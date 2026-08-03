@@ -156,6 +156,38 @@ abilities:
 }
 ```
 
+## CLI-first architecture (命令优先 — 每个能力都必须可 CLI 调用)
+
+**每个能力 (ability) 的每一个操作都 MUST 能以 CLI 命令的形式表达。** CLI 是底层
+primitive；所有 UI 按钮/开关本质上是替你执行一条 CLI 命令。不允许存在"只能从 UI
+触发"的操作。CLI REPL (能力 `cli`) 与 UI 是同一命令处理器的两个入口。
+
+### Command model
+
+- 每个主进程后端 (`src/main/<id>.ts`) 注册一组命令 (name 用 `<ability>.<command>`
+  命名空间，如 `mirror.switch` / `autostart.toggle` / `systemd.start` /
+  `apps.update` / `launch.run`)，注册表集中在 `src/main/commands.ts`：
+  `{ name, description, usage, run(args) => unknown }`。
+- `run(args)` 返回**结构化数据** (对象/数组/字符串)。CLI 层负责把它渲染成可读文本，
+  UI 层直接拿结构化数据渲染。两条路径共享同一 handler，绝不并行实现两套逻辑。
+- 入口一 (CLI): `cliExec('mirror switch --url https://...')` → tokenize →
+  查命令注册表 → `run()`。未命中的首词回退到应用 alias 启动 (`launch <alias>` /
+  裸 alias)。
+- 入口二 (UI): `window.cockpit.command('mirror.switch', { url: '...' })` IPC →
+  同一个 `run()`。UI 组件不写逻辑，只调命令 + 渲染结果。
+- CLI `help` 按能力分组列出全部命令; Tab 补全覆盖所有命令名 + 应用 alias。
+- 长轮询/状态查询 (`system.stats` / `docker.list` / `gpu` / `systemd.list`) 同样是
+  命令，只是 `run()` 返回当前快照; 轮询由主进程定时推送或 UI 定时调 `command`。
+- 副作用全部走命令 → 有 CLI history 可审计、无平行代码路径。新能力 = 新命令，
+  侧栏/UI 自动获得。
+
+### 约束
+
+- 命令名一律 kebab-case、`<ability>.<command>` 全小写。
+- `help`、Tab 补全、`info <alias>` 是内置命令，不走命令注册表 (app 别名逻辑)。
+- 交互式命令 (pkexec 提权、二次确认) 在 `run()` 内完成; UI 的确认对话框只是
+  在调用前先做前端确认，真正执行仍是那条命令。
+
 ## Sidebar + search
 
 Expanded sidebar: top search box (filters abilities AND quick-launches registry apps by name/alias/tag) +
@@ -305,7 +337,9 @@ mirroring FlClash's connection button.
 4. Dashboard with REAL data (host/GPU/docker/RAM/disk), drag-reorderable grid (gridstack).
 5. Mirror page: working USTC/TUNA/Aliyun switch (pkexec + backup + confirm).
 6. Autostart page: enable/disable toggles working.
-7. CLI page: REPL, alias launch, tab completion, `info <alias>`.
+7. CLI page: REPL, alias launch, tab completion, `info <alias>`; **每个能力的全部命令
+   都能在此执行 (`mirror.switch` / `autostart.toggle` / `systemd.action` …), `help`
+   按能力分组列出; UI 的按钮行为必须能被同一条 CLI 命令复现**.
 8. Reorder abilities in abilities.yaml → sidebar follows on restart; add a throwaway 10th ability folder →
    it appears after restart (proves dynamic loading).
 

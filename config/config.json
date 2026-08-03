@@ -1,0 +1,9 @@
+{
+  "theme": "dark",
+  "language": "zh",
+  "window": { "width": 1280, "height": 800 },
+  "runtime": {
+    "terminal": ["konsole", "--hold", "-e"],
+    "confirmBeforeLaunch": true
+  }
+}
