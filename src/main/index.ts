@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, protocol } from 'electron'
 import { join } from 'path'
+import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpc, startWatching } from './ipc'
 import { registerIconProtocol } from './icon-protocol'
@@ -54,6 +55,7 @@ async function createWindow(): Promise<void> {
     width,
     height,
     show: false,
+    icon,
     frame: !frameless,
     transparent,
     backgroundColor: transparent ? '#00000000' : '#121212',

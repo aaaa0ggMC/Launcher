@@ -489,7 +489,7 @@ onBeforeUnmount(() => {
           :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
         >
           <div class="brand-logo">
-            <GameIcon name="dashboard" :size="30" />
+            <GameIcon name="boss" :size="30" />
           </div>
           <div v-if="!rail" class="d-flex flex-column">
             <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
