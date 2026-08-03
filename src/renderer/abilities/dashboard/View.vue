@@ -91,18 +91,47 @@ onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
 })
 
-const cards = computed(() => {
-  const s = stats.value
-  if (!s) return []
-  const list = [
-    { id: 'host', w: 6, h: 2, title: '主机', icon: 'mdi-desktop-tower' },
-    { id: 'cpu', w: 6, h: 2, title: '处理器', icon: 'mdi-chip' },
-    { id: 'mem', w: 6, h: 2, title: '内存', icon: 'mdi-memory' },
+interface GridCard {
+  id: string
+  title: string
+  icon: string
+  w: number
+  h: number
+  x: number
+  y: number
+}
+
+/** Greedy first-fit on a 12-column grid → two cards per row by default. */
+function layoutCards(
+  cards: { id: string; title: string; icon: string; w: number; h: number }[]
+): GridCard[] {
+  const colY = new Array(12).fill(0)
+  return cards.map((c) => {
+    let bestX = 0
+    let bestY = Infinity
+    for (let x = 0; x <= 12 - c.w; x++) {
+      let y = 0
+      for (let cx = x; cx < x + c.w; cx++) y = Math.max(y, colY[cx])
+      if (y < bestY) {
+        bestY = y
+        bestX = x
+      }
+    }
+    for (let cx = bestX; cx < bestX + c.w; cx++) colY[cx] = bestY + c.h
+    return { ...c, x: bestX, y: bestY }
+  })
+}
+
+const cards = computed<GridCard[]>(() => {
+  const defs = [
+    { id: 'host', w: 6, h: 3, title: '主机', icon: 'mdi-desktop-tower' },
+    { id: 'cpu', w: 6, h: 3, title: '处理器', icon: 'mdi-chip' },
+    { id: 'mem', w: 6, h: 3, title: '内存', icon: 'mdi-memory' },
     { id: 'gpu', w: 6, h: 3, title: 'GPU', icon: 'mdi-video-card' },
-    { id: 'disk', w: 12, h: 3, title: '磁盘', icon: 'mdi-harddisk' },
-    { id: 'docker', w: 12, h: 3, title: '容器', icon: 'mdi-docker' }
+    { id: 'disk', w: 6, h: 3, title: '磁盘', icon: 'mdi-harddisk' },
+    { id: 'docker', w: 6, h: 3, title: '容器', icon: 'mdi-docker' }
   ]
-  return list.map((c) => ({ ...c, gs: { x: 0, y: 0 } }))
+  return layoutCards(defs)
 })
 
 const gpus = computed(() => stats.value?.gpu ?? [])
@@ -148,8 +177,8 @@ onBeforeUnmount(() => {
         v-for="c in cards"
         :key="c.id"
         class="grid-stack-item"
-        gs-x="0"
-        gs-y="0"
+        :gs-x="String(c.x)"
+        :gs-y="String(c.y)"
         :gs-w="String(c.w)"
         :gs-h="String(c.h)"
       >
