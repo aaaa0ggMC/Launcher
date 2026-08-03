@@ -239,9 +239,14 @@ onBeforeUnmount(() => unsub?.())
 
     <v-progress-linear v-if="loading" indeterminate class="mb-2" />
 
-    <v-row dense>
+    <v-row dense align="stretch">
       <v-col v-for="{ id, entry } in filtered" :key="id" cols="12" sm="6" md="4" lg="3">
-        <v-card rounded="lg" variant="tonal" :class="entry.missing ? 'opacity-60' : ''" class="app-card">
+        <v-card
+          rounded="lg"
+          variant="tonal"
+          :class="entry.missing ? 'opacity-60' : ''"
+          class="app-card fill-height"
+        >
           <v-card-text class="d-flex flex-column">
             <div class="d-flex align-start ga-3">
               <v-avatar size="40" color="surface-variant" rounded="lg">
