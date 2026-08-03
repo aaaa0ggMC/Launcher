@@ -13,6 +13,8 @@ export interface AppExecSpec {
   env?: Record<string, string>
   terminal?: boolean
   root?: boolean
+  /** override the script/desktop target for this spec (default: entry.path) */
+  path?: string
 }
 
 export type RiskLevel = 'low' | 'medium' | 'high'
@@ -24,13 +26,38 @@ export interface AppSecurity {
   acknowledged?: boolean
 }
 
+/**
+ * One additional operation on an app entry (e.g. new-api: start/stop/recreate).
+ * Each action renders as its own button on the app card; the button background
+ * color encodes the (effective) risk level — darker = more dangerous.
+ */
+export interface AppAction {
+  /** button label, e.g. "开始" / "停止" */
+  name: string
+  description?: string
+  icon?: string
+  /** per-action risk override; falls back to entry.security.risk for coloring */
+  risk?: RiskLevel
+  /** primary exec (single-step action) */
+  exec: AppExecSpec
+  /**
+   * multi-step sequence. Steps are run one by one in order; intermediate
+   * steps run headless and are awaited, the LAST step launches detached
+   * (honors its own terminal/root flags). Overrides `exec` when present.
+   */
+  steps?: AppExecSpec[]
+}
+
 export interface AppEntry {
   alias?: string
   name: string
   description?: string
   path: string
   icon?: string
+  /** primary launch spec — rendered as the default「启动」button */
   exec: AppExecSpec
+  /** additional clustered operations, keyed by action id */
+  actions?: Record<string, AppAction>
   tags?: string[]
   tags_auto?: string[]
   security?: AppSecurity

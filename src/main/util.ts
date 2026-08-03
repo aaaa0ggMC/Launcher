@@ -23,7 +23,11 @@ export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
 }
 
 /** Run a command, return stdout; throws on non-zero exit. */
-export async function run(cmd: string, args: string[], opts: { cwd?: string; timeout?: number } = {}): Promise<string> {
+export async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; timeout?: number } = {}
+): Promise<string> {
   const { stdout } = await execFileAsync(cmd, args, {
     encoding: 'utf-8',
     cwd: opts.cwd,

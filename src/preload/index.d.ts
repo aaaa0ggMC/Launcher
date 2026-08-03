@@ -32,12 +32,19 @@ export interface CockpitApi {
   listApps: () => Promise<AppsListResult>
   getEntry: (root: string, id: string) => Promise<AppEntry | null>
   updateEntry: (root: string, id: string, patch: Partial<AppEntry>) => Promise<AppEntry>
+  createEntry: (
+    root: string,
+    id: string,
+    patch: Partial<AppEntry>,
+    opts?: { mkdir?: boolean }
+  ) => Promise<AppEntry>
   deleteEntry: (root: string, id: string) => Promise<void>
   addRoot: (path: string) => Promise<AppsConfig['searchRoots']>
   removeRoot: (path: string) => Promise<AppsConfig['searchRoots']>
   appsConfig: () => Promise<AppsConfig>
   rescan: (root: string) => Promise<unknown>
   launch: (root: string, id: string) => Promise<LaunchResult>
+  launchAction: (root: string, id: string, action: string) => Promise<LaunchResult>
   getMirror: () => Promise<MirrorInfo>
   listAutostart: () => Promise<AutostartEntry[]>
   toggleAutostart: (file: string, hidden: boolean) => Promise<AutostartEntry[]>

@@ -1,32 +1,73 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 
 /**
- * Renders a game-icon-pack SVG by name. SVGs live in ../assets/icons/ and use
- * `fill="currentColor"` — color is inherited from the surrounding text color,
- * so active/inactive states work automatically via Vuetify's list-item theming.
+ * Renders an SVG icon by name. Sources, in priority order:
+ *   1. curated sidebar set  (assets/icons, eager, tiny)
+ *   2. game-icon-pack       (assets/game-icon-pack/svg, lazy, padding/no-padding)
+ * Icons use `fill="currentColor"` — color inherits from surrounding text color.
  *
- * Usage: <GameIcon name="dashboard" :size="20" />
+ * Usage: <GameIcon name="boss" :padding="true" :size="20" />
  */
-const props = withDefaults(defineProps<{ name: string; size?: number }>(), {
-  size: 20
-})
+interface GameIconProps {
+  name: string
+  padding?: boolean
+  size?: number
+  /** emoji shown when the icon name doesn't resolve (e.g. 😎) */
+  fallback?: string
+}
 
-const icons = import.meta.glob('../assets/icons/*.svg', {
+const props = withDefaults(defineProps<GameIconProps>(), { padding: false, size: 20 })
+
+const curated = import.meta.glob('../assets/icons/*.svg', {
   eager: true,
   query: '?raw',
   import: 'default'
 }) as Record<string, string>
 
-const raw = computed(() => {
-  const key = Object.keys(icons).find((k) => k.endsWith(`/${props.name}.svg`))
-  return key ? icons[key] : ''
-})
+const pack = import.meta.glob('../assets/game-icon-pack/svg/**/*.svg', {
+  query: '?raw',
+  import: 'default'
+}) as Record<string, () => Promise<string>>
+
+const raw = ref('')
+const missing = ref(false)
+
+async function load(): Promise<void> {
+  missing.value = false
+  const name = props.name
+  // 1. curated set (no padding variant)
+  const curatedKey = Object.keys(curated).find((k) => k.endsWith(`/${name}.svg`))
+  if (curatedKey) {
+    raw.value = curated[curatedKey]
+    return
+  }
+  // 2. game-icon-pack
+  const folder = props.padding ? 'padding' : 'no-padding'
+  const packKey = Object.keys(pack).find(
+    (k) => k.includes(`/${folder}/`) && k.endsWith(`/${name}.svg`)
+  )
+  raw.value = packKey ? ((await pack[packKey]()) ?? '') : ''
+  missing.value = !packKey
+}
+
+watch(() => [props.name, props.padding], load)
+onMounted(load)
 </script>
 
 <template>
-  <!-- eslint-disable-next-line vue/no-v-html -- static build-time SVG imports, not user input -->
-  <span class="game-icon" :style="{ width: `${size}px`, height: `${size}px` }" v-html="raw" />
+  <span v-if="raw" class="game-icon" :style="{ width: `${size}px`, height: `${size}px` }">
+    <!-- eslint-disable-next-line vue/no-v-html -- build-time/lazy SVG assets, not user input -->
+    <span v-html="raw" />
+  </span>
+  <span v-else-if="fallback" class="game-icon fallback" :style="{ fontSize: `${size - 2}px` }">
+    {{ fallback }}
+  </span>
+  <span
+    v-else-if="missing"
+    class="game-icon"
+    :style="{ width: `${size}px`, height: `${size}px` }"
+  />
 </template>
 
 <style scoped>
@@ -38,9 +79,19 @@ const raw = computed(() => {
   line-height: 0;
 }
 
-.game-icon :deep(svg) {
+.game-icon > span {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.game-icon > span :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.fallback {
+  line-height: 1;
 }
 </style>

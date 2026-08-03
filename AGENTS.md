@@ -40,6 +40,7 @@ sudo chmod 644 /usr/share/polkit-1/rules.d/49-cockpit-pkexec.rules
 开发模式下 `scripts/` 目录的脚本通过 pkexec 直接调用，路径由 `paths.ts` 的 `SCRIPTS_DIR` 指向项目内。无需额外安装。打包后的路径会不同，届时需调整 `SCRIPTS_DIR` 或将脚本安装到系统路径。
 
 当前脚本列表：
+
 - `write-mirrorlist.sh` — 原子替换 `/etc/pacman.d/mirrorlist` (mv, 非 cp)
 - `nvidia-pm-toggle.sh` — 切换 NVIDIA 电源管理参数
 - `run-as-root.sh` — 以 root 执行任意命令
@@ -68,12 +69,12 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 
 ```jsonc
 {
-  "theme": "dark",           // dark | pureblack | system
+  "theme": "dark", // dark | pureblack | system
   "language": "zh",
-  "uiScale": 1.1,            // 界面缩放 (0.8–1.8, webFrame.setZoomFactor)
+  "uiScale": 1.1, // 界面缩放 (0.8–1.8, webFrame.setZoomFactor)
   "window": { "width": 1280, "height": 800 },
   "runtime": {
-    "terminal": ["konsole", "--hold", "-e"],  // terminal:true 的条目用这个
+    "terminal": ["konsole", "--hold", "-e"], // terminal:true 的条目用这个
     "confirmBeforeLaunch": true
   }
 }

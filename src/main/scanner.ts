@@ -122,22 +122,49 @@ export async function draftFor(
   }
 }
 
+/** Normalize a name for fuzzy matching (case + separators ignored). */
+function normalizeKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** Strip a known source/script extension, e.g. "foo.sh" → "foo". */
+function stripExt(name: string): string {
+  const ext = name.toLowerCase().match(/\.(sh|bash|py|js|ts|mjs|cjs|cpp|c|rs|go)$/)?.[1]
+  return ext ? name.slice(0, -(ext.length + 1)) : name
+}
+
 /** Rescan a root: auto-draft every detected entry, merge per the safe policy. */
 export async function rescanRoot(root: string): Promise<AppRegistryFile> {
   const reg = (await readJson<AppRegistryFile>(join(root, 'apps.json'))) ?? { version: 1, apps: {} }
   const items = await readdir(root).catch(() => [])
-  const drafts: Record<string, AppEntry> = {}
+  const found: { name: string; isDir: boolean }[] = []
 
   for (const name of items) {
     if (name.startsWith('.') || name === 'apps.json') continue
     const full = join(root, name)
     const st = await stat(full).catch(() => null)
     if (!st) continue
-    const draft = await draftFor(root, name, st.isDirectory())
+    found.push({ name, isDir: st.isDirectory() })
+  }
+
+  // Deduplicate wrapper scripts vs project dirs: "foo.sh" next to a "foo" dir
+  // is a launcher for the dir project, not a separate app. Same for same-name
+  // variants (balance-checker file + balance_checker dir).
+  const dirKeys = new Set(found.filter((e) => e.isDir).map((e) => normalizeKey(e.name)))
+  const deduped = found.filter((e) => {
+    if (e.isDir) return true
+    return !dirKeys.has(normalizeKey(stripExt(e.name)))
+  })
+
+  const drafts: Record<string, AppEntry> = {}
+
+  for (const { name, isDir } of deduped) {
+    const draft = await draftFor(root, name, isDir)
     if (!draft) continue
     // derive id from draft (dir projects use pyproject name; override with alias-derived id)
     const id = (draft.alias ?? name).toLowerCase()
-    drafts[id] = draft
+    // On id collision, prefer the directory project over a loose script.
+    if (isDir || !drafts[id]) drafts[id] = draft
   }
 
   for (const [id, draft] of Object.entries(drafts)) {

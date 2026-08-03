@@ -1,4 +1,6 @@
 import type { AppEntry } from '../shared/types'
+import { isAbsolute, join } from 'path'
+import { mkdir } from 'fs/promises'
 import {
   listAllApps,
   getEntry,
@@ -10,7 +12,7 @@ import {
   writeRegistry
 } from './registry'
 import { rescanRoot } from './scanner'
-import { launchEntry } from './launcher'
+import { launchEntry, launchAction } from './launcher'
 import { getMirrorInfo, toggleMirror, testMirrors } from './mirror'
 import { listAutostart, toggleAutostart } from './autostart'
 import { listSystemd, systemdAction } from './systemd'
@@ -133,6 +135,24 @@ register(
   async (ctx) => removeSearchRoot(String(ctx.named.path ?? ''))
 )
 register(
+  'apps.create',
+  '创建新条目 (--root --id --patch <json> [--mkdir true])',
+  'apps.create --root ~/Apps --id myapp --patch {"name":"My App","exec":{"type":"custom","command":["run.sh"]}}',
+  async (ctx) => {
+    const root = String(ctx.named.root ?? '')
+    const id = String(ctx.named.id ?? '')
+    const patch = ctx.named.patch
+    if (!root || !id) return { ok: false, error: '需要 --root 与 --id' }
+    const p = typeof patch === 'string' ? JSON.parse(patch) : ((patch ?? {}) as Partial<AppEntry>)
+    // Optionally scaffold the project directory inside the search root.
+    if (ctx.named.mkdir === true && p.path) {
+      const target = isAbsolute(p.path) ? p.path : join(root, p.path)
+      await mkdir(target, { recursive: true })
+    }
+    return await updateEntry(root, id, p)
+  }
+)
+register(
   'apps.rescan',
   '重扫目录生成草稿 (--root)',
   'apps.rescan --root /home/aaaa0ggmc/Apps',
@@ -155,6 +175,21 @@ register(
     const entry = await getEntry(root, id)
     if (!entry) return { ok: false, error: `未找到条目: ${id}` }
     return await launchEntry(entry)
+  }
+)
+register(
+  'launch.action',
+  '运行应用的附加操作 (--root --id --action)',
+  'launch.action --root ~/Apps --id new-api --action stop',
+  async (ctx) => {
+    const root = String(ctx.named.root ?? '')
+    const id = String(ctx.named.id ?? '')
+    const actionId = String(ctx.named.action ?? '')
+    const entry = await getEntry(root, id)
+    if (!entry) return { ok: false, error: `未找到条目: ${id}` }
+    const action = entry.actions?.[actionId]
+    if (!action) return { ok: false, error: `未找到操作: ${id}.${actionId}` }
+    return await launchAction(entry, action)
   }
 )
 

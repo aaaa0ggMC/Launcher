@@ -29,7 +29,10 @@ export async function getManifest(): Promise<AbilitiesManifest | null> {
   }
 }
 
-export async function getAppsConfig(): Promise<{ searchRoots: SearchRoot[]; confirmBeforeLaunch: boolean }> {
+export async function getAppsConfig(): Promise<{
+  searchRoots: SearchRoot[]
+  confirmBeforeLaunch: boolean
+}> {
   const manifest = await getManifest()
   const apps = manifest?.abilities.find((a) => a.id === 'apps')
   const cfg = (apps?.config ?? {}) as {
@@ -79,7 +82,10 @@ async function readRegistry(root: string): Promise<AppRegistryFile> {
 /** List every app across all search roots.
  * Returns { roots, apps } where apps values carry a `root` runtime field.
  */
-export async function listAllApps(): Promise<{ roots: SearchRoot[]; apps: Record<string, AppEntry> }> {
+export async function listAllApps(): Promise<{
+  roots: SearchRoot[]
+  apps: Record<string, AppEntry>
+}> {
   const { searchRoots } = await getAppsConfig()
   const out: Record<string, AppEntry> = {}
   for (const root of searchRoots) {

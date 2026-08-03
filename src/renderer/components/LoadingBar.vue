@@ -15,24 +15,13 @@ defineProps<{
 
 <template>
   <div>
-    <v-progress-linear
-      v-if="loading"
-      indeterminate
-      color="primary"
-      class="mb-2"
-    />
+    <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
     <v-skeleton-loader
       v-if="skeleton && loading"
       :type="skeletonType ?? 'list-item-two-line,article'"
       class="mb-2"
     />
-    <v-alert
-      v-if="error"
-      type="error"
-      variant="tonal"
-      density="compact"
-      class="mb-3"
-    >
+    <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-3">
       {{ error }}
     </v-alert>
   </div>

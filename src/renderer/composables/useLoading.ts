@@ -1,7 +1,14 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
+
+interface LoadingState {
+  loading: Ref<boolean>
+  error: Ref<string>
+  run: <T>(fn: () => Promise<T>) => Promise<T | undefined>
+  clearError: () => void
+}
 
 /** Standardized loading/error state shared by all abilities. */
-export function useLoading() {
+export function useLoading(): LoadingState {
   const loading = ref(false)
   const error = ref('')
 

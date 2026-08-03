@@ -1,6 +1,6 @@
 import type { AppEntry } from '../shared/types'
 import { listAllApps } from './registry'
-import { launchEntry } from './launcher'
+import { launchEntry, launchAction } from './launcher'
 import { listCommands, tryRunCommand } from './commands'
 
 function formatEntry(e: AppEntry): string {
@@ -12,6 +12,10 @@ function formatEntry(e: AppEntry): string {
     `风险: ${e.security?.risk ?? 'low'}${e.security?.note ? `  (${e.security.note})` : ''}`,
     `标签: ${[...(e.tags ?? []), ...(e.tags_auto ?? [])].join(', ') || '—'}`
   ]
+  const actions = Object.entries(e.actions ?? {})
+  if (actions.length) {
+    lines.push(`操作: ${actions.map(([id, a]) => `${id} (${a.name})`).join(', ')}`)
+  }
   return lines.join('\n')
 }
 
@@ -40,7 +44,9 @@ export async function cliExec(input: string): Promise<string> {
       const lines = [
         '应用命令:',
         '  <alias>         直接启动应用 (别名/标签/id)',
+        '  <alias> <action>  执行应用的附加操作 (如 stop / restart)',
         '  launch <alias>  启动应用',
+        '  launch <alias> <action>  执行附加操作',
         '  info <alias>    查看应用详情',
         '  list, ls        列出全部应用',
         '  所有能力命令均可直接输入 (Tab 补全):'
@@ -71,8 +77,8 @@ export async function cliExec(input: string): Promise<string> {
     case 'launch':
     case 'run': {
       const key = rest[0]
-      if (!key) return '用法: launch <alias>'
-      return await launchByAlias(key)
+      if (!key) return '用法: launch <alias> [action]'
+      return await launchByAlias(key, rest[1])
     }
   }
 
@@ -80,10 +86,10 @@ export async function cliExec(input: string): Promise<string> {
   const commandOut = await tryRunCommand(input)
   if (commandOut !== null) return commandOut
 
-  // Bare alias / tag → launch.
+  // Bare alias / tag → launch (optionally an action: <alias> <action>).
   const e = await resolveByAlias(cmdRaw)
   if (!e) return `未知命令: ${cmdRaw} (输入 help 查看全部命令)`
-  return await launchByAlias(cmdRaw)
+  return await launchByAlias(cmdRaw, rest[0])
 }
 
 async function resolveByAlias(key: string): Promise<AppEntry | null> {
@@ -97,9 +103,20 @@ async function resolveByAlias(key: string): Promise<AppEntry | null> {
   return null
 }
 
-async function launchByAlias(key: string): Promise<string> {
+async function launchByAlias(key: string, actionId?: string): Promise<string> {
   const e = await resolveByAlias(key)
   if (!e) return `未找到: ${key}`
+  if (actionId) {
+    const action = e.actions?.[actionId]
+    if (!action) {
+      const known = Object.keys(e.actions ?? {}).join(', ') || '无'
+      return `未找到操作: ${actionId} (可用: ${known})`
+    }
+    const res = await launchAction(e, action)
+    return res.ok
+      ? `已执行 ${e.name}.${action.name}${res.pid ? ` (pid ${res.pid})` : ''}`
+      : `执行失败: ${res.error}`
+  }
   const res = await launchEntry(e)
   return res.ok ? `已启动 ${e.name}${res.pid ? ` (pid ${res.pid})` : ''}` : `启动失败: ${res.error}`
 }

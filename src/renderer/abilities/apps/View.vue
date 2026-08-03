@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
-import type { AppEntry } from '@shared/types'
+import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from '@shared/types'
 import LoadingBar from '../../components/LoadingBar.vue'
 import AbilityIcon from '../../components/AbilityIcon.vue'
 
 interface AbilitiesCtx {
   configs: Record<string, Record<string, unknown>>
   launch: (root: string, id: string, entry: AppEntry) => Promise<unknown>
+  launchAction: (
+    root: string,
+    id: string,
+    entry: AppEntry,
+    actionId: string,
+    action: AppAction
+  ) => Promise<unknown>
 }
 
 interface SearchRoot {
@@ -14,10 +21,13 @@ interface SearchRoot {
   watch: boolean
 }
 
-const { launch } = inject<AbilitiesCtx>('cockpit:abilities', {
+const { launch, launchAction } = inject<AbilitiesCtx>('cockpit:abilities', {
   configs: {},
-  launch: async () => {}
+  launch: async () => {},
+  launchAction: async () => {}
 })
+
+const EXEC_TYPES = ['uv', 'python', 'node', 'docker', 'systemd', 'script', 'desktop', 'custom']
 
 const apps = shallowRef<Record<string, AppEntry>>({})
 const roots = shallowRef<SearchRoot[]>([])
@@ -25,6 +35,52 @@ const loading = ref(false)
 const searchText = ref('')
 const activeTag = ref('')
 const showMissing = ref(false)
+
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || s
+  )
+}
+
+/** Button styling encodes danger — darker background = more dangerous. */
+function riskBtn(
+  entry: AppEntry,
+  action?: AppAction
+): { color: string; variant: 'tonal' | 'flat' } {
+  const risk = action?.risk ?? entry.security?.risk ?? 'low'
+  if (risk === 'high') return { color: 'error', variant: 'flat' }
+  if (risk === 'medium') return { color: 'warning', variant: 'tonal' }
+  return { color: 'success', variant: 'tonal' }
+}
+
+function actionList(entry: AppEntry): [string, AppAction][] {
+  return Object.entries(entry.actions ?? {})
+}
+
+/** Manual + auto tags, deduplicated (auto scan may re-add the same tag). */
+function entryTags(entry: AppEntry): string[] {
+  return [...new Set([...(entry.tags ?? []), ...(entry.tags_auto ?? [])])]
+}
+
+// ---------------------------------------------------------------------------
+// Edit dialog (primary exec + clustered actions)
+// ---------------------------------------------------------------------------
+interface ActionForm {
+  id: string
+  name: string
+  icon: string
+  execType: string
+  execCwd: string
+  execCommand: string
+  risk: string
+  terminal: boolean
+  rootFlag: boolean
+  /** multi-step mode: one command per line; overrides the single exec when non-empty */
+  stepsText: string
+}
 
 interface EditForm {
   root: string
@@ -42,11 +98,35 @@ interface EditForm {
   terminal: boolean
   rootFlag: boolean
   managed: boolean
+  actions: ActionForm[]
 }
 
 const form = ref<EditForm | null>(null)
 const editOpen = ref(false)
 const editBusy = ref(false)
+
+// ---------------------------------------------------------------------------
+// New entry dialog
+// ---------------------------------------------------------------------------
+interface NewEntryForm {
+  root: string
+  id: string
+  name: string
+  path: string
+  description: string
+  icon: string
+  execType: string
+  execCwd: string
+  execCommand: string
+  risk: string
+  terminal: boolean
+  rootFlag: boolean
+  createDir: boolean
+}
+
+const newOpen = ref(false)
+const newBusy = ref(false)
+const newForm = ref<NewEntryForm | null>(null)
 
 const newRootOpen = ref(false)
 const newRootPath = ref('')
@@ -96,13 +176,9 @@ const filtered = computed(() => {
   })
 })
 
-function iconSrc(entry: AppEntry): string {
-  const icon = entry.icon
-  if (!icon || icon === 'auto') return ''
-  const abs = icon.startsWith('/') ? icon : `${entry.root}/${icon}`
-  return `cockpit-icon://${encodeURIComponent(abs)}`
-}
-
+// ---------------------------------------------------------------------------
+// Edit
+// ---------------------------------------------------------------------------
 function openEdit(id: string): void {
   const entry = apps.value[id]
   if (!entry) return
@@ -121,9 +197,90 @@ function openEdit(id: string): void {
     note: entry.security?.note ?? '',
     terminal: entry.exec.terminal ?? false,
     rootFlag: entry.exec.root ?? false,
-    managed: entry.managed ?? true
+    managed: entry.managed ?? true,
+    actions: Object.entries(entry.actions ?? {}).map(([aid, a]) => ({
+      id: aid,
+      name: a.name,
+      icon: a.icon ?? '',
+      execType: a.exec.type,
+      execCwd: a.exec.cwd ?? '',
+      execCommand: a.exec.command.join(' '),
+      risk: a.risk ?? 'low',
+      terminal: a.exec.terminal ?? false,
+      rootFlag: a.exec.root ?? false,
+      stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n')
+    }))
   }
   editOpen.value = true
+}
+
+function addActionRow(): void {
+  if (!form.value) return
+  const used = new Set(form.value.actions.map((a) => a.id))
+  let n = form.value.actions.length + 1
+  let id = `action-${n}`
+  while (used.has(id)) {
+    n++
+    id = `action-${n}`
+  }
+  form.value.actions.push({
+    id,
+    name: '',
+    icon: '',
+    execType: 'custom',
+    execCwd: '{self}',
+    execCommand: '',
+    risk: 'medium',
+    terminal: false,
+    rootFlag: false,
+    stepsText: ''
+  })
+}
+
+function removeActionRow(i: number): void {
+  form.value?.actions.splice(i, 1)
+}
+
+/** Convert an action editor row back into a persisted AppAction. */
+function buildAction(a: ActionForm): AppAction {
+  const cwd = a.execCwd || undefined
+  const steps = a.stepsText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  if (steps.length) {
+    const seq: AppExecSpec[] = steps.map((line) => ({
+      type: 'custom',
+      command: line.split(/\s+/),
+      cwd
+    }))
+    const last: AppExecSpec = { ...seq[seq.length - 1] }
+    // Intermediate steps run headless + awaited; only the last may open a
+    // terminal / escalate. (terminal/root flags on custom specs are honored
+    // by buildArgv in the launcher.)
+    if (a.terminal) last.terminal = true
+    if (a.rootFlag) last.root = true
+    seq[seq.length - 1] = last
+    return {
+      name: a.name.trim() || a.id.trim(),
+      icon: a.icon.trim() || undefined,
+      exec: last,
+      steps: seq,
+      risk: a.risk as RiskLevel
+    }
+  }
+  return {
+    name: a.name.trim() || a.id.trim(),
+    icon: a.icon.trim() || undefined,
+    exec: {
+      type: a.execType as AppAction['exec']['type'],
+      command: a.execCommand.trim() ? a.execCommand.trim().split(/\s+/) : [],
+      cwd: a.execCwd || undefined,
+      terminal: a.terminal,
+      root: a.rootFlag
+    },
+    risk: a.risk as RiskLevel
+  }
 }
 
 async function saveEdit(): Promise<void> {
@@ -131,6 +288,11 @@ async function saveEdit(): Promise<void> {
   editBusy.value = true
   try {
     const f = form.value
+    const actions: Record<string, AppAction> = Object.fromEntries(
+      f.actions
+        .filter((a) => a.id.trim() && (a.name.trim() || a.execCommand.trim() || a.stepsText.trim()))
+        .map((a) => [a.id.trim(), buildAction(a)])
+    )
     await window.cockpit.updateEntry(f.root, f.id, {
       name: f.name,
       alias: f.alias || undefined,
@@ -147,12 +309,9 @@ async function saveEdit(): Promise<void> {
         terminal: f.terminal,
         root: f.rootFlag
       },
+      actions: Object.keys(actions).length ? actions : undefined,
       security: {
-        risk: f.risk as AppEntry['security'] extends infer S
-          ? S extends { risk: infer R }
-            ? R
-            : never
-          : never,
+        risk: f.risk as RiskLevel,
         note: f.note || undefined,
         acknowledged: apps.value[f.id]?.security?.acknowledged ?? false
       },
@@ -165,15 +324,74 @@ async function saveEdit(): Promise<void> {
   }
 }
 
-async function removeRoot(path: string): Promise<void> {
-  await window.cockpit.removeRoot(path)
-  await load()
-}
-
 async function deleteEntry(): Promise<void> {
   if (!form.value) return
   editOpen.value = false
   await window.cockpit.deleteEntry(form.value.root, form.value.id)
+  await load()
+}
+
+// ---------------------------------------------------------------------------
+// New entry
+// ---------------------------------------------------------------------------
+function openNew(): void {
+  newForm.value = {
+    root: roots.value[0]?.path ?? '',
+    id: '',
+    name: '',
+    path: '',
+    description: '',
+    icon: '',
+    execType: 'custom',
+    execCwd: '{self}',
+    execCommand: '',
+    risk: 'low',
+    terminal: false,
+    rootFlag: false,
+    createDir: false
+  }
+  newOpen.value = true
+}
+
+async function saveNew(): Promise<void> {
+  if (!newForm.value) return
+  const f = newForm.value
+  if (!f.root || !f.name.trim()) return
+  newBusy.value = true
+  try {
+    const id = f.id.trim() || slugify(f.path.trim() || f.name.trim())
+    await window.cockpit.createEntry(
+      f.root,
+      id,
+      {
+        name: f.name.trim(),
+        description: f.description || undefined,
+        icon: f.icon.trim() || undefined,
+        path: f.path.trim() || id,
+        exec: {
+          type: f.execType as AppEntry['exec']['type'],
+          command: f.execCommand.trim() ? f.execCommand.trim().split(/\s+/) : [],
+          cwd: f.execCwd || undefined,
+          terminal: f.terminal,
+          root: f.rootFlag
+        },
+        security: { risk: f.risk as RiskLevel },
+        managed: true
+      },
+      { mkdir: f.createDir }
+    )
+    newOpen.value = false
+    await load()
+  } finally {
+    newBusy.value = false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Roots
+// ---------------------------------------------------------------------------
+async function removeRoot(path: string): Promise<void> {
+  await window.cockpit.removeRoot(path)
   await load()
 }
 
@@ -200,12 +418,15 @@ onBeforeUnmount(() => unsub?.())
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
         <div class="text-h6 font-weight-medium">应用注册表</div>
-        <div class="text-caption on-surface-variant mt-1">桌面应用 · 别名 · 标签 · 一键启动</div>
+        <div class="text-caption on-surface-variant mt-1">
+          桌面应用 · 别名 · 标签 · 聚类操作 (按钮颜色越深越危险)
+        </div>
       </div>
       <div class="d-flex align-center ga-2">
         <v-btn variant="tonal" prepend-icon="mdi-folder-search" @click="newRootOpen = true">
           添加目录
         </v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNew">添加应用</v-btn>
       </div>
     </div>
 
@@ -288,9 +509,7 @@ onBeforeUnmount(() => unsub?.())
           <v-card-text class="d-flex flex-column">
             <div class="d-flex align-start ga-3">
               <v-avatar size="40" color="surface-variant" rounded="lg">
-                <img v-if="iconSrc(entry)" :src="iconSrc(entry)" alt="" width="24" height="24" />
                 <AbilityIcon
-                  v-else
                   :icon="entry.icon && entry.icon !== 'auto' ? entry.icon : null"
                   :size="22"
                 />
@@ -298,19 +517,14 @@ onBeforeUnmount(() => unsub?.())
               <div class="flex-grow-1 min-width-0">
                 <div class="d-flex align-center ga-2 flex-wrap">
                   <span class="text-body-1 font-weight-medium text-truncate">{{ entry.name }}</span>
-                  <v-chip
-                    size="x-small"
-                    variant="tonal"
-                    :color="
-                      entry.security?.risk === 'high'
-                        ? 'error'
-                        : entry.security?.risk === 'medium'
-                          ? 'warning'
-                          : 'success'
-                    "
+                  <v-icon
+                    v-if="entry.security?.risk === 'high'"
+                    color="error"
+                    size="small"
+                    title="高风险操作，操作前需确认"
                   >
-                    {{ entry.security?.risk ?? 'low' }}
-                  </v-chip>
+                    mdi-shield-alert-outline
+                  </v-icon>
                   <v-chip v-if="entry.missing" size="x-small" variant="tonal">缺失</v-chip>
                 </div>
                 <div class="text-caption on-surface-variant text-truncate mt-1">
@@ -318,7 +532,7 @@ onBeforeUnmount(() => unsub?.())
                 </div>
                 <div class="d-flex flex-wrap gap-1 mt-2">
                   <v-chip
-                    v-for="t in [...(entry.tags ?? []), ...(entry.tags_auto ?? [])]"
+                    v-for="t in entryTags(entry)"
                     :key="t"
                     size="x-small"
                     variant="flat"
@@ -331,16 +545,32 @@ onBeforeUnmount(() => unsub?.())
             </div>
           </v-card-text>
           <v-card-actions class="px-4 pb-4 pt-0 ga-2">
-            <v-spacer />
             <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">编辑</v-btn>
-            <v-btn
-              color="primary"
-              prepend-icon="mdi-play"
-              :disabled="entry.missing"
-              @click="launch(entry.root ?? '', id, entry)"
-            >
-              启动
-            </v-btn>
+            <v-spacer />
+            <div class="d-flex ga-2 justify-end flex-wrap">
+              <v-btn
+                :color="riskBtn(entry).color"
+                :variant="riskBtn(entry).variant"
+                prepend-icon="mdi-play"
+                :disabled="entry.missing"
+                @click="launch(entry.root ?? '', id, entry)"
+              >
+                启动
+              </v-btn>
+              <v-btn
+                v-for="[aid, act] in actionList(entry)"
+                :key="aid"
+                :color="riskBtn(entry, act).color"
+                :variant="riskBtn(entry, act).variant"
+                :disabled="entry.missing"
+                @click="launchAction(entry.root ?? '', id, entry, aid, act)"
+              >
+                <span class="d-inline-flex align-center ga-1">
+                  <AbilityIcon v-if="act.icon" :icon="act.icon" :size="16" />
+                  {{ act.name || aid }}
+                </span>
+              </v-btn>
+            </div>
           </v-card-actions>
         </v-card>
       </v-col>
@@ -350,10 +580,11 @@ onBeforeUnmount(() => unsub?.())
       v-if="filtered.length === 0"
       icon="mdi-apps"
       title="没有匹配的应用"
-      text="调整搜索或标签，或点击「添加目录」添加搜索根目录。"
+      text="调整搜索或标签，或点击「添加应用」/「添加目录」。"
       class="mt-6"
     />
 
+    <!-- Add search root -->
     <v-dialog v-model="newRootOpen" width="440">
       <v-card>
         <v-card-title>添加搜索目录</v-card-title>
@@ -375,7 +606,112 @@ onBeforeUnmount(() => unsub?.())
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="editOpen" width="560">
+    <!-- New entry -->
+    <v-dialog v-model="newOpen" width="560">
+      <v-card v-if="newForm">
+        <v-card-title>添加应用条目</v-card-title>
+        <v-card-text class="d-flex flex-column ga-3">
+          <v-select
+            v-model="newForm.root"
+            :items="roots.map((r) => r.path)"
+            label="存储目录 (注册表所在目录)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="newForm.name"
+            label="名称"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="newForm.id"
+            label="ID (留空自动生成)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="newForm.path"
+            label="目录/脚本路径 (相对存储目录或绝对路径)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="newForm.description"
+            label="描述"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="newForm.icon"
+            label="图标 (default/<名字>[/padding] · emoji/😎 · file//绝对路径)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-row dense>
+            <v-col cols="6">
+              <v-select
+                v-model="newForm.execType"
+                :items="EXEC_TYPES"
+                label="执行类型"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="newForm.risk"
+                :items="['low', 'medium', 'high']"
+                label="风险等级"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+          <v-text-field
+            v-model="newForm.execCommand"
+            label="命令 (空格分隔 argv)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-row dense>
+            <v-col cols="6">
+              <v-switch
+                v-model="newForm.terminal"
+                label="终端中运行"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-checkbox
+                v-model="newForm.createDir"
+                label="创建目录 (路径不存在时)"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="newOpen = false">取消</v-btn>
+          <v-btn color="primary" :loading="newBusy" @click="saveNew">创建</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Edit entry -->
+    <v-dialog v-model="editOpen" width="640">
       <v-card v-if="form">
         <v-card-title>编辑「{{ form.name }}」</v-card-title>
         <v-card-text class="d-flex flex-column ga-3">
@@ -400,13 +736,21 @@ onBeforeUnmount(() => unsub?.())
             density="compact"
             hide-details
           />
-          <v-text-field
-            v-model="form.icon"
-            label="图标 (路径 / emoji / auto)"
-            variant="outlined"
-            density="compact"
-            hide-details
-          />
+          <div class="d-flex align-center ga-3">
+            <v-text-field
+              v-model="form.icon"
+              label="图标"
+              hint="default/<名字>[/padding] · emoji/😎 · file//绝对路径 · 留空=默认"
+              persistent-hint
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="flex-grow-1"
+            />
+            <v-avatar size="40" color="surface-variant" rounded="lg">
+              <AbilityIcon :icon="form.icon || null" :size="22" />
+            </v-avatar>
+          </div>
           <v-text-field
             v-model="form.tags"
             label="标签 (逗号分隔)"
@@ -417,20 +761,12 @@ onBeforeUnmount(() => unsub?.())
 
           <v-divider />
 
+          <div class="text-subtitle-2">主操作 (启动按钮)</div>
           <v-row dense>
             <v-col cols="6">
               <v-select
                 v-model="form.execType"
-                :items="[
-                  'uv',
-                  'python',
-                  'node',
-                  'docker',
-                  'systemd',
-                  'script',
-                  'desktop',
-                  'custom'
-                ]"
+                :items="EXEC_TYPES"
                 label="执行类型"
                 variant="outlined"
                 density="compact"
@@ -488,6 +824,112 @@ onBeforeUnmount(() => unsub?.())
               />
             </v-col>
           </v-row>
+
+          <v-divider />
+
+          <div class="d-flex align-center justify-space-between">
+            <div class="text-subtitle-2">附加操作 (卡片上的其他按钮)</div>
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addActionRow">
+              添加操作
+            </v-btn>
+          </div>
+          <v-card
+            v-for="(a, i) in form.actions"
+            :key="a.id || i"
+            variant="outlined"
+            class="pa-2 action-editor"
+          >
+            <div class="d-flex align-center ga-2">
+              <v-text-field
+                v-model="a.id"
+                label="操作 ID"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="flex-grow-1"
+              />
+              <v-text-field
+                v-model="a.name"
+                label="按钮名称"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="flex-grow-1"
+              />
+              <v-text-field
+                v-model="a.icon"
+                label="图标 (default/emoji/file)"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="flex-grow-1"
+              />
+              <v-btn icon variant="text" color="error" @click="removeActionRow(i)">
+                <v-icon>mdi-delete</v-icon>
+              </v-btn>
+            </div>
+            <v-row dense class="mt-2">
+              <v-col cols="4">
+                <v-select
+                  v-model="a.execType"
+                  :items="EXEC_TYPES"
+                  label="执行类型"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="8">
+                <v-text-field
+                  v-model="a.execCommand"
+                  label="命令 (空格分隔 argv)"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <v-row dense class="mt-2" align="center">
+              <v-col cols="4">
+                <v-text-field
+                  v-model="a.execCwd"
+                  label="工作目录"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="4">
+                <v-select
+                  v-model="a.risk"
+                  :items="['low', 'medium', 'high']"
+                  label="风险等级"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="2">
+                <v-switch v-model="a.terminal" label="终端" density="compact" hide-details />
+              </v-col>
+              <v-col cols="2">
+                <v-switch v-model="a.rootFlag" label="root" density="compact" hide-details />
+              </v-col>
+            </v-row>
+            <v-textarea
+              v-model="a.stepsText"
+              label="多步命令 (可选, 每行一条, 依次执行; 最后一步前台运行)"
+              variant="outlined"
+              density="compact"
+              rows="2"
+              auto-grow
+              hide-details
+              class="mt-2"
+            />
+          </v-card>
+          <div v-if="form.actions.length === 0" class="text-caption on-surface-variant">
+            暂无附加操作 — 可在卡片上添加 开始 / 停止 / 重建 等按钮。
+          </div>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-btn color="error" variant="text" prepend-icon="mdi-delete" @click="deleteEntry">
@@ -519,5 +961,8 @@ onBeforeUnmount(() => unsub?.())
 }
 .app-card .v-card-actions {
   margin-top: auto;
+}
+.action-editor {
+  border-style: dashed;
 }
 </style>

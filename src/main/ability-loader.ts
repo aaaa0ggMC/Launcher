@@ -33,7 +33,11 @@ export async function loadExternalAbilities(): Promise<void> {
     if (st.isFile() && ['.ts', '.js', '.mjs', '.cjs'].includes(extname(name))) {
       filePath = full
     } else if (st.isDirectory()) {
-      for (const candidate of [join(full, 'index.ts'), join(full, 'index.js'), join(full, 'index.mjs')]) {
+      for (const candidate of [
+        join(full, 'index.ts'),
+        join(full, 'index.js'),
+        join(full, 'index.mjs')
+      ]) {
         if (await stat(candidate).catch(() => null)) {
           filePath = candidate
           break
@@ -79,7 +83,9 @@ async function importAbility(filePath: string): Promise<Record<string, unknown>>
       `cockpit-${Date.now()}-${Math.random().toString(36).slice(2)}.cjs`
     )
     await writeFile(tmpFile, result.code, 'utf-8')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require(tmpFile) as Record<string, unknown>
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require(filePath) as Record<string, unknown>
 }

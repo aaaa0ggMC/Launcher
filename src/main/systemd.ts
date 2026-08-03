@@ -33,7 +33,10 @@ export async function listSystemd(): Promise<SystemdUnit[]> {
   return parseUnits(out)
 }
 
-export async function systemdAction(name: string, action: 'start' | 'stop' | 'restart'): Promise<SystemdUnit[]> {
+export async function systemdAction(
+  name: string,
+  action: 'start' | 'stop' | 'restart'
+): Promise<SystemdUnit[]> {
   const args = [...(USER ? ['--user'] : []), action, name]
   await run('systemctl', args)
   return await listSystemd()

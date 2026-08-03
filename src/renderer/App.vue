@@ -2,7 +2,7 @@
 import { computed, provide, ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Ability } from './abilities/types'
-import type { AbilitiesManifest, AppEntry, LaunchResult } from '@shared/types'
+import type { AbilitiesManifest, AppAction, AppEntry, LaunchResult, RiskLevel } from '@shared/types'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 
@@ -136,6 +136,8 @@ interface PendingLaunch {
   root: string
   id: string
   entry: AppEntry
+  actionId?: string
+  action?: AppAction
 }
 
 const pendingLaunch = shallowRef<PendingLaunch | null>(null)
@@ -162,6 +164,25 @@ async function launchApp(root: string, id: string, entry: AppEntry): Promise<Lau
   return await window.cockpit.launch(root, id)
 }
 
+/** Launch a clustered action; per-action risk overrides entry-level risk. */
+async function launchActionApp(
+  root: string,
+  id: string,
+  entry: AppEntry,
+  actionId: string,
+  action: AppAction
+): Promise<LaunchResult | void> {
+  const risk = action.risk ?? entry.security?.risk ?? 'low'
+  const effective: AppEntry = { ...entry, security: { ...entry.security, risk } }
+  if (riskNeedsConfirm(effective)) {
+    pendingLaunch.value = { root, id, entry, actionId, action }
+    ackNow.value = false
+    confirmOpen.value = true
+    return
+  }
+  return await window.cockpit.launchAction(root, id, actionId)
+}
+
 async function doLaunch(): Promise<void> {
   const p = pendingLaunch.value
   if (!p) return
@@ -171,8 +192,24 @@ async function doLaunch(): Promise<void> {
       security: { ...(p.entry.security ?? {}), acknowledged: true } as AppEntry['security']
     })
   }
-  await window.cockpit.launch(p.root, p.id)
+  if (p.actionId && p.action) {
+    await window.cockpit.launchAction(p.root, p.id, p.actionId)
+  } else {
+    await window.cockpit.launch(p.root, p.id)
+  }
 }
+
+const pendingRisk = computed(() => {
+  const p = pendingLaunch.value
+  if (!p) return 'medium'
+  return (p.action?.risk ?? p.entry.security?.risk ?? 'medium') as RiskLevel
+})
+
+const pendingTitle = computed(() => {
+  const p = pendingLaunch.value
+  if (!p) return ''
+  return p.action ? `${p.entry.name} · ${p.action.name}` : p.entry.name
+})
 
 // ---------------------------------------------------------------------------
 // Search: also quick-launch registry apps by name/alias/tag
@@ -224,7 +261,11 @@ const abilityConfigs = computed(() => {
 })
 
 provide('cockpit:config', runtimeConfig)
-provide('cockpit:abilities', { configs: abilityConfigs, launch: launchApp })
+provide('cockpit:abilities', {
+  configs: abilityConfigs,
+  launch: launchApp,
+  launchAction: launchActionApp
+})
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -402,12 +443,12 @@ onBeforeUnmount(() => {
       <v-card rounded="lg">
         <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
           <v-icon color="warning">mdi-shield-alert-outline</v-icon>
-          确认启动「{{ pendingLaunch?.entry.name }}」？
+          确认启动「{{ pendingTitle }}」？
         </v-card-title>
         <v-card-text>
           <v-alert
             v-if="pendingLaunch?.entry.security?.auto_note || pendingLaunch?.entry.security?.note"
-            :type="pendingLaunch?.entry.security?.risk === 'high' ? 'error' : 'warning'"
+            :type="pendingRisk === 'high' ? 'error' : 'warning'"
             variant="tonal"
             class="mb-3"
             density="compact"
@@ -420,14 +461,14 @@ onBeforeUnmount(() => {
             </template>
           </v-alert>
           <div class="text-body-2 mb-2">
-            即将启动「{{ pendingLaunch?.entry.name }}」
+            即将启动「{{ pendingTitle }}」
             <v-chip
               size="x-small"
-              :color="pendingLaunch?.entry.security?.risk === 'high' ? 'error' : 'warning'"
+              :color="pendingRisk === 'high' ? 'error' : 'warning'"
               variant="tonal"
               class="ml-1"
             >
-              {{ pendingLaunch?.entry.security?.risk ?? 'medium' }}
+              {{ pendingRisk }}
             </v-chip>
           </div>
           <v-checkbox

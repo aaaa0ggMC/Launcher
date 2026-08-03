@@ -31,7 +31,10 @@ export async function listDocker(): Promise<DockerContainer[]> {
   return containers
 }
 
-export async function dockerAction(name: string, action: 'start' | 'stop' | 'restart'): Promise<DockerContainer[]> {
+export async function dockerAction(
+  name: string,
+  action: 'start' | 'stop' | 'restart'
+): Promise<DockerContainer[]> {
   if (action === 'restart') {
     await run('docker', ['restart', name])
   } else {

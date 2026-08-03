@@ -1,30 +1,37 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import GameIcon from './GameIcon.vue'
-import { FALLBACK_ICON } from '../abilities/types'
+import { parseIcon, fileIconUrl } from '../icon'
 
 /**
- * Renders an ability/app icon from the `icon` contract:
- *  - `gi:<name>` → <GameIcon>
- *  - anything else → emoji text (legacy / app entries)
- *  - null/empty   → fallback emoji
+ * Renders an icon from the unified `icon` contract:
+ *  - `default/<name>[/padding]` → game-icon-pack SVG
+ *  - `emoji/<emoji>` / bare emoji → emoji text
+ *  - `file/<path>` / absolute path → <img> via cockpit-icon://
+ *  - empty / `auto` → fallback cool emoji
  */
 const props = withDefaults(defineProps<{ icon: string | null | undefined; size?: number }>(), {
   size: 20
 })
 
-const isGameIcon = computed(() => (props.icon ?? '').startsWith('gi:'))
-const gameName = computed(() => (props.icon ?? '').slice(3))
-const emoji = computed(() => {
-  const v = props.icon
-  if (!v || v.startsWith('gi:')) return FALLBACK_ICON
-  return v
-})
+const parsed = computed(() => parseIcon(props.icon))
 </script>
 
 <template>
-  <GameIcon v-if="isGameIcon" :name="gameName" :size="size" />
-  <span v-else class="emoji-icon" :style="{ fontSize: `${size - 2}px` }">{{ emoji }}</span>
+  <GameIcon
+    v-if="parsed.kind === 'game'"
+    :name="parsed.name"
+    :padding="parsed.padding"
+    :size="size"
+    fallback="😎"
+  />
+  <img
+    v-else-if="parsed.kind === 'file'"
+    :src="fileIconUrl(parsed.path)"
+    alt=""
+    :style="{ width: `${size}px`, height: `${size}px`, objectFit: 'contain' }"
+  />
+  <span v-else class="emoji-icon" :style="{ fontSize: `${size - 2}px` }">{{ parsed.emoji }}</span>
 </template>
 
 <style scoped>

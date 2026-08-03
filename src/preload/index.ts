@@ -32,6 +32,13 @@ const cockpit = {
     cockpit.command('apps.get', { root, id }),
   updateEntry: (root: string, id: string, patch: CommandArgs): Promise<unknown> =>
     cockpit.command('apps.update', { root, id, patch }),
+  createEntry: (
+    root: string,
+    id: string,
+    patch: CommandArgs,
+    opts?: { mkdir?: boolean }
+  ): Promise<unknown> =>
+    cockpit.command('apps.create', { root, id, patch, mkdir: opts?.mkdir ?? false }),
   deleteEntry: (root: string, id: string): Promise<unknown> =>
     cockpit.command('apps.delete', { root, id }),
   addRoot: (path: string): Promise<unknown> => cockpit.command('apps.add-root', { path }),
@@ -41,6 +48,8 @@ const cockpit = {
   // launcher
   launch: (root: string, id: string): Promise<unknown> =>
     cockpit.command('launch.run', { root, id }),
+  launchAction: (root: string, id: string, action: string): Promise<unknown> =>
+    cockpit.command('launch.action', { root, id, action }),
 
   // mirror
   getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
