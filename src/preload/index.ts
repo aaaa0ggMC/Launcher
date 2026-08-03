@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 
 type CommandArgs = Record<string, unknown>
 
@@ -8,6 +7,9 @@ type CommandArgs = Record<string, unknown>
  * the command registry in the main process (commands.ts). The typed methods
  * below are thin wrappers over `command(...)`, so the UI executes the exact
  * same handlers the CLI uses.
+ *
+ * NOTE: sandbox: true — preload runs in a restricted context; only Electron
+ * built-ins may be required here (no external npm packages).
  */
 const cockpit = {
   // -- command dispatcher (CLI-first core) ----------------------------------
@@ -88,14 +90,11 @@ export type CockpitApi = typeof cockpit
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('cockpit', cockpit)
   } catch (error) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.cockpit = cockpit
 }

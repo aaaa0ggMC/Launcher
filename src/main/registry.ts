@@ -166,6 +166,7 @@ export function watchRoots(): void {
 
   const watcher = chokidar.watch([], {
     ignoreInitial: true,
+    ignorePermissionErrors: true,
     depth: 2,
     ignored: /(^|[/\\])\..|node_modules|\.venv|__pycache__/
   })

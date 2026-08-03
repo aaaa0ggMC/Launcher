@@ -1,4 +1,3 @@
-import type { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   AbilitiesManifest,
   AppEntry,
@@ -60,9 +59,9 @@ export interface CockpitApi {
 
 declare global {
   interface Window {
-    electron: ElectronAPI
     cockpit: CockpitApi
   }
 }
 
+export type { CockpitApi }
 export {}
