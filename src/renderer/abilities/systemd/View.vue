@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, onMounted } from 'vue'
 import type { SystemdUnit } from '@shared/types'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 const units = shallowRef<SystemdUnit[]>([])
 const loading = ref(false)
@@ -59,8 +60,6 @@ onMounted(load)
       </v-btn>
     </div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">{{ error }}</v-alert>
-
     <v-row class="mb-2" dense>
       <v-col cols="12" sm="5">
         <v-text-field
@@ -78,7 +77,7 @@ onMounted(load)
       </v-col>
     </v-row>
 
-    <v-progress-linear v-if="loading" indeterminate class="mb-2" />
+    <LoadingBar :loading="loading" :error="error" />
 
     <v-card rounded="lg" variant="tonal" flat>
       <v-list-item

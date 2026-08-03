@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, onMounted } from 'vue'
 import type { DisplayOutput, WallpaperFile } from '@shared/types'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 const { configs } = inject<{ configs: Record<string, Record<string, unknown>> }>('cockpit:abilities', {
   configs: {}
@@ -52,7 +53,7 @@ onMounted(load)
       壁纸目录: {{ wallpaperDir || '未配置 (config → display.wallpaperDir)' }}
     </div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">{{ error }}</v-alert>
+    <LoadingBar :loading="loading" :error="error" />
 
     <div class="text-subtitle-2 mb-2">输出设备</div>
     <v-row dense class="mb-4">
@@ -69,8 +70,6 @@ onMounted(load)
         <span class="text-caption on-surface-variant">kscreen-doctor 不可用</span>
       </v-col>
     </v-row>
-
-    <v-progress-linear v-if="loading" indeterminate class="mb-2" />
 
     <div class="text-subtitle-2 mb-2">壁纸</div>
     <v-row dense>

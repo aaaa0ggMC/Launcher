@@ -1,23 +1,33 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, onMounted } from 'vue'
 import type { GpuInfo, SystemStats } from '@shared/types'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 const gpus = shallowRef<GpuInfo[]>([])
 const stats = shallowRef<SystemStats | null>(null)
 const pm = ref<0 | 1 | null>(null)
 const pmBusy = ref(false)
 const pmConfirm = ref(false)
+const loading = ref(false)
 const error = ref('')
 
 async function load(): Promise<void> {
-  const [g, s, p] = await Promise.all([
-    window.cockpit.gpu(),
-    window.cockpit.stats().catch(() => null),
-    window.cockpit.readPm()
-  ])
-  gpus.value = g
-  stats.value = s
-  pm.value = p
+  loading.value = true
+  error.value = ''
+  try {
+    const [g, s, p] = await Promise.all([
+      window.cockpit.gpu(),
+      window.cockpit.stats().catch(() => null),
+      window.cockpit.readPm()
+    ])
+    gpus.value = g as GpuInfo[]
+    stats.value = s as SystemStats | null
+    pm.value = p as 0 | 1 | null
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
+  }
 }
 
 async function doTogglePm(): Promise<void> {
@@ -44,7 +54,7 @@ onMounted(load)
     <div class="text-h6 font-weight-medium mb-1">硬件信息</div>
     <div class="text-caption on-surface-variant mb-4">GPU / 磁盘 / 电源管理</div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">{{ error }}</v-alert>
+    <LoadingBar :loading="loading" :error="error" />
 
     <v-row dense>
       <v-col v-for="g in gpus" :key="g.name" cols="12" md="6">

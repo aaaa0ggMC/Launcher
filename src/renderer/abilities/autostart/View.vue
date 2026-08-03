@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, onMounted } from 'vue'
 import type { AutostartEntry } from '@shared/types'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 const entries = shallowRef<AutostartEntry[]>([])
 const loading = ref(false)
@@ -36,9 +37,7 @@ onMounted(load)
     <div class="text-h6 font-weight-medium mb-1">启动项</div>
     <div class="text-caption on-surface-variant mb-4">管理 ~/.config/autostart 中的自启动项</div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">{{ error }}</v-alert>
-
-    <v-progress-linear v-if="loading" indeterminate class="mb-2" />
+    <LoadingBar :loading="loading" :error="error" />
 
     <v-row dense>
       <v-col v-for="e in entries" :key="e.file" cols="12" sm="6" md="4">

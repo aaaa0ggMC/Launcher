@@ -5,8 +5,10 @@ import type { GridStackNode } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import type { SystemStats } from '@shared/types'
 import { fmtBytes, fmtUptime } from '../../composables/format'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 const stats = shallowRef<SystemStats | null>(null)
+const firstLoaded = ref(false)
 const loading = ref(false)
 const error = ref('')
 const gridEl = ref<HTMLElement | null>(null)
@@ -16,15 +18,26 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const LAYOUT_KEY = 'cockpit-dashboard-layout'
 
-async function load(): Promise<void> {
+/** Manual / first load (drives the shared loading bar + skeleton). */
+async function refresh(): Promise<void> {
   loading.value = true
+  error.value = ''
   try {
     stats.value = await window.cockpit.stats()
-    error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
+    firstLoaded.value = true
+  }
+}
+
+/** Silent background poll — no loading bar flicker. */
+async function poll(): Promise<void> {
+  try {
+    stats.value = await window.cockpit.stats()
+  } catch {
+    // keep last snapshot
   }
 }
 
@@ -78,12 +91,12 @@ function onResize(): void {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  await load()
+  await refresh()
   // grid init must wait until the container has a real width
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   initGrid()
-  timer = setInterval(load, 4000)
+  timer = setInterval(poll, 4000)
 })
 
 onBeforeUnmount(() => {
@@ -138,11 +151,6 @@ const gpus = computed(() => stats.value?.gpu ?? [])
 const disks = computed(() => stats.value?.disk ?? [])
 const containers = computed(() => stats.value?.docker ?? [])
 
-onMounted(async () => {
-  await load()
-  timer = setInterval(load, 4000)
-})
-
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
 })
@@ -161,18 +169,21 @@ onBeforeUnmount(() => {
         size="small"
         variant="tonal"
         prepend-icon="mdi-refresh"
-        :loading="loading"
-        @click="load"
+        :loading="loading && firstLoaded"
+        @click="refresh"
       >
         刷新
       </v-btn>
     </div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">
-      {{ error }}
-    </v-alert>
+    <LoadingBar
+      :loading="loading"
+      :skeleton="!firstLoaded"
+      :error="error"
+      skeleton-type="list-item-two-line,article"
+    />
 
-    <div ref="gridEl" class="grid-stack">
+    <div v-if="firstLoaded" ref="gridEl" class="grid-stack">
       <div
         v-for="c in cards"
         :key="c.id"

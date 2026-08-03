@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
 import type { AppEntry } from '@shared/types'
+import LoadingBar from '../../components/LoadingBar.vue'
 
 interface LaunchFn {
   (root: string, id: string, entry: AppEntry): Promise<unknown>
@@ -237,7 +238,7 @@ onBeforeUnmount(() => unsub?.())
       </v-chip>
     </div>
 
-    <v-progress-linear v-if="loading" indeterminate class="mb-2" />
+    <LoadingBar :loading="loading" />
 
     <v-row dense align="stretch">
       <v-col v-for="{ id, entry } in filtered" :key="id" cols="12" sm="6" md="4" lg="3">
