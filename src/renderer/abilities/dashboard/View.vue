@@ -57,7 +57,13 @@ function loadSavedLayout(): GridStackNode[] | null {
         n.x >= 0 &&
         n.x + n.w <= 12
     )
-    return valid ? layout : null
+    if (!valid) return null
+    // Only apply layouts whose ids match our current cards — otherwise
+    // gridstack load() would ADD extra widgets → ghost components.
+    const ids = new Set(['host', 'cpu', 'mem', 'gpu', 'disk', 'docker'])
+    const allMatch = layout.every((n) => typeof n.id === 'string' && ids.has(n.id))
+    if (!allMatch) return null
+    return layout
   } catch {
     return null
   }
@@ -205,6 +211,7 @@ onBeforeUnmount(() => {
       <div
         v-for="c in cards"
         :key="c.id"
+        :id="c.id"
         class="grid-stack-item"
         :gs-x="String(c.x)"
         :gs-y="String(c.y)"
