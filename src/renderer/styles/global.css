@@ -4,6 +4,21 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+/* Single scroll owner: the shell is fixed to the viewport; only v-main scrolls. */
+.v-application {
+  height: 100% !important;
+}
+
+.v-application__wrap {
+  height: 100%;
+  min-height: 0 !important;
+}
+
+.v-main {
+  overflow-y: auto;
   overflow-x: hidden;
 }
 
@@ -46,9 +61,4 @@ pre,
 /* Cards must never spill horizontally (tag chips, long text). */
 .v-card {
   overflow: hidden;
-}
-
-/* Prevent any horizontal scroll in the content area. */
-.v-main {
-  overflow-x: hidden;
 }
