@@ -201,12 +201,38 @@ pre,
 }
 
 /* ---------------------------------------------------------------------------
- * Content background — a barely-perceptible gradient for depth.
+ * Content background — a barely-perceptible gradient for depth. The solid
+ * backdrop color now lives in the Fuse layer, so only the top sheen remains.
  * ------------------------------------------------------------------------- */
 .content-bg {
-  background:
-    linear-gradient(180deg, rgba(var(--v-theme-surface-variant), 0.18) 0%, transparent 240px),
-    rgb(var(--v-theme-background));
+  background: linear-gradient(
+    180deg,
+    rgba(var(--v-theme-surface-variant), 0.18) 0%,
+    transparent 240px
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Background / Fuse / Data layering — the app root must be transparent so the
+ * two fixed layers behind the content are visible.
+ * ------------------------------------------------------------------------- */
+.v-application {
+  background: transparent;
+}
+
+/* Translucent chrome — let the background (image/fuse) show through the top
+ * app-bar and the sidebar too, not just the main content area. Kept close to
+ * the (near-transparent) main area; the backdrop blur keeps text readable.
+ * Vuetify injects `.bg-surface`/`.bg-surface-variant` with `!important` at the
+ * end of <head>; higher-specificity selectors are required to beat them. */
+.v-application .v-app-bar {
+  background: rgba(var(--v-theme-surface), 0.4) !important;
+  backdrop-filter: blur(14px);
+}
+
+.v-application .v-navigation-drawer {
+  background: rgba(var(--v-theme-surface-variant), 0.42) !important;
+  backdrop-filter: blur(14px);
 }
 
 /* ---------------------------------------------------------------------------

@@ -1,10 +1,29 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { homedir } from 'os'
+import { join } from 'path'
+import { readFile } from 'fs/promises'
 import { getManifest, watchRoots } from './registry'
 import { cliExec } from './cli'
 import { runCommand, listCommands } from './commands'
 
 function mainWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+}
+
+/**
+ * Resolve the current KDE desktop wallpaper path by parsing
+ * ~/.config/plasma-org.kde.plasma.desktop-appletsrc (Image=file://...).
+ * Used for the `wallpaper` background preset. Returns null if not found.
+ */
+async function kdeWallpaperPath(): Promise<string | null> {
+  try {
+    const cfg = join(homedir(), '.config', 'plasma-org.kde.plasma.desktop-appletsrc')
+    const raw = await readFile(cfg, 'utf-8')
+    const m = raw.match(/Image=file:\/\/([^\s#]+)/)
+    return m ? decodeURIComponent(m[1]) : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -31,6 +50,22 @@ export function registerIpc(): void {
     mainWindow()?.close()
   })
   ipcMain.handle('window:is-maximized', () => mainWindow()?.isMaximized() ?? false)
+
+  // Desktop wallpaper for the `wallpaper` background preset.
+  ipcMain.handle('window:wallpaper', async () => kdeWallpaperPath())
+
+  // Native file picker (image paths for background / app icons).
+  ipcMain.handle(
+    'dialog:pick-file',
+    async (_e, opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
+      const res = await dialog.showOpenDialog(mainWindow() ?? undefined!, {
+        title: opts?.title ?? '选择文件',
+        properties: ['openFile'],
+        filters: opts?.filters ?? []
+      })
+      return res.canceled || !res.filePaths[0] ? null : res.filePaths[0]
+    }
+  )
 
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) =>

@@ -245,6 +245,23 @@ function removeActionRow(i: number): void {
   form.value?.actions.splice(i, 1)
 }
 
+/** Pick an image via the native dialog and store it as a file:// icon. */
+async function browseIcon(actionIndex?: number): Promise<void> {
+  if (!form.value) return
+  const path = await window.cockpit.pickFile({
+    title: '选择图标',
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico'] }]
+  })
+  if (!path) return
+  const v = `file/${path}`
+  if (actionIndex === undefined) {
+    form.value.icon = v
+  } else {
+    const a = form.value.actions[actionIndex]
+    if (a) a.icon = v
+  }
+}
+
 /** Convert an action editor row back into a persisted AppAction. */
 function buildAction(a: ActionForm): AppAction {
   const cwd = a.execCwd || undefined
@@ -753,6 +770,9 @@ onBeforeUnmount(() => unsub?.())
               hide-details
               class="flex-grow-1"
             />
+            <v-btn icon variant="tonal" size="small" @click="browseIcon()">
+              <v-icon size="small">mdi-folder-image</v-icon>
+            </v-btn>
             <v-avatar size="40" color="surface-variant" rounded="lg">
               <AbilityIcon :icon="form.icon || null" :size="22" />
             </v-avatar>
@@ -894,6 +914,9 @@ onBeforeUnmount(() => unsub?.())
                 hide-details
                 class="flex-grow-1"
               />
+              <v-btn icon variant="text" size="small" @click="browseIcon(i)">
+                <v-icon size="small">mdi-folder-image</v-icon>
+              </v-btn>
               <v-btn icon variant="text" color="error" @click="removeActionRow(i)">
                 <v-icon>mdi-delete</v-icon>
               </v-btn>

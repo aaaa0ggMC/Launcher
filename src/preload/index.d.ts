@@ -65,6 +65,11 @@ export interface CockpitApi {
   windowToggleMaximize: () => Promise<boolean>
   windowClose: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  getWallpaper: () => Promise<string | null>
+  pickFile: (opts?: {
+    title?: string
+    filters?: { name: string; extensions: string[] }[]
+  }) => Promise<string | null>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

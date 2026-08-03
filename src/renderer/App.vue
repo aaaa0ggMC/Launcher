@@ -6,6 +6,9 @@ import type { AbilitiesManifest, AppAction, AppEntry, LaunchResult, RiskLevel } 
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import TransformerModal from './components/TransformerModal.vue'
+import BackgroundLayer from './components/BackgroundLayer.vue'
+import FuseLayer from './components/FuseLayer.vue'
+import { fileIconUrl } from './icon'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -153,6 +156,56 @@ function onConfigChanged(cfg: Record<string, unknown> | null): void {
   runtimeConfig.value = cfg ?? {}
   applyTheme()
   applyUiScale()
+  resolveBackgroundImage()
+}
+
+// ---------------------------------------------------------------------------
+// Background / Fuse / Data layers — configurable via settings → 窗口
+// ---------------------------------------------------------------------------
+const backgroundMode = computed<'transparent' | 'image' | 'wallpaper'>(() => {
+  const b =
+    (runtimeConfig.value.window as { background?: string } | undefined)?.background ?? 'transparent'
+  return (b === 'image' || b === 'wallpaper' ? b : 'transparent') as
+    'transparent' | 'image' | 'wallpaper'
+})
+const fuseAlpha = computed(() => {
+  const a = Number((runtimeConfig.value.window as { fuseAlpha?: number } | undefined)?.fuseAlpha)
+  return Number.isFinite(a) ? a : 1
+})
+const fuseBlur = computed(() => {
+  const b = Number((runtimeConfig.value.window as { fuseBlur?: number } | undefined)?.fuseBlur)
+  return Number.isFinite(b) ? b : 28
+})
+const backgroundOpacity = computed(() => {
+  const o = Number(
+    (runtimeConfig.value.window as { backgroundOpacity?: number } | undefined)?.backgroundOpacity
+  )
+  return Number.isFinite(o) ? o : 1
+})
+const backgroundImage = ref('')
+
+/** Resolve the background image for `image` / `wallpaper` presets. */
+async function resolveBackgroundImage(): Promise<void> {
+  const winCfg = runtimeConfig.value.window as { backgroundImage?: string } | undefined
+  if (backgroundMode.value === 'transparent') {
+    backgroundImage.value = ''
+    return
+  }
+  if (backgroundMode.value === 'image') {
+    // user-set image; nothing if no path configured
+    backgroundImage.value = winCfg?.backgroundImage ? fileIconUrl(winCfg.backgroundImage) : ''
+    return
+  }
+  // `wallpaper`: auto-resolve the KDE desktop wallpaper
+  const wp = await window.cockpit.getWallpaper()
+  backgroundImage.value = wp ? fileIconUrl(wp) : ''
+}
+
+let configUnsub: (() => void) | null = null
+function subscribeConfig(): void {
+  configUnsub = window.cockpit.on('cockpit:config-changed', (cfg) => {
+    if (cfg && typeof cfg === 'object') onConfigChanged(cfg as Record<string, unknown>)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +382,8 @@ onMounted(async () => {
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
     isMaximized.value = Boolean(v)
   })
+  subscribeConfig()
+  resolveBackgroundImage()
 })
 
 watch(currentId, () => persistUiState(), { flush: 'post' })
@@ -337,11 +392,19 @@ watch(rail, () => persistUiState())
 onBeforeUnmount(() => {
   unsub?.()
   winUnsub?.()
+  configUnsub?.()
 })
 </script>
 
 <template>
   <v-app :class="windowRounded ? 'win-rounded' : ''">
+    <BackgroundLayer
+      :mode="backgroundMode"
+      :image-url="backgroundImage"
+      :blur="fuseBlur"
+      :opacity="backgroundOpacity"
+    />
+    <FuseLayer :alpha="fuseAlpha" />
     <v-navigation-drawer
       v-model="drawer"
       :rail="rail"

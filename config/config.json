@@ -6,10 +6,19 @@
     "width": 1280,
     "height": 800,
     "frameless": true,
-    "rounded": true
+    "rounded": true,
+    "background": "image",
+    "fuseAlpha": 0.85,
+    "fuseBlur": 8,
+    "backgroundImage": "/home/aaaa0ggmc/Pictures/Fun/Rustic.jpg",
+    "backgroundOpacity": 0.6
   },
   "runtime": {
-    "terminal": ["konsole", "--hold", "-e"],
+    "terminal": [
+      "konsole",
+      "--hold",
+      "-e"
+    ],
     "confirmBeforeLaunch": true
   }
 }

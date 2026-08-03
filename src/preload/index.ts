@@ -94,6 +94,11 @@ const cockpit = {
   windowToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke('window:toggle-maximize'),
   windowClose: (): Promise<void> => ipcRenderer.invoke('window:close'),
   isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
+  getWallpaper: (): Promise<string | null> => ipcRenderer.invoke('window:wallpaper'),
+  pickFile: (opts?: {
+    title?: string
+    filters?: { name: string; extensions: string[] }[]
+  }): Promise<string | null> => ipcRenderer.invoke('dialog:pick-file', opts),
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {

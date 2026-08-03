@@ -12,7 +12,11 @@ import { CONFIG_JSON } from './paths'
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'cockpit-icon',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    // NOTE: must NOT be `standard: true`. With a standard scheme, the encoded
+    // absolute path (`cockpit-icon://%2Fhome%2F...`) puts `%2F` in the URL
+    // authority, which Chromium rejects → no request ever reaches the handler.
+    // As a non-standard (opaque) scheme the whole URL is passed through as-is.
+    privileges: { secure: true, supportFetchAPI: true, stream: true }
   }
 ])
 
@@ -31,15 +35,20 @@ async function createWindow(): Promise<void> {
       height?: number
       frameless?: boolean
       rounded?: boolean
+      fuseAlpha?: number
     }
   }>(CONFIG_JSON)
   const { width = 1280, height = 800 } = cfg?.window ?? {}
   // Frameless + rounded corners are config options (settings → 显示) applied on
   // next launch. rounded needs a transparent window so the CSS border-radius
   // corners reveal the desktop behind them (like Konsole on Wayland/KDE).
+  // A sub-100% fuse alpha or an image background also makes the window
+  // translucent, so transparency must be on for those too.
   const frameless = cfg?.window?.frameless !== false
   const rounded = frameless && cfg?.window?.rounded !== false
-  const transparent = rounded
+  const fuseAlpha = Number(cfg?.window?.fuseAlpha ?? 1)
+  const translucent = fuseAlpha < 1
+  const transparent = frameless && (rounded || translucent)
 
   mainWindow = new BrowserWindow({
     width,

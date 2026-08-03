@@ -79,6 +79,9 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
   const cfg = (await readJson<Record<string, unknown>>(CONFIG_JSON)) ?? {}
   const merged = { ...cfg, ...patch }
   await writeJsonAtomic(CONFIG_JSON, merged)
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('cockpit:config-changed', merged)
+  }
   return merged
 }
 
