@@ -324,14 +324,17 @@ onBeforeUnmount(() => {
     </v-app-bar>
 
     <v-main class="content-bg">
-      <v-container fluid class="fill-height">
-        <component :is="currentAbility?.comp" v-if="currentAbility" />
-        <v-empty-state
-          v-else
-          icon="mdi-view-dashboard-outline"
-          title="选择一个功能"
-          text="从左侧边栏选择功能，或使用顶部搜索框。"
-        />
+      <v-container fluid class="pa-4">
+        <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
+          <component :is="currentAbility?.comp" v-if="currentAbility" class="flex-grow-1" />
+          <v-empty-state
+            v-else
+            icon="mdi-view-dashboard-outline"
+            title="选择一个功能"
+            text="从左侧边栏选择功能，或使用顶部搜索框。"
+            class="align-self-center mt-8"
+          />
+        </div>
       </v-container>
     </v-main>
 

@@ -1,0 +1,54 @@
+/* Global app chrome — font stack & overflow guardlines. */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+body {
+  font-family:
+    'Noto Sans SC',
+    'Noto Sans CJK SC',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Vuetify components inherit from .v-application — force the CJK stack. */
+.v-application {
+  font-family:
+    'Noto Sans SC',
+    'Noto Sans CJK SC',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif !important;
+}
+
+.font-family-mono,
+code,
+kbd,
+pre,
+.v-code {
+  font-family:
+    'Noto Sans Mono CJK SC',
+    ui-monospace,
+    'SFMono-Regular',
+    Menlo,
+    Consolas,
+    monospace !important;
+}
+
+/* Cards must never spill horizontally (tag chips, long text). */
+.v-card {
+  overflow: hidden;
+}
+
+/* Prevent any horizontal scroll in the content area. */
+.v-main {
+  overflow-x: hidden;
+}

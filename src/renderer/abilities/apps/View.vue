@@ -196,10 +196,26 @@ onBeforeUnmount(() => unsub?.())
         />
       </v-col>
       <v-col cols="12" sm="8">
-        <v-chip-group v-model="activeTag" selected-class="text-primary">
-          <v-chip size="small" variant="outlined" :value="''">全部</v-chip>
-          <v-chip v-for="t in allTags" :key="t" size="small" variant="tonal">{{ t }}</v-chip>
-        </v-chip-group>
+        <div class="d-flex flex-wrap align-center gap-1">
+          <v-chip
+            size="small"
+            variant="outlined"
+            :color="activeTag === '' ? 'primary' : ''"
+            @click="activeTag = ''"
+          >
+            全部
+          </v-chip>
+          <v-chip
+            v-for="t in allTags"
+            :key="t"
+            size="small"
+            variant="tonal"
+            :color="activeTag === t ? 'primary' : ''"
+            @click="activeTag = activeTag === t ? '' : t"
+          >
+            {{ t }}
+          </v-chip>
+        </div>
         <v-checkbox v-model="showMissing" label="显示缺失条目" density="compact" hide-details class="mt-1" />
       </v-col>
     </v-row>
@@ -225,15 +241,15 @@ onBeforeUnmount(() => unsub?.())
 
     <v-row dense>
       <v-col v-for="{ id, entry } in filtered" :key="id" cols="12" sm="6" md="4" lg="3">
-        <v-card rounded="lg" variant="tonal" :class="entry.missing ? 'opacity-60' : ''" class="fill-height">
-          <v-card-text>
+        <v-card rounded="lg" variant="tonal" :class="entry.missing ? 'opacity-60' : ''" class="app-card">
+          <v-card-text class="d-flex flex-column">
             <div class="d-flex align-start ga-3">
               <v-avatar size="40" color="surface-variant" rounded="lg">
                 <img v-if="iconSrc(entry)" :src="iconSrc(entry)" alt="" width="24" height="24" />
                 <span v-else class="ability-icon">{{ entry.icon && entry.icon !== 'auto' ? entry.icon : '😎' }}</span>
               </v-avatar>
               <div class="flex-grow-1 min-width-0">
-                <div class="d-flex align-center ga-2">
+                <div class="d-flex align-center ga-2 flex-wrap">
                   <span class="text-body-1 font-weight-medium text-truncate">{{ entry.name }}</span>
                   <v-chip
                     size="x-small"
@@ -371,5 +387,13 @@ onBeforeUnmount(() => unsub?.())
 }
 .min-width-0 {
   min-width: 0;
+}
+.app-card {
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+}
+.app-card .v-card-actions {
+  margin-top: auto;
 }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { GridStack } from 'gridstack'
+import type { GridStackNode } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import type { SystemStats } from '@shared/types'
 import { fmtBytes, fmtUptime } from '../../composables/format'
@@ -20,12 +21,30 @@ async function load(): Promise<void> {
   try {
     stats.value = await window.cockpit.stats()
     error.value = ''
-    await nextTick()
-    initGrid()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
+  }
+}
+
+function loadSavedLayout(): GridStackNode[] | null {
+  const raw = localStorage.getItem(LAYOUT_KEY)
+  if (!raw) return null
+  try {
+    const layout = JSON.parse(raw) as GridStackNode[]
+    if (!Array.isArray(layout)) return null
+    // Guard against corrupt/legacy layouts pushing cards off-grid.
+    const valid = layout.every(
+      (n) =>
+        typeof n.x === 'number' &&
+        typeof n.w === 'number' &&
+        n.x >= 0 &&
+        n.x + n.w <= 12
+    )
+    return valid ? layout : null
+  } catch {
+    return null
   }
 }
 
@@ -35,8 +54,8 @@ function initGrid(): void {
   const g = GridStack.init(
     {
       column: 12,
-      margin: 10,
-      cellHeight: 76,
+      margin: 12,
+      cellHeight: 96,
       animate: true,
       float: true
     },
@@ -44,18 +63,33 @@ function initGrid(): void {
   )
   if (!g) return
   grid = g
-  const saved = localStorage.getItem(LAYOUT_KEY)
-  if (saved) {
-    try {
-      g.load(JSON.parse(saved))
-    } catch {
-      // ignore corrupt layout
-    }
-  }
+  const saved = loadSavedLayout()
+  if (saved) g.load(saved)
   g.on('change', () => {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(g.save(false)))
   })
 }
+
+function onResize(): void {
+  // Reflow all widgets against the current container width.
+  grid?.column(12)
+  grid?.compact()
+}
+
+onMounted(async () => {
+  window.addEventListener('resize', onResize)
+  await load()
+  // grid init must wait until the container has a real width
+  await nextTick()
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  initGrid()
+  timer = setInterval(load, 4000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  if (timer) clearInterval(timer)
+})
 
 const cards = computed(() => {
   const s = stats.value
