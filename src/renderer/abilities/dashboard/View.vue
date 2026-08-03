@@ -77,30 +77,25 @@ function initGrid(): void {
       column: 12,
       margin: 12,
       cellHeight: 96,
-      animate: true
-      // float: false → the grid stays compact; height always = lowest widget
+      animate: true,
+      // float: cards stay exactly where dropped; container height grows to the
+      // lowest widget's bottom (never snap-backs, never leaves stale ghosts).
+      float: true
     },
     el
   )
   if (!g) return
   grid = g
   const saved = loadSavedLayout()
-  if (saved) {
-    g.load(saved)
-    // shrink any stale empty rows down to the actual content bottom
-    g.compact()
-  }
+  if (saved) g.load(saved)
   g.on('change', () => {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(g.save(false)))
-    // keep the container tight to the bottom-most widget (no empty scroll area)
-    g.compact()
   })
 }
 
 function onResize(): void {
   // Reflow all widgets against the current container width.
   grid?.column(12)
-  grid?.compact()
 }
 
 onMounted(async () => {
@@ -120,7 +115,6 @@ onActivated(async () => {
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   grid.column(12)
-  grid.compact()
 })
 
 onBeforeUnmount(() => {
