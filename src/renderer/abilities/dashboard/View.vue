@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, computed, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
 import { GridStack } from 'gridstack'
 import type { GridStackNode } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
@@ -97,6 +97,16 @@ onMounted(async () => {
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   initGrid()
   timer = setInterval(poll, 4000)
+})
+
+// Re-shown from keep-alive cache: the container was display:none while hidden,
+// so reflow the grid now that it has a real width again.
+onActivated(async () => {
+  if (!firstLoaded.value || !grid) return
+  await nextTick()
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  grid.column(12)
+  grid.compact()
 })
 
 onBeforeUnmount(() => {

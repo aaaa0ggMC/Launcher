@@ -350,8 +350,11 @@ onBeforeUnmount(() => {
     <v-main class="content-bg">
       <v-container fluid class="pa-4">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
-          <component :is="currentAbility?.comp" v-if="currentAbility" class="flex-grow-1" />
-          <v-empty-state
+          <!-- keep-alive: ability pages are cached, so switching back shows
+               previous content instantly (background polls keep it fresh). -->
+          <keep-alive>
+            <component :is="currentAbility?.comp" v-if="currentAbility" class="flex-grow-1" />
+          </keep-alive>          <v-empty-state
             v-else
             icon="mdi-view-dashboard-outline"
             title="选择一个功能"
