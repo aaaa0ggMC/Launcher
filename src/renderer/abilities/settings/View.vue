@@ -253,13 +253,13 @@ async function resetDashboardLayout(): Promise<void> {
             </div>
             <v-slider
               v-model="fuseAlpha"
-              :min="0.4"
+              :min="0"
               :max="1"
-              :step="0.05"
+              :step="0.01"
               color="primary"
               thumb-label
               hide-details
-              @end="commitFuseAlpha"
+              @update:model-value="commitFuseAlpha"
             />
 
             <template v-if="background !== 'transparent'">
@@ -271,13 +271,13 @@ async function resetDashboardLayout(): Promise<void> {
               </div>
               <v-slider
                 v-model="backgroundOpacity"
-                :min="0.2"
+                :min="0"
                 :max="1"
-                :step="0.05"
+                :step="0.01"
                 color="primary"
                 thumb-label
                 hide-details
-                @end="commitBackgroundOpacity"
+                @update:model-value="commitBackgroundOpacity"
               />
             </template>
 
@@ -291,7 +291,7 @@ async function resetDashboardLayout(): Promise<void> {
               v-model="fuseBlur"
               :min="0"
               :max="60"
-              :step="2"
+              :step="1"
               color="primary"
               thumb-label
               hide-details

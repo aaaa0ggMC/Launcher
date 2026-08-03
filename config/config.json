@@ -8,10 +8,10 @@
     "frameless": true,
     "rounded": true,
     "background": "image",
-    "fuseAlpha": 0.85,
-    "fuseBlur": 8,
-    "backgroundImage": "/home/aaaa0ggmc/Pictures/Fun/Rustic.jpg",
-    "backgroundOpacity": 0.6
+    "fuseAlpha": 0.91,
+    "fuseBlur": 5,
+    "backgroundImage": "/home/aaaa0ggmc/Pictures/Wallpapers/IMG_20250610_132729.jpg",
+    "backgroundOpacity": 0.7
   },
   "runtime": {
     "terminal": [
