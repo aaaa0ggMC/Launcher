@@ -61,6 +61,10 @@ export interface CockpitApi {
   outputs: () => Promise<DisplayOutput[]>
   cliExec: (cmd: string) => Promise<string>
   setZoom: (factor: number) => void
+  windowMinimize: () => Promise<void>
+  windowToggleMaximize: () => Promise<boolean>
+  windowClose: () => Promise<void>
+  isMaximized: () => Promise<boolean>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

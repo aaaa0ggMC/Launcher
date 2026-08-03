@@ -135,23 +135,37 @@ pre,
 /* ---------------------------------------------------------------------------
  * Scrollbars — slim, themed, unobtrusive.
  * ------------------------------------------------------------------------- */
-.v-main__scroller {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-surface-bright), 0.6) transparent;
-}
+/* NOTE: do NOT set scrollbar-width/scrollbar-color here — newer Chromium honors
+ * them and switches to the standard (native GTK) scrollbar model, which then
+ * IGNORES all ::-webkit-scrollbar styling below and brings the arrow buttons
+ * back. Omitting them keeps the fully-custom WebKit scrollbar active. */
 
 .v-main__scroller::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 .v-main__scroller::-webkit-scrollbar-track {
   background: transparent;
 }
 
+.v-main__scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.v-main__scroller::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .v-main__scroller::-webkit-scrollbar-thumb {
   background-color: rgba(var(--v-theme-surface-bright), 0.55);
-  border-radius: 4px;
+  /* inset the light thumb (transparent border + clip) so it never hugs the
+   * rounded window corner and reads as a stray paper curl */
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
 }
 
 .v-main__scroller::-webkit-scrollbar-thumb:hover {
@@ -193,4 +207,29 @@ pre,
   background:
     linear-gradient(180deg, rgba(var(--v-theme-surface-variant), 0.18) 0%, transparent 240px),
     rgb(var(--v-theme-background));
+}
+
+/* ---------------------------------------------------------------------------
+ * Frameless window — app-bar is the drag region; buttons stay clickable.
+ * ------------------------------------------------------------------------- */
+.cockpit-app-bar {
+  -webkit-app-region: drag;
+}
+
+.cockpit-app-bar .v-btn {
+  -webkit-app-region: no-drag;
+}
+
+.cockpit-app-bar .win-close:hover {
+  background: rgb(var(--v-theme-error));
+  color: #fff;
+}
+
+/* Rounded frameless window (config window.rounded) — requires a transparent
+ * window; corners reveal the desktop behind, like Konsole on KDE/Wayland.
+ * clip-path clips ALL descendants (including the position:fixed app-bar and
+ * drawer, which overflow:hidden would let escape), so all four corners round
+ * uniformly and no scrollbar corner leaks into the bottom-right radius. */
+.win-rounded {
+  clip-path: inset(0 round 12px);
 }

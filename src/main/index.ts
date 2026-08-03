@@ -25,15 +25,30 @@ function broadcast(channel: string, ...args: unknown[]): void {
 }
 
 async function createWindow(): Promise<void> {
-  const cfg = await readJson<{ window?: { width?: number; height?: number } }>(CONFIG_JSON)
+  const cfg = await readJson<{
+    window?: {
+      width?: number
+      height?: number
+      frameless?: boolean
+      rounded?: boolean
+    }
+  }>(CONFIG_JSON)
   const { width = 1280, height = 800 } = cfg?.window ?? {}
+  // Frameless + rounded corners are config options (settings → 显示) applied on
+  // next launch. rounded needs a transparent window so the CSS border-radius
+  // corners reveal the desktop behind them (like Konsole on Wayland/KDE).
+  const frameless = cfg?.window?.frameless !== false
+  const rounded = frameless && cfg?.window?.rounded !== false
+  const transparent = rounded
 
   mainWindow = new BrowserWindow({
     width,
     height,
     show: false,
+    frame: !frameless,
+    transparent,
+    backgroundColor: transparent ? '#00000000' : '#121212',
     autoHideMenuBar: true,
-    backgroundColor: '#121212',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -43,6 +58,9 @@ async function createWindow(): Promise<void> {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.on('maximize', () => broadcast('cockpit:window-maximized', true))
+  mainWindow.on('unmaximize', () => broadcast('cockpit:window-maximized', false))
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)

@@ -89,6 +89,12 @@ const cockpit = {
     webFrame.setZoomFactor(clamped)
   },
 
+  // frameless window controls
+  windowMinimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
+  windowToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke('window:toggle-maximize'),
+  windowClose: (): Promise<void> => ipcRenderer.invoke('window:close'),
+  isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
+
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, ...args: unknown[]): void => cb(...args)

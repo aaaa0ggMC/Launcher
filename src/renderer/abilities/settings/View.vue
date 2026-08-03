@@ -8,6 +8,8 @@ const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { va
 const theme = ref('dark')
 const uiScale = ref(1.1)
 const confirmBeforeLaunch = ref(false)
+const frameless = ref(true)
+const rounded = ref(true)
 const searching = ref('')
 
 onMounted(async () => {
@@ -17,6 +19,9 @@ onMounted(async () => {
   uiScale.value = Number.isFinite(scale) && scale > 0 ? scale : 1.1
   confirmBeforeLaunch.value = !!(cfg?.runtime as Record<string, unknown> | undefined)
     ?.confirmBeforeLaunch
+  const win = (cfg?.window as Record<string, unknown> | undefined) ?? {}
+  frameless.value = win.frameless !== false
+  rounded.value = win.rounded !== false
   const appsCfg = (await window.cockpit.appsConfig()) as {
     searchRoots: { path: string; watch: boolean }[]
   }
@@ -43,6 +48,22 @@ async function setConfirm(v: boolean | null): Promise<void> {
       ...(config.value.runtime as Record<string, unknown> | undefined),
       confirmBeforeLaunch: val
     }
+  })
+}
+
+async function setFrameless(v: boolean | null): Promise<void> {
+  const val = !!v
+  frameless.value = val
+  await window.cockpit.setConfig({
+    window: { ...(config.value.window as Record<string, unknown> | undefined), frameless: val }
+  })
+}
+
+async function setRounded(v: boolean | null): Promise<void> {
+  const val = !!v
+  rounded.value = val
+  await window.cockpit.setConfig({
+    window: { ...(config.value.window as Record<string, unknown> | undefined), rounded: val }
   })
 }
 
@@ -113,6 +134,32 @@ async function resetDashboardLayout(): Promise<void> {
               <span>小</span>
               <span>默认</span>
               <span>大</span>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" md="6">
+        <v-card rounded="lg" variant="tonal">
+          <v-card-title class="text-subtitle-2">窗口</v-card-title>
+          <v-card-text class="d-flex flex-column">
+            <v-switch
+              :model-value="frameless"
+              label="无边框窗口"
+              density="compact"
+              hide-details
+              @update:model-value="setFrameless"
+            />
+            <v-switch
+              :model-value="rounded"
+              label="圆角窗口"
+              density="compact"
+              hide-details
+              class="mt-1"
+              @update:model-value="setRounded"
+            />
+            <div class="text-caption on-surface-variant mt-2">
+              需要透明窗口支持 (Wayland/KDE 可用)。修改后下次启动生效。
             </div>
           </v-card-text>
         </v-card>

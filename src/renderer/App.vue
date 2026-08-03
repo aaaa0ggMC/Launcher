@@ -34,6 +34,31 @@ const drawer = ref(true)
 const rail = ref(true)
 const searchText = ref('')
 const currentId = ref<string | null>(null)
+const isMaximized = ref(false)
+
+function winMinimize(): void {
+  window.cockpit.windowMinimize()
+}
+async function winToggleMaximize(): Promise<void> {
+  isMaximized.value = await window.cockpit.windowToggleMaximize()
+}
+function winClose(): void {
+  window.cockpit.windowClose()
+}
+
+/** Window prefs come from config.json (settings → 显示), applied on next launch. */
+const isFrameless = computed(
+  () => (runtimeConfig.value.window as { frameless?: boolean } | undefined)?.frameless !== false
+)
+const windowRounded = computed(
+  () =>
+    isFrameless.value &&
+    (runtimeConfig.value.window as { rounded?: boolean } | undefined)?.rounded !== false &&
+    !isMaximized.value
+)
+
+/** Sidebar icons: fill the rail in collapsed mode, larger in expanded. */
+const sidebarIconSize = computed(() => (rail.value ? 26 : 24))
 
 const UI_STATE_KEY = 'cockpit-ui-state'
 
@@ -208,6 +233,7 @@ async function doLaunch(): Promise<void> {
 const transformerOpen = ref(false)
 const transformerEntry = shallowRef<AppEntry | null>(null)
 const transformerPid = ref<number | null>(null)
+let winUnsub: (() => void) | null = null
 
 function openTransformer(res: LaunchResult | void, entry: AppEntry): void {
   if (!res || !res.ok || !res.monitor || !entry.transformer || !entry.transformer_display) return
@@ -299,6 +325,10 @@ onMounted(async () => {
   }
   restoreUiState()
   unsub = window.cockpit.on('cockpit:apps-changed', () => loadSearchApps())
+  window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
+  winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
+    isMaximized.value = Boolean(v)
+  })
 })
 
 watch(currentId, () => persistUiState(), { flush: 'post' })
@@ -306,16 +336,18 @@ watch(rail, () => persistUiState())
 
 onBeforeUnmount(() => {
   unsub?.()
+  winUnsub?.()
 })
 </script>
 
 <template>
-  <v-app>
+  <v-app :class="windowRounded ? 'win-rounded' : ''">
     <v-navigation-drawer
       v-model="drawer"
       :rail="rail"
       permanent
       width="264"
+      rail-width="64"
       color="surface-variant"
     >
       <template #prepend>
@@ -324,7 +356,7 @@ onBeforeUnmount(() => {
           :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
         >
           <div class="brand-logo">
-            <GameIcon name="dashboard" :size="22" />
+            <GameIcon name="dashboard" :size="26" />
           </div>
           <div v-if="!rail" class="d-flex flex-column">
             <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
@@ -382,7 +414,7 @@ onBeforeUnmount(() => {
               @click="currentId = a.id"
             >
               <template #prepend>
-                <AbilityIcon :icon="a.icon" :size="20" />
+                <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
               </template>
             </v-list-item>
           </template>
@@ -402,7 +434,7 @@ onBeforeUnmount(() => {
                 @click="currentId = a.id"
               >
                 <template #prepend>
-                  <AbilityIcon :icon="a.icon" :size="20" />
+                  <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
                 </template>
               </v-list-item>
             </template>
@@ -426,14 +458,23 @@ onBeforeUnmount(() => {
       </template>
     </v-navigation-drawer>
 
-    <v-app-bar color="surface" flat border>
-      <v-app-bar-title>
+    <v-app-bar color="surface" flat border :class="isFrameless ? 'cockpit-app-bar' : ''">
+      <v-app-bar-title @dblclick="isFrameless ? winToggleMaximize : undefined">
         <span class="text-subtitle-1 font-weight-medium">{{
           currentAbility?.name ?? 'Linux Cockpit'
         }}</span>
       </v-app-bar-title>
       <v-spacer />
       <v-btn icon="mdi-cog-outline" variant="text" @click="currentId = 'settings'" />
+      <template v-if="isFrameless">
+        <v-btn icon="mdi-window-minimize" variant="text" @click="winMinimize" />
+        <v-btn
+          :icon="isMaximized ? 'mdi-window-restore' : 'mdi-window-maximize'"
+          variant="text"
+          @click="winToggleMaximize"
+        />
+        <v-btn icon="mdi-close" variant="text" class="win-close" @click="winClose" />
+      </template>
     </v-app-bar>
 
     <v-main scrollable class="content-bg">

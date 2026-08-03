@@ -4,7 +4,9 @@
   "uiScale": 1.3,
   "window": {
     "width": 1280,
-    "height": 800
+    "height": 800,
+    "frameless": true,
+    "rounded": true
   },
   "runtime": {
     "terminal": ["konsole", "--hold", "-e"],
