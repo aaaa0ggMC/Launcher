@@ -218,6 +218,7 @@ onBeforeUnmount(() => {
         v-for="c in cards"
         :key="c.id"
         :id="c.id"
+        :gs-id="c.id"
         class="grid-stack-item"
         :gs-x="String(c.x)"
         :gs-y="String(c.y)"
