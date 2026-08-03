@@ -4,7 +4,7 @@ import type { Ability } from '../types'
 export default {
   id: 'autostart',
   name: '启动项',
-  icon: '🚀',
+  icon: 'gi:autostart',
   category: '系统',
   keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))

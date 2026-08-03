@@ -2,8 +2,9 @@
 import { computed, provide, ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Ability } from './abilities/types'
-import { FALLBACK_ICON } from './abilities/types'
 import type { AbilitiesManifest, AppEntry, LaunchResult } from '@shared/types'
+import AbilityIcon from './components/AbilityIcon.vue'
+import GameIcon from './components/GameIcon.vue'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -29,14 +30,17 @@ const runtimeConfig = ref<Record<string, unknown>>({})
 const theme = useTheme()
 
 const drawer = ref(true)
-const rail = ref(false)
+const rail = ref(true)
 const searchText = ref('')
 const currentId = ref<string | null>(null)
 
 const UI_STATE_KEY = 'cockpit-ui-state'
 
 function persistUiState(): void {
-  localStorage.setItem(UI_STATE_KEY, JSON.stringify({ rail: rail.value, currentId: currentId.value }))
+  localStorage.setItem(
+    UI_STATE_KEY,
+    JSON.stringify({ rail: rail.value, currentId: currentId.value })
+  )
 }
 
 function restoreUiState(): void {
@@ -65,7 +69,7 @@ const abilities = computed<SidebarAbility[]>(() => {
         order: cfg.order,
         config: (cfg.config ?? {}) as Record<string, unknown>,
         name: meta.name,
-        icon: meta.icon ?? FALLBACK_ICON,
+        icon: meta.icon ?? null,
         category: meta.category,
         keepAlive: meta.keepAlive !== false,
         comp: meta.component
@@ -74,9 +78,7 @@ const abilities = computed<SidebarAbility[]>(() => {
     .filter((x): x is SidebarAbility => x !== null)
 })
 
-const currentAbility = computed(
-  () => abilities.value.find((a) => a.id === currentId.value) ?? null
-)
+const currentAbility = computed(() => abilities.value.find((a) => a.id === currentId.value) ?? null)
 
 // keep-alive caches only abilities that opted in (keepAlive !== false).
 // Each cached page must declare a matching name via defineOptions.
@@ -108,7 +110,7 @@ const groups = computed<Group[]>(() => {
 })
 
 // ---------------------------------------------------------------------------
-// Theme switching from config.json (dark | pureblack | light | system)
+// Theme + UI zoom from config.json
 // ---------------------------------------------------------------------------
 function applyTheme(): void {
   const t = (runtimeConfig.value.theme as string) ?? 'dark'
@@ -116,9 +118,15 @@ function applyTheme(): void {
   theme.global.name.value = resolved === 'pureblack' ? 'pureblack' : 'dark'
 }
 
+function applyUiScale(): void {
+  const scale = Number(runtimeConfig.value.uiScale)
+  window.cockpit.setZoom(Number.isFinite(scale) && scale > 0 ? scale : 1.1)
+}
+
 function onConfigChanged(cfg: Record<string, unknown> | null): void {
   runtimeConfig.value = cfg ?? {}
   applyTheme()
+  applyUiScale()
 }
 
 // ---------------------------------------------------------------------------
@@ -137,10 +145,11 @@ const ackNow = ref(false)
 const RISK_LEVEL = { low: 0, medium: 1, high: 2 }
 
 function riskNeedsConfirm(entry: AppEntry): boolean {
-  const cfg = runtimeConfig.value.runtime as { confirmBeforeLaunch?: boolean } | undefined
-  if (cfg?.confirmBeforeLaunch) return true
   const level = RISK_LEVEL[entry.security?.risk ?? 'low']
-  return level >= RISK_LEVEL.medium && !entry.security?.acknowledged
+  // Only medium/high risk needs confirmation (unless already acknowledged).
+  // Low risk always launches directly, even with confirmBeforeLaunch enabled.
+  if (level >= RISK_LEVEL.medium && !entry.security?.acknowledged) return true
+  return false
 }
 
 async function launchApp(root: string, id: string, entry: AppEntry): Promise<LaunchResult | void> {
@@ -223,10 +232,7 @@ provide('cockpit:abilities', { configs: abilityConfigs, launch: launchApp })
 let unsub: (() => void) | null = null
 
 onMounted(async () => {
-  const [cfg, mani] = await Promise.all([
-    window.cockpit.getConfig(),
-    window.cockpit.getManifest()
-  ])
+  const [cfg, mani] = await Promise.all([window.cockpit.getConfig(), window.cockpit.getManifest()])
   onConfigChanged(cfg)
   manifest.value = mani
   const def = mani?.sidebar.default
@@ -255,23 +261,33 @@ onBeforeUnmount(() => {
       color="surface-variant"
     >
       <template #prepend>
-        <div class="px-4 py-3 d-flex align-center ga-2">
-          <v-icon color="primary" size="28">mdi-console-line</v-icon>
-          <span v-if="!rail" class="text-subtitle-1 font-weight-medium on-surface">Linux Cockpit</span>
+        <div
+          class="brand-header"
+          :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
+        >
+          <div class="brand-logo">
+            <GameIcon name="dashboard" :size="22" />
+          </div>
+          <div v-if="!rail" class="d-flex flex-column">
+            <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
+            <span class="text-caption on-surface-variant brand-sub">System Control Center</span>
+          </div>
         </div>
       </template>
 
       <!-- Top search box (expanded only) -->
-      <div v-if="!rail" class="px-3 pb-1">
+      <div v-if="!rail" class="px-3 pb-2">
         <v-text-field
           v-model="searchText"
-          @input="loadSearchApps"
           prepend-inner-icon="mdi-magnify"
           placeholder="搜索能力 / 应用别名"
           density="compact"
           variant="solo-filled"
+          flat
           hide-details
           clearable
+          rounded="lg"
+          @input="loadSearchApps"
         />
       </div>
 
@@ -284,6 +300,7 @@ onBeforeUnmount(() => {
           :subtitle="app.entry.description"
           :append-icon="'mdi-play'"
           density="compact"
+          rounded="lg"
           @click="launchApp(app.root, app.id, app.entry)"
         />
         <v-list-item v-if="searchApps.length === 0 && !searchBusy">
@@ -291,22 +308,23 @@ onBeforeUnmount(() => {
         </v-list-item>
       </v-list>
 
-      <v-divider v-if="!rail && searchText.trim()" class="my-2" />
+      <v-divider v-if="!rail && searchText.trim()" class="my-2 mx-2" />
 
       <template v-if="!rail">
         <v-list density="compact" nav class="px-2">
           <template v-for="g in groups" :key="g.label">
-            <v-list-subheader class="text-caption">{{ g.label }}</v-list-subheader>
+            <v-list-subheader>{{ g.label }}</v-list-subheader>
             <v-list-item
               v-for="a in g.items"
               :key="a.id"
               :title="a.name"
               density="compact"
               :active="currentId === a.id"
+              rounded="lg"
               @click="currentId = a.id"
             >
               <template #prepend>
-                <span class="ability-icon">{{ a.icon }}</span>
+                <AbilityIcon :icon="a.icon" :size="20" />
               </template>
             </v-list-item>
           </template>
@@ -315,17 +333,18 @@ onBeforeUnmount(() => {
 
       <!-- Collapsed rail: icon-only buttons -->
       <template v-else>
-        <v-list density="compact" nav class="px-2">
+        <v-list density="compact" nav class="px-1">
           <v-tooltip v-for="a in abilities" :key="a.id" location="end">
             <template #activator="{ props }">
               <v-list-item
                 v-bind="props"
                 :active="currentId === a.id"
                 density="compact"
+                rounded="lg"
                 @click="currentId = a.id"
               >
                 <template #prepend>
-                  <span class="ability-icon">{{ a.icon }}</span>
+                  <AbilityIcon :icon="a.icon" :size="20" />
                 </template>
               </v-list-item>
             </template>
@@ -335,21 +354,25 @@ onBeforeUnmount(() => {
       </template>
 
       <template #append>
-        <div class="pa-3">
+        <div class="pa-3 d-flex justify-center">
           <v-btn
-            block
             variant="tonal"
+            icon
             size="small"
-            :icon="rail ? 'mdi-chevron-right' : 'mdi-chevron-left'"
+            :aria-label="rail ? '展开侧边栏' : '收起侧边栏'"
             @click="rail = !rail"
-          />
+          >
+            <v-icon>{{ rail ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
+          </v-btn>
         </div>
       </template>
     </v-navigation-drawer>
 
     <v-app-bar color="surface" flat border>
       <v-app-bar-title>
-        <span class="text-subtitle-1">{{ currentAbility?.name ?? 'Linux Cockpit' }}</span>
+        <span class="text-subtitle-1 font-weight-medium">{{
+          currentAbility?.name ?? 'Linux Cockpit'
+        }}</span>
       </v-app-bar-title>
       <v-spacer />
       <v-btn icon="mdi-cog-outline" variant="text" @click="currentId = 'settings'" />
@@ -377,12 +400,13 @@ onBeforeUnmount(() => {
     <!-- Confirm-before-launch dialog -->
     <v-dialog v-model="confirmOpen" width="480">
       <v-card rounded="lg">
-        <v-card-title class="d-flex align-center ga-2">
-          <v-icon>mdi-shield-alert-outline</v-icon>
+        <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
+          <v-icon color="warning">mdi-shield-alert-outline</v-icon>
           确认启动「{{ pendingLaunch?.entry.name }}」？
         </v-card-title>
         <v-card-text>
           <v-alert
+            v-if="pendingLaunch?.entry.security?.auto_note || pendingLaunch?.entry.security?.note"
             :type="pendingLaunch?.entry.security?.risk === 'high' ? 'error' : 'warning'"
             variant="tonal"
             class="mb-3"
@@ -395,6 +419,17 @@ onBeforeUnmount(() => {
               <div>备注: {{ pendingLaunch.entry.security.note }}</div>
             </template>
           </v-alert>
+          <div class="text-body-2 mb-2">
+            即将启动「{{ pendingLaunch?.entry.name }}」
+            <v-chip
+              size="x-small"
+              :color="pendingLaunch?.entry.security?.risk === 'high' ? 'error' : 'warning'"
+              variant="tonal"
+              class="ml-1"
+            >
+              {{ pendingLaunch?.entry.security?.risk ?? 'medium' }}
+            </v-chip>
+          </div>
           <v-checkbox
             v-model="ackNow"
             label="知道了，以后不再提醒"
@@ -402,7 +437,7 @@ onBeforeUnmount(() => {
             hide-details
           />
         </v-card-text>
-        <v-card-actions class="pa-4 pt-0">
+        <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
           <v-btn variant="text" @click="confirmOpen = false">取消</v-btn>
           <v-btn color="primary" @click="doLaunch">启动</v-btn>
@@ -420,11 +455,32 @@ body,
   margin: 0;
 }
 
-.ability-icon {
-  font-size: 18px;
-  line-height: 1;
-  width: 24px;
-  text-align: center;
-  display: inline-block;
+.brand-header {
+  gap: 10px;
+}
+
+.brand-header--rail {
+  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: rgba(var(--v-theme-primary), 0.14);
+  color: rgb(var(--v-theme-primary));
+  flex-shrink: 0;
+}
+
+.brand-sub {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
 }
 </style>

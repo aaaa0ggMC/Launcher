@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { isAbsolute, dirname, join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
 import type { AppEntry, LaunchResult } from '../shared/types'
 import { CONFIG_JSON, SCRIPTS_DIR } from './paths'
@@ -10,10 +10,22 @@ interface RuntimeConfig {
   runtime?: { terminal?: string[]; confirmBeforeLaunch?: boolean }
 }
 
-/** Entry's base directory (absolute path the entry lives in). */
+/** Entry's own directory (where the project/script lives).
+ *  - Absolute path → its dirname
+ *  - Relative dir path (e.g. "bili-viewer") with root → join(root, path)
+ *  - Relative file path (e.g. "start_music") with root → root itself
+ *    (script files live in the search root; their cwd should be the root)
+ */
 function baseDir(entry: AppEntry): string {
   if (isAbsolute(entry.path)) return dirname(entry.path)
-  return entry.root ?? process.cwd()
+  const root = entry.root ?? process.cwd()
+  const full = join(root, entry.path)
+  try {
+    if (existsSync(full) && statSync(full).isFile()) return root
+  } catch {
+    // ignore
+  }
+  return full
 }
 
 /** Expand exec.cwd into an absolute path. */
@@ -67,8 +79,11 @@ function expandArgv(entry: AppEntry): string[] {
       const user = root ? [] : ['--user']
       return ['systemctl', ...user, ...command, ...args]
     }
-    case 'script':
-      return [argv0!, ...args]
+    case 'script': {
+      // Use bash to run the script — avoids "not executable" errors when the
+      // script file lacks +x permission.
+      return ['bash', argv0!, ...args]
+    }
     case 'desktop':
       return ['gio', 'launch', argv0!]
     case 'custom':

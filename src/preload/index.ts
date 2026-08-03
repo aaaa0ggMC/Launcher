@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, IpcRendererEvent } from 'electron'
 
 type CommandArgs = Record<string, unknown>
 
@@ -44,10 +44,6 @@ const cockpit = {
 
   // mirror
   getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
-  switchMirror: (serverLine: string): Promise<unknown> => {
-    const url = serverLine.replace(/^Server\s*=\s*/, '').trim()
-    return cockpit.command('mirror.switch', { url })
-  },
 
   // autostart
   listAutostart: (): Promise<unknown> => cockpit.command('autostart.list'),
@@ -77,6 +73,12 @@ const cockpit = {
 
   // cli
   cliExec: (cmd: string): Promise<string> => ipcRenderer.invoke('cli:exec', cmd),
+
+  // ui zoom (true uniform zoom via Electron webFrame)
+  setZoom: (factor: number): void => {
+    const clamped = Math.min(Math.max(factor, 0.5), 2.5)
+    webFrame.setZoomFactor(clamped)
+  },
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {

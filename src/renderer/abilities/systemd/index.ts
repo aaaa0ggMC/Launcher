@@ -4,7 +4,7 @@ import type { Ability } from '../types'
 export default {
   id: 'systemd',
   name: '服务',
-  icon: '🛠️',
+  icon: 'gi:systemd',
   category: '系统',
   keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))

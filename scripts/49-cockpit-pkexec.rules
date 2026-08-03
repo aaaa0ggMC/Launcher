@@ -1,0 +1,29 @@
+/* -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*- */
+
+// Linux Cockpit — pkexec auth cache for wheel group users.
+//
+// polkit 的 auth_admin_keep 会让一次成功认证在一段时间内保持有效
+// (polkit 默认 keep 时长为 5 分钟)。这样连续 toggle 多个镜像源时
+// 只需输入一次密码。
+//
+// 仅对 Cockpit 自己的 helper 脚本生效 (路径包含 write-mirrorlist /
+// nvidia-pm-toggle / run-as-root)。
+
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        subject.isInGroup("wheel")) {
+
+        var program = action.lookup("program") || "";
+        var cockpitScripts = [
+            "write-mirrorlist",
+            "nvidia-pm-toggle",
+            "run-as-root"
+        ];
+
+        for (var i = 0; i < cockpitScripts.length; i++) {
+            if (program.indexOf(cockpitScripts[i]) !== -1) {
+                return polkit.Result.AUTH_ADMIN_KEEP;
+            }
+        }
+    }
+});

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-cli' })
 
-import { ref, shallowRef, nextTick, onMounted } from 'vue'
+import { ref, shallowRef, nextTick, onMounted, onActivated } from 'vue'
 import type { AppEntry } from '@shared/types'
 
 interface Line {
@@ -53,6 +53,7 @@ async function run(): Promise<void> {
     busy.value = false
     await nextTick()
     scrollToBottom()
+    focusInput()
   }
 }
 
@@ -102,15 +103,32 @@ function complete(): void {
   }
 }
 
+function pickSuggestion(s: string): void {
+  input.value = s
+  suggestions.value = []
+}
+
 const outputEl = ref<HTMLElement | null>(null)
+const inputEl = ref<HTMLInputElement | null>(null)
 
 function scrollToBottom(): void {
   outputEl.value?.scrollTo({ top: outputEl.value.scrollHeight })
 }
 
+function focusInput(): void {
+  inputEl.value?.focus()
+}
+
 onMounted(async () => {
   await refreshAliases()
   history.value.push({ kind: 'out', text: 'Linux Cockpit CLI — 输入 help 查看命令, Tab 补全' })
+  await nextTick()
+  focusInput()
+})
+
+onActivated(async () => {
+  await nextTick()
+  focusInput()
 })
 </script>
 
@@ -121,37 +139,49 @@ onMounted(async () => {
       别名启动 · 标签补全 · <code>info &lt;alias&gt;</code>
     </div>
 
-    <v-card ref="outputEl" rounded="lg" variant="tonal" flat class="flex-grow-1 cli-output mb-3 pa-3 overflow-y-auto">
+    <v-card
+      ref="outputEl"
+      rounded="lg"
+      variant="tonal"
+      flat
+      class="cli-output pa-4 overflow-y-auto"
+    >
       <div
         v-for="(l, i) in history"
         :key="i"
         :class="[
           'font-family-mono text-body-2 mb-1',
-          l.kind === 'in' ? 'text-primary' : l.kind === 'err' ? 'text-error' : ''
+          l.kind === 'in' ? 'text-primary font-weight-medium' : l.kind === 'err' ? 'text-error' : ''
         ]"
       >
-        <template v-if="l.kind === 'in'"><span class="on-surface-variant">❯ </span>{{ l.text }}</template>
+        <template v-if="l.kind === 'in'"><span class="cli-prompt">❯</span> {{ l.text }}</template>
         <template v-else>{{ l.text }}</template>
       </div>
-      <div v-if="busy" class="text-caption on-surface-variant">运行中…</div>
+      <div v-if="busy" class="text-caption on-surface-variant mb-1">运行中…</div>
+
+      <div v-if="suggestions.length" class="mb-1 d-flex flex-wrap gap-1">
+        <v-chip
+          v-for="s in suggestions"
+          :key="s"
+          size="x-small"
+          variant="tonal"
+          @click="pickSuggestion(s)"
+        >
+          {{ s }}
+        </v-chip>
+      </div>
+
+      <div class="cli-input-line">
+        <span class="cli-prompt">❯</span>
+        <input
+          ref="inputEl"
+          v-model="input"
+          class="cli-input"
+          placeholder="输入命令，Tab 补全，↑↓ 历史"
+          @keydown="onKey"
+        />
+      </div>
     </v-card>
-
-    <div v-if="suggestions.length" class="mb-1 d-flex flex-wrap gap-1">
-      <v-chip v-for="s in suggestions" :key="s" size="x-small" variant="tonal" @click="input = s; suggestions = []">
-        {{ s }}
-      </v-chip>
-    </div>
-
-    <v-text-field
-      v-model="input"
-      @keydown="onKey"
-      prepend-inner-icon="mdi-console-line"
-      placeholder="输入命令，Tab 补全，↑↓ 历史"
-      variant="solo-filled"
-      density="compact"
-      hide-details
-      :loading="busy"
-    />
   </div>
 </template>
 
@@ -160,7 +190,31 @@ onMounted(async () => {
   gap: 4px;
 }
 .cli-output {
-  min-height: 240px;
-  max-height: calc(100vh - 340px);
+  flex: 1 1 auto;
+  min-height: 0;
+  background: rgba(var(--v-theme-background), 0.6);
+}
+.cli-input-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+.cli-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgba(var(--v-theme-on-surface), 1);
+  font-family: 'Noto Sans Mono CJK SC', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  caret-color: rgb(var(--v-theme-primary));
+}
+.cli-input::placeholder {
+  color: rgba(var(--v-theme-on-surface-variant), 0.6);
+}
+.cli-prompt {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 700;
+  font-family: 'Noto Sans Mono CJK SC', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 }
 </style>

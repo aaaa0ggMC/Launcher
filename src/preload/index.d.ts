@@ -39,7 +39,6 @@ export interface CockpitApi {
   rescan: (root: string) => Promise<unknown>
   launch: (root: string, id: string) => Promise<LaunchResult>
   getMirror: () => Promise<MirrorInfo>
-  switchMirror: (serverLine: string) => Promise<MirrorInfo>
   listAutostart: () => Promise<AutostartEntry[]>
   toggleAutostart: (file: string, hidden: boolean) => Promise<AutostartEntry[]>
   listSystemd: () => Promise<SystemdUnit[]>
@@ -54,6 +53,7 @@ export interface CockpitApi {
   applyWallpaper: (path: string) => Promise<boolean>
   outputs: () => Promise<DisplayOutput[]>
   cliExec: (cmd: string) => Promise<string>
+  setZoom: (factor: number) => void
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

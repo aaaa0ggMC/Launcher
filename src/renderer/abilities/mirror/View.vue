@@ -1,120 +1,159 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted } from 'vue'
-import type { MirrorInfo } from '@shared/types'
+import { ref, shallowRef, computed, onMounted } from 'vue'
+import type { MirrorInfo, MirrorEntry } from '@shared/types'
+
+interface MirrorTestItem {
+  name: string
+  url: string
+  ok: boolean
+  latency?: number
+  speed?: number
+  error?: string
+}
 
 const info = shallowRef<MirrorInfo | null>(null)
-const busy = ref<string | null>(null)
 const error = ref('')
-const confirmOpen = ref(false)
-const pendingMirror = ref<{ name: string; url: string } | null>(null)
+const toggling = ref<string | null>(null)
+const testing = ref(false)
+const testResults = shallowRef<Record<string, MirrorTestItem>>({})
 
 async function load(): Promise<void> {
   info.value = await window.cockpit.getMirror()
   error.value = info.value?.lastError ?? ''
 }
 
-function serverLine(url: string): string {
-  return `Server = ${url}`
-}
-
-function requestSwitch(m: { name: string; url: string }): void {
-  pendingMirror.value = m
-  confirmOpen.value = true
-}
-
-async function doSwitch(): Promise<void> {
-  const m = pendingMirror.value
-  if (!m) return
-  confirmOpen.value = false
-  busy.value = m.name
+async function toggle(m: MirrorEntry, enabled: boolean): Promise<void> {
+  toggling.value = m.name
   try {
-    const res = await window.cockpit.switchMirror(serverLine(m.url))
+    const res = (await window.cockpit.command('mirror.toggle', {
+      name: m.name,
+      enable: enabled
+    })) as MirrorInfo
     info.value = res
     error.value = res.lastError ?? ''
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    busy.value = null
+    toggling.value = null
   }
 }
+
+async function runTest(): Promise<void> {
+  testing.value = true
+  try {
+    const results = (await window.cockpit.command('mirror.test')) as MirrorTestItem[]
+    const map: Record<string, MirrorTestItem> = {}
+    for (const r of results) map[r.name] = r
+    testResults.value = map
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    testing.value = false
+  }
+}
+
+function fmtSpeed(bytesPerSec: number | undefined): string {
+  if (!bytesPerSec) return '—'
+  if (bytesPerSec >= 1048576) return `${(bytesPerSec / 1048576).toFixed(1)} MB/s`
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`
+  return `${Math.round(bytesPerSec)} B/s`
+}
+
+function latencyColor(ms: number | undefined): string {
+  if (ms === undefined) return ''
+  if (ms < 300) return 'success'
+  if (ms < 800) return 'warning'
+  return 'error'
+}
+
+const enabledCount = computed(() => info.value?.mirrors.filter((m) => m.enabled).length ?? 0)
+
+const sortedMirrors = computed(() => {
+  const list = [...(info.value?.mirrors ?? [])]
+  return list.sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+    const ra = testResults.value[a.name]
+    const rb = testResults.value[b.name]
+    if (!ra && !rb) return 0
+    if (!ra) return 1
+    if (!rb) return -1
+    if (!ra.ok) return 1
+    if (!rb.ok) return -1
+    return (ra.latency ?? 9999) - (rb.latency ?? 9999)
+  })
+})
 
 onMounted(load)
 </script>
 
 <template>
   <div>
-    <div class="text-h6 font-weight-medium mb-1">软件源</div>
-    <div class="text-caption on-surface-variant mb-4">切换 Arch Linux 镜像源（pkexec + 自动备份）</div>
+    <div class="d-flex align-center justify-space-between mb-1">
+      <div>
+        <div class="text-h6 font-weight-medium">软件源</div>
+        <div class="text-caption on-surface-variant mt-1">
+          Arch Linux 镜像源 · 已启用 {{ enabledCount }} 个
+        </div>
+      </div>
+      <v-btn variant="tonal" prepend-icon="mdi-speedometer" :loading="testing" @click="runTest">
+        测速
+      </v-btn>
+    </div>
 
-    <v-alert v-if="error" type="error" variant="tonal" class="mb-3" density="compact">
+    <v-alert v-if="error" type="error" variant="tonal" class="mb-3 mt-3" density="compact">
       {{ error }}
     </v-alert>
 
-    <v-alert
-      v-if="info?.current"
-      type="info"
-      variant="tonal"
-      class="mb-3"
-      density="compact"
-    >
-      当前: <code class="text-body-2">{{ info.current }}</code>
-    </v-alert>
-
-    <v-row dense>
-      <v-col v-for="m in info?.configured ?? []" :key="m.name" cols="12" sm="6" md="4">
-        <v-card
-          rounded="lg"
-          variant="tonal"
-          :class="info?.current === m.url ? 'current-mirror' : ''"
-        >
+    <v-row dense class="mt-2">
+      <v-col v-for="m in sortedMirrors" :key="m.name" cols="12" sm="6" md="4">
+        <v-card rounded="lg" variant="tonal" :class="m.enabled ? 'mirror-enabled' : ''">
           <v-card-text>
             <div class="d-flex align-center ga-2">
-              <v-icon
-                :color="info?.current === m.url ? 'success' : 'on-surface-variant'"
-              >
-                {{ info?.current === m.url ? 'mdi-check-circle' : 'mdi-earth' }}
+              <v-icon :color="m.enabled ? 'success' : 'on-surface-variant'">
+                {{ m.enabled ? 'mdi-check-circle' : 'mdi-earth-off' }}
               </v-icon>
               <span class="text-body-1 font-weight-medium">{{ m.name }}</span>
-              <v-chip v-if="info?.current === m.url" size="x-small" color="success" variant="tonal">
-                使用中
-              </v-chip>
+              <v-spacer v-if="testResults[m.name]" />
+              <template v-if="testResults[m.name]">
+                <v-chip
+                  v-if="testResults[m.name].ok"
+                  size="x-small"
+                  :color="latencyColor(testResults[m.name].latency)"
+                  variant="tonal"
+                >
+                  {{ testResults[m.name].latency }}ms
+                </v-chip>
+                <v-chip v-else size="x-small" color="error" variant="tonal">超时</v-chip>
+              </template>
             </div>
             <div class="text-caption on-surface-variant mt-2 text-truncate">{{ m.url }}</div>
+            <div v-if="testResults[m.name]?.ok" class="text-caption on-surface-variant mt-1">
+              <v-icon size="12" class="mr-1">mdi-download</v-icon>
+              {{ fmtSpeed(testResults[m.name].speed) }}
+            </div>
+            <div v-else-if="testResults[m.name]?.error" class="text-caption text-error mt-1">
+              {{ testResults[m.name].error }}
+            </div>
           </v-card-text>
-          <v-card-actions class="px-3 pb-3 pt-0">
-            <v-spacer />
-            <v-btn
-              size="small"
-              :color="info?.current === m.url ? 'success' : 'primary'"
-              variant="tonal"
-              :disabled="info?.current === m.url"
-              :loading="busy === m.name"
-              @click="requestSwitch(m)"
-            >
-              {{ info?.current === m.url ? '已启用' : '切换' }}
-            </v-btn>
+          <v-card-actions class="px-4 pb-4 pt-0">
+            <v-switch
+              :model-value="m.enabled"
+              color="success"
+              density="compact"
+              hide-details
+              :loading="toggling === m.name"
+              :label="m.enabled ? '已启用' : '已禁用'"
+              @update:model-value="(v: boolean | null) => toggle(m, !!v)"
+            />
           </v-card-actions>
         </v-card>
       </v-col>
     </v-row>
-
-    <v-dialog v-model="confirmOpen" width="460">
-      <v-card>
-        <v-card-title>切换到「{{ pendingMirror?.name }}」？</v-card-title>
-        <v-card-text class="text-body-2">
-          将写入 <code>/etc/pacman.d/mirrorlist</code>，原文件备份为
-          <code>mirrorlist.cockpit.bak</code>。需要输入管理员密码。
-        </v-card-text>
-        <v-card-actions class="pa-4 pt-0">
-          <v-spacer />
-          <v-btn variant="text" @click="confirmOpen = false">取消</v-btn>
-          <v-btn color="primary" @click="doSwitch">确认切换</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
 
 <style scoped>
-.current-mirror {
-  border: 1px solid rgb(var(--v-theme-success));
+.mirror-enabled {
+  border: 1px solid rgba(var(--v-theme-success), 0.4);
 }
 </style>

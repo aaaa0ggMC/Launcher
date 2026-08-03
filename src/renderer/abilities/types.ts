@@ -10,7 +10,12 @@ export interface Ability {
   id: string
   /** Display name (Chinese UI). */
   name: string
-  /** emoji | image path | null → falls back to "😎" */
+  /**
+   * Sidebar icon. Accepted formats:
+   *  - `gi:<name>`  → game-icon-pack SVG from `assets/icons/<name>.svg`
+   *  - emoji string (legacy / app entries)
+   *  - null → falls back to FALLBACK_ICON
+   */
   icon: string | null
   /** Sidebar group label. */
   category: string

@@ -1,14 +1,7 @@
 // Shared domain types used across main / preload / renderer.
 
 export type ExecType =
-  | 'uv'
-  | 'python'
-  | 'node'
-  | 'docker'
-  | 'systemd'
-  | 'script'
-  | 'desktop'
-  | 'custom'
+  'uv' | 'python' | 'node' | 'docker' | 'systemd' | 'script' | 'desktop' | 'custom'
 
 export interface AppExecSpec {
   type: ExecType
@@ -79,8 +72,14 @@ export interface GpuInfo {
   name: string
   driver: string
   vram: string
+  vramTotal?: string
+  vramUsed?: string
+  vramPercent?: number
   usage: string
   temp: string
+  fanSpeed?: string
+  power?: string
+  powerLimit?: string
 }
 
 export interface DockerContainer {
@@ -98,16 +97,33 @@ export interface SystemStats {
   arch: string
   release: string
   uptime: number
-  cpu: { model: string; cores: number; usage: number }
+  username?: string
+  shell?: string
+  de?: string
+  packages?: { pacman: number; flatpak: number }
+  loadAvg?: [number, number, number]
+  cpu: {
+    model: string
+    cores: number
+    usage: number
+    temp?: number
+    freq?: number
+  }
   mem: { total: number; used: number; free: number; percent: number }
+  swap?: { total: number; used: number; free: number; percent: number }
   disk: { path: string; total: number; used: number; free: number; percent: number }[]
   gpu: GpuInfo[]
   docker: DockerContainer[]
 }
 
+export interface MirrorEntry {
+  name: string
+  url: string
+  enabled: boolean
+}
+
 export interface MirrorInfo {
-  configured: { name: string; url: string }[]
-  current: string | null
+  mirrors: MirrorEntry[]
   lastError?: string
 }
 

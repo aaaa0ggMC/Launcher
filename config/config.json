@@ -1,6 +1,7 @@
 {
   "theme": "dark",
   "language": "zh",
+  "uiScale": 1.3,
   "window": {
     "width": 1280,
     "height": 800

@@ -1,4 +1,4 @@
-/* Global app chrome — font stack & overflow guardlines.
+/* Global app chrome — font stack, typography polish & overflow guardlines.
  *
  * Shell is locked to the viewport: html/body never scroll.
  * VMain has the `scrollable` prop → .v-main--scrollable is absolute inside the
@@ -21,6 +21,12 @@ body {
     'Segoe UI',
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings:
+    'kern' 1,
+    'liga' 1,
+    'cv01' 1;
 }
 
 /* Vuetify components inherit from .v-application — force the CJK stack. */
@@ -40,15 +46,151 @@ kbd,
 pre,
 .v-code {
   font-family:
-    'Noto Sans Mono CJK SC',
-    ui-monospace,
-    'SFMono-Regular',
-    Menlo,
-    Consolas,
-    monospace !important;
+    'Noto Sans Mono CJK SC', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace !important;
 }
 
 /* Cards must never spill horizontally (tag chips, long text). */
 .v-card {
   overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * Typography refinements — tighter, more deliberate hierarchy.
+ * ------------------------------------------------------------------------- */
+.v-application .text-h6 {
+  letter-spacing: 0.0125em;
+  font-weight: 600;
+}
+
+.v-application .text-subtitle-1 {
+  letter-spacing: 0.008em;
+}
+
+.v-application .text-subtitle-2 {
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+
+.v-application .text-caption {
+  letter-spacing: 0.015em;
+}
+
+/* ---------------------------------------------------------------------------
+ * Card polish — subtle border + hover lift for interactive cards.
+ * ------------------------------------------------------------------------- */
+.v-card.v-card--variant-tonal {
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.32);
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.app-card:hover,
+.wallpaper-card:hover {
+  border-color: rgba(var(--v-theme-primary), 0.45);
+  transform: translateY(-2px);
+}
+
+/* ---------------------------------------------------------------------------
+ * Navigation drawer polish — refined list items & active state.
+ * ------------------------------------------------------------------------- */
+.v-navigation-drawer .v-list-item {
+  border-radius: 8px;
+  margin-block: 2px;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.v-navigation-drawer .v-list-item--active {
+  background: rgba(var(--v-theme-primary), 0.14);
+  color: rgb(var(--v-theme-primary));
+}
+
+.v-navigation-drawer .v-list-item--active .v-list-item__overlay {
+  opacity: 0;
+}
+
+.v-navigation-drawer .v-list-subheader {
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+  padding-inline-start: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * App bar — drop the heavy bottom border to a hairline.
+ * ------------------------------------------------------------------------- */
+.v-app-bar {
+  background: rgb(var(--v-theme-surface)) !important;
+}
+
+.v-app-bar .v-toolbar__border {
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------------------
+ * Scrollbars — slim, themed, unobtrusive.
+ * ------------------------------------------------------------------------- */
+.v-main__scroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--v-theme-surface-bright), 0.6) transparent;
+}
+
+.v-main__scroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.v-main__scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.v-main__scroller::-webkit-scrollbar-thumb {
+  background-color: rgba(var(--v-theme-surface-bright), 0.55);
+  border-radius: 4px;
+}
+
+.v-main__scroller::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(var(--v-theme-on-surface-variant), 0.4);
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons — tonal variants get a subtle border for definition on dark bg;
+ * default density bumped slightly for a less cramped feel.
+ * ------------------------------------------------------------------------- */
+.v-btn--variant-tonal {
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+}
+
+.v-btn {
+  letter-spacing: 0.02em;
+}
+
+/* Icon buttons keep a consistent square hit target. */
+.v-btn--icon .v-icon {
+  --v-icon-size-multiplier: 1;
+}
+
+/* Card action rows get consistent breathing room. */
+.v-card-actions {
+  gap: 4px;
+}
+
+/* Dialog action rows align right with comfortable spacing. */
+.v-dialog .v-card-actions {
+  padding-block: 16px;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Content background — a barely-perceptible gradient for depth.
+ * ------------------------------------------------------------------------- */
+.content-bg {
+  background:
+    linear-gradient(180deg, rgba(var(--v-theme-surface-variant), 0.18) 0%, transparent 240px),
+    rgb(var(--v-theme-background));
 }

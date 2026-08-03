@@ -17,7 +17,7 @@ function formatEntry(e: AppEntry): string {
 
 /**
  * CLI REPL backend.
- *  1. First token is a registered ability command (mirror.switch, ...) → dispatch.
+ *  1. First token is a registered ability command (mirror.toggle, ...) → dispatch.
  *  2. Otherwise: <alias> launch, launch <alias>, info <alias>, list, help.
  */
 export async function cliExec(input: string): Promise<string> {
@@ -37,7 +37,14 @@ export async function cliExec(input: string): Promise<string> {
         list.push(`  ${c.name.padEnd(24)} ${c.description}`)
         grouped.set(ability, list)
       }
-      const lines = ['应用命令:', '  <alias>         直接启动应用 (别名/标签/id)', '  launch <alias>  启动应用', '  info <alias>    查看应用详情', '  list, ls        列出全部应用', '  所有能力命令均可直接输入 (Tab 补全):']
+      const lines = [
+        '应用命令:',
+        '  <alias>         直接启动应用 (别名/标签/id)',
+        '  launch <alias>  启动应用',
+        '  info <alias>    查看应用详情',
+        '  list, ls        列出全部应用',
+        '  所有能力命令均可直接输入 (Tab 补全):'
+      ]
       for (const [ability, cmdsList] of grouped) {
         lines.push(`[${ability}]`)
         lines.push(...cmdsList)

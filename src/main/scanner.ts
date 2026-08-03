@@ -39,7 +39,8 @@ async function detectPyproject(root: string): Promise<AppEntry | null> {
     name: name || cmd,
     description: parsed['project']?.description,
     path: root,
-    exec: { type: 'uv', command: [cmd], cwd: '{self}' },
+    // [project.scripts] entries are CLI tools → launch in a terminal by default.
+    exec: { type: 'uv', command: [cmd], cwd: '{self}', terminal: true },
     icon: 'auto'
   }
 }
@@ -61,9 +62,17 @@ async function detectPackageJson(root: string): Promise<AppEntry | null> {
 }
 
 /** Build a best-effort draft entry for one item inside a search root. */
-export async function draftFor(root: string, name: string, isDir: boolean): Promise<AppEntry | null> {
+export async function draftFor(
+  root: string,
+  name: string,
+  isDir: boolean
+): Promise<AppEntry | null> {
   const full = join(root, name)
-  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || name
+  const id =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || name
 
   if (isDir) {
     const py = await detectPyproject(full)

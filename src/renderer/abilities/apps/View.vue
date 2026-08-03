@@ -2,9 +2,11 @@
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
 import type { AppEntry } from '@shared/types'
 import LoadingBar from '../../components/LoadingBar.vue'
+import AbilityIcon from '../../components/AbilityIcon.vue'
 
-interface LaunchFn {
-  (root: string, id: string, entry: AppEntry): Promise<unknown>
+interface AbilitiesCtx {
+  configs: Record<string, Record<string, unknown>>
+  launch: (root: string, id: string, entry: AppEntry) => Promise<unknown>
 }
 
 interface SearchRoot {
@@ -12,7 +14,10 @@ interface SearchRoot {
   watch: boolean
 }
 
-const launch = inject<LaunchFn>('cockpit:launch', async () => {})
+const { launch } = inject<AbilitiesCtx>('cockpit:abilities', {
+  configs: {},
+  launch: async () => {}
+})
 
 const apps = shallowRef<Record<string, AppEntry>>({})
 const roots = shallowRef<SearchRoot[]>([])
@@ -74,7 +79,10 @@ const allTags = computed(() => {
 const filtered = computed(() => {
   const q = searchText.value.trim().toLowerCase()
   return entries.value.filter(({ id, entry }) => {
-    if (activeTag.value && ![...(entry.tags ?? []), ...(entry.tags_auto ?? [])].includes(activeTag.value)) {
+    if (
+      activeTag.value &&
+      ![...(entry.tags ?? []), ...(entry.tags_auto ?? [])].includes(activeTag.value)
+    ) {
       return false
     }
     if (!q) return true
@@ -128,7 +136,10 @@ async function saveEdit(): Promise<void> {
       alias: f.alias || undefined,
       description: f.description || undefined,
       icon: f.icon || undefined,
-      tags: f.tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
+      tags: f.tags
+        .split(/[,，]/)
+        .map((t) => t.trim())
+        .filter(Boolean),
       exec: {
         type: f.execType as AppEntry['exec']['type'],
         command: f.execCommand.trim() ? f.execCommand.trim().split(/\s+/) : [],
@@ -137,7 +148,11 @@ async function saveEdit(): Promise<void> {
         root: f.rootFlag
       },
       security: {
-        risk: f.risk as AppEntry['security'] extends infer S ? (S extends { risk: infer R } ? R : never) : never,
+        risk: f.risk as AppEntry['security'] extends infer S
+          ? S extends { risk: infer R }
+            ? R
+            : never
+          : never,
         note: f.note || undefined,
         acknowledged: apps.value[f.id]?.security?.acknowledged ?? false
       },
@@ -152,6 +167,13 @@ async function saveEdit(): Promise<void> {
 
 async function removeRoot(path: string): Promise<void> {
   await window.cockpit.removeRoot(path)
+  await load()
+}
+
+async function deleteEntry(): Promise<void> {
+  if (!form.value) return
+  editOpen.value = false
+  await window.cockpit.deleteEntry(form.value.root, form.value.id)
   await load()
 }
 
@@ -176,9 +198,12 @@ onBeforeUnmount(() => unsub?.())
 <template>
   <div>
     <div class="d-flex align-center justify-space-between mb-3">
-      <div class="text-h6 font-weight-medium">应用注册表</div>
+      <div>
+        <div class="text-h6 font-weight-medium">应用注册表</div>
+        <div class="text-caption on-surface-variant mt-1">桌面应用 · 别名 · 标签 · 一键启动</div>
+      </div>
       <div class="d-flex align-center ga-2">
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-folder-search" @click="newRootOpen = true">
+        <v-btn variant="tonal" prepend-icon="mdi-folder-search" @click="newRootOpen = true">
           添加目录
         </v-btn>
       </div>
@@ -217,13 +242,25 @@ onBeforeUnmount(() => unsub?.())
             {{ t }}
           </v-chip>
         </div>
-        <v-checkbox v-model="showMissing" label="显示缺失条目" density="compact" hide-details class="mt-1" />
+        <v-checkbox
+          v-model="showMissing"
+          label="显示缺失条目"
+          density="compact"
+          hide-details
+          class="mt-1"
+        />
       </v-col>
     </v-row>
 
     <div class="mb-3">
       <template v-for="r in roots" :key="r.path">
-        <v-chip size="small" variant="outlined" closable class="mr-2 mb-1" @click:close="removeRoot(r.path)">
+        <v-chip
+          size="small"
+          variant="outlined"
+          closable
+          class="mr-2 mb-1"
+          @click:close="removeRoot(r.path)"
+        >
           {{ r.path }}
         </v-chip>
       </template>
@@ -252,7 +289,11 @@ onBeforeUnmount(() => unsub?.())
             <div class="d-flex align-start ga-3">
               <v-avatar size="40" color="surface-variant" rounded="lg">
                 <img v-if="iconSrc(entry)" :src="iconSrc(entry)" alt="" width="24" height="24" />
-                <span v-else class="ability-icon">{{ entry.icon && entry.icon !== 'auto' ? entry.icon : '😎' }}</span>
+                <AbilityIcon
+                  v-else
+                  :icon="entry.icon && entry.icon !== 'auto' ? entry.icon : null"
+                  :size="22"
+                />
               </v-avatar>
               <div class="flex-grow-1 min-width-0">
                 <div class="d-flex align-center ga-2 flex-wrap">
@@ -260,7 +301,13 @@ onBeforeUnmount(() => unsub?.())
                   <v-chip
                     size="x-small"
                     variant="tonal"
-                    :color="entry.security?.risk === 'high' ? 'error' : entry.security?.risk === 'medium' ? 'warning' : 'success'"
+                    :color="
+                      entry.security?.risk === 'high'
+                        ? 'error'
+                        : entry.security?.risk === 'medium'
+                          ? 'warning'
+                          : 'success'
+                    "
                   >
                     {{ entry.security?.risk ?? 'low' }}
                   </v-chip>
@@ -283,11 +330,10 @@ onBeforeUnmount(() => unsub?.())
               </div>
             </div>
           </v-card-text>
-          <v-card-actions class="px-3 pb-3 pt-0">
+          <v-card-actions class="px-4 pb-4 pt-0 ga-2">
             <v-spacer />
-            <v-btn size="small" variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">编辑</v-btn>
+            <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">编辑</v-btn>
             <v-btn
-              size="small"
               color="primary"
               prepend-icon="mdi-play"
               :disabled="entry.missing"
@@ -321,7 +367,7 @@ onBeforeUnmount(() => unsub?.())
             hide-details
           />
         </v-card-text>
-        <v-card-actions class="pa-4 pt-0">
+        <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
           <v-btn variant="text" @click="newRootOpen = false">取消</v-btn>
           <v-btn color="primary" @click="addRoot">添加</v-btn>
@@ -333,11 +379,41 @@ onBeforeUnmount(() => unsub?.())
       <v-card v-if="form">
         <v-card-title>编辑「{{ form.name }}」</v-card-title>
         <v-card-text class="d-flex flex-column ga-3">
-          <v-text-field v-model="form.name" label="名称" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model="form.alias" label="别名 (CLI 快捷名)" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model="form.description" label="描述" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model="form.icon" label="图标 (路径 / emoji / auto)" variant="outlined" density="compact" hide-details />
-          <v-text-field v-model="form.tags" label="标签 (逗号分隔)" variant="outlined" density="compact" hide-details />
+          <v-text-field
+            v-model="form.name"
+            label="名称"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="form.alias"
+            label="别名 (CLI 快捷名)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="form.description"
+            label="描述"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="form.icon"
+            label="图标 (路径 / emoji / auto)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+          <v-text-field
+            v-model="form.tags"
+            label="标签 (逗号分隔)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
 
           <v-divider />
 
@@ -345,7 +421,16 @@ onBeforeUnmount(() => unsub?.())
             <v-col cols="6">
               <v-select
                 v-model="form.execType"
-                :items="['uv', 'python', 'node', 'docker', 'systemd', 'script', 'desktop', 'custom']"
+                :items="[
+                  'uv',
+                  'python',
+                  'node',
+                  'docker',
+                  'systemd',
+                  'script',
+                  'desktop',
+                  'custom'
+                ]"
                 label="执行类型"
                 variant="outlined"
                 density="compact"
@@ -353,16 +438,41 @@ onBeforeUnmount(() => unsub?.())
               />
             </v-col>
             <v-col cols="6">
-              <v-text-field v-model="form.execCwd" label="工作目录 (留空 / {self})" variant="outlined" density="compact" hide-details />
+              <v-text-field
+                v-model="form.execCwd"
+                label="工作目录 (留空 / {self})"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
             </v-col>
           </v-row>
-          <v-text-field v-model="form.execCommand" label="命令 (空格分隔 argv)" variant="outlined" density="compact" hide-details />
+          <v-text-field
+            v-model="form.execCommand"
+            label="命令 (空格分隔 argv)"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
           <v-row dense>
             <v-col cols="6">
-              <v-select v-model="form.risk" :items="['low', 'medium', 'high']" label="风险等级" variant="outlined" density="compact" hide-details />
+              <v-select
+                v-model="form.risk"
+                :items="['low', 'medium', 'high']"
+                label="风险等级"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
             </v-col>
             <v-col cols="6">
-              <v-text-field v-model="form.note" label="风险备注" variant="outlined" density="compact" hide-details />
+              <v-text-field
+                v-model="form.note"
+                label="风险备注"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
             </v-col>
           </v-row>
           <v-row dense>
@@ -370,11 +480,19 @@ onBeforeUnmount(() => unsub?.())
               <v-switch v-model="form.terminal" label="终端中运行" density="compact" hide-details />
             </v-col>
             <v-col cols="6">
-              <v-switch v-model="form.rootFlag" label="以 root 运行 (pkexec)" density="compact" hide-details />
+              <v-switch
+                v-model="form.rootFlag"
+                label="以 root 运行 (pkexec)"
+                density="compact"
+                hide-details
+              />
             </v-col>
           </v-row>
         </v-card-text>
-        <v-card-actions class="pa-4 pt-0">
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-btn color="error" variant="text" prepend-icon="mdi-delete" @click="deleteEntry">
+            删除
+          </v-btn>
           <v-spacer />
           <v-btn variant="text" @click="editOpen = false">取消</v-btn>
           <v-btn color="primary" :loading="editBusy" @click="saveEdit">保存</v-btn>

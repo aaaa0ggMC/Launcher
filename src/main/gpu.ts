@@ -6,25 +6,33 @@ import { NVIDIA_PM_CONF, SCRIPTS_DIR } from './paths'
 import { run } from './util'
 
 export async function gpuInfo(): Promise<GpuInfo[]> {
-  const out = await run(
-    'nvidia-smi',
-    [
-      '--query-gpu=name,driver_version,memory.total,memory.used,utilization.gpu,temperature.gpu',
-      '--format=csv,noheader,nounits'
-    ]
-  ).catch(() => '')
+  const out = await run('nvidia-smi', [
+    '--query-gpu=name,driver_version,memory.total,memory.used,utilization.gpu,temperature.gpu,fan.speed,power.draw,power.limit',
+    '--format=csv,noheader,nounits'
+  ]).catch(() => '')
   const gpus: GpuInfo[] = []
   for (const line of out.split('\n')) {
     const t = line.trim()
     if (!t) continue
     const cols = t.split(',').map((c) => c.trim())
     if (cols.length >= 6) {
+      const vramTotal = cols[2] || '0'
+      const vramUsed = cols[3] || '0'
+      const vramTotalNum = Number(vramTotal)
+      const vramUsedNum = Number(vramUsed)
+      const vramPercent = vramTotalNum > 0 ? Math.round((vramUsedNum / vramTotalNum) * 100) : 0
       gpus.push({
         name: cols[0],
         driver: cols[1],
-        vram: `${cols[3]} / ${cols[2]} MB`,
+        vram: `${vramUsed} / ${vramTotal} MB`,
+        vramTotal: `${vramTotal} MB`,
+        vramUsed: `${vramUsed} MB`,
+        vramPercent,
         usage: `${cols[4]}%`,
-        temp: `${cols[5]}°C`
+        temp: `${cols[5]}°C`,
+        fanSpeed: cols[6] ? `${cols[6]}%` : undefined,
+        power: cols[7] ? `${cols[7]}W` : undefined,
+        powerLimit: cols[8] ? `${cols[8]}W` : undefined
       })
     }
   }

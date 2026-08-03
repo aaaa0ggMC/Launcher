@@ -6,13 +6,17 @@ import { ref, inject, onMounted } from 'vue'
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
 
 const theme = ref('dark')
+const uiScale = ref(1.1)
 const confirmBeforeLaunch = ref(false)
 const searching = ref('')
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
   theme.value = (cfg?.theme as string) ?? 'dark'
-  confirmBeforeLaunch.value = !!((cfg?.runtime as Record<string, unknown> | undefined)?.confirmBeforeLaunch)
+  const scale = Number(cfg?.uiScale)
+  uiScale.value = Number.isFinite(scale) && scale > 0 ? scale : 1.1
+  confirmBeforeLaunch.value = !!(cfg?.runtime as Record<string, unknown> | undefined)
+    ?.confirmBeforeLaunch
   const appsCfg = (await window.cockpit.appsConfig()) as {
     searchRoots: { path: string; watch: boolean }[]
   }
@@ -26,17 +30,28 @@ async function setTheme(t: string): Promise<void> {
   await window.cockpit.setConfig({ theme: t })
 }
 
+async function commitUiScale(): Promise<void> {
+  window.cockpit.setZoom(uiScale.value)
+  await window.cockpit.setConfig({ uiScale: uiScale.value })
+}
+
 async function setConfirm(v: boolean | null): Promise<void> {
   const val = !!v
   confirmBeforeLaunch.value = val
   await window.cockpit.setConfig({
-    runtime: { ...(config.value.runtime as Record<string, unknown> | undefined), confirmBeforeLaunch: val }
+    runtime: {
+      ...(config.value.runtime as Record<string, unknown> | undefined),
+      confirmBeforeLaunch: val
+    }
   })
 }
 
 async function addRoot(): Promise<void> {
   if (!searching.value.trim()) return
-  const list = (await window.cockpit.addRoot(searching.value.trim())) as { path: string; watch: boolean }[]
+  const list = (await window.cockpit.addRoot(searching.value.trim())) as {
+    path: string
+    watch: boolean
+  }[]
   roots.value = list
   searching.value = ''
 }
@@ -53,13 +68,17 @@ async function resetDashboardLayout(): Promise<void> {
 
 <template>
   <div>
-    <div class="text-h6 font-weight-medium mb-4">设置</div>
+    <div class="mb-4">
+      <div class="text-h6 font-weight-medium">设置</div>
+      <div class="text-caption on-surface-variant mt-1">外观 · 启动 · 应用目录</div>
+    </div>
 
     <v-row dense>
       <v-col cols="12" md="6">
         <v-card rounded="lg" variant="tonal">
           <v-card-title class="text-subtitle-2">外观</v-card-title>
           <v-card-text>
+            <div class="text-body-2 mb-2">主题</div>
             <v-radio-group
               v-model="theme"
               density="compact"
@@ -70,6 +89,31 @@ async function resetDashboardLayout(): Promise<void> {
               <v-radio label="纯黑" value="pureblack" />
               <v-radio label="跟随系统" value="system" />
             </v-radio-group>
+
+            <v-divider class="my-3" />
+
+            <div class="d-flex align-center justify-space-between mb-1">
+              <span class="text-body-2">界面缩放</span>
+              <span class="text-caption on-surface-variant font-family-mono">
+                {{ Math.round(uiScale * 100) }}%
+              </span>
+            </div>
+            <v-slider
+              v-model="uiScale"
+              :min="0.8"
+              :max="1.8"
+              :step="0.05"
+              color="primary"
+              thumb-label
+              show-ticks
+              hide-details
+              @end="commitUiScale"
+            />
+            <div class="d-flex justify-space-between text-caption on-surface-variant mt-1">
+              <span>小</span>
+              <span>默认</span>
+              <span>大</span>
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -78,9 +122,7 @@ async function resetDashboardLayout(): Promise<void> {
         <v-card rounded="lg" variant="tonal">
           <v-card-title class="text-subtitle-2">总览排版</v-card-title>
           <v-card-text>
-            <div class="text-body-2 mb-2">
-              在总览页把卡片拖乱了吗？一键恢复默认排版。
-            </div>
+            <div class="text-body-2 mb-2">在总览页把卡片拖乱了吗？一键恢复默认排版。</div>
             <v-btn
               color="error"
               variant="tonal"
@@ -114,7 +156,13 @@ async function resetDashboardLayout(): Promise<void> {
           <v-card-text>
             <div class="mb-3">
               <template v-for="r in roots" :key="r.path">
-                <v-chip size="small" variant="outlined" closable class="mr-2 mb-1" @click:close="removeRoot(r.path)">
+                <v-chip
+                  size="small"
+                  variant="outlined"
+                  closable
+                  class="mr-2 mb-1"
+                  @click:close="removeRoot(r.path)"
+                >
                   {{ r.path }}
                 </v-chip>
               </template>
