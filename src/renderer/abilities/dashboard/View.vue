@@ -71,17 +71,23 @@ function initGrid(): void {
       column: 12,
       margin: 12,
       cellHeight: 96,
-      animate: true,
-      float: true
+      animate: true
+      // float: false → the grid stays compact; height always = lowest widget
     },
     el
   )
   if (!g) return
   grid = g
   const saved = loadSavedLayout()
-  if (saved) g.load(saved)
+  if (saved) {
+    g.load(saved)
+    // shrink any stale empty rows down to the actual content bottom
+    g.compact()
+  }
   g.on('change', () => {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(g.save(false)))
+    // keep the container tight to the bottom-most widget (no empty scroll area)
+    g.compact()
   })
 }
 

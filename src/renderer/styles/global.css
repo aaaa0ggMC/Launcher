@@ -1,27 +1,15 @@
-/* Global app chrome — font stack & overflow guardlines. */
+/* Global app chrome — font stack & overflow guardlines.
+ *
+ * Shell is locked to the viewport: html/body never scroll.
+ * VMain has the `scrollable` prop → .v-main--scrollable is absolute inside the
+ * wrap and its inner .v-main__scroller owns vertical scrolling.
+ */
 html,
 body,
 #app {
   height: 100%;
   margin: 0;
   overflow: hidden;
-}
-
-/* Single scroll owner: the shell is fixed to the viewport; only v-main scrolls. */
-.v-application {
-  height: 100% !important;
-}
-
-.v-application__wrap {
-  height: 100%;
-  min-height: 0 !important;
-  overflow: hidden;
-}
-
-.v-main {
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 
 body {

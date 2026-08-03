@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
       <v-btn icon="mdi-cog-outline" variant="text" @click="currentId = 'settings'" />
     </v-app-bar>
 
-    <v-main class="content-bg">
+    <v-main scrollable class="content-bg">
       <v-container fluid class="pa-4">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
           <!-- keep-alive: only abilities that opted in are cached (by name);
