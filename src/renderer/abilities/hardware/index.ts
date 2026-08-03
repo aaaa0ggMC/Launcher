@@ -6,5 +6,6 @@ export default {
   name: '硬件',
   icon: '🖥️',
   category: '硬件',
+  keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))
 } satisfies Ability

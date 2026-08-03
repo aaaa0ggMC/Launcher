@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-cli' })
+
 import { ref, shallowRef, nextTick, onMounted } from 'vue'
 import type { AppEntry } from '@shared/types'
 

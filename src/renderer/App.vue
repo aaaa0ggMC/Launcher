@@ -20,6 +20,7 @@ interface SidebarAbility {
   name: string
   icon: string
   category: string
+  keepAlive: boolean
   comp: Ability['component']
 }
 
@@ -66,6 +67,7 @@ const abilities = computed<SidebarAbility[]>(() => {
         name: meta.name,
         icon: meta.icon ?? FALLBACK_ICON,
         category: meta.category,
+        keepAlive: meta.keepAlive !== false,
         comp: meta.component
       }
     })
@@ -74,6 +76,12 @@ const abilities = computed<SidebarAbility[]>(() => {
 
 const currentAbility = computed(
   () => abilities.value.find((a) => a.id === currentId.value) ?? null
+)
+
+// keep-alive caches only abilities that opted in (keepAlive !== false).
+// Each cached page must declare a matching name via defineOptions.
+const keepAliveNames = computed(() =>
+  abilities.value.filter((a) => a.keepAlive).map((a) => `cockpit-${a.id}`)
 )
 
 const filteredAbilities = computed(() => {
@@ -350,11 +358,12 @@ onBeforeUnmount(() => {
     <v-main class="content-bg">
       <v-container fluid class="pa-4">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
-          <!-- keep-alive: ability pages are cached, so switching back shows
-               previous content instantly (background polls keep it fresh). -->
-          <keep-alive>
-            <component :is="currentAbility?.comp" v-if="currentAbility" class="flex-grow-1" />
-          </keep-alive>          <v-empty-state
+          <!-- keep-alive: only abilities that opted in are cached (by name);
+               the rest remount fresh each visit. -->
+          <keep-alive v-if="currentAbility" :include="keepAliveNames">
+            <component :is="currentAbility.comp" class="flex-grow-1" />
+          </keep-alive>
+          <v-empty-state
             v-else
             icon="mdi-view-dashboard-outline"
             title="选择一个功能"

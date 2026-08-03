@@ -6,5 +6,6 @@ export default {
   name: '显示与壁纸',
   icon: '🖼️',
   category: '外观',
+  keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))
 } satisfies Ability

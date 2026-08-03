@@ -6,5 +6,6 @@ export default {
   name: '软件源',
   icon: '🪞',
   category: '系统',
+  keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))
 } satisfies Ability

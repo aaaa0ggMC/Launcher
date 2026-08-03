@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-dashboard' })
+
 import { ref, shallowRef, computed, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
 import { GridStack } from 'gridstack'
 import type { GridStackNode } from 'gridstack'

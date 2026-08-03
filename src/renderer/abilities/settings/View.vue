@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-settings' })
+
 import { ref, inject, onMounted } from 'vue'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })

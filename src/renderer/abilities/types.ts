@@ -16,6 +16,11 @@ export interface Ability {
   category: string
   /** Page component. */
   component: Component
+  /**
+   * Keep the page instance alive across sidebar switches (default true).
+   * Polling/fast-loading snapshot pages should set false to always reload fresh.
+   */
+  keepAlive?: boolean
 }
 
 export const FALLBACK_ICON = '😎'
