@@ -5,6 +5,7 @@ import type { Ability } from './abilities/types'
 import type { AbilitiesManifest, AppAction, AppEntry, LaunchResult, RiskLevel } from '@shared/types'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
+import TransformerModal from './components/TransformerModal.vue'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -161,7 +162,9 @@ async function launchApp(root: string, id: string, entry: AppEntry): Promise<Lau
     confirmOpen.value = true
     return
   }
-  return await window.cockpit.launch(root, id)
+  const res = await window.cockpit.launch(root, id)
+  openTransformer(res, entry)
+  return res
 }
 
 /** Launch a clustered action; per-action risk overrides entry-level risk. */
@@ -180,7 +183,9 @@ async function launchActionApp(
     confirmOpen.value = true
     return
   }
-  return await window.cockpit.launchAction(root, id, actionId)
+  const res = await window.cockpit.launchAction(root, id, actionId)
+  openTransformer(res, entry)
+  return res
 }
 
 async function doLaunch(): Promise<void> {
@@ -192,11 +197,23 @@ async function doLaunch(): Promise<void> {
       security: { ...(p.entry.security ?? {}), acknowledged: true } as AppEntry['security']
     })
   }
-  if (p.actionId && p.action) {
-    await window.cockpit.launchAction(p.root, p.id, p.actionId)
-  } else {
-    await window.cockpit.launch(p.root, p.id)
-  }
+  const res =
+    p.actionId && p.action
+      ? await window.cockpit.launchAction(p.root, p.id, p.actionId)
+      : await window.cockpit.launch(p.root, p.id)
+  openTransformer(res, p.entry)
+}
+
+// -- live output transformer modal -----------------------------------------
+const transformerOpen = ref(false)
+const transformerEntry = shallowRef<AppEntry | null>(null)
+const transformerPid = ref<number | null>(null)
+
+function openTransformer(res: LaunchResult | void, entry: AppEntry): void {
+  if (!res || !res.ok || !res.monitor || !entry.transformer || !entry.transformer_display) return
+  transformerEntry.value = entry
+  transformerPid.value = res.pid ?? null
+  transformerOpen.value = true
 }
 
 const pendingRisk = computed(() => {
@@ -485,6 +502,9 @@ onBeforeUnmount(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Live output transformer modal -->
+    <TransformerModal v-model="transformerOpen" :entry="transformerEntry" :pid="transformerPid" />
   </v-app>
 </template>
 

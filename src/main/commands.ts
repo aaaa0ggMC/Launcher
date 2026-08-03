@@ -174,7 +174,7 @@ register(
     const id = String(ctx.named.id ?? '')
     const entry = await getEntry(root, id)
     if (!entry) return { ok: false, error: `未找到条目: ${id}` }
-    return await launchEntry(entry)
+    return await launchEntry(entry, launchOpts(entry))
   }
 )
 register(
@@ -189,9 +189,14 @@ register(
     if (!entry) return { ok: false, error: `未找到条目: ${id}` }
     const action = entry.actions?.[actionId]
     if (!action) return { ok: false, error: `未找到操作: ${id}.${actionId}` }
-    return await launchAction(entry, action)
+    return await launchAction(entry, action, launchOpts(entry))
   }
 )
+
+/** Stream output when the entry opts into the live transformer display. */
+function launchOpts(entry: AppEntry): { monitor: boolean } {
+  return { monitor: Boolean(entry.transformer && entry.transformer_display) }
+}
 
 // -- system ------------------------------------------------------------------
 register('system.stats', '系统实时状态 (host/GPU/docker/RAM/disk)', 'system.stats', async () =>

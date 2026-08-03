@@ -2,12 +2,51 @@ import { spawn } from 'child_process'
 import { isAbsolute, dirname, join } from 'path'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
-import type { AppEntry, AppExecSpec, AppAction, LaunchResult } from '../shared/types'
+import type {
+  AppEntry,
+  AppExecSpec,
+  AppAction,
+  LaunchResult,
+  ProcOutputEvent
+} from '../shared/types'
 import { CONFIG_JSON, SCRIPTS_DIR } from './paths'
 import { readJson } from './util'
 
 interface RuntimeConfig {
   runtime?: { terminal?: string[]; confirmBeforeLaunch?: boolean }
+}
+
+export type { ProcOutputEvent }
+
+type OutputBroadcast = (event: ProcOutputEvent) => void
+
+let outputBroadcast: OutputBroadcast = () => {}
+
+export function setOutputBroadcast(fn: OutputBroadcast): void {
+  outputBroadcast = fn
+}
+
+/** Read a piped stream, emit each complete line to the broadcast. */
+function streamLines(
+  pid: number,
+  stream: 'stdout' | 'stderr',
+  readable: NodeJS.ReadableStream | null
+): void {
+  if (!readable) return
+  readable.setEncoding('utf8')
+  let buf = ''
+  readable.on('data', (chunk: string) => {
+    buf += chunk
+    let idx: number
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx)
+      buf = buf.slice(idx + 1)
+      outputBroadcast({ pid, type: 'line', stream, line })
+    }
+  })
+  readable.on('end', () => {
+    if (buf.trim()) outputBroadcast({ pid, type: 'line', stream, line: buf })
+  })
 }
 
 /** Entry's own directory (where the project/script lives).
@@ -111,7 +150,8 @@ function spawnDetached(
   argv: string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
-  terminal: boolean
+  terminal: boolean,
+  monitor = false
 ): Promise<LaunchResult> {
   return new Promise<LaunchResult>((resolve) => {
     try {
@@ -119,14 +159,21 @@ function spawnDetached(
         cwd,
         env,
         detached: true,
-        stdio: 'ignore'
+        stdio: monitor ? ['ignore', 'pipe', 'pipe'] : 'ignore'
       })
       child.unref()
       child.on('error', (err) => {
         resolve({ ok: false, error: `spawn 失败: ${err.message}` })
       })
       child.on('spawn', () => {
-        resolve({ ok: true, pid: child.pid, terminal })
+        if (monitor && child.pid) {
+          streamLines(child.pid, 'stdout', child.stdout)
+          streamLines(child.pid, 'stderr', child.stderr)
+          child.on('exit', (code) => {
+            outputBroadcast({ pid: child.pid!, type: 'exit', code })
+          })
+        }
+        resolve({ ok: true, pid: child.pid, terminal, monitor })
       })
     } catch (err) {
       resolve({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -164,17 +211,29 @@ function spawnWait(argv: string[], cwd: string, env: NodeJS.ProcessEnv): Promise
   })
 }
 
+export interface LaunchOptions {
+  /** capture stdout/stderr and stream line events to the renderer */
+  monitor?: boolean
+}
+
 /** Launch an exec spec. Returns immediately; process runs detached. */
-export async function launchSpec(entry: AppEntry, spec: AppExecSpec): Promise<LaunchResult> {
-  const cwd = expandCwd(entry, spec)
-  const env: NodeJS.ProcessEnv = { ...process.env, ...(spec.env ?? {}) }
-  const argv = await buildArgv(entry, spec)
-  return await spawnDetached(argv, cwd, env, spec.terminal ?? false)
+export async function launchSpec(
+  entry: AppEntry,
+  spec: AppExecSpec,
+  opts: LaunchOptions = {}
+): Promise<LaunchResult> {
+  // In monitor mode the output must reach our pipe — a terminal wrapper would
+  // swallow it, so run headless and let the transformer modal be the display.
+  const eff = opts.monitor ? { ...spec, terminal: false } : spec
+  const cwd = expandCwd(entry, eff)
+  const env: NodeJS.ProcessEnv = { ...process.env, ...(eff.env ?? {}) }
+  const argv = await buildArgv(entry, eff)
+  return await spawnDetached(argv, cwd, env, eff.terminal ?? false, opts.monitor ?? false)
 }
 
 /** Launch an app entry (primary exec). Returns immediately; process runs detached. */
-export function launchEntry(entry: AppEntry): Promise<LaunchResult> {
-  return launchSpec(entry, entry.exec)
+export function launchEntry(entry: AppEntry, opts?: LaunchOptions): Promise<LaunchResult> {
+  return launchSpec(entry, entry.exec, opts)
 }
 
 /**
@@ -182,7 +241,11 @@ export function launchEntry(entry: AppEntry): Promise<LaunchResult> {
  * intermediate step headless (awaited); only the last step launches detached
  * with its own terminal/root flags.
  */
-export async function launchAction(entry: AppEntry, action: AppAction): Promise<LaunchResult> {
+export async function launchAction(
+  entry: AppEntry,
+  action: AppAction,
+  opts: LaunchOptions = {}
+): Promise<LaunchResult> {
   const steps = action.steps
   if (steps?.length) {
     for (let i = 0; i < steps.length - 1; i++) {
@@ -199,7 +262,9 @@ export async function launchAction(entry: AppEntry, action: AppAction): Promise<
         }
       }
     }
-    const last = steps[steps.length - 1]
+    const last = opts.monitor
+      ? { ...steps[steps.length - 1], terminal: false }
+      : steps[steps.length - 1]
     const argv = await buildArgv(entry, last)
     return await spawnDetached(
       argv,
@@ -208,8 +273,9 @@ export async function launchAction(entry: AppEntry, action: AppAction): Promise<
         ...process.env,
         ...(last.env ?? {})
       },
-      last.terminal ?? false
+      last.terminal ?? false,
+      opts.monitor ?? false
     )
   }
-  return launchSpec(entry, action.exec)
+  return launchSpec(entry, action.exec, opts)
 }

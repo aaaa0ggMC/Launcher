@@ -98,6 +98,8 @@ interface EditForm {
   terminal: boolean
   rootFlag: boolean
   managed: boolean
+  transformer: string
+  transformerDisplay: boolean
   actions: ActionForm[]
 }
 
@@ -131,14 +133,14 @@ const newForm = ref<NewEntryForm | null>(null)
 const newRootOpen = ref(false)
 const newRootPath = ref('')
 
-async function load(): Promise<void> {
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const res = await window.cockpit.listApps()
     apps.value = res.apps
     roots.value = res.roots
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -198,6 +200,8 @@ function openEdit(id: string): void {
     terminal: entry.exec.terminal ?? false,
     rootFlag: entry.exec.root ?? false,
     managed: entry.managed ?? true,
+    transformer: entry.transformer ?? '',
+    transformerDisplay: entry.transformer_display ?? false,
     actions: Object.entries(entry.actions ?? {}).map(([aid, a]) => ({
       id: aid,
       name: a.name,
@@ -315,6 +319,8 @@ async function saveEdit(): Promise<void> {
         note: f.note || undefined,
         acknowledged: apps.value[f.id]?.security?.acknowledged ?? false
       },
+      transformer: f.transformer.trim() || undefined,
+      transformer_display: f.transformerDisplay,
       managed: f.managed
     })
     editOpen.value = false
@@ -407,7 +413,7 @@ let unsub: (() => void) | null = null
 
 onMounted(() => {
   load()
-  unsub = window.cockpit.on('cockpit:apps-changed', () => load())
+  unsub = window.cockpit.on('cockpit:apps-changed', () => load(true))
 })
 
 onBeforeUnmount(() => unsub?.())
@@ -565,10 +571,10 @@ onBeforeUnmount(() => unsub?.())
                 :disabled="entry.missing"
                 @click="launchAction(entry.root ?? '', id, entry, aid, act)"
               >
-                <span class="d-inline-flex align-center ga-1">
-                  <AbilityIcon v-if="act.icon" :icon="act.icon" :size="16" />
-                  {{ act.name || aid }}
-                </span>
+                <template v-if="act.icon" #prepend>
+                  <AbilityIcon :icon="act.icon" :size="16" />
+                </template>
+                {{ act.name || aid }}
               </v-btn>
             </div>
           </v-card-actions>
@@ -824,6 +830,30 @@ onBeforeUnmount(() => unsub?.())
               />
             </v-col>
           </v-row>
+
+          <v-divider />
+
+          <div class="d-flex align-center justify-space-between">
+            <div class="text-subtitle-2">实时输出 Transformer</div>
+            <v-switch
+              v-model="form.transformerDisplay"
+              label="启用实时弹窗"
+              density="compact"
+              hide-details
+              color="primary"
+            />
+          </div>
+          <v-textarea
+            v-model="form.transformer"
+            label="Transformer (JS 构造函数, onNewLine(e, ui))"
+            hint="ui.add(ui.NewAlign(ui.NewText('x'), ui.NewStatus('$5.00'))) — 组件: NewText/NewTitle/NewAlign/NewBar/NewStatus/NewTable"
+            persistent-hint
+            variant="outlined"
+            density="compact"
+            rows="3"
+            auto-grow
+            class="font-mono"
+          />
 
           <v-divider />
 

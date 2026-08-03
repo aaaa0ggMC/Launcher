@@ -5,6 +5,7 @@ import { registerIpc, startWatching } from './ipc'
 import { registerIconProtocol } from './icon-protocol'
 import { loadExternalAbilities } from './ability-loader'
 import { setRegistryBroadcast } from './registry'
+import { setOutputBroadcast } from './launcher'
 import { readJson } from './util'
 import { CONFIG_JSON } from './paths'
 
@@ -76,6 +77,7 @@ if (!gotLock) {
 
     registerIconProtocol()
     setRegistryBroadcast(broadcast)
+    setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
     registerIpc()
     startWatching()
 

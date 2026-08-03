@@ -63,6 +63,13 @@ export interface AppEntry {
   security?: AppSecurity
   managed?: boolean
   missing?: boolean
+  /**
+   * optional JS source: a constructor with `onNewLine(e, ui)` — e is each line
+   * of the process output, ui is a component factory (ui.NewAlign/NewBar/...).
+   * Combined with transformer_display, a live 80% modal renders the output.
+   */
+  transformer?: string
+  transformer_display?: boolean
   /** search root this entry lives in (runtime info, not persisted) */
   root?: string
 }
@@ -93,7 +100,14 @@ export interface LaunchResult {
   pid?: number
   error?: string
   terminal?: boolean
+  /** true when the process output is being streamed to the renderer */
+  monitor?: boolean
 }
+
+/** Streamed process output event (line-split stdout/stderr + exit). */
+export type ProcOutputEvent =
+  | { pid: number; type: 'line'; stream: 'stdout' | 'stderr'; line: string }
+  | { pid: number; type: 'exit'; code: number | null }
 
 export interface GpuInfo {
   name: string

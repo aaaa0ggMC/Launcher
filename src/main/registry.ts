@@ -174,8 +174,25 @@ export function watchRoots(): void {
     ignoreInitial: true,
     ignorePermissionErrors: true,
     depth: 2,
-    ignored: /(^|[/\\])\..|node_modules|\.venv|__pycache__/
+    // Skip hidden files, VCS, dependency dirs, and high-churn files (db/logs
+    // written by running services inside the search root would otherwise fire
+    // change events constantly and make the Apps page flash).
+    ignored:
+      /(^|[/\\])\..|node_modules|\.venv|__pycache__|\.git|\.db$|\.db-journal$|\.sqlite3?$|\.log$|(^|[/\\])logs([/\\]|$)/
   })
+
+  // Structural changes only (a new/removed app dir/script); file *content*
+  // changes and bursty rescan churn are coalesced into one debounced notify.
+  const STRUCTURAL = new Set(['add', 'addDir', 'unlink', 'unlinkDir'])
+  let notifyTimer: NodeJS.Timeout | null = null
+  const notify = (root: string): void => {
+    if (notifyTimer) clearTimeout(notifyTimer)
+    notifyTimer = setTimeout(() => {
+      broadcast('cockpit:apps-changed', 'structure', root)
+      notifyTimer = null
+    }, 400)
+  }
+
   watcher.on('all', (event, path) => {
     const root = [...roots].find((r) => path === r || path.startsWith(r + '/'))
     if (!root) return
@@ -183,8 +200,8 @@ export function watchRoots(): void {
     const id = rel.split('/')[0]
     if (rel.endsWith('apps.json')) {
       broadcast('cockpit:apps-changed', 'file', root)
-    } else if (rel && !id.startsWith('.')) {
-      broadcast('cockpit:apps-changed', event, root)
+    } else if (rel && !id.startsWith('.') && STRUCTURAL.has(event)) {
+      notify(root)
     }
   })
 
