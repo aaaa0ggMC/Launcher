@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, shallowRef, onMounted, onBeforeUnmount } from 'vue'
+import { computed, provide, ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Ability } from './abilities/types'
 import { FALLBACK_ICON } from './abilities/types'
@@ -31,6 +31,24 @@ const drawer = ref(true)
 const rail = ref(false)
 const searchText = ref('')
 const currentId = ref<string | null>(null)
+
+const UI_STATE_KEY = 'cockpit-ui-state'
+
+function persistUiState(): void {
+  localStorage.setItem(UI_STATE_KEY, JSON.stringify({ rail: rail.value, currentId: currentId.value }))
+}
+
+function restoreUiState(): void {
+  try {
+    const raw = localStorage.getItem(UI_STATE_KEY)
+    if (!raw) return
+    const s = JSON.parse(raw)
+    if (typeof s.rail === 'boolean') rail.value = s.rail
+    if (typeof s.currentId === 'string') currentId.value = s.currentId
+  } catch {
+    // ignore corrupt state
+  }
+}
 
 const abilities = computed<SidebarAbility[]>(() => {
   if (!manifest.value) return []
@@ -204,9 +222,15 @@ onMounted(async () => {
   onConfigChanged(cfg)
   manifest.value = mani
   const def = mani?.sidebar.default
-  currentId.value = def && abilities.value.some((a) => a.id === def) ? def : null
+  if (!currentId.value || !abilities.value.some((a) => a.id === currentId.value)) {
+    currentId.value = def && abilities.value.some((a) => a.id === def) ? def : null
+  }
+  restoreUiState()
   unsub = window.cockpit.on('cockpit:apps-changed', () => loadSearchApps())
 })
+
+watch(currentId, () => persistUiState(), { flush: 'post' })
+watch(rail, () => persistUiState())
 
 onBeforeUnmount(() => {
   unsub?.()
