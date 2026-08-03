@@ -15,9 +15,11 @@ body,
 .v-application__wrap {
   height: 100%;
   min-height: 0 !important;
+  overflow: hidden;
 }
 
 .v-main {
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
