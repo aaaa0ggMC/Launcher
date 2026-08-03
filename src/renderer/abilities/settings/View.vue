@@ -45,6 +45,10 @@ async function removeRoot(p: string): Promise<void> {
   const list = (await window.cockpit.removeRoot(p)) as { path: string; watch: boolean }[]
   roots.value = list
 }
+
+async function resetDashboardLayout(): Promise<void> {
+  await window.cockpit.command('dashboard.reset-layout')
+}
 </script>
 
 <template>
@@ -66,6 +70,25 @@ async function removeRoot(p: string): Promise<void> {
               <v-radio label="纯黑" value="pureblack" />
               <v-radio label="跟随系统" value="system" />
             </v-radio-group>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" md="6">
+        <v-card rounded="lg" variant="tonal">
+          <v-card-title class="text-subtitle-2">总览排版</v-card-title>
+          <v-card-text>
+            <div class="text-body-2 mb-2">
+              在总览页把卡片拖乱了吗？一键恢复默认排版。
+            </div>
+            <v-btn
+              color="error"
+              variant="tonal"
+              prepend-icon="mdi-restore"
+              @click="resetDashboardLayout"
+            >
+              重置排版
+            </v-btn>
           </v-card-text>
         </v-card>
       </v-col>

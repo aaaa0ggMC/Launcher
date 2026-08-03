@@ -3,7 +3,7 @@ defineOptions({ name: 'cockpit-dashboard' })
 
 import { ref, shallowRef, computed, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
 import { GridStack } from 'gridstack'
-import type { GridStackNode } from 'gridstack'
+import type { GridStackNode, GridItemHTMLElement } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import type { SystemStats } from '@shared/types'
 import { fmtBytes, fmtUptime } from '../../composables/format'
@@ -17,8 +17,6 @@ const gridEl = ref<HTMLElement | null>(null)
 
 let grid: GridStack | null = null
 let timer: ReturnType<typeof setInterval> | null = null
-
-const LAYOUT_KEY = 'cockpit-dashboard-layout'
 
 /** Manual / first load (drives the shared loading bar + skeleton). */
 async function refresh(): Promise<void> {
@@ -43,12 +41,11 @@ async function poll(): Promise<void> {
   }
 }
 
-function loadSavedLayout(): GridStackNode[] | null {
-  const raw = localStorage.getItem(LAYOUT_KEY)
-  if (!raw) return null
+/** Read persisted layout via the CLI-first dashboard.get-layout command. */
+async function loadSavedLayout(): Promise<GridStackNode[] | null> {
   try {
-    const layout = JSON.parse(raw) as GridStackNode[]
-    if (!Array.isArray(layout)) return null
+    const layout = (await window.cockpit.command('dashboard.get-layout')) as GridStackNode[] | null
+    if (!Array.isArray(layout) || layout.length === 0) return null
     // Guard against corrupt/legacy layouts pushing cards off-grid.
     const valid = layout.every(
       (n) =>
@@ -69,7 +66,17 @@ function loadSavedLayout(): GridStackNode[] | null {
   }
 }
 
-function initGrid(): void {
+/** Restore the grid to the default (layoutCards) positions. */
+async function applyDefaultLayout(): Promise<void> {
+  if (!grid) return
+  for (const c of cards.value) {
+    const el = gridEl.value?.querySelector(`#${c.id}`)
+    if (el) grid.update(el as GridItemHTMLElement, { x: c.x, y: c.y, w: c.w, h: c.h })
+  }
+  await window.cockpit.command('dashboard.set-layout', { layout: grid.save(false) })
+}
+
+async function initGrid(): Promise<void> {
   const el = gridEl.value
   if (!el || grid) return
   const g = GridStack.init(
@@ -86,10 +93,10 @@ function initGrid(): void {
   )
   if (!g) return
   grid = g
-  const saved = loadSavedLayout()
+  const saved = await loadSavedLayout()
   if (saved) g.load(saved)
   g.on('change', () => {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(g.save(false)))
+    void window.cockpit.command('dashboard.set-layout', { layout: g.save(false) })
   })
 }
 
@@ -98,13 +105,17 @@ function onResize(): void {
   grid?.column(12)
 }
 
+let unsubReset: (() => void) | null = null
+
 onMounted(async () => {
   window.addEventListener('resize', onResize)
+  // Settings → 重置排版: restore the default grid layout live.
+  unsubReset = window.cockpit.on('cockpit:dashboard-reset', () => void applyDefaultLayout())
   await refresh()
   // grid init must wait until the container has a real width
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-  initGrid()
+  await initGrid()
   timer = setInterval(poll, 4000)
 })
 
@@ -118,6 +129,7 @@ onActivated(async () => {
 })
 
 onBeforeUnmount(() => {
+  unsubReset?.()
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
 })

@@ -18,8 +18,10 @@ import { listDocker, dockerAction } from './docker'
 import { gpuInfo, readPmValue, togglePm } from './gpu'
 import { listWallpapers, applyWallpaper, listOutputs } from './display'
 import { systemStats } from './system'
+import { getDashboardLayout, setDashboardLayout, resetDashboardLayout } from './ui-state'
 import { readJson, writeJsonAtomic } from './util'
 import { CONFIG_JSON } from './paths'
+import { BrowserWindow } from 'electron'
 
 // ---------------------------------------------------------------------------
 // CLI-first command registry. Every ability operation is a registered command;
@@ -115,6 +117,23 @@ register('launch.run', '启动应用 (--root --id)', 'launch.run --root ~/Apps -
 
 // -- system ------------------------------------------------------------------
 register('system.stats', '系统实时状态 (host/GPU/docker/RAM/disk)', 'system.stats', async () => systemStats())
+
+// -- dashboard layout ----------------------------------------------------------
+register('dashboard.get-layout', '读取总览排版', 'dashboard.get-layout', async () => getDashboardLayout())
+register('dashboard.set-layout', '保存总览排版 (--layout <json>)', 'dashboard.set-layout --layout []', async (ctx) => {
+  const layout = ctx.named.layout
+  const arr = typeof layout === 'string' ? JSON.parse(layout) : layout
+  if (!Array.isArray(arr)) return { ok: false, error: 'layout 必须是数组' }
+  await setDashboardLayout(arr)
+  return { ok: true }
+})
+register('dashboard.reset-layout', '重置总览排版为默认', 'dashboard.reset-layout', async () => {
+  await resetDashboardLayout()
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('cockpit:dashboard-reset')
+  }
+  return { ok: true }
+})
 
 // -- mirror ------------------------------------------------------------------
 register('mirror.get', '当前镜像源与配置', 'mirror.get', async () => getMirrorInfo())
