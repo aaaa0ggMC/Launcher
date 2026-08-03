@@ -22,6 +22,23 @@ Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的
 pnpm install
 ```
 
+### 2.1 git submodule — 图标库
+
+侧栏/应用图标使用 [game-icon-pack](https://github.com/Nieobie/game-icon-pack) (CC0)。
+它以 git submodule 挂在 `src/renderer/assets/game-icon-pack`，克隆后必须初始化，否则图标无法解析：
+
+```bash
+git submodule update --init --recursive
+```
+
+更新到上游最新：
+
+```bash
+git submodule update --remote src/renderer/assets/game-icon-pack
+```
+
+渲染端 `GameIcon.vue` 用 `import.meta.glob('../assets/game-icon-pack/svg/**/*.svg')` 读取，SVG 结构与上游一致 (`svg/no-padding` + `svg/padding`)。
+
 ## 3. 系统级配置 (迁移时必须手动执行)
 
 ### 3.1 polkit 规则 — pkexec 免重复输密码

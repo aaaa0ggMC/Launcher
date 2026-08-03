@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { ipcMain, BrowserWindow, dialog, clipboard } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
@@ -66,6 +66,11 @@ export function registerIpc(): void {
       return res.canceled || !res.filePaths[0] ? null : res.filePaths[0]
     }
   )
+
+  // Clipboard write (copy current view as markdown etc).
+  ipcMain.handle('clipboard:write', (_e, text: string) => {
+    clipboard.writeText(text ?? '')
+  })
 
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) =>

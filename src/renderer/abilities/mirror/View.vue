@@ -84,6 +84,27 @@ const sortedMirrors = computed(() => {
 })
 
 onMounted(load)
+
+/** Custom markdown export — marks each mirror's enabled state explicitly
+ * (the generic DOM extractor can't tell an on/off switch apart). */
+function toMarkdown(): string {
+  const lines: string[] = []
+  lines.push('## 软件源')
+  lines.push(`已启用 ${enabledCount.value} / ${info.value?.mirrors.length ?? 0} 个`)
+  lines.push('')
+  for (const m of sortedMirrors.value) {
+    lines.push(`- **${m.name}** — ${m.enabled ? '✅ 启用' : '⛔ 未启用'}`)
+    lines.push(`  - URL: \`${m.url}\``)
+    const t = testResults.value[m.name]
+    if (t) {
+      if (t.ok) lines.push(`  - 测速: ${t.latency}ms · ${fmtSpeed(t.speed)}`)
+      else if (t.error) lines.push(`  - 测速: 失败 — ${t.error}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

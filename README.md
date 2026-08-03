@@ -1,34 +1,56 @@
-# cockpit
+# Linux System Cockpit
 
-An Electron application with Vue and TypeScript
+Arch Linux + KDE Plasma 6 (Wayland) 上的个人系统控制中心。
 
-## Recommended IDE Setup
+基于 Electron + Vue 3 + Vuetify 3 (Material 3) 的桌面应用，核心架构为 CLI-first：每个操作都是注册命令，UI 按钮与 CLI REPL 共享同一套 handler。
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar)
+## 功能
 
-## Project Setup
+- 应用注册表：按目录扫描应用，一键启动 / 附加操作（actions），风险分级按钮
+- 镜像源管理：自定义 `[MIRROR]` 格式，行级 toggle，测速，pkexec + 原子写入
+- systemd 用户服务管理
+- Docker 容器管理
+- NVIDIA GPU 信息与电源管理切换
+- 自启动项管理
+- 自定义仪表盘（gridstack 布局持久化）
+- 侧栏能力动态加载（`config/abilities.yaml` 驱动）
 
-### Install
+## 环境要求
+
+- Node.js >= 22
+- pnpm >= 11
+- Arch Linux + KDE Plasma 6 (Wayland)
+- 提权操作依赖 `pkexec` (polkit)
+
+## 开发
 
 ```bash
-$ pnpm install
+git submodule update --init --recursive
+pnpm install
+pnpm dev
 ```
 
-### Development
+## 构建
 
 ```bash
-$ pnpm dev
+pnpm build
 ```
 
-### Build
+## 代码质量
 
 ```bash
-# For windows
-$ pnpm build:win
-
-# For macOS
-$ pnpm build:mac
-
-# For Linux
-$ pnpm build:linux
+pnpm typecheck
+pnpm lint
+pnpm format
 ```
+
+## 系统级配置
+
+提权操作需要把 polkit 规则安装到系统：
+
+```bash
+sudo cp scripts/49-cockpit-pkexec.rules /usr/share/polkit-1/rules.d/
+sudo chmod 644 /usr/share/polkit-1/rules.d/49-cockpit-pkexec.rules
+```
+
+详细说明见 `AGENTS.md`。

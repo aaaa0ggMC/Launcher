@@ -14,11 +14,7 @@
     "backgroundOpacity": 0.7
   },
   "runtime": {
-    "terminal": [
-      "konsole",
-      "--hold",
-      "-e"
-    ],
+    "terminal": ["konsole", "--hold", "-e"],
     "confirmBeforeLaunch": true
   }
 }

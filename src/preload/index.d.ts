@@ -70,6 +70,7 @@ export interface CockpitApi {
     title?: string
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
+  copyText: (text: string) => Promise<void>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

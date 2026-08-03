@@ -99,6 +99,7 @@ const cockpit = {
     title?: string
     filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke('dialog:pick-file', opts),
+  copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {

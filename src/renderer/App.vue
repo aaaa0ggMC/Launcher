@@ -61,7 +61,77 @@ const windowRounded = computed(
 )
 
 /** Sidebar icons: fill the rail in collapsed mode, larger in expanded. */
-const sidebarIconSize = computed(() => (rail.value ? 26 : 24))
+const sidebarIconSize = computed(() => (rail.value ? 32 : 28))
+
+// ---------------------------------------------------------------------------
+// Copy current view as markdown (for pasting into an AI etc.)
+// ---------------------------------------------------------------------------
+const abilityRef = ref<{ $el?: Element; toMarkdown?: () => string } | null>(null)
+const copySnackOpen = ref(false)
+const copySnackText = ref('')
+
+/** Generic DOM→markdown extraction of the current ability view. */
+function viewToMarkdown(root: Element): string {
+  const out: string[] = []
+  const emit = (line: string): void => {
+    const t = line.trim()
+    if (t && out[out.length - 1] !== t) out.push(t)
+  }
+  const walk = (el: Element): void => {
+    if (el instanceof HTMLElement && el.offsetParent === null && !el.closest('.v-dialog')) return
+    if (
+      el.matches(
+        'button,a,input,textarea,select,[role="button"],.v-btn,.v-overlay,.v-menu,.v-slider,.v-switch'
+      )
+    )
+      return
+    const cls = typeof el.className === 'string' ? el.className : ''
+    const hCls = /(?:^|\s)text-h([1-6])\b/.exec(cls)
+    const isH = /^H[1-6]$/.test(el.tagName)
+    if (hCls || isH) {
+      const lvl = hCls ? Number(hCls[1]) : Number(el.tagName[1])
+      const text = (el.textContent ?? '').trim()
+      if (text) emit(`${'#'.repeat(Math.min(lvl + 1, 6))} ${text}`)
+      return
+    }
+    if (el.matches('.v-card-title')) {
+      const text = (el.textContent ?? '').trim()
+      if (text) emit(`### ${text}`)
+      return
+    }
+    if (el.matches('.v-list-item,li')) {
+      const text = (el.textContent ?? '').trim()
+      if (text) emit(`- ${text}`)
+      return
+    }
+    if (el.children.length === 0) {
+      const text = (el.textContent ?? '').trim()
+      if (text) emit(text)
+      return
+    }
+    for (const c of Array.from(el.children)) walk(c)
+  }
+  walk(root)
+  return out.join('\n')
+}
+
+async function copyCurrentView(): Promise<void> {
+  const ability = currentAbility.value
+  if (!ability) return
+  let md: string
+  const inst = abilityRef.value
+  if (inst && typeof inst.toMarkdown === 'function') {
+    md = inst.toMarkdown()
+  } else if (inst?.$el) {
+    md = viewToMarkdown(inst.$el)
+  } else {
+    md = '(无法读取页面内容)'
+  }
+  const header = `# ${ability.name}\n\n> 由 Linux Cockpit 导出 · ${new Date().toLocaleString('zh-CN')}\n\n`
+  await window.cockpit.copyText(header + md)
+  copySnackText.value = `已复制「${ability.name}」为 Markdown`
+  copySnackOpen.value = true
+}
 
 const UI_STATE_KEY = 'cockpit-ui-state'
 
@@ -419,7 +489,7 @@ onBeforeUnmount(() => {
           :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
         >
           <div class="brand-logo">
-            <GameIcon name="dashboard" :size="26" />
+            <GameIcon name="dashboard" :size="30" />
           </div>
           <div v-if="!rail" class="d-flex flex-column">
             <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
@@ -507,11 +577,23 @@ onBeforeUnmount(() => {
       </template>
 
       <template #append>
-        <div class="pa-3 d-flex justify-center">
+        <div class="pa-3 d-flex justify-center ga-2" :class="rail ? 'flex-column' : ''">
+          <v-tooltip text="复制当前页面为 Markdown" location="end">
+            <template #activator="{ props: tp }">
+              <v-btn
+                v-bind="tp"
+                variant="tonal"
+                icon
+                :disabled="!currentAbility"
+                @click="copyCurrentView"
+              >
+                <AbilityIcon icon="default/document" :size="20" />
+              </v-btn>
+            </template>
+          </v-tooltip>
           <v-btn
             variant="tonal"
             icon
-            size="small"
             :aria-label="rail ? '展开侧边栏' : '收起侧边栏'"
             @click="rail = !rail"
           >
@@ -546,7 +628,7 @@ onBeforeUnmount(() => {
           <!-- keep-alive: only abilities that opted in are cached (by name);
                the rest remount fresh each visit. -->
           <keep-alive v-if="currentAbility" :include="keepAliveNames">
-            <component :is="currentAbility.comp" class="flex-grow-1" />
+            <component :is="currentAbility.comp" ref="abilityRef" class="flex-grow-1" />
           </keep-alive>
           <v-empty-state
             v-else
@@ -609,6 +691,10 @@ onBeforeUnmount(() => {
 
     <!-- Live output transformer modal -->
     <TransformerModal v-model="transformerOpen" :entry="transformerEntry" :pid="transformerPid" />
+
+    <v-snackbar v-model="copySnackOpen" :timeout="2500" color="success" location="top">
+      {{ copySnackText }}
+    </v-snackbar>
   </v-app>
 </template>
 
