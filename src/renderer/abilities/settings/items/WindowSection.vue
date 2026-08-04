@@ -1,13 +1,21 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-settings-window' })
 
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject, onMounted, computed } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '../../../i18n'
 import { backgrounds } from '../../../backgrounds'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+
+const bgItems = computed(() =>
+  backgrounds.map((b) => ({
+    id: b.id,
+    name: translate(uiLang.value, `background.${b.id}.name`),
+    description: translate(uiLang.value, `background.${b.id}.desc`)
+  }))
+)
 
 const frameless = ref(true)
 const rounded = ref(true)
@@ -113,7 +121,7 @@ async function commitFuseBlur(): Promise<void> {
       <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.background') }}</div>
       <v-select
         v-model="background"
-        :items="backgrounds"
+        :items="bgItems"
         item-title="name"
         item-value="id"
         :label="translate(uiLang, 'window.bgSelect')"
@@ -123,7 +131,7 @@ async function commitFuseBlur(): Promise<void> {
         @update:model-value="setBackground"
       />
       <div class="text-caption on-surface-variant mt-1">
-        {{ backgrounds.find((b) => b.id === background)?.description }}
+        {{ bgItems.find((b) => b.id === background)?.description }}
       </div>
       <div v-if="background === 'image'" class="mt-2">
         <v-text-field

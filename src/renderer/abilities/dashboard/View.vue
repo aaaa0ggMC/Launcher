@@ -1,7 +1,16 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-dashboard' })
 
-import { ref, shallowRef, computed, inject, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
+import {
+  ref,
+  shallowRef,
+  computed,
+  inject,
+  onMounted,
+  onActivated,
+  onBeforeUnmount,
+  nextTick
+} from 'vue'
 import type { Ref } from 'vue'
 import { GridStack } from 'gridstack'
 import type { GridStackNode, GridItemHTMLElement } from 'gridstack'
@@ -13,7 +22,7 @@ import LoadingBar from '../../components/LoadingBar.vue'
 import { translate, translateTemplate } from '../../i18n'
 
 const stats = shallowRef<SystemStats | null>(null)
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const pm = ref<0 | 1 | null>(null)
 const pmBusy = ref(false)
 const pmConfirm = ref(false)
@@ -264,7 +273,7 @@ onBeforeUnmount(() => {
           <v-card class="card-fill" flat variant="tonal" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 text-subtitle-2 pb-1">
               <v-icon size="18" color="primary">{{ c.icon }}</v-icon>
-              <span>{{ c.title }}</span>
+              <span>{{ translate(uiLang, 'dashboard.card.' + c.id, c.title) }}</span>
             </v-card-title>
             <v-card-text class="stat-card-text">
               <!-- Host -->
@@ -325,7 +334,11 @@ onBeforeUnmount(() => {
                       {{ stats?.cpu.model }}
                     </div>
                     <div class="text-caption on-surface-variant mt-1">
-                      {{ translateTemplate(uiLang, 'dashboard.cores', { n: String(stats?.cpu.cores ?? '') }) }}
+                      {{
+                        translateTemplate(uiLang, 'dashboard.cores', {
+                          n: String(stats?.cpu.cores ?? '')
+                        })
+                      }}
                       <span v-if="stats?.cpu.freq"> · {{ stats.cpu.freq }} MHz</span>
                     </div>
                   </div>
@@ -365,7 +378,9 @@ onBeforeUnmount(() => {
               <!-- Memory -->
               <template v-else-if="c.id === 'mem'">
                 <div class="d-flex align-center justify-space-between mb-1">
-                  <span class="text-body-2 font-weight-medium">{{ translate(uiLang, 'dashboard.mem') }}</span>
+                  <span class="text-body-2 font-weight-medium">{{
+                    translate(uiLang, 'dashboard.mem')
+                  }}</span>
                   <span class="text-caption font-family-mono on-surface-variant">
                     {{ stats?.mem.percent }}%
                   </span>
@@ -384,15 +399,17 @@ onBeforeUnmount(() => {
                 />
                 <div class="d-flex justify-space-between mt-1">
                   <span class="text-caption on-surface-variant">
-{{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats?.mem.used ?? 0) }}
-                   </span>
-                   <span class="text-caption on-surface-variant">
-                     {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats?.mem.total ?? 0) }}
+                    {{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats?.mem.used ?? 0) }}
+                  </span>
+                  <span class="text-caption on-surface-variant">
+                    {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats?.mem.total ?? 0) }}
                   </span>
                 </div>
                 <v-divider class="my-2" />
                 <div class="d-flex align-center justify-space-between mb-1">
-                  <span class="text-body-2 font-weight-medium">{{ translate(uiLang, 'dashboard.swap') }}</span>
+                  <span class="text-body-2 font-weight-medium">{{
+                    translate(uiLang, 'dashboard.swap')
+                  }}</span>
                   <span v-if="stats?.swap" class="text-caption font-family-mono on-surface-variant">
                     {{ stats.swap.percent }}%
                   </span>
@@ -406,13 +423,15 @@ onBeforeUnmount(() => {
                 />
                 <div v-if="stats?.swap" class="d-flex justify-space-between mt-1">
                   <span class="text-caption on-surface-variant">
-{{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats.swap.used) }}
-                   </span>
-                   <span class="text-caption on-surface-variant">
-                     {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats.swap.total) }}
+                    {{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats.swap.used) }}
+                  </span>
+                  <span class="text-caption on-surface-variant">
+                    {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats.swap.total) }}
                   </span>
                 </div>
-                <div v-else class="text-caption on-surface-variant">{{ translate(uiLang, 'dashboard.noSwap') }}</div>
+                <div v-else class="text-caption on-surface-variant">
+                  {{ translate(uiLang, 'dashboard.noSwap') }}
+                </div>
               </template>
 
               <!-- GPU -->
@@ -431,17 +450,24 @@ onBeforeUnmount(() => {
                       {{ g.temp }}
                     </v-chip>
                   </div>
-                  <div class="text-caption on-surface-variant mt-1">{{ translate(uiLang, 'dashboard.driver') }} {{ g.driver }}</div>
+                  <div class="text-caption on-surface-variant mt-1">
+                    {{ translate(uiLang, 'dashboard.driver') }} {{ g.driver }}
+                  </div>
                   <div class="text-caption on-surface-variant mt-1 d-flex ga-3 flex-wrap">
                     <span>{{ translate(uiLang, 'dashboard.vram') }} {{ g.vram }}</span>
-                    <span v-if="g.fanSpeed">{{ translate(uiLang, 'dashboard.fan') }} {{ g.fanSpeed }}</span>
+                    <span v-if="g.fanSpeed"
+                      >{{ translate(uiLang, 'dashboard.fan') }} {{ g.fanSpeed }}</span
+                    >
                     <span v-if="g.power">
-                      {{ translate(uiLang, 'dashboard.power') }} {{ g.power }}<span v-if="g.powerLimit"> / {{ g.powerLimit }}</span>
+                      {{ translate(uiLang, 'dashboard.power') }} {{ g.power
+                      }}<span v-if="g.powerLimit"> / {{ g.powerLimit }}</span>
                     </span>
                   </div>
                   <div class="mt-1">
                     <div class="d-flex justify-space-between text-caption">
-                      <span class="on-surface-variant">{{ translate(uiLang, 'dashboard.gpuUtil') }}</span>
+                      <span class="on-surface-variant">{{
+                        translate(uiLang, 'dashboard.gpuUtil')
+                      }}</span>
                       <span class="font-family-mono">{{ g.usage }}</span>
                     </div>
                     <v-progress-linear

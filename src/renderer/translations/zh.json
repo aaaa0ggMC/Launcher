@@ -193,5 +193,18 @@
   "animation.fade": "淡入淡出",
   "animation.slide": "左右滑动",
   "animation.caption": "在侧栏能力之间切换时的过渡效果。",
-  "window.note": "frameless/rounded 下次启动生效；背景/fuse 即时生效。图层: Background(底) → Fuse(中) → Data(顶)。Fuse 100% 时完全盖住背景；调低 Fuse 透出背景，图片可见度 = 背景图片不透明度 × (1 − Fuse 蒙层不透明度)。"
+  "window.note": "frameless/rounded 下次启动生效；背景/fuse 即时生效。图层: Background(底) → Fuse(中) → Data(顶)。Fuse 100% 时完全盖住背景；调低 Fuse 透出背景，图片可见度 = 背景图片不透明度 × (1 − Fuse 蒙层不透明度)。",
+  "background.transparent.name": "透明",
+  "background.transparent.desc": "不绘制背景，仅由 Fuse 半透明蒙层提供底色",
+  "background.image.name": "图片",
+  "background.image.desc": "自定义图片路径，可高斯模糊",
+  "background.wallpaper.name": "桌面壁纸",
+  "background.wallpaper.desc": "自动读取 KDE 桌面壁纸，可高斯模糊",
+  "dashboard.card.host": "主机",
+  "dashboard.card.cpu": "处理器",
+  "dashboard.card.mem": "内存",
+  "dashboard.card.gpu": "GPU",
+  "dashboard.card.pm": "NVIDIA 电源管理",
+  "dashboard.card.disk": "磁盘",
+  "dashboard.card.docker": "容器"
 }

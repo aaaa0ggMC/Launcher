@@ -193,5 +193,18 @@
   "animation.fade": "Fade",
   "animation.slide": "Slide",
   "animation.caption": "Transition effect when switching between sidebar abilities.",
-  "window.note": "frameless/rounded take effect on next launch; background/fuse apply instantly. Layers: Background (bottom) → Fuse (middle) → Data (top). Fuse at 100% fully hides the background; lower it to reveal it. Image visibility = background opacity × (1 − fuse overlay opacity)."
+  "window.note": "frameless/rounded take effect on next launch; background/fuse apply instantly. Layers: Background (bottom) → Fuse (middle) → Data (top). Fuse at 100% fully hides the background; lower it to reveal it. Image visibility = background opacity × (1 − fuse overlay opacity).",
+  "background.transparent.name": "Transparent",
+  "background.transparent.desc": "No background drawn; Fuse translucent overlay provides the base tint.",
+  "background.image.name": "Image",
+  "background.image.desc": "Custom image path, supports Gaussian blur",
+  "background.wallpaper.name": "Desktop Wallpaper",
+  "background.wallpaper.desc": "Automatically reads the KDE desktop wallpaper, supports Gaussian blur",
+  "dashboard.card.host": "Host",
+  "dashboard.card.cpu": "CPU",
+  "dashboard.card.mem": "Memory",
+  "dashboard.card.gpu": "GPU",
+  "dashboard.card.pm": "NVIDIA Power Mgmt",
+  "dashboard.card.disk": "Disk",
+  "dashboard.card.docker": "Containers"
 }
