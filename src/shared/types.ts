@@ -42,6 +42,7 @@ export interface AppAction {
   /** button label, e.g. "开始" / "停止" */
   name: string
   description?: string
+  localized?: Record<string, { name?: string; description?: string }>
   icon?: string
   /** per-action risk override; falls back to entry.security.risk for coloring */
   risk?: RiskLevel

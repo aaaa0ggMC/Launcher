@@ -128,6 +128,30 @@ async function normalizeEntry(raw: Record<string, unknown>): Promise<AppEntry> {
     }
   }
 
+  // Normalize action names/descriptions.
+  const actions = entry.actions as Record<string, Record<string, unknown>> | undefined
+  if (actions) {
+    for (const [, act] of Object.entries(actions)) {
+      for (const afield of ['name', 'description'] as const) {
+        const aval = act[afield]
+        if (aval && typeof aval === 'object') {
+          act[afield] = await resolveLocalized(aval, lang)
+          const norm = act.localized as Record<string, Record<string, string>> | undefined
+          if (!norm) {
+            const loc: Record<string, Record<string, string>> = {}
+            const map = aval as Record<string, string>
+            for (const [code, text] of Object.entries(map)) {
+              if (typeof text === 'string' && text) {
+                loc[code.replace(/_/g, '-')] = { [afield]: text }
+              }
+            }
+            if (Object.keys(loc).length) act.localized = loc
+          }
+        }
+      }
+    }
+  }
+
   return entry as unknown as AppEntry
 }
 

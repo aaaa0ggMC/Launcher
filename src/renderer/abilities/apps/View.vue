@@ -81,8 +81,8 @@ interface ActionForm {
   risk: string
   terminal: boolean
   rootFlag: boolean
-  /** multi-step mode: one command per line; overrides the single exec when non-empty */
   stepsText: string
+  localized?: Record<string, { name?: string; description?: string }>
 }
 
 interface EditForm {
@@ -212,7 +212,7 @@ function openEdit(id: string): void {
     transformerDisplay: entry.transformer_display ?? false,
     actions: Object.entries(entry.actions ?? {}).map(([aid, a]) => ({
       id: aid,
-      name: a.name,
+      name: typeof a.name === 'string' ? a.name : '',
       icon: a.icon ?? '',
       execType: a.exec.type,
       execCwd: a.exec.cwd ?? '',
@@ -220,7 +220,8 @@ function openEdit(id: string): void {
       risk: a.risk ?? 'low',
       terminal: a.exec.terminal ?? false,
       rootFlag: a.exec.root ?? false,
-      stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n')
+      stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n'),
+      localized: a.localized ?? {}
     }))
   }
   editOpen.value = true
@@ -311,7 +312,8 @@ function buildAction(a: ActionForm): AppAction {
       icon: a.icon.trim() || undefined,
       exec: last,
       steps: seq,
-      risk: a.risk as RiskLevel
+      risk: a.risk as RiskLevel,
+      localized: a.localized && Object.keys(a.localized).length ? a.localized : undefined
     }
   }
   return {
@@ -324,7 +326,8 @@ function buildAction(a: ActionForm): AppAction {
       terminal: a.terminal,
       root: a.rootFlag
     },
-    risk: a.risk as RiskLevel
+    risk: a.risk as RiskLevel,
+    localized: a.localized && Object.keys(a.localized).length ? a.localized : undefined
   }
 }
 

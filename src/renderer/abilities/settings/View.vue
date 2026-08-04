@@ -162,7 +162,7 @@ function selectCategory(id: string): void {
           translate(uiLang, 'label.' + activeCategory.label, activeCategory.label)
         }}</span>
         <span v-if="activeCategory.description" class="text-caption on-surface-variant ml-2">
-          {{ translate(uiLang, 'desc.' + activeCategory.description, activeCategory.description) }}
+          {{ translate(uiLang, 'desc.' + activeCategory.id, activeCategory.description) }}
         </span>
       </div>
       <v-row dense>

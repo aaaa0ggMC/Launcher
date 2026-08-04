@@ -2,19 +2,27 @@ import type { AppEntry } from '../shared/types'
 import { listAllApps } from './registry'
 import { launchEntry, launchAction } from './launcher'
 import { listCommands, tryRunCommand } from './commands'
+import { t, te } from './i18n'
 
 function formatEntry(e: AppEntry): string {
-  const lines = [
-    `名称: ${e.name}`,
-    `别名: ${e.alias ?? ''}`,
-    `路径: ${e.path}`,
-    `类型: ${e.exec.type}  →  ${e.exec.command.join(' ')}`,
-    `风险: ${e.security?.risk ?? 'low'}${e.security?.note ? `  (${e.security.note})` : ''}`,
-    `标签: ${[...(e.tags ?? []), ...(e.tags_auto ?? [])].join(', ') || '—'}`
-  ]
   const actions = Object.entries(e.actions ?? {})
+  const lines = [
+    te('cli.formatEntry.name', { val: e.name }),
+    te('cli.formatEntry.alias', { val: e.alias ?? '' }),
+    te('cli.formatEntry.path', { val: e.path }),
+    te('cli.formatEntry.type', { val: e.exec.type, cmd: e.exec.command.join(' ') }),
+    te('cli.formatEntry.risk', {
+      val: e.security?.risk ?? 'low',
+      note: e.security?.note ? `  (${e.security.note})` : ''
+    }),
+    te('cli.formatEntry.tags', {
+      val: [...(e.tags ?? []), ...(e.tags_auto ?? [])].join(', ') || '—'
+    })
+  ]
   if (actions.length) {
-    lines.push(`操作: ${actions.map(([id, a]) => `${id} (${a.name})`).join(', ')}`)
+    lines.push(
+      te('cli.formatEntry.actions', { val: actions.map(([id, a]) => `${id} (${a.name})`).join(', ') })
+    )
   }
   return lines.join('\n')
 }
@@ -42,14 +50,14 @@ export async function cliExec(input: string): Promise<string> {
         grouped.set(ability, list)
       }
       const lines = [
-        '应用命令:',
-        '  <alias>         直接启动应用 (别名/标签/id)',
-        '  <alias> <action>  执行应用的附加操作 (如 stop / restart)',
-        '  launch <alias>  启动应用',
-        '  launch <alias> <action>  执行附加操作',
-        '  info <alias>    查看应用详情',
-        '  list, ls        列出全部应用',
-        '  所有能力命令均可直接输入 (Tab 补全):'
+        t('cli.help.appCmds'),
+        t('cli.help.aliasLaunch'),
+        t('cli.help.aliasAction'),
+        t('cli.help.launch'),
+        t('cli.help.launchAction'),
+        t('cli.help.info'),
+        t('cli.help.list'),
+        t('cli.help.allCmds')
       ]
       for (const [ability, cmdsList] of grouped) {
         lines.push(`[${ability}]`)
@@ -60,24 +68,24 @@ export async function cliExec(input: string): Promise<string> {
     case 'list':
     case 'ls': {
       const { apps } = await listAllApps()
-      if (Object.keys(apps).length === 0) return '(空 — 没有找到应用)'
+      if (Object.keys(apps).length === 0) return t('cli.list.empty')
       const rows = Object.entries(apps).map(([id, e]) => {
         const alias = e.alias && e.alias !== id ? e.alias : ''
         return `  ${(alias || id).padEnd(18)} ${e.name}`
       })
-      return `共 ${rows.length} 个应用:\n${rows.join('\n')}`
+      return `${te('cli.list.count', { n: String(rows.length) })}\n${rows.join('\n')}`
     }
     case 'info': {
       const key = rest[0]
-      if (!key) return '用法: info <alias>'
+      if (!key) return t('cli.info.usage')
       const e = await resolveByAlias(key)
-      if (!e) return `未找到: ${key}`
+      if (!e) return te('cli.launch.notFound', { key })
       return formatEntry(e)
     }
     case 'launch':
     case 'run': {
       const key = rest[0]
-      if (!key) return '用法: launch <alias> [action]'
+      if (!key) return t('cli.launch.usage')
       return await launchByAlias(key, rest[1])
     }
   }
@@ -88,7 +96,7 @@ export async function cliExec(input: string): Promise<string> {
 
   // Bare alias / tag → launch (optionally an action: <alias> <action>).
   const e = await resolveByAlias(cmdRaw)
-  if (!e) return `未知命令: ${cmdRaw} (输入 help 查看全部命令)`
+  if (!e) return te('cli.error.unknown', { cmd: cmdRaw })
   return await launchByAlias(cmdRaw, rest[0])
 }
 
@@ -105,18 +113,27 @@ async function resolveByAlias(key: string): Promise<AppEntry | null> {
 
 async function launchByAlias(key: string, actionId?: string): Promise<string> {
   const e = await resolveByAlias(key)
-  if (!e) return `未找到: ${key}`
+  if (!e) return te('cli.launch.notFound', { key })
   if (actionId) {
     const action = e.actions?.[actionId]
     if (!action) {
-      const known = Object.keys(e.actions ?? {}).join(', ') || '无'
-      return `未找到操作: ${actionId} (可用: ${known})`
+      const known = Object.keys(e.actions ?? {}).join(', ') || '—'
+      return te('cli.launch.actionNotFound', { action: actionId, known })
     }
     const res = await launchAction(e, action)
     return res.ok
-      ? `已执行 ${e.name}.${action.name}${res.pid ? ` (pid ${res.pid})` : ''}`
-      : `执行失败: ${res.error}`
+      ? te('cli.launch.executed', {
+          name: e.name,
+          action: action.name,
+          pid: res.pid ? ` (pid ${res.pid})` : ''
+        })
+      : te('cli.launch.failed', { error: res.error ?? '' })
   }
   const res = await launchEntry(e)
-  return res.ok ? `已启动 ${e.name}${res.pid ? ` (pid ${res.pid})` : ''}` : `启动失败: ${res.error}`
+  return res.ok
+    ? te('cli.launch.started', {
+        name: e.name,
+        pid: res.pid ? ` (pid ${res.pid})` : ''
+      })
+    : te('cli.launch.failedStart', { error: res.error ?? '' })
 }

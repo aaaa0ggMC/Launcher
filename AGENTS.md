@@ -153,6 +153,8 @@ src/
         View.vue       # 页面组件
     components/         # 共享组件 (GameIcon, AbilityIcon, LoadingBar)
     assets/icons/      # game-icon-pack SVG 图标
+    translations/      # 翻译文件: zh.json / en-US.json / index.json
+    i18n.ts            # translate/translateTemplate/localize/useI18n
     styles/
       theme.ts         # Vuetify 主题 token (dark / pureblack)
       global.css       # 全局样式 (排版/卡片/滚动条/按钮)
