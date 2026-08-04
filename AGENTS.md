@@ -1,20 +1,29 @@
 # AGENTS.md
 
-Linux System Cockpit — Arch Linux + KDE Plasma 6 (Wayland) 上的个人系统控制中心。
+Linux System Cockpit — 个人系统控制中心，当前面向 Arch Linux + KDE Plasma 6 (Wayland) 开发。
 Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的完整流程。
+
+> 核心（框架、命令注册表、UI、日志、应用注册表、ft、logs 等）跨平台，不依赖具体发行版/桌面；
+> Linux/发行版相关逻辑都隔离在对应 ability 的 service 与 `scripts/`，保持命令接口不变即可改写适配（见 README「平台适配」）。
 
 ## 1. 环境要求
 
+**跨平台基线**：
+
 - Node.js ≥ 22 (开发机为 v26.5.0)
 - pnpm ≥ 11 (`corepack enable && corepack prepare pnpm@latest --activate`)
-- Arch Linux + KDE Plasma 6 (Wayland)。其他桌面理论上可用但未测试。
-- 系统工具（可选，按需）：
-  - `pkexec` (polkit) — 提权操作必须
-  - `nvidia-smi` — GPU 信息
-  - `docker` — 容器管理
-  - `flatpak` — 包计数
-  - `pacman` — 包计数
-  - `konsole` — 终端启动 (可在 config.json 改)
+- Electron 可运行的桌面环境（当前主要验证于 Arch Linux + KDE Plasma 6 / Wayland）
+
+**Linux / 发行版特定能力的系统工具**（可选，按需；缺失时仅对应能力不可用）：
+
+- `pkexec` (polkit) — 提权操作必须
+- `nvidia-smi` — GPU 信息
+- `docker` — 容器管理
+- `flatpak` — 包计数
+- `pacman` — 镜像源 / 包计数
+- `systemctl` — systemd 服务
+- `plasma-apply-wallpaperimage` / `kscreen-doctor` — 壁纸 / 显示输出 (KDE)
+- `konsole` — 终端启动 (可在 config.json 改)
 
 ## 2. 安装依赖
 
