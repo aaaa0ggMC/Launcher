@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, clipboard } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, access } from 'fs/promises'
 import { getManifest, watchRoots } from './registry'
 import { cliExec } from './cli'
 import { runCommand, listCommands, UnknownCommandError } from './commands'
@@ -10,17 +10,88 @@ function mainWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
 }
 
+/** Expand `$HOME` / `~/` in a config value. */
+function expandHome(p: string): string {
+  if (!p) return p
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2))
+  if (p.includes('$HOME')) return p.replaceAll('$HOME', homedir())
+  return p
+}
+
 /**
  * Resolve the current KDE desktop wallpaper path by parsing
- * ~/.config/plasma-org.kde.plasma.desktop-appletsrc (Image=file://...).
+ * ~/.config/plasma-org.kde.plasma.desktop-appletsrc.
  * Used for the `wallpaper` background preset. Returns null if not found.
+ *
+ * Two wallpaper backends are supported:
+ *  1. Standard `org.kde.image` → `Image=file://...`
+ *  2. kde-wallpaper-engine (com.github.catsout.wallpaperEngineKde) →
+ *     derives the Steam Workshop `preview.jpg` from WallpaperSource /
+ *     SteamLibraryPath + WallpaperWorkShopId (the plugin stores no static
+ *     Image= line; the preview frame is the closest static still).
  */
 async function kdeWallpaperPath(): Promise<string | null> {
   try {
     const cfg = join(homedir(), '.config', 'plasma-org.kde.plasma.desktop-appletsrc')
     const raw = await readFile(cfg, 'utf-8')
-    const m = raw.match(/Image=file:\/\/([^\s#]+)/)
-    return m ? decodeURIComponent(m[1]) : null
+
+    // 1. Standard image wallpaper.
+    const img = raw.match(/Image=file:\/\/([^\s#]+)/)
+    if (img) return decodeURIComponent(img[1])
+
+    // 2. kde-wallpaper-engine: no Image= line, so resolve the workshop
+    //    preview frame.
+    const src = raw.match(/WallpaperSource\[\$e\]=file:([^\n]+)/)
+    const steamLib = raw.match(/SteamLibraryPath\[\$e\]=file:([^\n]+)/)
+    const workshopId = raw.match(/WallpaperWorkShopId=(\d+)/)
+    if (src) {
+      // e.g. file:$HOME/.local/share/Steam/.../content/431960/<id>/scene.json+scene
+      const p = expandHome(src[1].trim())
+      const contentIdx = p.indexOf('steamapps/workshop/content/')
+      if (contentIdx >= 0) {
+        const base = p.slice(0, contentIdx)
+        // scene.json+scene may not exist; the plugin ships preview.jpg.
+        const preview = join(base, 'steamapps', 'workshop', 'content', '431960')
+        const idDir = workshopId ? workshopId[1] : null
+        if (idDir) {
+          const candidate = join(preview, idDir, 'preview.jpg')
+          try {
+            await access(candidate)
+            return candidate
+          } catch {
+            /* preview not shipped for this wallpaper */
+          }
+        }
+      }
+      // Fallback: nearest dir from the source path + preview.jpg.
+      const dir = p.slice(0, p.indexOf('scene.json') >= 0 ? p.indexOf('scene.json') : p.length)
+      const fb = join(dir.trim().replace(/\+scene$/, ''), 'preview.jpg')
+      try {
+        await access(fb)
+        return fb
+      } catch {
+        /* ignore */
+      }
+    }
+    if (steamLib && workshopId) {
+      const base = expandHome(steamLib[1].trim())
+      const candidate = join(
+        base,
+        'steamapps',
+        'workshop',
+        'content',
+        '431960',
+        workshopId[1],
+        'preview.jpg'
+      )
+      try {
+        await access(candidate)
+        return candidate
+      } catch {
+        /* ignore */
+      }
+    }
+    return null
   } catch {
     return null
   }
