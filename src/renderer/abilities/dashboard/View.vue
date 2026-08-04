@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
         <div v-if="stats" class="text-caption on-surface-variant mt-1">
           {{ stats.hostname }} · {{ stats.platform }} ·
           {{
-            translateTemplate(uiLang, 'dashboard.uptimeLabel', { time: fmtUptime(stats.uptime) })
+            translateTemplate(uiLang, 'dashboard.uptimeLabel', { time: fmtUptime(stats.uptime, uiLang) })
           }}
         </div>
       </div>
@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="info-cell">
                     <span class="info-label">{{ translate(uiLang, 'dashboard.uptime') }}</span>
-                    <span class="info-value">{{ fmtUptime(stats?.uptime ?? 0) }}</span>
+                    <span class="info-value">{{ fmtUptime(stats?.uptime ?? 0, uiLang) }}</span>
                   </div>
                 </div>
                 <v-divider class="my-2" />

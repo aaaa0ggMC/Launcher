@@ -10,13 +10,18 @@ export function fmtBytes(n: number): string {
   return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`
 }
 
-export function fmtUptime(sec: number): string {
+export function fmtUptime(sec: number, locale = 'en'): string {
   const d = Math.floor(sec / 86400)
   const h = Math.floor((sec % 86400) / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (d > 0) return `${d}天 ${h}小时`
-  if (h > 0) return `${h}小时 ${m}分`
-  return `${m}分钟`
+  if (locale === 'zh') {
+    if (d > 0) return `${d}天 ${h}小时`
+    if (h > 0) return `${h}小时 ${m}分`
+    return `${m}分钟`
+  }
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
 }
 
 export type RiskColor = 'success' | 'warning' | 'error'
