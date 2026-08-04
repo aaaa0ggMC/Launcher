@@ -200,6 +200,21 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 通过 Electron `webFrame.setZoomFactor()` 实现真正的等比缩放 (不是只改 rem)。
 设置页滑块拖动时只更新数值，松手 (`@end`) 才应用缩放 + 持久化。
 
+### 新增一个 Ability
+
+每个 ability 由三个可选的注入点组成，按需添加：
+
+1. **渲染端页面** `src/renderer/abilities/<id>/index.ts`（`Ability` 对象）+ `View.vue`
+2. **主进程命令** `src/main/commands/<id>.ts`（导出 `CommandSpec[]`），并在 `src/main/commands/index.ts` 加一行 import + 展开
+3. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
+
+然后在 `config/abilities.yaml` 的 `abilities` 列表注册（`id`/`order`/`enabled`）。
+
+**依赖原则**：
+- settings 是自身能力，其注入项不能调用其他能力已移除的命令（跨能力设置项应由对应能力自己注入）
+- 渲染端页面不应 `import` 其他 ability 模块
+- 删除能力 = 删文件夹 + 改 yaml + 删命令文件 + 移除 `commands/index.ts` 里的 import
+
 ## 10. 国际化 (i18n)
 
 翻译文件位于 `src/renderer/translations/`，目前支持 `zh`（中文）和 `en-US`（美国英语）。

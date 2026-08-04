@@ -12,8 +12,8 @@ Arch Linux + KDE Plasma 6 (Wayland) 上的个人系统控制中心。
 - Docker 容器管理
 - NVIDIA GPU 信息与电源管理切换
 - 自启动项管理
-- 自定义仪表盘（gridstack 布局持久化）
-- 侧栏能力动态加载（`config/abilities.yaml` 驱动）
+- 自定义仪表盘（gridstack 布局持久化，可锁定布局以便选中复制）
+- 侧栏能力动态加载（`config/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
 - 国际化 / 多语言支持（中文 + English，应用条目可配 `zh` / `en_US`）
 
 ## 环境要求

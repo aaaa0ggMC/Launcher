@@ -31,7 +31,9 @@ Linux System Cockpit 是运行在 Arch Linux + KDE Plasma 6 (Wayland) 上的个�
 
 **每个操作都是一个注册命令 `<ability>.<command>`**，UI 按钮与 CLI REPL 共用同一 handler：
 
-- 注册点：`src/main/commands.ts` (`register(...)`)
+- 注册点：`src/main/commands/<ability>.ts`，每个能力一个文件导出 `CommandSpec[]`，`src/main/commands/index.ts` 汇总 `registerAll(...)`。**新增能力 = 加一个命令文件 + 一行 import，不需要改中央总控**
+- 分发：`commands/registry.ts` 持有 Map，`runCommand`（UI 路径）与 `tryRunCommand`（CLI 路径）共用
+- 未注册命令：`runCommand` 抛 `UnknownCommandError`，`ipc.ts` 广播 `cockpit:command-error` → 渲染端弹错误 toast
 - UI 路径：`window.cockpit.command('mirror.toggle', { name, enable })` → IPC `command:run` → `runCommand`
 - CLI 路径：`mirror.toggle --name USTC --enable true` → `cliExec` → `tryRunCommand`
 
@@ -149,7 +151,11 @@ src/
   main/               # Electron 主进程
     index.ts          # BrowserWindow + 单例 + IPC 接线
     ipc.ts            # window.* / dialog.* / clipboard.* 等 chrome IPC
-    commands.ts       # 命令注册表 (CLI-first 核心)
+    commands/          # 能力注入的命令注册表 (CLI-first 核心)
+      types.ts         # CommandSpec / CommandContext 契约
+      registry.ts      # 命令 Map + runCommand/tryRunCommand/parseArgs
+      index.ts         # 汇总各能力命令并 registerAll
+      <ability>.ts     # 每能力一个文件，导出 CommandSpec[]
     registry.ts       # abilities.yaml + apps.json 读写 / 文件监听
     scanner.ts        # 应用扫描 (dedup 包装脚本 vs 目录)
     launcher.ts       # exec spec → spawn argv / monitor 输出流
