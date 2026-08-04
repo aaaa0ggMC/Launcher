@@ -46,7 +46,7 @@ export async function cliExec(input: string): Promise<string> {
       for (const c of cmds) {
         const ability = c.name.split('.')[0]
         const list = grouped.get(ability) ?? []
-        list.push(`  ${c.name.padEnd(24)} ${c.description}`)
+        list.push(`  ${c.name.padEnd(24)} ${t(c.name + '.desc', c.description)}`)
         grouped.set(ability, list)
       }
       const lines = [
