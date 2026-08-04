@@ -316,5 +316,6 @@
   "hardware.pm-toggle.desc": "Toggle 0↔1 (pkexec, reboot required)",
   "display.wallpapers.desc": "List wallpapers (--dir)",
   "display.apply.desc": "Apply a wallpaper (--path)",
-  "display.outputs.desc": "List display outputs"
+  "display.outputs.desc": "List display outputs",
+  "settings.languageCaption": "Switch language — reloads the page to apply."
 }
