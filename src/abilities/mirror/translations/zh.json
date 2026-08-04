@@ -1,0 +1,19 @@
+{
+  "ability.mirror.name": "软件源",
+  "ability.mirror.category": "系统",
+  "mirror.heading": "软件源",
+  "mirror.subtitle": "Arch Linux 镜像源 · 已启用 {n} 个",
+  "mirror.test": "测速",
+  "mirror.timeout": "超时",
+  "mirror.enabled": "已启用",
+  "mirror.disabled": "已禁用",
+  "mirror.mdHeading": "## 软件源",
+  "mirror.mdEnabledCount": "已启用 {n} / {total} 个",
+  "mirror.mdEnabled": "✅ 启用",
+  "mirror.mdDisabled": "⛔ 未启用",
+  "mirror.mdTestOk": "  - 测速: {latency}ms · {speed}",
+  "mirror.mdTestFail": "  - 测速: 失败 — {error}",
+  "mirror.get.desc": "当前镜像源列表与状态",
+  "mirror.toggle.desc": "启用/禁用镜像源 (--name --enable true|false, pkexec)",
+  "mirror.test.desc": "测试所有镜像源连通性与速度"
+}

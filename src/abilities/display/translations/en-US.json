@@ -1,0 +1,5 @@
+{
+  "display.wallpapers.desc": "List wallpapers (--dir)",
+  "display.apply.desc": "Apply a wallpaper (--path)",
+  "display.outputs.desc": "List display outputs"
+}

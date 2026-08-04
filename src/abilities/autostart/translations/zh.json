@@ -1,0 +1,12 @@
+{
+  "ability.autostart.name": "启动项",
+  "ability.autostart.category": "系统",
+  "autostart.heading": "启动项",
+  "autostart.subtitle": "管理 ~/.config/autostart 中的自启动项",
+  "autostart.enabled": "已启用",
+  "autostart.disabled": "已禁用",
+  "autostart.empty": "没有自启动项",
+  "autostart.emptyText": "~/.config/autostart 中没有 .desktop 文件。",
+  "autostart.list.desc": "列出开机自启动项",
+  "autostart.toggle.desc": "启用/禁用启动项 (--file --hidden true|false)"
+}

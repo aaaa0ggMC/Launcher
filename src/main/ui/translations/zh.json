@@ -1,0 +1,22 @@
+{
+  "app.brandSub": "System Control Center",
+  "search.placeholder": "搜索能力 / 应用别名",
+  "search.appsHeader": "应用",
+  "search.noMatch": "无匹配应用",
+  "appbar.selectTitle": "选择一个功能",
+  "appbar.selectText": "从左侧边栏选择功能，或使用顶部搜索框。",
+  "confirm.title": "确认启动「{name}」？",
+  "confirm.detected": "检测:",
+  "confirm.note": "备注:",
+  "confirm.aboutToLaunch": "即将启动「{name}」",
+  "confirm.ack": "知道了，以后不再提醒",
+  "confirm.cancel": "取消",
+  "confirm.launch": "启动",
+  "copy.failed": "(无法读取页面内容)",
+  "copy.copied": "已复制「{name}」为 Markdown",
+  "copy.exported": "由 Linux Cockpit 导出",
+  "appbar.copyTooltip": "复制当前页面为 Markdown",
+  "sidebar.expand": "展开侧边栏",
+  "sidebar.collapse": "收起侧边栏",
+  "commandError.notFound": "功能「{name}」不存在或已被移除"
+}

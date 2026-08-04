@@ -1,0 +1,15 @@
+{
+  "ability.systemd.name": "Services",
+  "ability.systemd.category": "System",
+  "systemd.heading": "Systemd Services",
+  "systemd.subtitle": "User services (systemctl --user)",
+  "systemd.refresh": "Refresh",
+  "systemd.search": "Search services",
+  "systemd.showAll": "Show all (including inactive)",
+  "systemd.restart": "Restart",
+  "systemd.stop": "Stop",
+  "systemd.start": "Start",
+  "systemd.empty": "No matching services",
+  "systemd.list.desc": "List user systemd services",
+  "systemd.action.desc": "Start/stop/restart a service (--name --action)"
+}

@@ -1,0 +1,4 @@
+{
+  "background.transparent.name": "透明",
+  "background.transparent.desc": "不绘制背景，仅由 Fuse 半透明蒙层提供底色"
+}

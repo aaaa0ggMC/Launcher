@@ -2,13 +2,14 @@ import { app, shell, BrowserWindow, protocol } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { registerIpc, startWatching } from './ipc'
-import { registerIconProtocol } from './icon-protocol'
-import { loadExternalAbilities } from './ability-loader'
-import { setRegistryBroadcast } from './registry'
-import { setOutputBroadcast } from './launcher'
-import { readJson } from './util'
-import { CONFIG_JSON } from './paths'
+import { registerIpc, startWatching } from './process/ipc'
+import { registerIconProtocol } from './process/icon-protocol'
+import { loadExternalAbilities } from './process/ability-loader'
+import { registerAbilityCommands } from './process/abilities-loader'
+import { setRegistryBroadcast } from '../abilities/apps/registry'
+import { setOutputBroadcast } from '../abilities/apps/launcher'
+import { readJson } from './process/util'
+import { CONFIG_JSON } from './process/paths'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -107,6 +108,8 @@ if (!gotLock) {
     registerIconProtocol()
     setRegistryBroadcast(broadcast)
     setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
+    // Register every built-in ability's commands before any IPC dispatch.
+    registerAbilityCommands()
     registerIpc()
     startWatching()
 

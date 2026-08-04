@@ -1,0 +1,12 @@
+{
+  "ability.autostart.name": "Autostart",
+  "ability.autostart.category": "System",
+  "autostart.heading": "Autostart",
+  "autostart.subtitle": "Manage ~/.config/autostart entries",
+  "autostart.enabled": "Enabled",
+  "autostart.disabled": "Disabled",
+  "autostart.empty": "No autostart entries",
+  "autostart.emptyText": "No .desktop files found in ~/.config/autostart.",
+  "autostart.list.desc": "List autostart entries",
+  "autostart.toggle.desc": "Enable/disable an autostart entry (--file --hidden true|false)"
+}

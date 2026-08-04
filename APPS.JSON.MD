@@ -148,7 +148,7 @@ CLI 执行操作：`launch <alias> <action>` 或 `launch.action --root ~/Apps --
 | `file/abs/path` | 同上（简写，都按绝对处理） |
 | 留空 / `auto` | 兜底 😎 |
 
-找不到的图标名也会回落 😎。图标名列表见 `src/renderer/assets/game-icon-pack/Icon_Catalog.json`。
+找不到的图标名也会回落 😎。图标名列表见 `src/main/ui/assets/game-icon-pack/Icon_Catalog.json`。
 UI 里编辑对话框的图标字段旁有 📁 按钮，可弹原生文件选择器。
 
 ---

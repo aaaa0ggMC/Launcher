@@ -1,16 +1,22 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
   "include": [
-    "src/renderer/**/*",
-    "src/renderer/**/*.vue",
+    "src/main/ui/**/*",
+    "src/main/ui/**/*.vue",
+    "src/abilities/**/*",
+    "src/background/**/*",
     "src/shared/**/*",
     "src/preload/*.d.ts"
   ],
+  "exclude": ["src/abilities/*/commands.ts"],
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": ["src/renderer/*"],
+      "@ui/*": ["src/main/ui/*"],
+      "@abilities": ["src/abilities/index.ts"],
+      "@abilities/*": ["src/abilities/*"],
+      "@background/*": ["src/background/*"],
       "@shared/*": ["src/shared/*"]
     }
   }

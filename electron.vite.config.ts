@@ -25,12 +25,21 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
+    // UI framework lives in src/main/ui (part of the "main" program shell).
+    root: resolve('src/main/ui'),
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer'),
+        '@ui': resolve('src/main/ui'),
+        '@abilities': resolve('src/abilities'),
+        '@background': resolve('src/background'),
         '@shared': resolve('src/shared')
       }
     },
-    plugins: [vue()]
+    plugins: [vue()],
+    build: {
+      rollupOptions: {
+        input: resolve('src/main/ui/index.html')
+      }
+    }
   }
 })

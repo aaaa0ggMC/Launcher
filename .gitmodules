@@ -1,3 +1,3 @@
 [submodule "src/renderer/assets/game-icon-pack"]
-	path = src/renderer/assets/game-icon-pack
+	path = src/main/ui/assets/game-icon-pack
 	url = https://github.com/Nieobie/game-icon-pack

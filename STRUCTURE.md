@@ -9,21 +9,27 @@ Linux System Cockpit 是运行在 Arch Linux + KDE Plasma 6 (Wayland) 上的个�
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  main  (Electron 主进程)                                  │
-│  · 命令注册表 (CLI-first) / IPC 服务                       │
-│  · launcher (spawn) / registry / scanner / mirror / 等等   │
+│  main  (主程序)                                           │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  process  (Electron 主进程)                         │  │
+│  │  · 命令注册表 (CLI-first) / IPC 服务 / 加载器        │  │
+│  │  · launcher / registry / manifest / 等等            │  │
+│  └────────────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  ui  (渲染 UI 框架: Vue3 + Vuetify)                 │  │
+│  │  · App.vue 侧栏 + app-bar + keep-alive 宿主        │  │
+│  └────────────────────────────────────────────────────┘  │
 ├──────────────────────────────────────────────────────────┤
-│  preload (contextBridge)                                  │
-│  · window.cockpit.*  —— 一组 thin wrapper，全部走 command()│
+│  abilities  所有能力 (页面 + 命令 + 类型 + 翻译 自包含)   │
+│  background 所有背景 (每种类型一个文件夹)                 │
 ├──────────────────────────────────────────────────────────┤
-│  renderer (Vue 3 + Vuetify)                               │
-│  · App.vue 侧栏 + app-bar + keep-alive 宿主               │
-│  · abilities/* 动态能力页面                                │
+│  preload (contextBridge) · window.cockpit.*              │
 └──────────────────────────────────────────────────────────┘
 ```
 
 - 渲染进程 sandbox + contextIsolation + nodeIntegration=false。
 - preload 只暴露白名单 API；所有能力操作经由 `command(name, args)` 走主进程命令注册表。
+- **加载模式**：主进程的 `abilities-loader.ts` 汇总所有 `src/abilities/*/commands.ts`；渲染端 `src/abilities/index.ts` 汇总所有能力元数据并暴露给单个能力（跨范围控制）。
 
 ---
 
@@ -31,8 +37,8 @@ Linux System Cockpit 是运行在 Arch Linux + KDE Plasma 6 (Wayland) 上的个�
 
 **每个操作都是一个注册命令 `<ability>.<command>`**，UI 按钮与 CLI REPL 共用同一 handler：
 
-- 注册点：`src/main/commands/<ability>.ts`，每个能力一个文件导出 `CommandSpec[]`，`src/main/commands/index.ts` 汇总 `registerAll(...)`。**新增能力 = 加一个命令文件 + 一行 import，不需要改中央总控**
-- 分发：`commands/registry.ts` 持有 Map，`runCommand`（UI 路径）与 `tryRunCommand`（CLI 路径）共用
+- 注册点：`src/abilities/<id>/commands.ts`（能力自己的命令），由 `src/main/process/abilities-loader.ts` 用 `import.meta.glob` 自动收集并 `registerAll(...)`。**新增能力 = 建目录，不需要改中央总控**
+- 分发：`src/main/process/commands/registry.ts` 持有 Map，`runCommand`（UI 路径）与 `tryRunCommand`（CLI 路径）共用
 - 未注册命令：`runCommand` 抛 `UnknownCommandError`，`ipc.ts` 广播 `cockpit:command-error` → 渲染端弹错误 toast
 - UI 路径：`window.cockpit.command('mirror.toggle', { name, enable })` → IPC `command:run` → `runCommand`
 - CLI 路径：`mirror.toggle --name USTC --enable true` → `cliExec` → `tryRunCommand`
@@ -55,19 +61,25 @@ CLI REPL 还支持：`<alias>` 直接启动、`<alias> <action>` 执行操作、
 
 ---
 
-## 3. Ability 动态加载
+## 3. Ability 自包含结构
 
-侧栏由 `config/abilities.yaml` 驱动；每个能力一个目录 `src/renderer/abilities/<id>/`：
+侧栏由 `config/abilities.yaml` 驱动；每个能力一个目录 `src/abilities/<id>/`，页面、命令、类型、翻译全部内聚在一起：
 
 ```
 abilities/<id>/
-  index.ts   # 元数据: id/name/icon/category/keepAlive/component(async)
-  View.vue   # 页面组件
+  index.ts        # 统筹加载: 元数据 id/name/icon/category/keepAlive/component(async)/settings
+  View.vue        # 页面组件 (可省略 → 纯后端能力, 如 display)
+  commands.ts     # 主进程命令 CommandSpec[] (由 main 的 abilities-loader 自动注册)
+  types.ts        # 该能力领域类型 (不放进 shared)
+  translations/   # 该能力自己的翻译文件 (zh.json / en-US.json)
+  <子文件>         # service.ts / items/ / panels/ 等
 ```
 
-- 渲染端 `import.meta.glob` eager 收集 `index.ts`（只有元数据），`View.vue` 用 `defineAsyncComponent` 首次显示时才加载（code-split）。
+- 渲染端 `src/abilities/index.ts`（加载器）用 `import.meta.glob` eager 收集各能力 `index.ts`（只有元数据），`View.vue` 用 `defineAsyncComponent` 首次显示时才加载（code-split）。
+- 主进程 `src/main/process/abilities-loader.ts` 用 `import.meta.glob` 收集各能力 `commands.ts` 并注册进命令表。
 - 侧栏顺序 / 启用 / 各能力 config 都由 `abilities.yaml` 控制。
-- 新增能力 = 建目录 + 改 yaml。
+- 新增能力 = 建目录（可只放 commands.ts，如 display）+ 改 yaml；删除能力 = 删目录 + 改 yaml。
+- 跨范围控制：`App.vue` 通过 `provide('cockpit:abilities', { list, current, configs, launch, launchAction, listCommands })` 把加载到的一切暴露给每个能力。
 
 ---
 
@@ -81,7 +93,7 @@ Fuse        —— 半透明蒙层: rgba(var(--v-theme-background), fuseAlpha)  
 Background  —— 透明 / 自定义图片 / KDE 壁纸 (可高斯模糊)               (z-index -2)
 ```
 
-- **BackgroundLayer**（`components/BackgroundLayer.vue`）：注册表驱动（`backgrounds/index.ts`），预制 `transparent` / `image` / `wallpaper`，各自独立组件。`image` 用 `window.backgroundImage` 路径；`wallpaper` 由主进程解析 KDE 壁纸（`window:wallpaper` IPC）。
+- **BackgroundLayer**（`main/ui/components/BackgroundLayer.vue`）：加载器驱动（`src/background/index.ts` globs 每个背景类型文件夹），每种背景一个文件夹 `src/background/<type>/`（`index.ts` 导出 BackgroundDef + `View.vue`），预制 `transparent` / `image` / `wallpaper`。`image` 用 `window.backgroundImage` 路径；`wallpaper` 由主进程解析 KDE 壁纸（`window:wallpaper` IPC）。
 - **FuseLayer**：当前纯色背景的载体。fuse 100% 完全盖住背景；越低背景透得越多。`图片可见度 = backgroundOpacity × (1 − fuseAlpha)`。
 - 配置（`window.*`，设置→窗口）：`background` / `backgroundImage` / `backgroundOpacity` / `fuseAlpha` / `fuseBlur` / `frameless` / `rounded`。除 frameless/rounded 外均实时生效（`config.set` 广播 `cockpit:config-changed`）。
 - 窗口透明逻辑：`transparent = frameless && (rounded || fuseAlpha < 1)`。
@@ -91,11 +103,11 @@ Background  —— 透明 / 自定义图片 / KDE 壁纸 (可高斯模糊)      
 
 ## 5. 图标系统
 
-统一 icon 语法（`src/renderer/icon.ts` 的 `parseIcon`），条目 / 操作按钮 / 侧栏通用：
+统一 icon 语法（`src/main/ui/icon.ts` 的 `parseIcon`），条目 / 操作按钮 / 侧栏通用：
 
 | 语法 | 含义 |
 |---|---|
-| `default/<名字>[/padding]` | game-icon-pack 图标（`assets/game-icon-pack/svg/{no-padding,padding}/...`，懒加载） |
+| `default/<名字>[/padding]` | game-icon-pack 图标（`main/ui/assets/game-icon-pack/svg/{no-padding,padding}/...`，懒加载） |
 | `emoji/<emoji>` | 直接展示 emoji |
 | `file//abs/path` 或 `file/abs/path` | 本地图片，走 `cockpit-icon://` 协议 |
 | `gi:<name>` | 侧栏旧格式（`assets/icons/` 精选） |
@@ -148,37 +160,45 @@ apps.json 条目可配 `transformer` + `transformer_display`：
 
 ```
 src/
-  main/               # Electron 主进程
-    index.ts          # BrowserWindow + 单例 + IPC 接线
-    ipc.ts            # window.* / dialog.* / clipboard.* 等 chrome IPC
-    commands/          # 能力注入的命令注册表 (CLI-first 核心)
-      types.ts         # CommandSpec / CommandContext 契约
-      registry.ts      # 命令 Map + runCommand/tryRunCommand/parseArgs
-      index.ts         # 汇总各能力命令并 registerAll
-      <ability>.ts     # 每能力一个文件，导出 CommandSpec[]
-    registry.ts       # abilities.yaml + apps.json 读写 / 文件监听
-    scanner.ts        # 应用扫描 (dedup 包装脚本 vs 目录)
-    launcher.ts       # exec spec → spawn argv / monitor 输出流
-    security.ts       # 目录内容风险扫描
-    mirror.ts / systemd.ts / docker.ts / gpu.ts / system.ts / autostart.ts / display.ts
-    i18n.ts           # 主进程翻译 (t/te, 读取 renderer 翻译文件)
-    icon-protocol.ts  # cockpit-icon:// 协议
-    ability-loader.ts # 外部后端能力 (esbuild 即时编译)
+  main/               # 主程序 (Electron 主进程 + UI 框架)
+    index.ts          # Electron 入口: BrowserWindow + 单例 + IPC 接线
+    process/          # 主进程 (后端)
+      ipc.ts          # window.* / dialog.* / clipboard.* 等 chrome IPC
+      cli.ts          # CLI REPL
+      commands/       # 命令注册表 (CLI-first 核心)
+        types.ts      # CommandSpec / CommandContext 契约
+        registry.ts   # 命令 Map + runCommand/tryRunCommand/parseArgs
+      abilities-loader.ts  # 加载器: globs src/abilities/*/commands.ts → registerAll
+      ability-loader.ts    # 外部用户能力 (esbuild 即时编译)
+      manifest.ts     # abilities.yaml 读取
+      paths.ts / util.ts / i18n.ts / icon-protocol.ts
+    ui/               # 渲染 UI 框架
+      App.vue         # 三层宿主 + 侧栏 + app-bar + 弹窗 (提供 cockpit:* 上下文)
+      main.ts         # Vuetify 初始化
+      components/     # AbilityIcon / GameIcon / BackgroundLayer / FuseLayer / TransformerModal / UiNode / LoadingBar
+      icon.ts         # icon 语法解析
+      transformer.ts  # ui 组件工厂 + UiNode 描述
+      translations/   # 框架层翻译: zh.json / en-US.json / index.json
+      i18n.ts         # translate/translateTemplate/localize/useI18n (合并各模块翻译)
+      styles/         # theme.ts (Material tokens) + global.css
+  abilities/          # 所有能力 (自包含)
+    index.ts          # 加载器: globs abilities/*/index.ts, 暴露列表 + settings 聚合
+    types.ts          # Ability / AbilitySetting 契约
+    <id>/             # 每个能力
+      index.ts        # 统筹加载 (元数据)
+      View.vue        # 页面 (可省略)
+      commands.ts     # 主进程命令 (可省略)
+      types.ts        # 领域类型 (可省略)
+      translations/   # 该能力翻译 (可省略)
+      <子文件>        # service.ts / items/ / panels/ 等
+  background/         # 所有背景 (每种类型一个文件夹)
+    index.ts          # 加载器: globs background/*/index.ts
+    types.ts          # BackgroundDef
+    <type>/           # index.ts (BackgroundDef) + View.vue (+ translations/)
   preload/
     index.ts          # contextBridge → window.cockpit.*
     index.d.ts
-  renderer/
-    App.vue           # 三层宿主 + 侧栏 + app-bar + 弹窗
-    main.ts           # Vuetify 初始化
-    abilities/<id>/   # 每个能力 (index.ts + View.vue)
-    backgrounds/      # Background 预制组件注册表
-    components/       # AbilityIcon / GameIcon / BackgroundLayer / FuseLayer / TransformerModal / UiNode / LoadingBar
-    icon.ts           # icon 语法解析
-    transformer.ts    # ui 组件工厂 + UiNode 描述
-    translations/      # 翻译文件: zh.json / en-US.json / index.json
-    i18n.ts            # translate/translateTemplate/localize/useI18n
-    styles/           # theme.ts (Material tokens) + global.css
-  shared/types.ts     # 跨进程共享类型
+  shared/types.ts     # 仅框架契约 (AbilitiesManifest / LaunchResult / ProcOutputEvent)
 config/
   config.json / abilities.yaml
 scripts/              # pkexec helper 脚本 + polkit 规则

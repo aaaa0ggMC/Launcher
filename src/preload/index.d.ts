@@ -1,16 +1,11 @@
-import type {
-  AbilitiesManifest,
-  AppEntry,
-  AutostartEntry,
-  DisplayOutput,
-  DockerContainer,
-  GpuInfo,
-  LaunchResult,
-  MirrorInfo,
-  SystemStats,
-  SystemdUnit,
-  WallpaperFile
-} from '../shared/types'
+import type { AbilitiesManifest, LaunchResult } from '../shared/types'
+import type { AppEntry } from '../abilities/apps/types'
+import type { AutostartEntry } from '../abilities/autostart/types'
+import type { DisplayOutput } from '../abilities/display/types'
+import type { DockerContainer, GpuInfo, SystemStats } from '../abilities/dashboard/types'
+import type { MirrorInfo } from '../abilities/mirror/types'
+import type { SystemdUnit } from '../abilities/systemd/types'
+import type { WallpaperFile } from '../abilities/display/types'
 
 export interface AppsListResult {
   roots: { path: string; watch: boolean }[]

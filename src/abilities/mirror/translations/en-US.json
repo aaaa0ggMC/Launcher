@@ -1,0 +1,19 @@
+{
+  "ability.mirror.name": "Mirrors",
+  "ability.mirror.category": "System",
+  "mirror.heading": "Mirrors",
+  "mirror.subtitle": "Arch Linux mirrors · {n} enabled",
+  "mirror.test": "Test",
+  "mirror.timeout": "Timeout",
+  "mirror.enabled": "Enabled",
+  "mirror.disabled": "Disabled",
+  "mirror.mdHeading": "## Mirrors",
+  "mirror.mdEnabledCount": "{n} / {total} enabled",
+  "mirror.mdEnabled": "✅ Enabled",
+  "mirror.mdDisabled": "⛔ Disabled",
+  "mirror.mdTestOk": "  - Test: {latency}ms · {speed}",
+  "mirror.mdTestFail": "  - Test: failed — {error}",
+  "mirror.get.desc": "Current mirror list and status",
+  "mirror.toggle.desc": "Enable/disable a mirror (--name --enable true|false, pkexec)",
+  "mirror.test.desc": "Test all mirrors for connectivity and speed"
+}

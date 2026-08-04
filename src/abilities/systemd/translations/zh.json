@@ -1,0 +1,15 @@
+{
+  "ability.systemd.name": "服务",
+  "ability.systemd.category": "系统",
+  "systemd.heading": "Systemd 服务",
+  "systemd.subtitle": "用户服务 (systemctl --user)",
+  "systemd.refresh": "刷新",
+  "systemd.search": "搜索服务",
+  "systemd.showAll": "显示全部 (含未激活)",
+  "systemd.restart": "重启",
+  "systemd.stop": "停止",
+  "systemd.start": "启动",
+  "systemd.empty": "没有匹配的服务",
+  "systemd.list.desc": "列出用户 systemd 服务",
+  "systemd.action.desc": "启动/停止/重启服务 (--name --action)"
+}
