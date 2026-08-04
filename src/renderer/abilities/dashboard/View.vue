@@ -30,6 +30,7 @@ const firstLoaded = ref(false)
 const loading = ref(false)
 const error = ref('')
 const gridEl = ref<HTMLElement | null>(null)
+const locked = ref(false)
 
 let grid: GridStack | null = null
 let timer: ReturnType<typeof setInterval> | null = null
@@ -137,11 +138,40 @@ async function initGrid(): Promise<void> {
   )
   if (!g) return
   grid = g
+  applyLock()
   const saved = await loadSavedLayout()
   if (saved) g.load(saved)
   g.on('change', () => {
     void window.cockpit.command('dashboard.set-layout', { layout: g.save(false) })
   })
+}
+
+/** Disable drag/resize so text can be selected/copied; persists to config. */
+async function toggleLock(): Promise<void> {
+  locked.value = !locked.value
+  applyLock()
+  await window.cockpit.setConfig({
+    dashboard: { ...dashConfig.value, locked: locked.value }
+  })
+}
+
+/** Read dashboard config (locked) from config.json. */
+const dashConfig = ref<Record<string, unknown>>({})
+async function loadLockConfig(): Promise<void> {
+  const cfg = await window.cockpit.getConfig()
+  const dash = (cfg?.dashboard as Record<string, unknown> | undefined) ?? {}
+  dashConfig.value = dash
+  locked.value = dash.locked === true
+  applyLock()
+}
+
+function applyLock(): void {
+  if (!grid) return
+  if (locked.value) {
+    grid.disable()
+  } else {
+    grid.enable()
+  }
 }
 
 function onResize(): void {
@@ -159,6 +189,7 @@ onMounted(async () => {
   // grid init must wait until the container has a real width
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  await loadLockConfig()
   await initGrid()
   timer = setInterval(poll, 4000)
 })
@@ -239,18 +270,33 @@ onBeforeUnmount(() => {
         <div v-if="stats" class="text-caption on-surface-variant mt-1">
           {{ stats.hostname }} · {{ stats.platform }} ·
           {{
-            translateTemplate(uiLang, 'dashboard.uptimeLabel', { time: fmtUptime(stats.uptime, uiLang) })
+            translateTemplate(uiLang, 'dashboard.uptimeLabel', {
+              time: fmtUptime(stats.uptime, uiLang)
+            })
           }}
         </div>
       </div>
-      <v-btn
-        variant="tonal"
-        prepend-icon="mdi-refresh"
-        :loading="loading && firstLoaded"
-        @click="refresh"
-      >
-        {{ translate(uiLang, 'dashboard.refresh') }}
-      </v-btn>
+      <div class="d-flex align-center ga-2">
+        <v-btn
+          icon
+          variant="tonal"
+          :color="locked ? 'warning' : ''"
+          :title="
+            locked ? translate(uiLang, 'dashboard.unlock') : translate(uiLang, 'dashboard.lock')
+          "
+          @click="toggleLock"
+        >
+          <v-icon>{{ locked ? 'mdi-lock' : 'mdi-lock-open-variant-outline' }}</v-icon>
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-refresh"
+          :loading="loading && firstLoaded"
+          @click="refresh"
+        >
+          {{ translate(uiLang, 'dashboard.refresh') }}
+        </v-btn>
+      </div>
     </div>
 
     <LoadingBar
@@ -612,7 +658,11 @@ onBeforeUnmount(() => {
         }}</v-card-title>
         <v-card-text class="text-body-2">
           <span
-            v-html="translateTemplate(uiLang, 'dashboard.pmDialogText', { path: '<code>/etc/modprobe.d/nvidia-pm-override.conf</code>' })"
+            v-html="
+              translateTemplate(uiLang, 'dashboard.pmDialogText', {
+                path: '<code>/etc/modprobe.d/nvidia-pm-override.conf</code>'
+              })
+            "
           ></span>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">

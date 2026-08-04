@@ -323,5 +323,7 @@
   "desc.dashboard.dashboard": "总览页卡片排版",
   "animation.slideUp": "上滑",
   "animation.zoom": "缩放",
-  "animation.flip": "翻转"
+  "animation.flip": "翻转",
+  "dashboard.lock": "锁定布局 (可选中复制文字)",
+  "dashboard.unlock": "解锁布局 (可拖动调整)"
 }

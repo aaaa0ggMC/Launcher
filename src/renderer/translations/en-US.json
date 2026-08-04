@@ -323,5 +323,7 @@
   "desc.dashboard.dashboard": "Dashboard card layout",
   "animation.slideUp": "Slide Up",
   "animation.zoom": "Zoom",
-  "animation.flip": "Flip"
+  "animation.flip": "Flip",
+  "dashboard.lock": "Lock layout (enable text selection)",
+  "dashboard.unlock": "Unlock layout (drag to rearrange)"
 }
