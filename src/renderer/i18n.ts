@@ -42,8 +42,18 @@ export function localize(
   field: 'name' | 'description' | 'alias',
   lang: string
 ): string | undefined {
-  const loc = entry.localized?.[lang] ?? entry.localized?.zh
-  return loc?.[field] ?? entry[field]
+  // preferred language → en-US fallback → first available → base field
+  const direct = entry.localized?.[lang]?.[field]
+  if (direct) return direct
+  const fallback = entry.localized?.['en-US']?.[field] ?? entry.localized?.['en_US']?.[field]
+  if (fallback) return fallback
+  if (entry.localized) {
+    for (const val of Object.values(entry.localized)) {
+      const v = val[field]
+      if (v) return v
+    }
+  }
+  return entry[field]
 }
 
 export function useI18n(lang: Ref<string>) {

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'fs/promises'
 import chokidar from 'chokidar'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import type { AbilitiesManifest, AppEntry, AppRegistryFile } from '../shared/types'
-import { ABILITIES_YAML } from './paths'
+import { ABILITIES_YAML, CONFIG_JSON } from './paths'
 import { readJson, writeJsonAtomic } from './util'
 
 export interface SearchRoot {
@@ -79,6 +79,58 @@ async function readRegistry(root: string): Promise<AppRegistryFile> {
   return (await readJson<AppRegistryFile>(appsJsonPath(root))) ?? { version: 1, apps: {} }
 }
 
+/** Resolve a localized value from the raw apps.json format.
+ *  The field may be a plain string or an object `{ "zh": "...", "en_US": "..." }`.
+ *  Returns the string for the active language (from config), falling back to
+ *  en_US, then the first available translation, then undefined. */
+async function resolveLocalized(value: unknown, lang: string): Promise<string | undefined> {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') {
+    const map = value as Record<string, string>
+    return map[lang] ?? map['en_US'] ?? map['en-US'] ?? Object.values(map)[0]
+  }
+  return undefined
+}
+
+/** Read the configured language from config.json (default 'zh'). */
+async function readConfigLang(): Promise<string> {
+  try {
+    const cfg = await readJson<{ language?: string }>(CONFIG_JSON)
+    return cfg?.language ?? 'zh'
+  } catch {
+    return 'zh'
+  }
+}
+
+/** Normalize a raw entry from apps.json: convert object-format name/description/
+ *  alias into resolved strings and populate the `localized` map so the renderer
+ *  can switch languages without re-fetching. */
+async function normalizeEntry(raw: Record<string, unknown>): Promise<AppEntry> {
+  const lang = await readConfigLang()
+  const entry = { ...raw } as Record<string, unknown>
+
+  for (const field of ['name', 'description', 'alias'] as const) {
+    const val = entry[field]
+    if (val && typeof val === 'object') {
+      const map = val as Record<string, string>
+      entry[field] = await resolveLocalized(val, lang)
+      const loc: Record<string, Record<string, string>> = (entry.localized as Record<
+        string,
+        Record<string, string>
+      >) ?? {}
+      for (const [code, text] of Object.entries(map)) {
+        if (typeof text === 'string' && text) {
+          const norm = code.replace(/_/g, '-')
+          loc[norm] = { ...(loc[norm] ?? {}), [field]: text }
+        }
+      }
+      if (Object.keys(loc).length) entry.localized = loc
+    }
+  }
+
+  return entry as unknown as AppEntry
+}
+
 /** List every app across all search roots.
  * Returns { roots, apps } where apps values carry a `root` runtime field.
  */
@@ -90,8 +142,8 @@ export async function listAllApps(): Promise<{
   const out: Record<string, AppEntry> = {}
   for (const root of searchRoots) {
     const reg = await readRegistry(root.path)
-    for (const [id, entry] of Object.entries(reg.apps)) {
-      out[id] = { ...entry, root: root.path }
+    for (const [id, raw] of Object.entries(reg.apps)) {
+      out[id] = { ...(await normalizeEntry(raw as unknown as Record<string, unknown>)), root: root.path }
     }
   }
   return { roots: searchRoots, apps: out }
@@ -99,8 +151,8 @@ export async function listAllApps(): Promise<{
 
 export async function getEntry(root: string, id: string): Promise<AppEntry | null> {
   const reg = await readRegistry(root)
-  const entry = reg.apps[id]
-  return entry ? { ...entry, root } : null
+  const raw = reg.apps[id]
+  return raw ? { ...(await normalizeEntry(raw as unknown as Record<string, unknown>)), root } : null
 }
 
 /**
