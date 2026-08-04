@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
 import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from '@shared/types'
 import LoadingBar from '../../components/LoadingBar.vue'
 import AbilityIcon from '../../components/AbilityIcon.vue'
-import { localize } from '../../i18n'
+import { localize, translate, translateTemplate } from '../../i18n'
 
 interface AbilitiesCtx {
   configs: Record<string, Record<string, unknown>>
@@ -471,16 +471,16 @@ onBeforeUnmount(() => unsub?.())
   <div>
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
-        <div class="text-h6 font-weight-medium">应用注册表</div>
+        <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'apps.heading') }}</div>
         <div class="text-caption on-surface-variant mt-1">
-          桌面应用 · 别名 · 标签 · 聚类操作 (按钮颜色越深越危险)
+          {{ translate(uiLang, 'apps.subtitle') }}
         </div>
       </div>
       <div class="d-flex align-center ga-2">
         <v-btn variant="tonal" prepend-icon="mdi-folder-search" @click="newRootOpen = true">
-          添加目录
+          {{ translate(uiLang, 'apps.addDir') }}
         </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNew">添加应用</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNew">{{ translate(uiLang, 'apps.addApp') }}</v-btn>
       </div>
     </div>
 
@@ -489,7 +489,7 @@ onBeforeUnmount(() => unsub?.())
         <v-text-field
           v-model="searchText"
           prepend-inner-icon="mdi-magnify"
-          placeholder="搜索名称 / 别名 / 标签"
+          :placeholder="translate(uiLang, 'apps.search')"
           density="compact"
           variant="solo-filled"
           hide-details
@@ -504,7 +504,7 @@ onBeforeUnmount(() => unsub?.())
             :color="activeTag === '' ? 'primary' : ''"
             @click="activeTag = ''"
           >
-            全部
+            {{ translate(uiLang, 'apps.all') }}
           </v-chip>
           <v-chip
             v-for="t in allTags"
@@ -519,7 +519,7 @@ onBeforeUnmount(() => unsub?.())
         </div>
         <v-checkbox
           v-model="showMissing"
-          label="显示缺失条目"
+          :label="translate(uiLang, 'apps.showMissing')"
           density="compact"
           hide-details
           class="mt-1"
@@ -546,7 +546,7 @@ onBeforeUnmount(() => unsub?.())
         prepend-icon="mdi-folder-alert-outline"
         @click="newRootOpen = true"
       >
-        暂无搜索目录，点击添加
+        {{ translate(uiLang, 'apps.noRoots') }}
       </v-chip>
     </div>
 
@@ -577,11 +577,11 @@ onBeforeUnmount(() => unsub?.())
                     v-if="entry.security?.risk === 'high'"
                     color="error"
                     size="small"
-                    title="高风险操作，操作前需确认"
+                    :title="translate(uiLang, 'apps.highRisk')"
                   >
                     mdi-shield-alert-outline
                   </v-icon>
-                  <v-chip v-if="entry.missing" size="x-small" variant="tonal">缺失</v-chip>
+                  <v-chip v-if="entry.missing" size="x-small" variant="tonal">{{ translate(uiLang, 'apps.missing') }}</v-chip>
                 </div>
                 <div class="text-caption on-surface-variant text-truncate mt-1">
                   {{ localize(entry, 'description', uiLang) || entry.description || entry.path }}
@@ -601,7 +601,7 @@ onBeforeUnmount(() => unsub?.())
             </div>
           </v-card-text>
           <v-card-actions class="px-4 pb-4 pt-0 ga-2">
-            <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">编辑</v-btn>
+            <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">{{ translate(uiLang, 'apps.edit') }}</v-btn>
             <v-spacer />
             <div class="d-flex ga-2 justify-end flex-wrap">
               <v-btn
@@ -609,9 +609,9 @@ onBeforeUnmount(() => unsub?.())
                 :variant="riskBtn(entry).variant"
                 prepend-icon="mdi-play"
                 :disabled="entry.missing"
-                @click="launch(entry.root ?? '', id, entry)"
+@click="launch(entry.root ?? '', id, entry)"
               >
-                启动
+                {{ translate(uiLang, 'apps.launch') }}
               </v-btn>
               <v-btn
                 v-for="[aid, act] in actionList(entry)"
@@ -635,26 +635,26 @@ onBeforeUnmount(() => unsub?.())
     <v-empty-state
       v-if="filtered.length === 0"
       icon="mdi-apps"
-      title="没有匹配的应用"
-      text="调整搜索或标签，或点击「添加应用」/「添加目录」。"
+      :title="translate(uiLang, 'apps.empty')"
+      :text="translate(uiLang, 'apps.emptyText')"
       class="mt-6"
     />
 
     <!-- Add search root -->
     <v-dialog v-model="newRootOpen" width="440">
       <v-card>
-        <v-card-title>添加搜索目录</v-card-title>
+        <v-card-title>{{ translate(uiLang, 'apps.addRootTitle') }}</v-card-title>
         <v-card-text>
           <v-text-field
             v-model="newRootPath"
-            label="绝对路径"
+            :label="translate(uiLang, 'apps.absolutePath')"
             placeholder="/home/aaaa0ggmc/Apps"
             variant="outlined"
             density="compact"
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" title="选择目录" @click="pickNewRoot">
+              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectDir')" @click="pickNewRoot">
                 <v-icon>mdi-folder-open</v-icon>
               </v-btn>
             </template>
@@ -662,8 +662,8 @@ onBeforeUnmount(() => unsub?.())
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="newRootOpen = false">取消</v-btn>
-          <v-btn color="primary" @click="addRoot">添加</v-btn>
+          <v-btn variant="text" @click="newRootOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
+          <v-btn color="primary" @click="addRoot">{{ translate(uiLang, 'apps.add') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -671,59 +671,59 @@ onBeforeUnmount(() => unsub?.())
     <!-- New entry -->
     <v-dialog v-model="newOpen" width="560">
       <v-card v-if="newForm">
-        <v-card-title>添加应用条目</v-card-title>
+        <v-card-title>{{ translate(uiLang, 'apps.addEntryTitle') }}</v-card-title>
         <v-card-text class="d-flex flex-column ga-3">
           <v-select
             v-model="newForm.root"
             :items="roots.map((r) => r.path)"
-            label="存储目录 (注册表所在目录)"
+            :label="translate(uiLang, 'apps.storeDir')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="newForm.name"
-            label="名称"
+            :label="translate(uiLang, 'apps.name')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="newForm.id"
-            label="ID (留空自动生成)"
+            :label="translate(uiLang, 'apps.idAuto')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="newForm.path"
-            label="目录/脚本路径 (相对存储目录或绝对路径)"
+            :label="translate(uiLang, 'apps.path')"
             variant="outlined"
             density="compact"
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" title="选择目录或脚本" @click="browseNewPath">
+              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectPath')" @click="browseNewPath">
                 <v-icon>mdi-folder-open</v-icon>
               </v-btn>
             </template>
           </v-text-field>
           <v-text-field
             v-model="newForm.description"
-            label="描述"
+            :label="translate(uiLang, 'apps.description')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="newForm.icon"
-            label="图标 (default/<名字>[/padding] · emoji/😎 · file//绝对路径)"
+            :label="translate(uiLang, 'apps.icon')"
             variant="outlined"
             density="compact"
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" title="选择图标文件" @click="browseNewIcon">
+              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectIcon')" @click="browseNewIcon">
                 <v-icon>mdi-folder-image</v-icon>
               </v-btn>
             </template>
@@ -733,7 +733,7 @@ onBeforeUnmount(() => unsub?.())
               <v-select
                 v-model="newForm.execType"
                 :items="EXEC_TYPES"
-                label="执行类型"
+                :label="translate(uiLang, 'apps.execType')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -743,7 +743,7 @@ onBeforeUnmount(() => unsub?.())
               <v-select
                 v-model="newForm.risk"
                 :items="['low', 'medium', 'high']"
-                label="风险等级"
+                :label="translate(uiLang, 'apps.risk')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -752,7 +752,7 @@ onBeforeUnmount(() => unsub?.())
           </v-row>
           <v-text-field
             v-model="newForm.execCommand"
-            label="命令 (空格分隔 argv)"
+            :label="translate(uiLang, 'apps.command')"
             variant="outlined"
             density="compact"
             hide-details
@@ -761,7 +761,7 @@ onBeforeUnmount(() => unsub?.())
             <v-col cols="6">
               <v-switch
                 v-model="newForm.terminal"
-                label="终端中运行"
+                :label="translate(uiLang, 'apps.terminal')"
                 density="compact"
                 hide-details
               />
@@ -769,7 +769,7 @@ onBeforeUnmount(() => unsub?.())
             <v-col cols="6">
               <v-checkbox
                 v-model="newForm.createDir"
-                label="创建目录 (路径不存在时)"
+                :label="translate(uiLang, 'apps.createDir')"
                 density="compact"
                 hide-details
               />
@@ -778,8 +778,8 @@ onBeforeUnmount(() => unsub?.())
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="newOpen = false">取消</v-btn>
-          <v-btn color="primary" :loading="newBusy" @click="saveNew">创建</v-btn>
+          <v-btn variant="text" @click="newOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
+          <v-btn color="primary" :loading="newBusy" @click="saveNew">{{ translate(uiLang, 'apps.create') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -787,25 +787,25 @@ onBeforeUnmount(() => unsub?.())
     <!-- Edit entry -->
     <v-dialog v-model="editOpen" width="640">
       <v-card v-if="form">
-        <v-card-title>编辑「{{ form.name }}」</v-card-title>
+        <v-card-title>{{ translateTemplate(uiLang, 'apps.editTitle', { name: form.name || '' }) }}</v-card-title>
         <v-card-text class="d-flex flex-column ga-3">
           <v-text-field
             v-model="form.name"
-            label="名称"
+            :label="translate(uiLang, 'apps.name')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="form.alias"
-            label="别名 (CLI 快捷名)"
+            :label="translate(uiLang, 'apps.alias')"
             variant="outlined"
             density="compact"
             hide-details
           />
           <v-text-field
             v-model="form.description"
-            label="描述"
+            :label="translate(uiLang, 'apps.description')"
             variant="outlined"
             density="compact"
             hide-details
@@ -813,8 +813,8 @@ onBeforeUnmount(() => unsub?.())
           <div class="d-flex align-center ga-3">
             <v-text-field
               v-model="form.icon"
-              label="图标"
-              hint="default/<名字>[/padding] · emoji/😎 · file//绝对路径 · 留空=默认"
+              :label="translate(uiLang, 'apps.icon')"
+              :hint="translate(uiLang, 'apps.iconHint')"
               persistent-hint
               variant="outlined"
               density="compact"
@@ -822,7 +822,7 @@ onBeforeUnmount(() => unsub?.())
               class="flex-grow-1"
             >
               <template #append-inner>
-                <v-btn icon variant="text" size="small" title="选择图标文件" @click="browseIcon()">
+                <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectIcon')" @click="browseIcon()">
                   <v-icon>mdi-folder-image</v-icon>
                 </v-btn>
               </template>
@@ -833,7 +833,7 @@ onBeforeUnmount(() => unsub?.())
           </div>
           <v-text-field
             v-model="form.tags"
-            label="标签 (逗号分隔)"
+            :label="translate(uiLang, 'apps.tags')"
             variant="outlined"
             density="compact"
             hide-details
@@ -841,13 +841,13 @@ onBeforeUnmount(() => unsub?.())
 
           <v-divider />
 
-          <div class="text-subtitle-2">主操作 (启动按钮)</div>
+          <div class="text-subtitle-2">{{ translate(uiLang, 'apps.mainAction') }}</div>
           <v-row dense>
             <v-col cols="6">
               <v-select
                 v-model="form.execType"
                 :items="EXEC_TYPES"
-                label="执行类型"
+                :label="translate(uiLang, 'apps.execType')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -856,7 +856,7 @@ onBeforeUnmount(() => unsub?.())
             <v-col cols="6">
               <v-text-field
                 v-model="form.execCwd"
-                label="工作目录 (留空 / {self})"
+                :label="translate(uiLang, 'apps.cwd')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -865,7 +865,7 @@ onBeforeUnmount(() => unsub?.())
           </v-row>
           <v-text-field
             v-model="form.execCommand"
-            label="命令 (空格分隔 argv)"
+            :label="translate(uiLang, 'apps.command')"
             variant="outlined"
             density="compact"
             hide-details
@@ -875,7 +875,7 @@ onBeforeUnmount(() => unsub?.())
               <v-select
                 v-model="form.risk"
                 :items="['low', 'medium', 'high']"
-                label="风险等级"
+                :label="translate(uiLang, 'apps.risk')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -884,7 +884,7 @@ onBeforeUnmount(() => unsub?.())
             <v-col cols="6">
               <v-text-field
                 v-model="form.note"
-                label="风险备注"
+                :label="translate(uiLang, 'apps.riskNote')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -893,12 +893,12 @@ onBeforeUnmount(() => unsub?.())
           </v-row>
           <v-row dense>
             <v-col cols="6">
-              <v-switch v-model="form.terminal" label="终端中运行" density="compact" hide-details />
+              <v-switch v-model="form.terminal" :label="translate(uiLang, 'apps.terminal')" density="compact" hide-details />
             </v-col>
             <v-col cols="6">
               <v-switch
                 v-model="form.rootFlag"
-                label="以 root 运行 (pkexec)"
+                :label="translate(uiLang, 'apps.rootRun')"
                 density="compact"
                 hide-details
               />
@@ -908,10 +908,10 @@ onBeforeUnmount(() => unsub?.())
           <v-divider />
 
           <div class="d-flex align-center justify-space-between">
-            <div class="text-subtitle-2">实时输出 Transformer</div>
+            <div class="text-subtitle-2">{{ translate(uiLang, 'apps.transformerSection') }}</div>
             <v-switch
               v-model="form.transformerDisplay"
-              label="启用实时弹窗"
+              :label="translate(uiLang, 'apps.transformerToggle')"
               density="compact"
               hide-details
               color="primary"
@@ -919,8 +919,8 @@ onBeforeUnmount(() => unsub?.())
           </div>
           <v-textarea
             v-model="form.transformer"
-            label="Transformer (JS 构造函数, onNewLine(e, ui))"
-            hint="ui.add(ui.NewAlign(ui.NewText('x'), ui.NewStatus('$5.00'))) — 组件: NewText/NewTitle/NewAlign/NewBar/NewStatus/NewTable"
+            :label="translate(uiLang, 'apps.transformerInput')"
+            :hint="translate(uiLang, 'apps.transformerHint')"
             persistent-hint
             variant="outlined"
             density="compact"
@@ -932,9 +932,9 @@ onBeforeUnmount(() => unsub?.())
           <v-divider />
 
           <div class="d-flex align-center justify-space-between">
-            <div class="text-subtitle-2">附加操作 (卡片上的其他按钮)</div>
+            <div class="text-subtitle-2">{{ translate(uiLang, 'apps.actionsSection') }}</div>
             <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addActionRow">
-              添加操作
+              {{ translate(uiLang, 'apps.addAction') }}
             </v-btn>
           </div>
           <v-card
@@ -946,7 +946,7 @@ onBeforeUnmount(() => unsub?.())
             <div class="d-flex align-center ga-2">
               <v-text-field
                 v-model="a.id"
-                label="操作 ID"
+                :label="translate(uiLang, 'apps.actionId')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -954,7 +954,7 @@ onBeforeUnmount(() => unsub?.())
               />
               <v-text-field
                 v-model="a.name"
-                label="按钮名称"
+                :label="translate(uiLang, 'apps.actionName')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -962,7 +962,7 @@ onBeforeUnmount(() => unsub?.())
               />
               <v-text-field
                 v-model="a.icon"
-                label="图标 (default/emoji/file)"
+                :label="translate(uiLang, 'apps.actionIcon')"
                 variant="outlined"
                 density="compact"
                 hide-details
@@ -973,7 +973,7 @@ onBeforeUnmount(() => unsub?.())
                     icon
                     variant="text"
                     size="small"
-                    title="选择图标文件"
+                    :title="translate(uiLang, 'apps.selectIcon')"
                     @click="browseIcon(i)"
                   >
                     <v-icon>mdi-folder-image</v-icon>
@@ -989,7 +989,7 @@ onBeforeUnmount(() => unsub?.())
                 <v-select
                   v-model="a.execType"
                   :items="EXEC_TYPES"
-                  label="执行类型"
+                  :label="translate(uiLang, 'apps.actionExecType')"
                   variant="outlined"
                   density="compact"
                   hide-details
@@ -998,7 +998,7 @@ onBeforeUnmount(() => unsub?.())
               <v-col cols="8">
                 <v-text-field
                   v-model="a.execCommand"
-                  label="命令 (空格分隔 argv)"
+                  :label="translate(uiLang, 'apps.actionCommand')"
                   variant="outlined"
                   density="compact"
                   hide-details
@@ -1009,7 +1009,7 @@ onBeforeUnmount(() => unsub?.())
               <v-col cols="4">
                 <v-text-field
                   v-model="a.execCwd"
-                  label="工作目录"
+                  :label="translate(uiLang, 'apps.actionCwd')"
                   variant="outlined"
                   density="compact"
                   hide-details
@@ -1019,22 +1019,22 @@ onBeforeUnmount(() => unsub?.())
                 <v-select
                   v-model="a.risk"
                   :items="['low', 'medium', 'high']"
-                  label="风险等级"
+                  :label="translate(uiLang, 'apps.actionRisk')"
                   variant="outlined"
                   density="compact"
                   hide-details
                 />
               </v-col>
               <v-col cols="2">
-                <v-switch v-model="a.terminal" label="终端" density="compact" hide-details />
+                <v-switch v-model="a.terminal" :label="translate(uiLang, 'apps.actionTerminal')" density="compact" hide-details />
               </v-col>
               <v-col cols="2">
-                <v-switch v-model="a.rootFlag" label="root" density="compact" hide-details />
+                <v-switch v-model="a.rootFlag" :label="translate(uiLang, 'apps.actionRoot')" density="compact" hide-details />
               </v-col>
             </v-row>
             <v-textarea
               v-model="a.stepsText"
-              label="多步命令 (可选, 每行一条, 依次执行; 最后一步前台运行)"
+              :label="translate(uiLang, 'apps.actionSteps')"
               variant="outlined"
               density="compact"
               rows="2"
@@ -1044,16 +1044,16 @@ onBeforeUnmount(() => unsub?.())
             />
           </v-card>
           <div v-if="form.actions.length === 0" class="text-caption on-surface-variant">
-            暂无附加操作 — 可在卡片上添加 开始 / 停止 / 重建 等按钮。
+            {{ translate(uiLang, 'apps.noActions') }}
           </div>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-btn color="error" variant="text" prepend-icon="mdi-delete" @click="deleteEntry">
-            删除
+            {{ translate(uiLang, 'apps.delete') }}
           </v-btn>
           <v-spacer />
-          <v-btn variant="text" @click="editOpen = false">取消</v-btn>
-          <v-btn color="primary" :loading="editBusy" @click="saveEdit">保存</v-btn>
+          <v-btn variant="text" @click="editOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
+          <v-btn color="primary" :loading="editBusy" @click="saveEdit">{{ translate(uiLang, 'apps.save') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

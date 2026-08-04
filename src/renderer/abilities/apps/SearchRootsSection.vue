@@ -1,7 +1,12 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-apps-search-roots' })
 
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../i18n'
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+
 const roots = ref<{ path: string; watch: boolean }[]>([])
 const searching = ref('')
 
@@ -37,10 +42,10 @@ async function pickDirectory(): Promise<void> {
 
 <template>
   <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">应用搜索目录</v-card-title>
+    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'apps.searchRoots') }}</v-card-title>
     <v-card-text>
       <div class="text-caption on-surface-variant mb-3">
-        应用注册表从这些根目录扫描 apps.json，添加或移除即时生效。
+        {{ translate(uiLang, 'apps.searchRootsDesc') }}
       </div>
       <div class="mb-3">
         <template v-for="r in roots" :key="r.path">
@@ -54,7 +59,9 @@ async function pickDirectory(): Promise<void> {
             {{ r.path }}
           </v-chip>
         </template>
-        <span v-if="roots.length === 0" class="text-caption on-surface-variant">未配置</span>
+        <span v-if="roots.length === 0" class="text-caption on-surface-variant">{{
+          translate(uiLang, 'apps.unconfigured')
+        }}</span>
       </div>
       <div class="d-flex align-center ga-2">
         <v-text-field
@@ -66,13 +73,19 @@ async function pickDirectory(): Promise<void> {
           class="flex-grow-1"
         >
           <template #append-inner>
-            <v-btn icon variant="text" size="small" title="选择目录" @click="pickDirectory">
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              :title="translate(uiLang, 'apps.selectDir')"
+              @click="pickDirectory"
+            >
               <v-icon>mdi-folder-open</v-icon>
             </v-btn>
           </template>
         </v-text-field>
         <v-btn color="primary" variant="tonal" height="40" class="px-5" @click="addRoot">
-          添加
+          {{ translate(uiLang, 'apps.add') }}
         </v-btn>
       </div>
     </v-card-text>
