@@ -12,7 +12,6 @@ export default [
     run: async (ctx) => {
       const dir = String(ctx.named.dir ?? '')
       const result = await listWallpapers(dir)
-      log.info('display.wallpapers', { ok: true, count: result.length })
       return result
     }
   },
@@ -27,7 +26,6 @@ export default [
         return { ok: false, error: '需要 --path' }
       }
       const ok = await applyWallpaper(path)
-      log.info('display.apply', { ok, path })
       return { ok }
     }
   },
@@ -37,7 +35,6 @@ export default [
     usage: 'display.outputs',
     run: async () => {
       const result = await listOutputs()
-      log.info('display.outputs', { ok: true, count: result.length })
       return result
     }
   }

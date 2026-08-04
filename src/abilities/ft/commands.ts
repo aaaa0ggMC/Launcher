@@ -11,7 +11,6 @@ export default [
     usage: 'ft.presets',
     run: async () => {
       const presets = listFtPresets()
-      log.info('ft.presets', { count: presets.length })
       return presets
     }
   },
@@ -26,7 +25,6 @@ export default [
         log.warn('ft.load failed', { name, error: `未知预设: ${name}` })
         return { ok: false, error: `未知预设: ${name}` }
       }
-      log.info('ft.load', { name, vectors: preset.vectors.length })
       return preset
     }
   },
@@ -54,8 +52,7 @@ export default [
         return { ok: false, error: '需要 --path' }
       }
       const result = await exportFtFile(path, typeof data === 'string' ? JSON.parse(data) : data)
-      if (result.ok) log.info('ft.export', { path })
-      else log.error('ft.export failed', { path, error: result.error })
+      if (!result.ok) log.error('ft.export failed', { path, error: result.error })
       return result
     }
   }

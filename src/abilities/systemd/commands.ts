@@ -11,7 +11,6 @@ export default [
     usage: 'systemd.list',
     run: async () => {
       const result = await listSystemd()
-      log.info('systemd.list', { ok: true, count: result.length })
       return result
     }
   },
@@ -28,7 +27,6 @@ export default [
       }
       try {
         const result = await systemdAction(name, action)
-        log.info('systemd.action', { ok: true, name, action })
         return result
       } catch (e) {
         log.error('systemd.action', {

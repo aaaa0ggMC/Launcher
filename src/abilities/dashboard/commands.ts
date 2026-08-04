@@ -15,7 +15,6 @@ export default [
     usage: 'system.stats',
     run: async () => {
       const result = await systemStats()
-      log.info('system.stats', { ok: true })
       return result
     }
   },
@@ -25,7 +24,6 @@ export default [
     usage: 'hardware.gpu',
     run: async () => {
       const result = await gpuInfo()
-      log.info('hardware.gpu', { ok: true })
       return result
     }
   },
@@ -35,7 +33,6 @@ export default [
     usage: 'hardware.pm',
     run: async () => {
       const result = await readPmValue()
-      log.info('hardware.pm', { ok: true })
       return result
     }
   },
@@ -46,7 +43,6 @@ export default [
     run: async () => {
       try {
         const result = await togglePm()
-        log.info('hardware.pm-toggle', { ok: true, value: result })
         return result
       } catch (e) {
         log.error('hardware.pm-toggle', {
@@ -63,7 +59,6 @@ export default [
     usage: 'docker.list',
     run: async () => {
       const result = await listDocker()
-      log.info('docker.list', { ok: true, count: result.length })
       return result
     }
   },
@@ -80,7 +75,6 @@ export default [
       }
       try {
         const result = await dockerAction(name, action)
-        log.info('docker.action', { ok: true, name, action })
         return result
       } catch (e) {
         log.error('docker.action', {
@@ -99,7 +93,6 @@ export default [
     usage: 'dashboard.get-layout',
     run: async () => {
       const result = await getDashboardLayout()
-      log.info('dashboard.get-layout', { ok: true })
       return result
     }
   },
@@ -115,7 +108,6 @@ export default [
         return { ok: false, error: 'layout 必须是数组' }
       }
       await setDashboardLayout(arr)
-      log.info('dashboard.set-layout', { ok: true, count: arr.length })
       return { ok: true }
     }
   },
@@ -128,7 +120,6 @@ export default [
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send('cockpit:dashboard-reset')
       }
-      log.info('dashboard.reset-layout', { ok: true })
       return { ok: true }
     }
   }

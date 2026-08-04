@@ -146,7 +146,6 @@ function stripExt(name: string): string {
 
 /** Rescan a root: auto-draft every detected entry, merge per the safe policy. */
 export async function rescanRoot(root: string): Promise<AppRegistryFile> {
-  log.info('rescan start', { root })
   const reg = (await readJson<AppRegistryFile>(join(root, 'apps.json'))) ?? { version: 1, apps: {} }
   const items = await readdir(root).catch(() => [])
   const found: { name: string; isDir: boolean }[] = []

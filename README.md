@@ -95,4 +95,9 @@ sudo cp scripts/49-cockpit-pkexec.rules /usr/share/polkit-1/rules.d/
 sudo chmod 644 /usr/share/polkit-1/rules.d/49-cockpit-pkexec.rules
 ```
 
+## 许可证
+
+- 项目本体：**MIT**（见 `LICENSE`）。
+- 图标包 [game-icon-pack](https://github.com/Nieobie/game-icon-pack)：**CC0 1.0 Universal**（公有领域，随子模块自带许可）。
+
 详细架构见 `STRUCTURE.md`，开发与操作手册见 `AGENTS.md`。

@@ -27,25 +27,38 @@ const fmt = winston.format.printf((info) => {
   return `${ts} [${String(info.level).toUpperCase()}]${scope} ${info.message}${data}`
 })
 
+const baseFormat = (): winston.Logform.Format =>
+  winston.format.combine(winston.format.timestamp(), fmt)
+const fileTransport = (): DailyRotateFile =>
+  new DailyRotateFile({
+    dirname: LOG_DIR,
+    filename: 'cockpit-%DATE%.log',
+    datePattern: 'YYYY-MM-DD',
+    maxSize: '10m',
+    maxFiles: '14d',
+    zippedArchive: true
+  })
+
+// Both transports share the file. `fileLogger` is used for merged/repeated
+// entries so the console never scrolls with poll noise while the file keeps
+// every raw line for audit.
 const logger = winston.createLogger({
   level: 'debug',
-  format: winston.format.combine(winston.format.timestamp(), fmt),
-  transports: [
-    new winston.transports.Console(),
-    new DailyRotateFile({
-      dirname: LOG_DIR,
-      filename: 'cockpit-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '10m',
-      maxFiles: '14d',
-      zippedArchive: true
-    })
-  ]
+  format: baseFormat(),
+  transports: [new winston.transports.Console(), fileTransport()]
+})
+const fileLogger = winston.createLogger({
+  level: 'debug',
+  format: baseFormat(),
+  transports: [fileTransport()]
 })
 
 let seq = 0
 const buffer: LogEntry[] = []
 const MAX_BUFFER = 20000
+
+/** Merge window for repeated same-kind entries (periodic poll noise etc.). */
+const MERGE_WINDOW_MS = 5000
 
 type LogBroadcast = (entry: LogEntry) => void
 let broadcast: LogBroadcast = () => {}
@@ -63,43 +76,58 @@ export function isLogsSelfEntry(e: Pick<LogEntry, 'scope' | 'message'>): boolean
   return e.scope === 'logs' || (e.scope === 'ipc' && e.message.startsWith('logs.'))
 }
 
-/** Two entries are "duplicates" when the renderer-relevant payload matches. */
-function samePayload(
-  a: LogEntry,
-  b: Pick<LogEntry, 'level' | 'scope' | 'message' | 'data'>
-): boolean {
-  if (a.level !== b.level || a.scope !== b.scope || a.message !== b.message) return false
-  const da = a.data
-  const db = b.data
-  if (da === undefined || db === undefined) return da === db
-  return JSON.stringify(da) === JSON.stringify(db)
+/**
+ * Newest buffer entry with the same level/scope/message within the merge
+ * window — data is ignored so a changing payload (poll noise) still counts as
+ * the same recurring event. Entries are time-ordered, so scanning backwards
+ * until the window boundary is correct and cheap.
+ */
+function findMergeTarget(
+  level: LogLevel,
+  scope: string,
+  message: string,
+  now: number
+): LogEntry | null {
+  for (let i = buffer.length - 1; i >= 0; i--) {
+    const e = buffer[i]
+    if (e.ts < now - MERGE_WINDOW_MS) break
+    if (e.level === level && e.scope === scope && e.message === message) return e
+  }
+  return null
 }
 
 function emit(level: LogLevel, scope: string, message: string, data?: unknown): void {
-  // The on-disk file keeps every raw line (complete audit trail)…
-  logger.log({
+  const now = Date.now()
+  const logInfo = {
     level,
     message,
     scope,
     ...(data !== undefined ? { data } : {})
-  })
+  }
 
-  // …but the in-memory buffer (and thus the UI + export) merges consecutive
-  // duplicates into one entry with an incrementing count.
-  const last = buffer[buffer.length - 1]
-  if (last && samePayload(last, { level, scope, message, data })) {
-    last.count = (last.count ?? 1) + 1
+  const merged = findMergeTarget(level, scope, message, now)
+  if (merged) {
+    // Repeated within the window: bump the existing entry, refresh ts/data,
+    // and only write to the FILE (audit) — not the console, so poll noise
+    // doesn't scroll the terminal.
+    fileLogger.log(logInfo)
+    merged.count = (merged.count ?? 1) + 1
+    merged.ts = now
+    merged.data = data
     try {
-      broadcast(last)
+      broadcast(merged)
     } catch {
       // ignore
     }
     return
   }
 
+  // Novel entry: both console + file.
+  logger.log(logInfo)
+
   const entry: LogEntry = {
     id: seq++,
-    ts: Date.now(),
+    ts: now,
     level,
     scope,
     message,

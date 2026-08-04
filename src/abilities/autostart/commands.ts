@@ -11,7 +11,6 @@ export default [
     usage: 'autostart.list',
     run: async () => {
       const result = await listAutostart()
-      log.info('autostart.list', { ok: true, count: result.length })
       return result
     }
   },
@@ -28,7 +27,6 @@ export default [
       }
       await toggleAutostart(file, hidden)
       const result = await listAutostart()
-      log.info('autostart.toggle', { ok: true, file, hidden })
       return result
     }
   }

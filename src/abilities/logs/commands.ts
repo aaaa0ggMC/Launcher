@@ -55,7 +55,6 @@ export default [
       const scope = String(ctx.named.scope ?? 'renderer')
       const message = String(ctx.named.message ?? '')
       const data = ctx.named.data !== undefined ? JSON.parse(String(ctx.named.data)) : undefined
-      log.info('logs.post', { scope, level, messageLength: message.length })
       logAt(level, scope, message, data)
       return { ok: true }
     }

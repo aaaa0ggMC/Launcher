@@ -11,7 +11,6 @@ export default [
     usage: 'mirror.get',
     run: async () => {
       const result = await getMirrorInfo()
-      log.info('mirror.get', { ok: true, count: result.mirrors.length })
       return result
     }
   },
@@ -27,7 +26,6 @@ export default [
         return { ok: false, error: '需要 --name' }
       }
       const result = await toggleMirror(name, enabled)
-      log.info('mirror.toggle', { ok: true, name, enabled })
       return result
     }
   },
@@ -37,11 +35,6 @@ export default [
     usage: 'mirror.test',
     run: async () => {
       const result = await testMirrors()
-      log.info('mirror.test', {
-        ok: true,
-        okCount: result.filter((r) => r.ok).length,
-        failed: result.filter((r) => !r.ok).length
-      })
       return result
     }
   }
