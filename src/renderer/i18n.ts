@@ -1,8 +1,8 @@
 import type { Ref } from 'vue'
 import type { AppEntry } from '@shared/types'
-import zh from '../../data/translations/zh.json'
-import enUS from '../../data/translations/en-US.json'
-import languages from '../../data/translations/index.json'
+import zh from './translations/zh.json'
+import enUS from './translations/en-US.json'
+import languages from './translations/index.json'
 
 export interface LanguageMeta {
   code: string
