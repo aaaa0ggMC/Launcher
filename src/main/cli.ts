@@ -21,7 +21,9 @@ function formatEntry(e: AppEntry): string {
   ]
   if (actions.length) {
     lines.push(
-      te('cli.formatEntry.actions', { val: actions.map(([id, a]) => `${id} (${a.name})`).join(', ') })
+      te('cli.formatEntry.actions', {
+        val: actions.map(([id, a]) => `${id} (${a.name})`).join(', ')
+      })
     )
   }
   return lines.join('\n')
