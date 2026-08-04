@@ -11,6 +11,7 @@ import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
 import { buildSettingsSections } from './abilities/settings/registry'
 import type { SettingsCategory } from './abilities/settings/registry'
+import { translate, translateTemplate, localize } from './i18n'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -61,6 +62,17 @@ const windowRounded = computed(
     (runtimeConfig.value.window as { rounded?: boolean } | undefined)?.rounded !== false &&
     !isMaximized.value
 )
+
+/** Current active language from config. */
+const lang = computed(() => (runtimeConfig.value.language as string) ?? 'zh')
+provide('cockpit:lang', lang)
+
+function t(key: string, fallback?: string): string {
+  return translate(lang.value, key, fallback)
+}
+function te(key: string, vars: Record<string, string>, fallback?: string): string {
+  return translateTemplate(lang.value, key, vars, fallback)
+}
 
 /** Sidebar icons: fill the rail in collapsed mode, larger in expanded. */
 const sidebarIconSize = computed(() => (rail.value ? 32 : 28))
@@ -127,11 +139,11 @@ async function copyCurrentView(): Promise<void> {
   } else if (inst?.$el) {
     md = viewToMarkdown(inst.$el)
   } else {
-    md = '(无法读取页面内容)'
+    md = t('copy.failed')
   }
-  const header = `# ${ability.name}\n\n> 由 Linux Cockpit 导出 · ${new Date().toLocaleString('zh-CN')}\n\n`
+  const header = `# ${ability.name}\n\n> ${t('copy.exported')} · ${new Date().toLocaleString(lang.value)}\n\n`
   await window.cockpit.copyText(header + md)
-  copySnackText.value = `已复制「${ability.name}」为 Markdown`
+  copySnackText.value = te('copy.copied', { name: ability.name })
   copySnackOpen.value = true
 }
 
@@ -169,9 +181,9 @@ const abilities = computed<SidebarAbility[]>(() => {
         id: cfg.id,
         order: cfg.order,
         config: (cfg.config ?? {}) as Record<string, unknown>,
-        name: meta.name,
+        name: t(`ability.${cfg.id}.name`, meta.name),
         icon: meta.icon ?? null,
-        category: meta.category,
+        category: t(`ability.${cfg.id}.category`, meta.category),
         keepAlive: meta.keepAlive !== false,
         comp: meta.component
       }
@@ -423,11 +435,12 @@ async function loadSearchApps(): Promise<void> {
     const hits: SearchApp[] = []
     for (const [id, entry] of Object.entries(res.apps)) {
       if (!entry || entry.missing) continue
-      const alias = entry.alias ?? ''
+      const locName = localize(entry, 'name', lang.value) ?? entry.name
+      const locAlias = localize(entry, 'alias', lang.value) ?? ''
       const tags = [...(entry.tags ?? []), ...(entry.tags_auto ?? [])]
       if (
-        entry.name.toLowerCase().includes(q) ||
-        alias.toLowerCase().includes(q) ||
+        locName.toLowerCase().includes(q) ||
+        locAlias.toLowerCase().includes(q) ||
         tags.some((t) => t.toLowerCase().includes(q))
       ) {
         hits.push({ id, root: entry.root ?? '', entry })
@@ -516,7 +529,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!rail" class="d-flex flex-column">
             <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
-            <span class="text-caption on-surface-variant brand-sub">System Control Center</span>
+            <span class="text-caption on-surface-variant brand-sub">{{ t('app.brandSub') }}</span>
           </div>
         </div>
       </template>
@@ -526,7 +539,7 @@ onBeforeUnmount(() => {
         <v-text-field
           v-model="searchText"
           prepend-inner-icon="mdi-magnify"
-          placeholder="搜索能力 / 应用别名"
+          :placeholder="t('search.placeholder')"
           density="compact"
           variant="solo-filled"
           flat
@@ -538,19 +551,19 @@ onBeforeUnmount(() => {
       </div>
 
       <v-list v-if="!rail && searchText.trim()" density="compact" class="px-2">
-        <v-list-subheader>应用</v-list-subheader>
+        <v-list-subheader>{{ t('search.appsHeader') }}</v-list-subheader>
         <v-list-item
           v-for="app in searchApps"
           :key="app.id"
-          :title="app.entry.name"
-          :subtitle="app.entry.description"
+          :title="localize(app.entry, 'name', lang) || app.entry.name"
+          :subtitle="localize(app.entry, 'description', lang) || app.entry.description"
           :append-icon="'mdi-play'"
           density="compact"
           rounded="lg"
           @click="launchApp(app.root, app.id, app.entry)"
         />
         <v-list-item v-if="searchApps.length === 0 && !searchBusy">
-          <v-list-item-subtitle>无匹配应用</v-list-item-subtitle>
+          <v-list-item-subtitle>{{ t('search.noMatch') }}</v-list-item-subtitle>
         </v-list-item>
       </v-list>
 
@@ -601,7 +614,7 @@ onBeforeUnmount(() => {
 
       <template #append>
         <div class="pa-3 d-flex justify-center ga-2" :class="rail ? 'flex-column' : ''">
-          <v-tooltip text="复制当前页面为 Markdown" location="end">
+          <v-tooltip :text="t('appbar.copyTooltip')" location="end">
             <template #activator="{ props: tp }">
               <v-btn
                 v-bind="tp"
@@ -617,7 +630,7 @@ onBeforeUnmount(() => {
           <v-btn
             variant="tonal"
             icon
-            :aria-label="rail ? '展开侧边栏' : '收起侧边栏'"
+            :aria-label="rail ? t('sidebar.expand') : t('sidebar.collapse')"
             @click="rail = !rail"
           >
             <v-icon>{{ rail ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
@@ -658,8 +671,8 @@ onBeforeUnmount(() => {
             <v-empty-state
               v-else
               icon="mdi-view-dashboard-outline"
-              title="选择一个功能"
-              text="从左侧边栏选择功能，或使用顶部搜索框。"
+              :title="t('appbar.selectTitle')"
+              :text="t('appbar.selectText')"
               class="align-self-center mt-8"
             />
           </transition>
@@ -672,7 +685,7 @@ onBeforeUnmount(() => {
       <v-card rounded="lg">
         <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
           <v-icon color="warning">mdi-shield-alert-outline</v-icon>
-          确认启动「{{ pendingTitle }}」？
+          {{ te('confirm.title', { name: pendingTitle }) }}
         </v-card-title>
         <v-card-text>
           <v-alert
@@ -683,14 +696,14 @@ onBeforeUnmount(() => {
             density="compact"
           >
             <template v-if="pendingLaunch?.entry.security?.auto_note">
-              检测: {{ pendingLaunch.entry.security.auto_note }}
+              {{ t('confirm.detected') }} {{ pendingLaunch.entry.security.auto_note }}
             </template>
             <template v-if="pendingLaunch?.entry.security?.note">
-              <div>备注: {{ pendingLaunch.entry.security.note }}</div>
+              <div>{{ t('confirm.note') }} {{ pendingLaunch.entry.security.note }}</div>
             </template>
           </v-alert>
           <div class="text-body-2 mb-2">
-            即将启动「{{ pendingTitle }}」
+            {{ te('confirm.aboutToLaunch', { name: pendingTitle }) }}
             <v-chip
               size="x-small"
               :color="pendingRisk === 'high' ? 'error' : 'warning'"
@@ -700,17 +713,12 @@ onBeforeUnmount(() => {
               {{ pendingRisk }}
             </v-chip>
           </div>
-          <v-checkbox
-            v-model="ackNow"
-            label="知道了，以后不再提醒"
-            density="compact"
-            hide-details
-          />
+          <v-checkbox v-model="ackNow" :label="t('confirm.ack')" density="compact" hide-details />
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="confirmOpen = false">取消</v-btn>
-          <v-btn color="primary" @click="doLaunch">启动</v-btn>
+          <v-btn variant="text" @click="confirmOpen = false">{{ t('confirm.cancel') }}</v-btn>
+          <v-btn color="primary" @click="doLaunch">{{ t('confirm.launch') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

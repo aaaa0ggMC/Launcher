@@ -49,6 +49,14 @@ export default {
           component: defineAsyncComponent(() => import('./items/AnimationSection.vue'))
         },
         {
+          key: 'language',
+          label: '语言',
+          icon: 'mdi-translate',
+          description: 'Interface language (中文 / English)',
+          keywords: ['语言', 'language', '翻译', 'translate', 'i18n'],
+          component: defineAsyncComponent(() => import('./items/LanguageSection.vue'))
+        },
+        {
           key: 'dashboard',
           label: '总览排版',
           icon: 'mdi-view-dashboard-outline',

@@ -5,6 +5,7 @@ import { computed, inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { SettingsCategory, SettingsItem } from './registry'
 import AbilityIcon from '../../components/AbilityIcon.vue'
+import { translate, translateTemplate } from '../../i18n'
 
 /**
  * Settings page — consumes the injection list built & provided by App.vue
@@ -21,6 +22,7 @@ import AbilityIcon from '../../components/AbilityIcon.vue'
 
 const injected = inject<Ref<SettingsCategory[]>>('cockpit:settings', ref([]))
 const sections = computed<SettingsCategory[]>(() => injected.value)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 const query = ref('')
 const activeCategoryId = ref<string | null>(null)
@@ -78,9 +80,11 @@ function selectCategory(id: string): void {
 
 <template>
   <div>
-    <div class="text-h6 font-weight-medium mb-1">设置</div>
+    <div class="text-h6 font-weight-medium mb-1">
+      {{ translate(uiLang, 'ability.settings.name') }}
+    </div>
     <div class="text-caption on-surface-variant mb-4">
-      设置由各能力注入 · 搜索可匹配分类与具体设置内容
+      {{ translate(uiLang, 'settings.caption') }}
     </div>
 
     <!-- Level 1: top row — search box + horizontally scrollable category chips -->
@@ -88,7 +92,7 @@ function selectCategory(id: string): void {
       <v-text-field
         v-model="query"
         prepend-inner-icon="mdi-magnify"
-        placeholder="搜索设置…"
+        :placeholder="translate(uiLang, 'settings.searchPlaceholder')"
         density="compact"
         variant="solo-filled"
         flat
@@ -121,7 +125,9 @@ function selectCategory(id: string): void {
     <!-- Search mode: matched categories, matched items rendered inline -->
     <template v-if="searching">
       <div v-if="resultGroups.length">
-        <div class="text-caption on-surface-variant mb-3">匹配 {{ resultCount }} 项设置</div>
+        <div class="text-caption on-surface-variant mb-3">
+          {{ translateTemplate(uiLang, 'settings.resultCount', { n: String(resultCount) }) }}
+        </div>
         <div v-for="g in resultGroups" :key="g.category.id" class="mb-4">
           <div class="d-flex align-center ga-2 mb-2">
             <v-icon v-if="isMdiIcon(g.category.icon)" size="16">{{ g.category.icon }}</v-icon>
@@ -140,8 +146,8 @@ function selectCategory(id: string): void {
       <v-empty-state
         v-else
         icon="mdi-magnify-close"
-        title="没有匹配的设置"
-        text="换个关键词试试，可搜索分类名或具体设置内容"
+        :title="translate(uiLang, 'settings.searchEmpty')"
+        :text="translate(uiLang, 'settings.searchEmptyText')"
       />
     </template>
 
@@ -167,7 +173,12 @@ function selectCategory(id: string): void {
       </v-row>
     </template>
 
-    <v-empty-state v-else icon="mdi-tune" title="暂无可配置项" text="当前没有能力注入设置选项" />
+    <v-empty-state
+      v-else
+      icon="mdi-tune"
+      :title="translate(uiLang, 'settings.empty')"
+      :text="translate(uiLang, 'settings.emptyText')"
+    />
   </div>
 </template>
 

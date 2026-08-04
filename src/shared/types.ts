@@ -59,6 +59,7 @@ export interface AppEntry {
   alias?: string
   name: string
   description?: string
+  localized?: Record<string, { name?: string; description?: string; alias?: string }>
   path: string
   icon?: string
   /** primary launch spec — rendered as the default「启动」button */

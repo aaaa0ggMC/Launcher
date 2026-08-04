@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
+import type { Ref } from 'vue'
 import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from '@shared/types'
 import LoadingBar from '../../components/LoadingBar.vue'
 import AbilityIcon from '../../components/AbilityIcon.vue'
+import { localize } from '../../i18n'
 
 interface AbilitiesCtx {
   configs: Record<string, Record<string, unknown>>
@@ -26,6 +28,7 @@ const { launch, launchAction } = inject<AbilitiesCtx>('cockpit:abilities', {
   launch: async () => {},
   launchAction: async () => {}
 })
+const uiLang = inject<Ref<string>>('cockpit:lang', ref('zh'))
 
 const EXEC_TYPES = ['uv', 'python', 'node', 'docker', 'systemd', 'script', 'desktop', 'custom']
 
@@ -168,12 +171,14 @@ const filtered = computed(() => {
       return false
     }
     if (!q) return true
-    const alias = entry.alias ?? ''
+    const locName = localize(entry, 'name', uiLang.value) ?? entry.name
+    const locAlias = localize(entry, 'alias', uiLang.value) ?? ''
+    const locDesc = localize(entry, 'description', uiLang.value) ?? ''
     return (
-      entry.name.toLowerCase().includes(q) ||
+      locName.toLowerCase().includes(q) ||
       id.toLowerCase().includes(q) ||
-      alias.toLowerCase().includes(q) ||
-      (entry.description ?? '').toLowerCase().includes(q)
+      locAlias.toLowerCase().includes(q) ||
+      locDesc.toLowerCase().includes(q)
     )
   })
 })
@@ -565,7 +570,9 @@ onBeforeUnmount(() => unsub?.())
               </v-avatar>
               <div class="flex-grow-1 min-width-0">
                 <div class="d-flex align-center ga-2 flex-wrap">
-                  <span class="text-body-1 font-weight-medium text-truncate">{{ entry.name }}</span>
+                  <span class="text-body-1 font-weight-medium text-truncate">{{
+                    localize(entry, 'name', uiLang) || entry.name
+                  }}</span>
                   <v-icon
                     v-if="entry.security?.risk === 'high'"
                     color="error"
@@ -577,7 +584,7 @@ onBeforeUnmount(() => unsub?.())
                   <v-chip v-if="entry.missing" size="x-small" variant="tonal">缺失</v-chip>
                 </div>
                 <div class="text-caption on-surface-variant text-truncate mt-1">
-                  {{ entry.description || entry.path }}
+                  {{ localize(entry, 'description', uiLang) || entry.description || entry.path }}
                 </div>
                 <div class="d-flex flex-wrap gap-1 mt-2">
                   <v-chip
