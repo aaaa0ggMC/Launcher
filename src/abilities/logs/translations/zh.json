@@ -1,0 +1,16 @@
+{
+  "ability.logs.name": "日志",
+  "ability.logs.category": "系统",
+  "logs.heading": "日志",
+  "logs.caption": "当前会话日志 · 按级别过滤 · 实时滚动",
+  "logs.levelFilter": "级别",
+  "logs.levelAll": "全部",
+  "logs.ignoreSelf": "忽略 logs 自身日志",
+  "logs.export": "导出",
+  "logs.exportTitle": "导出当前会话日志",
+  "logs.exportFailed": "导出失败",
+  "logs.exported": "已导出 {n} 条日志",
+  "logs.loadOlder": "加载更早日志",
+  "logs.empty": "暂无日志",
+  "logs.total": "共 {n} 条"
+}

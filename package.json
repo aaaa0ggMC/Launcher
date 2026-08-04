@@ -22,6 +22,8 @@
     "gridstack": "^13.0.2",
     "three": "^0.185.1",
     "vuetify": "^3.13.0",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

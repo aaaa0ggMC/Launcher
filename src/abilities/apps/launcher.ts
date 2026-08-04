@@ -6,6 +6,9 @@ import type { AppEntry, AppExecSpec, AppAction } from './types'
 import type { LaunchResult, ProcOutputEvent } from '../../shared/types'
 import { CONFIG_JSON, SCRIPTS_DIR } from '../../main/process/paths'
 import { readJson } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('apps-launcher')
 
 interface RuntimeConfig {
   runtime?: { terminal?: string[]; confirmBeforeLaunch?: boolean }
@@ -158,10 +161,12 @@ function spawnDetached(
       })
       child.unref()
       child.on('error', (err) => {
+        log.error('spawn failed', { argv: argv[0], error: err.message })
         resolve({ ok: false, error: `spawn 失败: ${err.message}` })
       })
       child.on('spawn', () => {
         if (monitor && child.pid) {
+          log.debug('monitor streaming started', { pid: child.pid, argv: argv[0] })
           streamLines(child.pid, 'stdout', child.stdout)
           streamLines(child.pid, 'stderr', child.stderr)
           child.on('exit', (code) => {
@@ -171,6 +176,10 @@ function spawnDetached(
         resolve({ ok: true, pid: child.pid, terminal, monitor })
       })
     } catch (err) {
+      log.error('spawn threw', {
+        argv: argv[0],
+        error: err instanceof Error ? err.message : String(err)
+      })
       resolve({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -190,6 +199,7 @@ function spawnWait(argv: string[], cwd: string, env: NodeJS.ProcessEnv): Promise
         errBuf = (errBuf + String(d)).slice(-300)
       })
       child.on('error', (err) => {
+        log.error('spawn failed', { argv: argv[0], error: err.message })
         resolve({ ok: false, error: `spawn 失败: ${err.message}` })
       })
       child.on('exit', (code) => {
@@ -201,6 +211,10 @@ function spawnWait(argv: string[], cwd: string, env: NodeJS.ProcessEnv): Promise
           })
       })
     } catch (err) {
+      log.error('spawn threw', {
+        argv: argv[0],
+        error: err instanceof Error ? err.message : String(err)
+      })
       resolve({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -223,7 +237,16 @@ export async function launchSpec(
   const cwd = expandCwd(entry, eff)
   const env: NodeJS.ProcessEnv = { ...process.env, ...(eff.env ?? {}) }
   const argv = await buildArgv(entry, eff)
-  return await spawnDetached(argv, cwd, env, eff.terminal ?? false, opts.monitor ?? false)
+  const res = await spawnDetached(argv, cwd, env, eff.terminal ?? false, opts.monitor ?? false)
+  log.info('launch result', {
+    root: entry.root,
+    name: entry.alias ?? entry.name,
+    type: spec.type,
+    ok: res.ok,
+    pid: res.pid,
+    error: res.error
+  })
+  return res
 }
 
 /** Launch an app entry (primary exec). Returns immediately; process runs detached. */
@@ -243,6 +266,11 @@ export async function launchAction(
 ): Promise<LaunchResult> {
   const steps = action.steps
   if (steps?.length) {
+    log.info('launch action', {
+      root: entry.root,
+      name: entry.alias ?? entry.name,
+      steps: steps.length
+    })
     for (let i = 0; i < steps.length - 1; i++) {
       const step = steps[i]
       const argv = await buildArgv(entry, step)
@@ -251,6 +279,12 @@ export async function launchAction(
         ...(step.env ?? {})
       })
       if (!res.ok) {
+        log.warn('action step failed', {
+          root: entry.root,
+          name: entry.alias ?? entry.name,
+          step: i + 1,
+          error: res.error
+        })
         return {
           ...res,
           error: `步骤 ${i + 1} 失败: ${step.command.join(' ')} — ${res.error ?? ''}`
@@ -261,7 +295,7 @@ export async function launchAction(
       ? { ...steps[steps.length - 1], terminal: false }
       : steps[steps.length - 1]
     const argv = await buildArgv(entry, last)
-    return await spawnDetached(
+    const res = await spawnDetached(
       argv,
       expandCwd(entry, last),
       {
@@ -271,6 +305,15 @@ export async function launchAction(
       last.terminal ?? false,
       opts.monitor ?? false
     )
+    log.info('action result', {
+      root: entry.root,
+      name: entry.alias ?? entry.name,
+      steps: steps.length,
+      ok: res.ok,
+      pid: res.pid,
+      error: res.error
+    })
+    return res
   }
   return launchSpec(entry, action.exec, opts)
 }

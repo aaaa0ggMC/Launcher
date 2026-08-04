@@ -2,6 +2,9 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile, writeFile, mkdir, rename } from 'fs/promises'
 import { dirname } from 'path'
+import { makeLogger } from './logger'
+
+const log = makeLogger('util')
 
 export const execFileAsync = promisify(execFile)
 
@@ -9,7 +12,8 @@ export const execFileAsync = promisify(execFile)
 export async function readJson<T>(p: string): Promise<T | null> {
   try {
     return JSON.parse(await readFile(p, 'utf-8')) as T
-  } catch {
+  } catch (e) {
+    log.warn('readJson failed', { path: p, error: e instanceof Error ? e.message : String(e) })
     return null
   }
 }

@@ -1,6 +1,9 @@
 import { readFile, writeFile } from 'fs/promises'
 import type { FtPreset, FtVector } from './types'
 import { dftVectors, sampleParametric, samplePolyline, type Point2 } from './dft'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('ft')
 
 export interface FtPresetMeta {
   name: string
@@ -119,15 +122,24 @@ const DESCRIPTIONS: Record<string, string> = {
 }
 
 export function listFtPresets(): FtPresetMeta[] {
-  return Object.keys(PRESETS).map((name) => ({
+  const presets = Object.keys(PRESETS).map((name) => ({
     name,
     description: DESCRIPTIONS[name] ?? ''
   }))
+  log.info('presets listed', { count: presets.length })
+  return presets
 }
 
 export function loadFtPreset(name: string): FtPreset | null {
-  if (name === 'random') return { name: 'random', vectors: randomVectors(), runSpeed: 1 }
-  return PRESETS[name] ?? null
+  if (name === 'random') {
+    const vectors = randomVectors()
+    log.info('preset loaded', { name, vectors: vectors.length })
+    return { name: 'random', vectors, runSpeed: 1 }
+  }
+  const preset = PRESETS[name] ?? null
+  if (preset) log.info('preset loaded', { name, vectors: preset.vectors.length })
+  else log.warn('preset not found', { name })
+  return preset
 }
 
 /** Normalize one raw vector from a JSON file into a valid FtVector. */
@@ -160,8 +172,12 @@ export async function loadFtFile(path: string): Promise<{
     const raw = await readFile(path, 'utf-8')
     const data = JSON.parse(raw) as Record<string, unknown> | unknown[]
     const list = Array.isArray(data) ? data : (data as Record<string, unknown>).vectors
-    if (!Array.isArray(list)) return { ok: false, error: '文件缺少 vectors 数组' }
+    if (!Array.isArray(list)) {
+      log.warn('ft file load failed', { path, error: '文件缺少 vectors 数组' })
+      return { ok: false, error: '文件缺少 vectors 数组' }
+    }
     const obj = Array.isArray(data) ? {} : (data as Record<string, unknown>)
+    log.info('ft file loaded', { path, count: list.length })
     return {
       ok: true,
       vectors: list.map(normalizeVector),
@@ -169,7 +185,9 @@ export async function loadFtFile(path: string): Promise<{
       ...(obj.verticesLimit !== undefined ? { verticesLimit: Number(obj.verticesLimit) } : {})
     }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const error = e instanceof Error ? e.message : String(e)
+    log.error('ft file load failed', { path, error })
+    return { ok: false, error }
   }
 }
 
@@ -180,8 +198,16 @@ export async function exportFtFile(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     await writeFile(path, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+    const count = Array.isArray(data)
+      ? data.length
+      : Array.isArray((data as Record<string, unknown> | null)?.vectors)
+        ? ((data as Record<string, unknown>).vectors as unknown[]).length
+        : 0
+    log.info('ft file exported', { path, count })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const error = e instanceof Error ? e.message : String(e)
+    log.error('ft file export failed', { path, error })
+    return { ok: false, error }
   }
 }

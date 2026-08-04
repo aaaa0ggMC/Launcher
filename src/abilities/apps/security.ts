@@ -1,6 +1,9 @@
 import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import type { RiskLevel } from './types'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('apps-security')
 
 export interface Assessment {
   risk: RiskLevel
@@ -33,7 +36,10 @@ const TEXT_FILES = ['.sh', '.bash', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', 
 
 /** Risk assessment by content scanning a directory for shell/python/node scripts. */
 export async function assessDir(dir: string): Promise<Assessment> {
-  const names = await readdir(dir).catch(() => [])
+  const names = await readdir(dir).catch((e) => {
+    log.warn('risk scan readdir failed', { dir, error: e instanceof Error ? e.message : String(e) })
+    return []
+  })
   const notes = new Set<string>()
   let network = false
   let priv = false
@@ -44,7 +50,14 @@ export async function assessDir(dir: string): Promise<Assessment> {
     if (!TEXT_FILES.some((ext) => lower.endsWith(ext))) continue
     const full = join(dir, name)
     if (dir.startsWith('.') || name.startsWith('.')) continue
-    const content = await readFile(full, 'utf-8').catch(() => '')
+    const content = await readFile(full, 'utf-8').catch((e) => {
+      log.warn('risk scan read failed', {
+        dir,
+        file: name,
+        error: e instanceof Error ? e.message : String(e)
+      })
+      return ''
+    })
     if (!content) continue
     for (const rule of DANGER_RULES) {
       if (rule.re.test(content)) {
@@ -60,6 +73,7 @@ export async function assessDir(dir: string): Promise<Assessment> {
   if (network || sys || priv) risk = 'medium'
   if (priv && (network || sys)) risk = 'high'
 
+  log.debug('risk assessed', { dir, risk, notes: notes.size })
   return {
     risk,
     auto_note: notes.size ? [...notes].join('; ') : undefined

@@ -1,4 +1,7 @@
 import type { CommandSpec } from './types'
+import { makeLogger } from '../logger'
+
+const log = makeLogger('commands')
 
 /**
  * Thrown when a command name isn't registered (e.g. the backing ability was
@@ -29,6 +32,7 @@ export function registerAll(specs: CommandSpec[]): void {
     if (commands.has(s.name)) throw new Error(`重复命令: ${s.name}`)
     commands.set(s.name, s)
   }
+  log.info(`registered ${specs.length} commands (total ${commands.size})`)
 }
 
 export function listCommands(): CommandSpec[] {
@@ -88,6 +92,7 @@ export async function tryRunCommand(input: string): Promise<string | null> {
     const result = await spec.run({ named, positional })
     return formatResult(result)
   } catch (e) {
+    log.error('command failed', { name, error: e instanceof Error ? e.message : String(e) })
     return `错误: ${e instanceof Error ? e.message : String(e)}`
   }
 }

@@ -4,12 +4,16 @@ import { join } from 'path'
 import type { GpuInfo } from './types'
 import { NVIDIA_PM_CONF, SCRIPTS_DIR } from '../../main/process/paths'
 import { run } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('dashboard-gpu')
 
 export async function gpuInfo(): Promise<GpuInfo[]> {
   const out = await run('nvidia-smi', [
     '--query-gpu=name,driver_version,memory.total,memory.used,utilization.gpu,temperature.gpu,fan.speed,power.draw,power.limit',
     '--format=csv,noheader,nounits'
   ]).catch(() => '')
+  if (!out) log.warn('nvidia-smi query failed')
   const gpus: GpuInfo[] = []
   for (const line of out.split('\n')) {
     const t = line.trim()
@@ -43,6 +47,7 @@ export async function gpuInfo(): Promise<GpuInfo[]> {
       })
     }
   }
+  log.info('gpu query result', { count: gpus.length })
   return gpus
 }
 
@@ -54,8 +59,15 @@ function clean(v: string | undefined): string | undefined {
 
 export async function readPmValue(): Promise<0 | 1 | null> {
   const raw = await readFile(NVIDIA_PM_CONF, 'utf-8').catch(() => '')
-  if (/NVreg_PreserveVideoMemoryAllocations=1/.test(raw)) return 1
-  if (/NVreg_PreserveVideoMemoryAllocations=0/.test(raw)) return 0
+  if (/NVreg_PreserveVideoMemoryAllocations=1/.test(raw)) {
+    log.info('pm value read', { value: 1 })
+    return 1
+  }
+  if (/NVreg_PreserveVideoMemoryAllocations=0/.test(raw)) {
+    log.info('pm value read', { value: 0 })
+    return 0
+  }
+  log.info('pm value read', { value: null })
   return null
 }
 
@@ -67,7 +79,11 @@ export async function togglePm(): Promise<0 | 1 | null> {
       if (err) reject(new Error(stderr.trim() || err.message))
       else resolve(stdout.trim())
     })
+  }).catch((e: unknown) => {
+    log.error('pm toggle failed', { error: e instanceof Error ? e.message : String(e) })
+    throw e
   })
-  if (result === '0' || result === '1') return result === '1' ? 1 : 0
-  return null
+  const value = result === '0' || result === '1' ? (result === '1' ? 1 : 0) : null
+  log.info('pm toggle result', { value })
+  return value
 }

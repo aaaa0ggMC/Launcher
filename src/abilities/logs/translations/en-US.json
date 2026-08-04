@@ -1,0 +1,16 @@
+{
+  "ability.logs.name": "Logs",
+  "ability.logs.category": "System",
+  "logs.heading": "Logs",
+  "logs.caption": "Current session logs · filter by level · live tail",
+  "logs.levelFilter": "Level",
+  "logs.levelAll": "All",
+  "logs.ignoreSelf": "Hide logs-self",
+  "logs.export": "Export",
+  "logs.exportTitle": "Export current session logs",
+  "logs.exportFailed": "Export failed",
+  "logs.exported": "Exported {n} log lines",
+  "logs.loadOlder": "Load older",
+  "logs.empty": "No logs yet",
+  "logs.total": "{n} lines"
+}

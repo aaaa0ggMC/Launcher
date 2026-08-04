@@ -3,6 +3,9 @@ import { join, extname, basename } from 'path'
 import { tmpdir } from 'os'
 import { ipcMain } from 'electron'
 import { EXTERNAL_ABILITIES_DIR } from './paths'
+import { makeLogger } from './logger'
+
+const log = makeLogger('ability-loader')
 
 // esbuild is externalized (see electron.vite.config.ts); resolved at runtime
 // from the project's node_modules. Used to compile external ability .ts files.
@@ -50,10 +53,13 @@ export async function loadExternalAbilities(): Promise<void> {
       const mod = await importAbility(filePath)
       if (typeof mod.register === 'function') {
         await mod.register(makeContext(basename(name, extname(name))))
-        console.log(`[cockpit] external ability loaded: ${name}`)
+        log.info('external ability loaded', { name })
       }
     } catch (e) {
-      console.error(`[cockpit] failed to load external ability ${name}:`, e)
+      log.error('failed to load external ability', {
+        name,
+        error: e instanceof Error ? e.message : String(e)
+      })
     }
   }
 }
@@ -64,7 +70,7 @@ function makeContext(id: string): AbilityContext {
     handle: (channel, fn) => {
       ipcMain.handle(`${id}:${channel}`, (_e, payload) => fn(payload))
     },
-    log: (...args) => console.log(`[cockpit:${id}]`, ...args)
+    log: (...args) => log.info(`[${id}] ${args.join(' ')}`)
   }
 }
 

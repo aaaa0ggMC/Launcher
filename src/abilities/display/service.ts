@@ -2,6 +2,9 @@ import { readdir } from 'fs/promises'
 import { join, extname } from 'path'
 import type { DisplayOutput, WallpaperFile } from './types'
 import { run } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('display')
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'])
 
@@ -12,12 +15,15 @@ export async function listWallpapers(dir: string): Promise<WallpaperFile[]> {
     if (!IMAGE_EXTS.has(extname(name).toLowerCase())) continue
     out.push({ name, path: join(dir, name) })
   }
+  log.info('wallpaper list result', { dir, count: out.length })
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function applyWallpaper(path: string): Promise<boolean> {
   const out = await run('plasma-apply-wallpaperimage', [path]).catch(() => '')
-  return !out.toLowerCase().includes('error')
+  const ok = !out.toLowerCase().includes('error')
+  log.info('apply wallpaper result', { path, ok })
+  return ok
 }
 
 export async function listOutputs(): Promise<DisplayOutput[]> {
@@ -33,5 +39,6 @@ export async function listOutputs(): Promise<DisplayOutput[]> {
       enabled: m[2] === 'enabled'
     })
   }
+  log.info('output list result', { count: outputs.length })
   return outputs
 }

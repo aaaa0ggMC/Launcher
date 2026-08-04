@@ -14,6 +14,9 @@ export const SCRIPTS_DIR = join(APP_ROOT, 'scripts')
 export const USER_CONFIG_DIR = join(homedir(), '.config', 'LinuxCockpit')
 export const EXTERNAL_ABILITIES_DIR = join(USER_CONFIG_DIR, 'abilities')
 
+/** Rotating log output (daily files, auto-archived). */
+export const LOG_DIR = join(USER_CONFIG_DIR, 'logs')
+
 export const AUTOSTART_DIR = join(homedir(), '.config', 'autostart')
 export const MIRRORLIST = '/etc/pacman.d/mirrorlist'
 export const NVIDIA_PM_CONF = '/etc/modprobe.d/nvidia-pm-override.conf'

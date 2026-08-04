@@ -2,7 +2,10 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { join } from 'path'
 import type { AppEntry, AppRegistryFile, RiskLevel } from './types'
 import { readJson } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
 import { assessDir } from './security'
+
+const log = makeLogger('apps-scanner')
 
 export interface DraftEntry {
   id: string
@@ -76,11 +79,18 @@ export async function draftFor(
 
   if (isDir) {
     const py = await detectPyproject(full)
-    if (py) return { ...py, alias: id }
+    if (py) {
+      log.debug('detected pyproject', { root, name: py.name, id })
+      return { ...py, alias: id }
+    }
     const node = await detectPackageJson(full)
-    if (node) return { ...node, alias: id }
+    if (node) {
+      log.debug('detected package.json', { root, name: node.name, id })
+      return { ...node, alias: id }
+    }
     const hasVenv = await stat(join(full, '.venv')).catch(() => null)
     if (hasVenv) {
+      log.debug('detected venv', { root, id })
       return {
         alias: id,
         name,
@@ -91,6 +101,7 @@ export async function draftFor(
     }
     const hasDocker = await stat(join(full, 'Dockerfile')).catch(() => null)
     if (hasDocker) {
+      log.debug('detected docker', { root, id })
       return {
         alias: id,
         name,
@@ -135,6 +146,7 @@ function stripExt(name: string): string {
 
 /** Rescan a root: auto-draft every detected entry, merge per the safe policy. */
 export async function rescanRoot(root: string): Promise<AppRegistryFile> {
+  log.info('rescan start', { root })
   const reg = (await readJson<AppRegistryFile>(join(root, 'apps.json'))) ?? { version: 1, apps: {} }
   const items = await readdir(root).catch(() => [])
   const found: { name: string; isDir: boolean }[] = []
@@ -218,6 +230,17 @@ export async function rescanRoot(root: string): Promise<AppRegistryFile> {
 
   reg.version = 1
   reg.apps = next
+  const total = Object.keys(next).length
+  const missing = Object.values(next).filter((e) => e.missing).length
+  const created = Object.keys(drafts).filter((id) => !reg.apps[id]).length
+  log.info('rescan summary', {
+    root,
+    found: found.length,
+    drafts: Object.keys(drafts).length,
+    created,
+    kept: total - created - missing,
+    missing
+  })
   return reg
 }
 

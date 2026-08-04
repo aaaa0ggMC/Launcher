@@ -2,6 +2,9 @@ import { readdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { AutostartEntry } from './types'
 import { AUTOSTART_DIR } from '../../main/process/paths'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('autostart')
 
 interface DesktopFile {
   groups: Record<string, Record<string, string>>
@@ -57,6 +60,7 @@ export async function listAutostart(): Promise<AutostartEntry[]> {
       hidden: hiddenFromGroups(desktop)
     })
   }
+  log.info('autostart list result', { count: out.length })
   return out.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
 
@@ -71,5 +75,15 @@ export async function toggleAutostart(file: string, hidden: boolean): Promise<vo
   } else {
     delete entry.Hidden
   }
-  await writeFile(full, serializeDesktop(desktop), 'utf-8')
+  try {
+    await writeFile(full, serializeDesktop(desktop), 'utf-8')
+    log.info('toggle autostart ok', { file, hidden })
+  } catch (e) {
+    log.error('toggle autostart failed', {
+      file,
+      hidden,
+      error: e instanceof Error ? e.message : String(e)
+    })
+    throw e
+  }
 }

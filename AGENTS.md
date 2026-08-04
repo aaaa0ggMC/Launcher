@@ -208,6 +208,13 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 通过 Electron `webFrame.setZoomFactor()` 实现真正的等比缩放 (不是只改 rem)。
 设置页滑块拖动时只更新数值，松手 (`@end`) 才应用缩放 + 持久化。
 
+### 日志系统
+
+- 基础设施 `src/main/process/logger.ts`：winston + winston-daily-rotate-file，写入 `~/.config/LinuxCockpit/logs/cockpit-YYYY-MM-DD.log`（按天轮转、10MB 上限、14 天保留、.gz 归档），同时维护当前会话的内存环形缓冲（20000 条）+ 向所有窗口广播 `cockpit:log` 事件。
+- 模块获取 scoped logger：`const log = makeLogger('<scope>')`，然后 `log.info/warn/error/debug(msg, data?)`。新代码应使用它而不是裸 `console.log`。
+- Logs ability（`src/abilities/logs/`）提供 UI：虚拟滚动逐行展示、按级别过滤、滑动窗口向后翻页、实时尾部、导出当前会话（`logs.query` / `logs.export` / `logs.post`）。
+- 渲染端 `main.ts` 会把 `console.warn/error` 与未捕获错误通过 `logs.post` 转发进主进程日志。
+
 ### 新增一个 Ability
 
 每个 ability 由几个可选的注入点组成，全部内聚在 `src/abilities/<id>/` 一个文件夹，按需添加：

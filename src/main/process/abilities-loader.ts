@@ -1,5 +1,8 @@
 import type { CommandSpec } from './commands/types'
 import { registerAll, listCommands } from './commands/registry'
+import { makeLogger } from './logger'
+
+const log = makeLogger('abilities-loader')
 
 /**
  * Built-in ability command loader.
@@ -21,15 +24,15 @@ export function registerAbilityCommands(): void {
     const mod = commandModules[key]
     const specs = mod?.default
     if (!Array.isArray(specs)) {
-      console.warn(`[cockpit] ${key}: 缺少 default CommandSpec[] 导出，跳过`)
+      log.warn('missing default CommandSpec[] export, skip', { key })
       continue
     }
     try {
       registerAll(specs)
       loaded.push(key)
     } catch (e) {
-      console.error(`[cockpit] 注册 ${key} 失败:`, e)
+      log.error('register failed', { key, error: e instanceof Error ? e.message : String(e) })
     }
   }
-  console.log(`[cockpit] 已注册 ${listCommands().length} 个命令 (${loaded.length} 个能力)`)
+  log.info(`registered ${listCommands().length} commands (${loaded.length} abilities)`)
 }

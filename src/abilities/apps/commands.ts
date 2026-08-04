@@ -14,6 +14,9 @@ import {
 } from './registry'
 import { rescanRoot } from './scanner'
 import { launchEntry, launchAction } from './launcher'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('apps')
 
 /** Stream output when the entry opts into the live transformer display. */
 function launchOpts(entry: AppEntry): { monitor: boolean } {
@@ -25,7 +28,11 @@ export default [
     name: 'apps.list',
     description: '列出所有搜索目录下的应用',
     usage: 'apps.list',
-    run: async () => listAllApps()
+    run: async () => {
+      const r = await listAllApps()
+      log.info('apps.list ok', { roots: r.roots.length, apps: Object.keys(r.apps).length })
+      return r
+    }
   },
   {
     name: 'apps.get',
@@ -34,14 +41,23 @@ export default [
     run: async (ctx) => {
       const root = String(ctx.named.root ?? '')
       const id = String(ctx.named.id ?? '')
-      return await getEntry(root, id)
+      const entry = await getEntry(root, id)
+      log.info('apps.get', { root, id, found: !!entry })
+      return entry
     }
   },
   {
     name: 'apps.config',
     description: '读取 Apps 能力配置 (搜索目录等)',
     usage: 'apps.config',
-    run: async () => getAppsConfig()
+    run: async () => {
+      const r = await getAppsConfig()
+      log.info('apps.config', {
+        roots: r.searchRoots.length,
+        confirmBeforeLaunch: r.confirmBeforeLaunch
+      })
+      return r
+    }
   },
   {
     name: 'apps.update',
@@ -51,9 +67,14 @@ export default [
       const root = String(ctx.named.root ?? '')
       const id = String(ctx.named.id ?? '')
       const patch = ctx.named.patch
-      if (!root || !id) return { ok: false, error: '需要 --root 与 --id' }
+      if (!root || !id) {
+        log.warn('apps.update invalid args', { root, id })
+        return { ok: false, error: '需要 --root 与 --id' }
+      }
       const p = typeof patch === 'string' ? JSON.parse(patch) : ((patch ?? {}) as Partial<AppEntry>)
-      return await updateEntry(root, id, p)
+      const r = await updateEntry(root, id, p)
+      log.info('apps.update ok', { root, id })
+      return r
     }
   },
   {
@@ -63,8 +84,12 @@ export default [
     run: async (ctx) => {
       const root = String(ctx.named.root ?? '')
       const id = String(ctx.named.id ?? '')
-      if (!root || !id) return { ok: false, error: '需要 --root 与 --id' }
+      if (!root || !id) {
+        log.warn('apps.delete invalid args', { root, id })
+        return { ok: false, error: '需要 --root 与 --id' }
+      }
       await deleteEntry(root, id)
+      log.info('apps.delete ok', { root, id })
       return { ok: true }
     }
   },
@@ -72,13 +97,23 @@ export default [
     name: 'apps.add-root',
     description: '添加搜索目录 (--path)',
     usage: 'apps.add-root --path /home/aaaa0ggmc/Apps',
-    run: async (ctx) => addSearchRoot(String(ctx.named.path ?? ''))
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      const r = await addSearchRoot(path)
+      log.info('apps.add-root ok', { path, roots: r.length })
+      return r
+    }
   },
   {
     name: 'apps.remove-root',
     description: '移除搜索目录 (--path)',
     usage: 'apps.remove-root --path /home/aaaa0ggmc/Apps',
-    run: async (ctx) => removeSearchRoot(String(ctx.named.path ?? ''))
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      const r = await removeSearchRoot(path)
+      log.info('apps.remove-root ok', { path, roots: r.length })
+      return r
+    }
   },
   {
     name: 'apps.create',
@@ -89,14 +124,19 @@ export default [
       const root = String(ctx.named.root ?? '')
       const id = String(ctx.named.id ?? '')
       const patch = ctx.named.patch
-      if (!root || !id) return { ok: false, error: '需要 --root 与 --id' }
+      if (!root || !id) {
+        log.warn('apps.create invalid args', { root, id })
+        return { ok: false, error: '需要 --root 与 --id' }
+      }
       const p = typeof patch === 'string' ? JSON.parse(patch) : ((patch ?? {}) as Partial<AppEntry>)
       // Optionally scaffold the project directory inside the search root.
       if (ctx.named.mkdir === true && p.path) {
         const target = isAbsolute(p.path) ? p.path : join(root, p.path)
         await mkdir(target, { recursive: true })
       }
-      return await updateEntry(root, id, p)
+      const r = await updateEntry(root, id, p)
+      log.info('apps.create ok', { root, id, mkdir: ctx.named.mkdir === true })
+      return r
     }
   },
   {
@@ -107,6 +147,7 @@ export default [
       const root = String(ctx.named.root ?? '')
       const reg = await rescanRoot(root)
       await writeRegistry(root, reg)
+      log.info('apps.rescan ok', { root, apps: Object.keys(reg.apps).length })
       return reg
     }
   },
@@ -118,8 +159,13 @@ export default [
       const root = String(ctx.named.root ?? '')
       const id = String(ctx.named.id ?? '')
       const entry = await getEntry(root, id)
-      if (!entry) return { ok: false, error: `未找到条目: ${id}` }
-      return await launchEntry(entry, launchOpts(entry))
+      if (!entry) {
+        log.warn('launch.run entry not found', { root, id })
+        return { ok: false, error: `未找到条目: ${id}` }
+      }
+      const r = await launchEntry(entry, launchOpts(entry))
+      log.info('launch.run ok', { root, id, ok: r.ok, pid: r.pid, error: r.error })
+      return r
     }
   },
   {
@@ -131,10 +177,18 @@ export default [
       const id = String(ctx.named.id ?? '')
       const actionId = String(ctx.named.action ?? '')
       const entry = await getEntry(root, id)
-      if (!entry) return { ok: false, error: `未找到条目: ${id}` }
+      if (!entry) {
+        log.warn('launch.action entry not found', { root, id, actionId })
+        return { ok: false, error: `未找到条目: ${id}` }
+      }
       const action = entry.actions?.[actionId]
-      if (!action) return { ok: false, error: `未找到操作: ${id}.${actionId}` }
-      return await launchAction(entry, action, launchOpts(entry))
+      if (!action) {
+        log.warn('launch.action action not found', { root, id, actionId })
+        return { ok: false, error: `未找到操作: ${id}.${actionId}` }
+      }
+      const r = await launchAction(entry, action, launchOpts(entry))
+      log.info('launch.action ok', { root, id, actionId, ok: r.ok, pid: r.pid, error: r.error })
+      return r
     }
   }
 ] satisfies CommandSpec[]

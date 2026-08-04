@@ -2,6 +2,9 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { USER_CONFIG_DIR } from '../../main/process/paths'
 import { DASHBOARD_LAYOUT_VERSION } from './types'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('dashboard-ui-state')
 
 const UI_STATE_FILE = join(USER_CONFIG_DIR, 'ui-state.json')
 
@@ -23,10 +26,11 @@ export async function getDashboardLayout(): Promise<{
   version: number | null
 }> {
   const state = await getUiState()
-  return {
-    layout: Array.isArray(state.dashboardLayout) ? state.dashboardLayout : [],
-    version: typeof state.dashboardLayoutVersion === 'number' ? state.dashboardLayoutVersion : null
-  }
+  const layout = Array.isArray(state.dashboardLayout) ? state.dashboardLayout : []
+  const version =
+    typeof state.dashboardLayoutVersion === 'number' ? state.dashboardLayoutVersion : null
+  log.info('layout get', { count: layout.length, version })
+  return { layout, version }
 }
 
 export async function setDashboardLayout(layout: unknown[]): Promise<void> {
@@ -35,6 +39,7 @@ export async function setDashboardLayout(layout: unknown[]): Promise<void> {
   state.dashboardLayoutVersion = DASHBOARD_LAYOUT_VERSION
   await mkdir(USER_CONFIG_DIR, { recursive: true })
   await writeFile(UI_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
+  log.info('layout set', { count: layout.length, version: DASHBOARD_LAYOUT_VERSION })
 }
 
 export async function resetDashboardLayout(): Promise<void> {
@@ -43,4 +48,5 @@ export async function resetDashboardLayout(): Promise<void> {
   delete state.dashboardLayoutVersion
   await mkdir(USER_CONFIG_DIR, { recursive: true })
   await writeFile(UI_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
+  log.info('layout reset')
 }

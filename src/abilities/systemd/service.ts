@@ -1,5 +1,8 @@
 import type { SystemdUnit } from './types'
 import { run } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('systemd')
 
 const USER = process.getuid?.() !== 0
 
@@ -30,7 +33,10 @@ export async function listSystemd(): Promise<SystemdUnit[]> {
     '--plain'
   ]
   const out = await run('systemctl', args).catch(() => '')
-  return parseUnits(out)
+  if (!out) log.warn('systemctl list failed')
+  const units = parseUnits(out)
+  log.info('systemd list result', { count: units.length })
+  return units
 }
 
 export async function systemdAction(
@@ -38,6 +44,17 @@ export async function systemdAction(
   action: 'start' | 'stop' | 'restart'
 ): Promise<SystemdUnit[]> {
   const args = [...(USER ? ['--user'] : []), action, name]
-  await run('systemctl', args)
-  return await listSystemd()
+  try {
+    await run('systemctl', args)
+    const units = await listSystemd()
+    log.info('systemd action ok', { name, action })
+    return units
+  } catch (e) {
+    log.error('systemd action failed', {
+      name,
+      action,
+      error: e instanceof Error ? e.message : String(e)
+    })
+    throw e
+  }
 }

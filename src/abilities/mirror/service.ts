@@ -7,6 +7,9 @@ import http from 'http'
 import type { MirrorEntry, MirrorInfo, MirrorTestResult } from './types'
 import { MIRRORLIST, SCRIPTS_DIR } from '../../main/process/paths'
 import { getManifest } from '../../main/process/manifest'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('mirror')
 
 /**
  * Serialize all mirror operations (read + toggle) — prevents the UI from
@@ -94,6 +97,7 @@ export async function getMirrorInfo(): Promise<MirrorInfo> {
     const raw = await readFile(MIRRORLIST, 'utf-8').catch(() => '')
     const fileMirrors = parseMirrorlist(raw)
     const mirrors = await mergeWithConfig(fileMirrors)
+    log.info('get mirror info', { count: mirrors.length })
     return { mirrors }
   })
 }
@@ -142,6 +146,7 @@ export async function toggleMirror(name: string, enabled: boolean): Promise<Mirr
       const mirrors = await mergeWithConfig(parseMirrorlist(raw))
       const target = mirrors.find((m) => m.name === name)
       if (!target) {
+        log.warn('toggle mirror not found', { name })
         resolveRun({ mirrors, lastError: `未找到镜像源: ${name}` })
         return
       }
@@ -154,6 +159,7 @@ export async function toggleMirror(name: string, enabled: boolean): Promise<Mirr
 
       if (srvIdx >= lines.length) {
         const mirrors = await mergeWithConfig(parseMirrorlist(raw))
+        log.warn('toggle mirror server line missing', { name })
         resolveRun({ mirrors, lastError: `镜像源 ${name} 的 Server 行缺失` })
         return
       }
@@ -181,12 +187,14 @@ export async function toggleMirror(name: string, enabled: boolean): Promise<Mirr
 
     if (!result.ok) {
       const mirrors = await mergeWithConfig(parseMirrorlist(raw))
+      log.error('toggle mirror failed', { name, enabled, error: result.message })
       resolveRun({ mirrors, lastError: `pkexec 失败: ${result.message}` })
       return
     }
     // Re-read to reflect the actual file state after the swap.
     const fresh = await readFile(MIRRORLIST, 'utf-8').catch(() => '')
     const freshMirrors = await mergeWithConfig(parseMirrorlist(fresh))
+    log.info('toggle mirror ok', { name, enabled })
     resolveRun({ mirrors: freshMirrors })
   })
   // Keep the chain going regardless of success/failure.
@@ -253,6 +261,10 @@ export async function testMirrors(): Promise<MirrorTestResult[]> {
         const { latency, speed } = await probeMirror(testUrl, 10000)
         return { name: m.name, url: m.url, ok: true, latency, speed }
       } catch (e) {
+        log.warn('mirror test failed', {
+          name: m.name,
+          error: e instanceof Error ? e.message : String(e)
+        })
         return {
           name: m.name,
           url: m.url,
@@ -262,5 +274,10 @@ export async function testMirrors(): Promise<MirrorTestResult[]> {
       }
     })
   )
+  log.info('mirror test run', {
+    total: results.length,
+    ok: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length
+  })
   return results
 }

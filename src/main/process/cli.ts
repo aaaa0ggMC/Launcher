@@ -3,6 +3,9 @@ import { listAllApps } from '../../abilities/apps/registry'
 import { launchEntry, launchAction } from '../../abilities/apps/launcher'
 import { listCommands, tryRunCommand } from './commands/registry'
 import { t, te } from './i18n'
+import { makeLogger } from './logger'
+
+const log = makeLogger('cli')
 
 function formatEntry(e: AppEntry): string {
   const actions = Object.entries(e.actions ?? {})
@@ -39,6 +42,7 @@ export async function cliExec(input: string): Promise<string> {
   const [cmdRaw, ...rest] = tokens
   if (!cmdRaw) return ''
   const cmd = cmdRaw.toLowerCase()
+  log.debug('cli input', { cmd })
 
   // Built-ins first.
   switch (cmd) {
@@ -98,10 +102,12 @@ export async function cliExec(input: string): Promise<string> {
 
   // Bare alias / tag → launch (optionally an action: <alias> <action>).
   const e = await resolveByAlias(cmdRaw)
-  if (!e) return te('cli.error.unknown', { cmd: cmdRaw })
+  if (!e) {
+    log.warn('unknown cli command', { cmd: cmdRaw })
+    return te('cli.error.unknown', { cmd: cmdRaw })
+  }
   return await launchByAlias(cmdRaw, rest[0])
 }
-
 async function resolveByAlias(key: string): Promise<AppEntry | null> {
   const { apps } = await listAllApps()
   const k = key.toLowerCase()
@@ -123,6 +129,8 @@ async function launchByAlias(key: string, actionId?: string): Promise<string> {
       return te('cli.launch.actionNotFound', { action: actionId, known })
     }
     const res = await launchAction(e, action)
+    if (!res.ok)
+      log.error('cli action launch failed', { name: e.name, action: action.name, error: res.error })
     return res.ok
       ? te('cli.launch.executed', {
           name: e.name,
@@ -132,6 +140,7 @@ async function launchByAlias(key: string, actionId?: string): Promise<string> {
       : te('cli.launch.failed', { error: res.error ?? '' })
   }
   const res = await launchEntry(e)
+  if (!res.ok) log.error('cli launch failed', { name: e.name, error: res.error })
   return res.ok
     ? te('cli.launch.started', {
         name: e.name,

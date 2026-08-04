@@ -10,6 +10,7 @@ import { setRegistryBroadcast } from '../abilities/apps/registry'
 import { setOutputBroadcast } from '../abilities/apps/launcher'
 import { readJson } from './process/util'
 import { CONFIG_JSON } from './process/paths'
+import { setLogBroadcast, log } from './process/logger'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -108,10 +109,16 @@ if (!gotLock) {
     registerIconProtocol()
     setRegistryBroadcast(broadcast)
     setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
+    setLogBroadcast((entry) => broadcast('cockpit:log', entry))
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
     startWatching()
+    log.info('app started', {
+      platform: process.platform,
+      version: process.versions.electron,
+      mode: is.dev ? 'dev' : 'prod'
+    })
 
     // Load external backend abilities before showing any window.
     loadExternalAbilities().catch((e) => console.error('[cockpit] external abilities:', e))

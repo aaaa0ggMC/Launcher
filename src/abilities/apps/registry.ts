@@ -7,6 +7,9 @@ import type { AppEntry, AppRegistryFile } from './types'
 import { CONFIG_JSON, ABILITIES_YAML } from '../../main/process/paths'
 import { getManifest } from '../../main/process/manifest'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('apps-registry')
 
 export interface SearchRoot {
   path: string
@@ -50,6 +53,7 @@ export async function addSearchRoot(path: string): Promise<SearchRoot[]> {
   if (!searchRoots.some((r) => r.path === path)) {
     searchRoots.push({ path, watch: true })
     await saveSearchRoots(searchRoots)
+    log.info('search root added', { path })
     broadcast('cockpit:apps-changed', 'roots', null)
   }
   return searchRoots
@@ -59,6 +63,7 @@ export async function removeSearchRoot(path: string): Promise<SearchRoot[]> {
   const { searchRoots } = await getAppsConfig()
   const next = searchRoots.filter((r) => r.path !== path)
   await saveSearchRoots(next)
+  log.info('search root removed', { path })
   broadcast('cockpit:apps-changed', 'roots', null)
   return next
 }
@@ -159,9 +164,13 @@ export async function listAllApps(): Promise<{
   for (const root of searchRoots) {
     const reg = await readRegistry(root.path)
     for (const [id, raw] of Object.entries(reg.apps)) {
-      out[id] = { ...(await normalizeEntry(raw as unknown as Record<string, unknown>)), root: root.path }
+      out[id] = {
+        ...(await normalizeEntry(raw as unknown as Record<string, unknown>)),
+        root: root.path
+      }
     }
   }
+  log.info('listed apps', { roots: searchRoots.length, apps: Object.keys(out).length })
   return { roots: searchRoots, apps: out }
 }
 
@@ -202,6 +211,7 @@ export async function updateEntry(
   if (!merged.alias) merged.alias = id
   reg.apps[id] = merged
   await writeJsonAtomic(file, reg)
+  log.info('entry saved', { root, id })
   broadcast('cockpit:apps-changed', 'update', { root, id })
   return { ...merged, root }
 }
@@ -211,11 +221,13 @@ export async function deleteEntry(root: string, id: string): Promise<void> {
   const reg = await readRegistry(root)
   delete reg.apps[id]
   await writeJsonAtomic(file, reg)
+  log.info('entry deleted', { root, id })
   broadcast('cockpit:apps-changed', 'delete', { root, id })
 }
 
 export async function writeRegistry(root: string, reg: AppRegistryFile): Promise<void> {
   await writeJsonAtomic(appsJsonPath(root), reg)
+  log.info('registry written (rescan broadcast)', { root, apps: Object.keys(reg.apps).length })
   broadcast('cockpit:apps-changed', 'rescan', root)
 }
 
@@ -267,8 +279,10 @@ export function watchRoots(): void {
     const rel = path === root ? '' : path.slice(root.length + 1)
     const id = rel.split('/')[0]
     if (rel.endsWith('apps.json')) {
+      log.debug('watcher apps.json change', { root })
       broadcast('cockpit:apps-changed', 'file', root)
     } else if (rel && !id.startsWith('.') && STRUCTURAL.has(event)) {
+      log.debug('watcher structural event', { root, event, path: rel })
       notify(root)
     }
   })

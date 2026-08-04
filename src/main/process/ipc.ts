@@ -7,6 +7,21 @@ import { watchRoots } from '../../abilities/apps/registry'
 import { cliExec } from './cli'
 import { runCommand, listCommands, UnknownCommandError } from './commands/registry'
 
+/** Argument keys whose values should never land in the log (config patches,
+ *  file payloads, credentials). */
+const SENSITIVE_KEYS = new Set(['patch', 'data', 'password', 'token', 'secret', 'apiKey', 'env'])
+
+function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(args ?? {})) {
+    out[k] = SENSITIVE_KEYS.has(k) ? '<redacted>' : v
+  }
+  return out
+}
+import { makeLogger } from './logger'
+
+const log = makeLogger('ipc')
+
 function mainWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
 }
@@ -111,6 +126,9 @@ export function registerIpc(): void {
 
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) => {
+    // Log the concrete command + its (redacted) args. The file always keeps
+    // these (even `logs.*`) — the UI just filters them via `excludeSelf`.
+    log.info(name, { args: redactArgs(args ?? {}) })
     try {
       return await runCommand(name, args ?? {})
     } catch (err) {
@@ -118,9 +136,12 @@ export function registerIpc(): void {
       // window so the renderer can show a friendly toast, then rethrow so
       // existing callers keep their current error semantics.
       if (err instanceof UnknownCommandError) {
+        log.warn('unknown command', err.commandName)
         for (const win of BrowserWindow.getAllWindows()) {
           win.webContents.send('cockpit:command-error', err.commandName)
         }
+      } else {
+        log.error(`${name} failed`, err instanceof Error ? err.message : String(err))
       }
       throw err
     }
@@ -134,5 +155,6 @@ export function registerIpc(): void {
 }
 
 export function startWatching(): void {
+  log.info('start watching app roots')
   watchRoots()
 }

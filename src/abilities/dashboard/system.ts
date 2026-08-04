@@ -4,6 +4,9 @@ import type { SystemStats } from './types'
 import { gpuInfo } from './gpu'
 import { listDocker } from './docker'
 import { run } from '../../main/process/util'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('dashboard-system')
 
 async function cpuUsage(): Promise<{
   model: string
@@ -32,6 +35,7 @@ async function cpuUsage(): Promise<{
 
   // CPU temperature — try thermal zones (works on most Linux setups without lm_sensors).
   let temp: number | undefined
+  let zoneFails = 0
   for (let i = 0; i < 4; i++) {
     const raw = await readFile(`/sys/class/thermal/thermal_zone${i}/temp`, 'utf-8').catch(() => '')
     if (raw) {
@@ -40,7 +44,12 @@ async function cpuUsage(): Promise<{
         temp = t
         break
       }
+    } else {
+      zoneFails++
     }
+  }
+  if (temp === undefined) {
+    log.warn('cpu temp read failed', { zonesChecked: 4, zoneFails })
   }
 
   // CPU frequency — os.cpus()[0].speed returns MHz in Node.js.
@@ -57,6 +66,7 @@ async function cpuUsage(): Promise<{
 
 async function diskStats(): Promise<SystemStats['disk']> {
   const out = await run('df', ['-kP']).catch(() => '')
+  if (!out) log.warn('disk stats read failed')
   const disks: SystemStats['disk'] = []
   for (const line of out.split('\n').slice(1)) {
     const cols = line.trim().split(/\s+/)
@@ -137,6 +147,12 @@ export async function systemStats(): Promise<SystemStats> {
     swapStats(),
     packageCounts()
   ])
+  log.info('stats collected', {
+    cpuUsage: cpu.usage,
+    gpuCount: gpu.length,
+    dockerCount: docker.length,
+    diskCount: disks.length
+  })
   return {
     hostname: os.hostname(),
     platform: `${os.type()} ${os.release()}`,
