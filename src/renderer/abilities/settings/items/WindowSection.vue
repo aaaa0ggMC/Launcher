@@ -195,9 +195,7 @@ async function commitFuseBlur(): Promise<void> {
       />
 
       <div class="text-caption on-surface-variant mt-2">
-        frameless/rounded 下次启动生效；背景/fuse 即时生效。图层: Background(底) → Fuse(中) →
-        Data(顶)。Fuse 100% 时完全盖住背景；调低 Fuse 透出背景，图片可见度 = 背景图片不透明度 × (1 −
-        Fuse 蒙层不透明度)。
+        {{ translate(uiLang, 'window.note') }}
       </div>
     </v-card-text>
   </v-card>

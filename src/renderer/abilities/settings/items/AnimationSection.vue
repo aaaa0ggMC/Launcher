@@ -1,7 +1,12 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-settings-animations' })
 
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../i18n'
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+
 const enabled = ref(true)
 const pageTransition = ref<'fade' | 'slide'>('fade')
 
@@ -36,17 +41,17 @@ async function setStyle(v: string | null): Promise<void> {
 
 <template>
   <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">界面切换动画</v-card-title>
+    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'animation.title') }}</v-card-title>
     <v-card-text>
       <v-switch
         :model-value="enabled"
-        label="启用切换动画"
+        :label="translate(uiLang, 'animation.enabled')"
         density="compact"
         hide-details
         @update:model-value="setEnabled"
       />
       <v-divider class="my-3" />
-      <div class="text-body-2 mb-1">切换样式</div>
+      <div class="text-body-2 mb-1">{{ translate(uiLang, 'animation.style') }}</div>
       <v-radio-group
         :model-value="enabled ? pageTransition : null"
         density="compact"
@@ -54,10 +59,12 @@ async function setStyle(v: string | null): Promise<void> {
         :disabled="!enabled"
         @update:model-value="setStyle"
       >
-        <v-radio label="淡入淡出" value="fade" />
-        <v-radio label="左右滑动" value="slide" />
+        <v-radio :label="translate(uiLang, 'animation.fade')" value="fade" />
+        <v-radio :label="translate(uiLang, 'animation.slide')" value="slide" />
       </v-radio-group>
-      <div class="text-caption on-surface-variant mt-2">在侧栏能力之间切换时的过渡效果。</div>
+      <div class="text-caption on-surface-variant mt-2">
+        {{ translate(uiLang, 'animation.caption') }}
+      </div>
     </v-card-text>
   </v-card>
 </template>

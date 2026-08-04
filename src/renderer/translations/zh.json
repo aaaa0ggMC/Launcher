@@ -186,5 +186,12 @@
   "apps.save": "保存",
   "apps.searchRoots": "应用搜索目录",
   "apps.searchRootsDesc": "应用注册表从这些根目录扫描 apps.json，添加或移除即时生效。",
-  "apps.unconfigured": "未配置"
+  "apps.unconfigured": "未配置",
+  "animation.title": "界面切换动画",
+  "animation.enabled": "启用切换动画",
+  "animation.style": "切换样式",
+  "animation.fade": "淡入淡出",
+  "animation.slide": "左右滑动",
+  "animation.caption": "在侧栏能力之间切换时的过渡效果。",
+  "window.note": "frameless/rounded 下次启动生效；背景/fuse 即时生效。图层: Background(底) → Fuse(中) → Data(顶)。Fuse 100% 时完全盖住背景；调低 Fuse 透出背景，图片可见度 = 背景图片不透明度 × (1 − Fuse 蒙层不透明度)。"
 }

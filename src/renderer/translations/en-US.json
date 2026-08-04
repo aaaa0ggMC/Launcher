@@ -186,5 +186,12 @@
   "apps.save": "Save",
   "apps.searchRoots": "Search Directories",
   "apps.searchRootsDesc": "The app registry scans these root directories for apps.json files.",
-  "apps.unconfigured": "Not configured"
+  "apps.unconfigured": "Not configured",
+  "animation.title": "Page Transition",
+  "animation.enabled": "Enable transitions",
+  "animation.style": "Transition style",
+  "animation.fade": "Fade",
+  "animation.slide": "Slide",
+  "animation.caption": "Transition effect when switching between sidebar abilities.",
+  "window.note": "frameless/rounded take effect on next launch; background/fuse apply instantly. Layers: Background (bottom) → Fuse (middle) → Data (top). Fuse at 100% fully hides the background; lower it to reveal it. Image visibility = background opacity × (1 − fuse overlay opacity)."
 }
