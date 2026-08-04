@@ -1,7 +1,8 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-dashboard' })
 
-import { ref, shallowRef, computed, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, computed, inject, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
+import type { Ref } from 'vue'
 import { GridStack } from 'gridstack'
 import type { GridStackNode, GridItemHTMLElement } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
@@ -9,8 +10,10 @@ import type { SystemStats } from '@shared/types'
 import { DASHBOARD_LAYOUT_VERSION } from '@shared/types'
 import { fmtBytes, fmtUptime } from '../../composables/format'
 import LoadingBar from '../../components/LoadingBar.vue'
+import { translate, translateTemplate } from '../../i18n'
 
 const stats = shallowRef<SystemStats | null>(null)
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 const pm = ref<0 | 1 | null>(null)
 const pmBusy = ref(false)
 const pmConfirm = ref(false)
@@ -223,7 +226,7 @@ onBeforeUnmount(() => {
   <div>
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
-        <div class="text-h6 font-weight-medium">系统总览</div>
+        <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'dashboard.heading') }}</div>
         <div v-if="stats" class="text-caption on-surface-variant mt-1">
           {{ stats.hostname }} · {{ stats.platform }} · 已运行 {{ fmtUptime(stats.uptime) }}
         </div>
@@ -234,7 +237,7 @@ onBeforeUnmount(() => {
         :loading="loading && firstLoaded"
         @click="refresh"
       >
-        刷新
+        {{ translate(uiLang, 'dashboard.refresh') }}
       </v-btn>
     </div>
 
@@ -269,19 +272,19 @@ onBeforeUnmount(() => {
                 <div class="text-body-1 font-weight-medium">{{ stats?.hostname }}</div>
                 <div class="info-grid mt-2">
                   <div class="info-cell">
-                    <span class="info-label">系统</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.sys') }}</span>
                     <span class="info-value">{{ stats?.platform }}</span>
                   </div>
                   <div class="info-cell">
-                    <span class="info-label">架构</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.arch') }}</span>
                     <span class="info-value">{{ stats?.arch }}</span>
                   </div>
                   <div class="info-cell">
-                    <span class="info-label">用户</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.user') }}</span>
                     <span class="info-value">{{ stats?.username ?? '—' }}</span>
                   </div>
                   <div class="info-cell">
-                    <span class="info-label">桌面</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.desktop') }}</span>
                     <span class="info-value">{{ stats?.de ?? '—' }}</span>
                   </div>
                   <div class="info-cell">
@@ -289,7 +292,7 @@ onBeforeUnmount(() => {
                     <span class="info-value text-truncate">{{ stats?.shell ?? '—' }}</span>
                   </div>
                   <div class="info-cell">
-                    <span class="info-label">运行时长</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.uptime') }}</span>
                     <span class="info-value">{{ fmtUptime(stats?.uptime ?? 0) }}</span>
                   </div>
                 </div>
@@ -322,7 +325,7 @@ onBeforeUnmount(() => {
                       {{ stats?.cpu.model }}
                     </div>
                     <div class="text-caption on-surface-variant mt-1">
-                      {{ stats?.cpu.cores }} 核
+                      {{ translateTemplate(uiLang, 'dashboard.cores', { n: String(stats?.cpu.cores ?? '') }) }}
                       <span v-if="stats?.cpu.freq"> · {{ stats.cpu.freq }} MHz</span>
                     </div>
                   </div>
@@ -330,7 +333,7 @@ onBeforeUnmount(() => {
                 <v-divider class="my-2" />
                 <div class="info-grid">
                   <div class="info-cell">
-                    <span class="info-label">温度</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.temp') }}</span>
                     <span class="info-value">
                       <v-icon
                         v-if="stats?.cpu.temp"
@@ -349,7 +352,7 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
                   <div class="info-cell">
-                    <span class="info-label">负载 (1/5/15m)</span>
+                    <span class="info-label">{{ translate(uiLang, 'dashboard.load') }}</span>
                     <span class="info-value font-family-mono">
                       {{
                         stats?.loadAvg ? stats.loadAvg.map((l) => l.toFixed(2)).join(' / ') : '—'
@@ -362,7 +365,7 @@ onBeforeUnmount(() => {
               <!-- Memory -->
               <template v-else-if="c.id === 'mem'">
                 <div class="d-flex align-center justify-space-between mb-1">
-                  <span class="text-body-2 font-weight-medium">物理内存</span>
+                  <span class="text-body-2 font-weight-medium">{{ translate(uiLang, 'dashboard.mem') }}</span>
                   <span class="text-caption font-family-mono on-surface-variant">
                     {{ stats?.mem.percent }}%
                   </span>
@@ -381,15 +384,15 @@ onBeforeUnmount(() => {
                 />
                 <div class="d-flex justify-space-between mt-1">
                   <span class="text-caption on-surface-variant">
-                    已用 {{ fmtBytes(stats?.mem.used ?? 0) }}
-                  </span>
-                  <span class="text-caption on-surface-variant">
-                    共 {{ fmtBytes(stats?.mem.total ?? 0) }}
+{{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats?.mem.used ?? 0) }}
+                   </span>
+                   <span class="text-caption on-surface-variant">
+                     {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats?.mem.total ?? 0) }}
                   </span>
                 </div>
                 <v-divider class="my-2" />
                 <div class="d-flex align-center justify-space-between mb-1">
-                  <span class="text-body-2 font-weight-medium">交换分区</span>
+                  <span class="text-body-2 font-weight-medium">{{ translate(uiLang, 'dashboard.swap') }}</span>
                   <span v-if="stats?.swap" class="text-caption font-family-mono on-surface-variant">
                     {{ stats.swap.percent }}%
                   </span>
@@ -403,19 +406,19 @@ onBeforeUnmount(() => {
                 />
                 <div v-if="stats?.swap" class="d-flex justify-space-between mt-1">
                   <span class="text-caption on-surface-variant">
-                    已用 {{ fmtBytes(stats.swap.used) }}
-                  </span>
-                  <span class="text-caption on-surface-variant">
-                    共 {{ fmtBytes(stats.swap.total) }}
+{{ translate(uiLang, 'dashboard.used') }} {{ fmtBytes(stats.swap.used) }}
+                   </span>
+                   <span class="text-caption on-surface-variant">
+                     {{ translate(uiLang, 'dashboard.total') }} {{ fmtBytes(stats.swap.total) }}
                   </span>
                 </div>
-                <div v-else class="text-caption on-surface-variant">未启用交换分区</div>
+                <div v-else class="text-caption on-surface-variant">{{ translate(uiLang, 'dashboard.noSwap') }}</div>
               </template>
 
               <!-- GPU -->
               <template v-else-if="c.id === 'gpu'">
                 <div v-if="gpus.length === 0" class="text-caption on-surface-variant">
-                  未检测到 GPU (nvidia-smi 不可用)
+                  {{ translate(uiLang, 'dashboard.noGpu') }}
                 </div>
                 <div v-for="g in gpus" :key="g.name" class="mb-3">
                   <div class="d-flex justify-space-between align-center">
@@ -428,17 +431,17 @@ onBeforeUnmount(() => {
                       {{ g.temp }}
                     </v-chip>
                   </div>
-                  <div class="text-caption on-surface-variant mt-1">驱动 {{ g.driver }}</div>
+                  <div class="text-caption on-surface-variant mt-1">{{ translate(uiLang, 'dashboard.driver') }} {{ g.driver }}</div>
                   <div class="text-caption on-surface-variant mt-1 d-flex ga-3 flex-wrap">
-                    <span>显存 {{ g.vram }}</span>
-                    <span v-if="g.fanSpeed">风扇 {{ g.fanSpeed }}</span>
+                    <span>{{ translate(uiLang, 'dashboard.vram') }} {{ g.vram }}</span>
+                    <span v-if="g.fanSpeed">{{ translate(uiLang, 'dashboard.fan') }} {{ g.fanSpeed }}</span>
                     <span v-if="g.power">
-                      功耗 {{ g.power }}<span v-if="g.powerLimit"> / {{ g.powerLimit }}</span>
+                      {{ translate(uiLang, 'dashboard.power') }} {{ g.power }}<span v-if="g.powerLimit"> / {{ g.powerLimit }}</span>
                     </span>
                   </div>
                   <div class="mt-1">
                     <div class="d-flex justify-space-between text-caption">
-                      <span class="on-surface-variant">GPU 利用率</span>
+                      <span class="on-surface-variant">{{ translate(uiLang, 'dashboard.gpuUtil') }}</span>
                       <span class="font-family-mono">{{ g.usage }}</span>
                     </div>
                     <v-progress-linear

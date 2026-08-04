@@ -2,9 +2,12 @@
 defineOptions({ name: 'cockpit-settings-window' })
 
 import { ref, inject, onMounted } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../i18n'
 import { backgrounds } from '../../../backgrounds'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 
 const frameless = ref(true)
 const rounded = ref(true)
@@ -87,18 +90,18 @@ async function commitFuseBlur(): Promise<void> {
 
 <template>
   <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">窗口</v-card-title>
+    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'window.title') }}</v-card-title>
     <v-card-text class="d-flex flex-column">
       <v-switch
         :model-value="frameless"
-        label="无边框窗口"
+        :label="translate(uiLang, 'window.frameless')"
         density="compact"
         hide-details
         @update:model-value="setFrameless"
       />
       <v-switch
         :model-value="rounded"
-        label="圆角窗口"
+        :label="translate(uiLang, 'window.rounded')"
         density="compact"
         hide-details
         class="mt-1"
@@ -107,13 +110,13 @@ async function commitFuseBlur(): Promise<void> {
 
       <v-divider class="my-3" />
 
-      <div class="text-body-2 mb-1">背景</div>
+      <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.background') }}</div>
       <v-select
         v-model="background"
         :items="backgrounds"
         item-title="name"
         item-value="id"
-        label="背景"
+        :label="translate(uiLang, 'window.bgSelect')"
         variant="outlined"
         density="compact"
         hide-details
@@ -125,7 +128,7 @@ async function commitFuseBlur(): Promise<void> {
       <div v-if="background === 'image'" class="mt-2">
         <v-text-field
           v-model="backgroundImage"
-          label="图片路径"
+          :label="translate(uiLang, 'window.imgPath')"
           placeholder="/home/user/Pictures/wall.jpg"
           variant="outlined"
           density="compact"
@@ -141,7 +144,7 @@ async function commitFuseBlur(): Promise<void> {
       </div>
 
       <div class="d-flex align-center justify-space-between mt-3 mb-1">
-        <span class="text-body-2">Fuse 蒙层不透明度</span>
+        <span class="text-body-2">{{ translate(uiLang, 'window.fuseAlpha') }}</span>
         <span class="text-caption on-surface-variant font-family-mono">
           {{ Math.round(fuseAlpha * 100) }}%
         </span>
@@ -159,7 +162,7 @@ async function commitFuseBlur(): Promise<void> {
 
       <template v-if="background !== 'transparent'">
         <div class="d-flex align-center justify-space-between mt-3 mb-1">
-          <span class="text-body-2">背景图片不透明度</span>
+          <span class="text-body-2">{{ translate(uiLang, 'window.bgOpacity') }}</span>
           <span class="text-caption on-surface-variant font-family-mono">
             {{ Math.round(backgroundOpacity * 100) }}%
           </span>
@@ -177,7 +180,7 @@ async function commitFuseBlur(): Promise<void> {
       </template>
 
       <div class="d-flex align-center justify-space-between mt-3 mb-1">
-        <span class="text-body-2">背景模糊</span>
+        <span class="text-body-2">{{ translate(uiLang, 'window.bgBlur') }}</span>
         <span class="text-caption on-surface-variant font-family-mono"> {{ fuseBlur }}px </span>
       </div>
       <v-slider

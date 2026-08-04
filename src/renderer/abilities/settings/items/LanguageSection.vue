@@ -3,7 +3,6 @@ defineOptions({ name: 'cockpit-settings-language' })
 
 import { ref, onMounted } from 'vue'
 import { availableLanguages } from '../../../i18n'
-
 const selected = ref('zh')
 
 onMounted(async () => {

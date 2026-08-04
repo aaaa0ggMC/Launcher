@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, onMounted } from 'vue'
+import { ref, shallowRef, computed, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { MirrorInfo, MirrorEntry } from '@shared/types'
+import { translate, translateTemplate } from '../../i18n'
+
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 
 interface MirrorTestItem {
   name: string
@@ -111,13 +115,13 @@ defineExpose({ toMarkdown })
   <div>
     <div class="d-flex align-center justify-space-between mb-1">
       <div>
-        <div class="text-h6 font-weight-medium">软件源</div>
+        <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'mirror.heading') }}</div>
         <div class="text-caption on-surface-variant mt-1">
-          Arch Linux 镜像源 · 已启用 {{ enabledCount }} 个
+          {{ translateTemplate(uiLang, 'mirror.subtitle', { n: String(enabledCount) }) }}
         </div>
       </div>
       <v-btn variant="tonal" prepend-icon="mdi-speedometer" :loading="testing" @click="runTest">
-        测速
+        {{ translate(uiLang, 'mirror.test') }}
       </v-btn>
     </div>
 
@@ -149,7 +153,7 @@ defineExpose({ toMarkdown })
                 >
                   {{ testResults[m.name].latency }}ms
                 </v-chip>
-                <v-chip v-else size="x-small" color="error" variant="tonal">超时</v-chip>
+                <v-chip v-else size="x-small" color="error" variant="tonal">{{ translate(uiLang, 'mirror.timeout') }}</v-chip>
               </template>
             </div>
             <div class="text-caption on-surface-variant mt-2 text-truncate">{{ m.url }}</div>
@@ -172,7 +176,7 @@ defineExpose({ toMarkdown })
               density="compact"
               hide-details
               :loading="toggling === m.name"
-              :label="m.enabled ? '已启用' : '已禁用'"
+              :label="m.enabled ? translate(uiLang, 'mirror.enabled') : translate(uiLang, 'mirror.disabled')"
               @update:model-value="(v: boolean | null) => toggle(m, !!v)"
             />
           </v-card-actions>

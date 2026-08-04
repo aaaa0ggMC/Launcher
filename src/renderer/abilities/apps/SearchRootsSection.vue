@@ -2,7 +2,6 @@
 defineOptions({ name: 'cockpit-apps-search-roots' })
 
 import { ref, onMounted } from 'vue'
-
 const roots = ref<{ path: string; watch: boolean }[]>([])
 const searching = ref('')
 

@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, onMounted } from 'vue'
+import { ref, shallowRef, computed, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { SystemdUnit } from '@shared/types'
+import { translate } from '../../i18n'
 import LoadingBar from '../../components/LoadingBar.vue'
+
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 
 const units = shallowRef<SystemdUnit[]>([])
 const loading = ref(false)
@@ -52,11 +56,11 @@ onMounted(load)
   <div>
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
-        <div class="text-h6 font-weight-medium">Systemd 服务</div>
-        <div class="text-caption on-surface-variant">用户服务 (systemctl --user)</div>
+        <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'systemd.heading') }}</div>
+        <div class="text-caption on-surface-variant">{{ translate(uiLang, 'systemd.subtitle') }}</div>
       </div>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loading" @click="load">
-        刷新
+        {{ translate(uiLang, 'systemd.refresh') }}
       </v-btn>
     </div>
 
@@ -65,7 +69,7 @@ onMounted(load)
         <v-text-field
           v-model="filter"
           prepend-inner-icon="mdi-magnify"
-          placeholder="搜索服务"
+          :placeholder="translate(uiLang, 'systemd.search')"
           density="compact"
           variant="solo-filled"
           hide-details
@@ -73,7 +77,7 @@ onMounted(load)
         />
       </v-col>
       <v-col cols="12" sm="7" class="d-flex align-center">
-        <v-checkbox v-model="showAll" label="显示全部 (含未激活)" density="compact" hide-details />
+        <v-checkbox v-model="showAll" :label="translate(uiLang, 'systemd.showAll')" density="compact" hide-details />
       </v-col>
     </v-row>
 
@@ -107,7 +111,7 @@ onMounted(load)
               variant="tonal"
               :loading="busy === `${u.name}:restart`"
               :disabled="u.active !== 'active'"
-              title="重启"
+              :title="translate(uiLang, 'systemd.restart')"
               @click="act(u, 'restart')"
             >
               <v-icon>mdi-restart</v-icon>
@@ -119,7 +123,7 @@ onMounted(load)
               color="error"
               variant="tonal"
               :loading="busy === `${u.name}:stop`"
-              title="停止"
+              :title="translate(uiLang, 'systemd.stop')"
               @click="act(u, 'stop')"
             >
               <v-icon>mdi-stop</v-icon>
@@ -131,7 +135,7 @@ onMounted(load)
               color="success"
               variant="tonal"
               :loading="busy === `${u.name}:start`"
-              title="启动"
+              :title="translate(uiLang, 'systemd.start')"
               @click="act(u, 'start')"
             >
               <v-icon>mdi-play</v-icon>
@@ -144,7 +148,7 @@ onMounted(load)
     <v-empty-state
       v-if="!loading && filtered.length === 0"
       icon="mdi-server-off"
-      title="没有匹配的服务"
+      :title="translate(uiLang, 'systemd.empty')"
       class="mt-6"
     />
   </div>

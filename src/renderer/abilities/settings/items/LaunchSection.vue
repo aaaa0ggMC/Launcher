@@ -2,8 +2,11 @@
 defineOptions({ name: 'cockpit-settings-launch' })
 
 import { ref, inject, onMounted } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../i18n'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 const confirmBeforeLaunch = ref(false)
 
 onMounted(async () => {
@@ -26,11 +29,11 @@ async function setConfirm(v: boolean | null): Promise<void> {
 
 <template>
   <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">启动</v-card-title>
+    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'launch.title') }}</v-card-title>
     <v-card-text>
       <v-switch
         :model-value="confirmBeforeLaunch"
-        label="所有启动前都需确认"
+        :label="translate(uiLang, 'launch.switch')"
         density="compact"
         hide-details
         @update:model-value="setConfirm"

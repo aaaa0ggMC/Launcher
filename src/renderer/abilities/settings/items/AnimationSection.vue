@@ -2,7 +2,6 @@
 defineOptions({ name: 'cockpit-settings-animations' })
 
 import { ref, onMounted } from 'vue'
-
 const enabled = ref(true)
 const pageTransition = ref<'fade' | 'slide'>('fade')
 

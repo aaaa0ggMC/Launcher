@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted } from 'vue'
+import { ref, shallowRef, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { AutostartEntry } from '@shared/types'
+import { translate } from '../../i18n'
 import LoadingBar from '../../components/LoadingBar.vue'
+
+const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
 
 const entries = shallowRef<AutostartEntry[]>([])
 const loading = ref(false)
@@ -34,8 +38,8 @@ onMounted(load)
 
 <template>
   <div>
-    <div class="text-h6 font-weight-medium mb-1">启动项</div>
-    <div class="text-caption on-surface-variant mb-4">管理 ~/.config/autostart 中的自启动项</div>
+    <div class="text-h6 font-weight-medium mb-1">{{ translate(uiLang, 'autostart.heading') }}</div>
+    <div class="text-caption on-surface-variant mb-4">{{ translate(uiLang, 'autostart.subtitle') }}</div>
 
     <LoadingBar :loading="loading" :error="error" />
 
@@ -50,7 +54,7 @@ onMounted(load)
               <div class="d-flex align-center ga-2">
                 <span class="text-body-1 font-weight-medium text-truncate">{{ e.name }}</span>
                 <v-chip size="x-small" variant="tonal" :color="e.hidden ? '' : 'success'">
-                  {{ e.hidden ? '已禁用' : '已启用' }}
+                  {{ e.hidden ? translate(uiLang, 'autostart.disabled') : translate(uiLang, 'autostart.enabled') }}
                 </v-chip>
               </div>
               <div class="text-caption on-surface-variant text-truncate mt-1">{{ e.exec }}</div>
@@ -72,8 +76,8 @@ onMounted(load)
     <v-empty-state
       v-if="!loading && entries.length === 0"
       icon="mdi-rocket-launch-outline"
-      title="没有自启动项"
-      text="~/.config/autostart 中没有 .desktop 文件。"
+      :title="translate(uiLang, 'autostart.empty')"
+      :text="translate(uiLang, 'autostart.emptyText')"
       class="mt-6"
     />
   </div>
