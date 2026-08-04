@@ -14,11 +14,12 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 <template>
   <div class="d-flex flex-column ga-3">
     <!-- playback row -->
-    <div class="d-flex ga-2">
+    <div class="ctrl-actions">
       <v-btn
         variant="tonal"
         :color="state.running ? '' : 'success'"
         :prepend-icon="state.running ? 'mdi-pause' : 'mdi-play'"
+        class="ctrl-actions__primary"
         @click="state.running = !state.running"
       >
         {{ state.running ? t('ft.ctrl.pause') : t('ft.ctrl.play') }}
@@ -92,33 +93,80 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
     </div>
 
     <!-- sliders -->
-    <div>
-      <div class="d-flex justify-space-between text-caption on-surface-variant">
-        <span>{{ t('ft.ctrl.speed') }}</span>
-        <span class="font-family-mono">{{ state.runSpeed.toFixed(2) }}</span>
+    <div class="ft-sliders">
+      <div class="ft-slider">
+        <div class="ft-slider__head">
+          <span class="ft-slider__label">{{ t('ft.ctrl.speed') }}</span>
+          <span class="ft-slider__value font-family-mono">{{ state.runSpeed.toFixed(2) }}</span>
+        </div>
+        <v-slider
+          v-model="state.runSpeed"
+          :min="0.05"
+          :max="4"
+          :step="0.05"
+          color="primary"
+          density="compact"
+          hide-details
+        />
       </div>
-      <v-slider
-        v-model="state.runSpeed"
-        :min="0.05"
-        :max="4"
-        :step="0.05"
-        density="compact"
-        hide-details
-      />
-    </div>
-    <div>
-      <div class="d-flex justify-space-between text-caption on-surface-variant">
-        <span>{{ t('ft.ctrl.pointsLimit') }}</span>
-        <span class="font-family-mono">{{ state.verticesLimit }}</span>
+      <div class="ft-slider">
+        <div class="ft-slider__head">
+          <span class="ft-slider__label">{{ t('ft.ctrl.pointsLimit') }}</span>
+          <span class="ft-slider__value font-family-mono">{{ state.verticesLimit }}</span>
+        </div>
+        <v-slider
+          v-model="state.verticesLimit"
+          :min="200"
+          :max="8000"
+          :step="200"
+          color="primary"
+          density="compact"
+          hide-details
+        />
       </div>
-      <v-slider
-        v-model="state.verticesLimit"
-        :min="200"
-        :max="8000"
-        :step="200"
-        density="compact"
-        hide-details
-      />
     </div>
   </div>
 </template>
+
+<style scoped>
+.ctrl-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ctrl-actions__primary {
+  grid-column: 1 / -1;
+  min-height: 40px;
+}
+
+.ft-sliders {
+  display: flex;
+  flex-direction: column;
+}
+
+.ft-slider + .ft-slider {
+  margin-top: 4px;
+}
+
+.ft-slider__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.ft-slider__label {
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.ft-slider__value {
+  font-size: 0.875rem;
+  color: rgba(var(--v-theme-on-surface-variant), 0.9);
+}
+
+.ft-slider :deep(.v-slider) {
+  margin: 0;
+}
+</style>

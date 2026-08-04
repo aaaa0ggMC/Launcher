@@ -15,14 +15,13 @@ import {
 import type { Ref } from 'vue'
 import { FtEngine } from './engine'
 import { FtScene } from './scene'
-import type { FtUiState } from './types'
+import type { FtUiState, FtVector } from './types'
 import { translate } from '@ui/i18n'
 import InfoPanel from './panels/InfoPanel.vue'
 import ControlsPanel from './panels/ControlsPanel.vue'
 import VectorsPanel from './panels/VectorsPanel.vue'
 import SamplesPanel from './panels/SamplesPanel.vue'
 import type { FtPresetMeta } from './panels/SamplesPanel.vue'
-import AboutPanel from './panels/AboutPanel.vue'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
@@ -58,6 +57,7 @@ provide('ft:state', state)
 provide('ft:presets', presets)
 provide('ft:presetLoading', presetLoading)
 provide('ft:loadPreset', loadPreset)
+provide('ft:applyVectors', applyVectors)
 
 const hostRef = ref<HTMLElement | null>(null)
 let engine: FtEngine | null = null
@@ -67,7 +67,7 @@ let last = 0
 let fpsCount = 0
 let fpsStart = 0
 let statsLast = 0
-let dragging = false
+let dragButton = -1
 let lastX = 0
 let lastY = 0
 let currentChain: ReturnType<FtEngine['computeChain']> | null = null
@@ -76,9 +76,41 @@ let ro: ResizeObserver | null = null
 // ---------------------------------------------------------------------------
 // Preset loading (CLI-first: goes through the main-process command registry)
 // ---------------------------------------------------------------------------
+/**
+ * Replace the vector set and redraw from scratch: reset sim time, clear the
+ * track, recompute the chain and reframe the camera. Shared by preset loading
+ * and the vectors editor (update / load-file).
+ */
+function applyVectors(
+  vectors: FtVectorLike[],
+  opts?: { runSpeed?: number; verticesLimit?: number }
+): void {
+  if (!engine || !scene) return
+  const limit = opts?.verticesLimit ?? state.verticesLimit
+  engine.setVectors(vectors)
+  if (opts?.runSpeed !== undefined) engine.runSpeed = opts.runSpeed
+  engine.verticesLimit = limit
+  engine.running = state.running
+  scene.setVectors(vectors, limit)
+
+  state.vectors = vectors as FtVector[]
+  state.vectorCount = vectors.length
+  state.verticesLimit = limit
+  if (opts?.runSpeed !== undefined) state.runSpeed = opts.runSpeed
+  state.currentPreset = ''
+  state.time = 0
+  state.trackCount = 0
+  state.tip = { x: 0, y: 0, z: 0 }
+
+  engine.clearTrack()
+  currentChain = engine.computeChain()
+  scene.update(currentChain)
+  scene.updateTrack(engine.track, 0)
+  scene.resetView()
+}
+
 async function loadPreset(name: string): Promise<void> {
   if (!engine || !scene) return
-  state.currentPreset = name
   presetLoading.value = true
   try {
     const res = (await window.cockpit.command('ft.load', { name })) as {
@@ -87,24 +119,8 @@ async function loadPreset(name: string): Promise<void> {
       verticesLimit?: number
     } | null
     if (!res || !Array.isArray(res.vectors)) return
-    const vectors = res.vectors
-    const limit = res.verticesLimit ?? 4096
-    engine.setVectors(vectors)
-    engine.runSpeed = res.runSpeed ?? 1
-    engine.verticesLimit = limit
-    engine.running = state.running
-    scene.setVectors(vectors, limit)
-    state.vectors = vectors
-    state.vectorCount = vectors.length
-    state.verticesLimit = limit
-    state.runSpeed = engine.runSpeed
-    state.time = 0
-    state.trackCount = 0
-    state.tip = { x: 0, y: 0, z: 0 }
-    currentChain = engine.computeChain()
-    scene.update(currentChain)
-    scene.updateTrack(engine.track, 0)
-    scene.resetView()
+    applyVectors(res.vectors, { runSpeed: res.runSpeed, verticesLimit: res.verticesLimit })
+    state.currentPreset = name
   } finally {
     presetLoading.value = false
   }
@@ -190,6 +206,8 @@ function toggleMode(): void {
 
 // ---------------------------------------------------------------------------
 // Pointer / wheel interactions on the main view
+//  - left drag  → pan along the camera's view plane (world-space screen plane)
+//  - right drag → rotate the view direction (orbit) — 3D only
 // ---------------------------------------------------------------------------
 function onWheel(e: WheelEvent): void {
   const factor = Math.pow(1.1, e.deltaY / 100)
@@ -197,59 +215,29 @@ function onWheel(e: WheelEvent): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
-  if (e.button !== 0) return
-  dragging = true
+  if (e.button !== 0 && e.button !== 2) return
+  dragButton = e.button
   lastX = e.clientX
   lastY = e.clientY
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 }
 
 function onPointerMove(e: PointerEvent): void {
-  if (!dragging) return
+  if (dragButton < 0) return
   const dx = e.clientX - lastX
   const dy = e.clientY - lastY
   lastX = e.clientX
   lastY = e.clientY
-  if (scene?.getMode() === '3d') scene.orbitBy(dx, dy)
-  else scene?.panBy(dx, dy)
+  if (!scene) return
+  if (dragButton === 2) {
+    scene.orbitBy(dx, dy)
+  } else {
+    scene.panBy(dx, dy)
+  }
 }
 
 function onPointerUp(): void {
-  dragging = false
-}
-
-// ---------------------------------------------------------------------------
-// Keyboard shortcuts (mirror the original menu hotkeys)
-// ---------------------------------------------------------------------------
-function onKeydown(e: KeyboardEvent): void {
-  const target = e.target as HTMLElement
-  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-  switch (e.key) {
-    case ' ':
-      e.preventDefault()
-      state.running = !state.running
-      break
-    case 'r':
-    case 'R':
-      repaint()
-      break
-    case 'f':
-    case 'F':
-      state.follow = !state.follow
-      break
-    case 'm':
-    case 'M':
-      state.neon = !state.neon
-      break
-    case '+':
-    case '=':
-      scene?.zoomBy(1 / 1.1)
-      break
-    case '-':
-    case '_':
-      scene?.zoomBy(1.1)
-      break
-  }
+  dragButton = -1
 }
 
 // ---------------------------------------------------------------------------
@@ -286,20 +274,17 @@ onMounted(async () => {
 })
 
 onActivated(() => {
-  window.addEventListener('keydown', onKeydown)
   startLoop()
   scene?.resize()
 })
 
 onDeactivated(() => {
-  window.removeEventListener('keydown', onKeydown)
   stopLoop()
 })
 
 onBeforeUnmount(() => {
   stopLoop()
   ro?.disconnect()
-  window.removeEventListener('keydown', onKeydown)
   scene?.dispose()
   scene = null
   engine = null
@@ -351,7 +336,7 @@ watch(
 </script>
 
 <template>
-  <div class="ft-root">
+  <div class="ft-root" :class="{ 'ft-root--collapsed': collapsed }">
     <div
       ref="hostRef"
       class="ft-host"
@@ -360,6 +345,7 @@ watch(
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @contextmenu.prevent
     />
 
     <!-- top-left floating toolbar -->
@@ -386,7 +372,7 @@ watch(
         :title="t('ft.ctrl.follow')"
         @click="state.follow = !state.follow"
       >
-        <v-icon>mdi-crosshairs-fixed</v-icon>
+        <v-icon>mdi-target</v-icon>
       </v-btn>
       <v-btn
         icon
@@ -453,16 +439,6 @@ watch(
               <SamplesPanel />
             </v-expansion-panel-text>
           </v-expansion-panel>
-
-          <v-expansion-panel value="about">
-            <v-expansion-panel-title>
-              <v-icon size="18" color="primary" class="mr-2">mdi-information-outline</v-icon>
-              {{ t('ft.section.about') }}
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <AboutPanel />
-            </v-expansion-panel-text>
-          </v-expansion-panel>
         </v-expansion-panels>
       </div>
     </aside>
@@ -479,10 +455,23 @@ watch(
 }
 
 .ft-host {
+  /* Reserves the docked panel on the right, so the scene canvas is exactly the
+     visible area and the origin stays dead-center — never covered by the UI. */
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: 336px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   cursor: grab;
   touch-action: none;
+}
+
+.ft-root--collapsed .ft-host {
+  right: 72px;
 }
 
 .ft-host:active {
@@ -503,7 +492,8 @@ watch(
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
 }
 
-/* right floating panel — same surface-variant glass as the sidebar */
+/* right panel — docked beside the view (not floating), so the scene canvas
+ * never gets covered and the origin stays centered in the visible area */
 .ft-panel {
   position: absolute;
   top: 12px;
@@ -543,7 +533,14 @@ watch(
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0 10px 12px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ft-panel__body::-webkit-scrollbar {
+  display: none;
 }
 
 .ft-panel__body :deep(.v-expansion-panels) {

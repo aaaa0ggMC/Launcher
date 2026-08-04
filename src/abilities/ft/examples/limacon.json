@@ -1,0 +1,15 @@
+{
+  "vectors": [
+    {
+      "x": 70,
+      "y": 0,
+      "secperRound": 1
+    },
+    {
+      "x": 45,
+      "y": 0,
+      "secperRound": 2
+    }
+  ],
+  "runSpeed": 1
+}

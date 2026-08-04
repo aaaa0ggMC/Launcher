@@ -101,6 +101,11 @@ const cockpit = {
     any?: boolean
     filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke('dialog:pick-file', opts),
+  pickSaveFile: (opts?: {
+    title?: string
+    defaultPath?: string
+    filters?: { name: string; extensions: string[] }[]
+  }): Promise<string | null> => ipcRenderer.invoke('dialog:save-file', opts),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
 
   // events (returns unsubscribe)

@@ -72,14 +72,14 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 }
 
 .info-label {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   letter-spacing: 0.04em;
   color: rgba(var(--v-theme-on-surface-variant), 0.7);
   margin-bottom: 1px;
 }
 
 .info-value {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: rgb(var(--v-theme-on-surface));
   display: flex;
   align-items: center;

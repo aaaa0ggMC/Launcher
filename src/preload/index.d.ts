@@ -67,6 +67,11 @@ export interface CockpitApi {
     any?: boolean
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
+  pickSaveFile: (opts?: {
+    title?: string
+    defaultPath?: string
+    filters?: { name: string; extensions: string[] }[]
+  }) => Promise<string | null>
   copyText: (text: string) => Promise<void>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }

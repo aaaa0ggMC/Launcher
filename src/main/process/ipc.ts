@@ -84,6 +84,26 @@ export function registerIpc(): void {
     }
   )
 
+  // Save-as dialog (e.g. exporting a vectors JSON file).
+  ipcMain.handle(
+    'dialog:save-file',
+    async (
+      _e,
+      opts?: {
+        title?: string
+        defaultPath?: string
+        filters?: { name: string; extensions: string[] }[]
+      }
+    ) => {
+      const res = await dialog.showSaveDialog(mainWindow() ?? undefined!, {
+        title: opts?.title ?? '保存文件',
+        defaultPath: opts?.defaultPath,
+        filters: opts?.filters
+      })
+      return res.canceled || !res.filePath ? null : res.filePath
+    }
+  )
+
   // Clipboard write (copy current view as markdown etc).
   ipcMain.handle('clipboard:write', (_e, text: string) => {
     clipboard.writeText(text ?? '')

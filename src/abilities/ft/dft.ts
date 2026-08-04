@@ -73,8 +73,3 @@ export function dftVectors(points: Point2[], harmonics: number, basePeriod = 1):
   }
   return out
 }
-
-/** Total chain reach — used to frame the camera to fit a preset. */
-export function chainReach(vectors: FtVector[]): number {
-  return vectors.reduce((s, v) => s + Math.hypot(v.x, v.y), 0)
-}

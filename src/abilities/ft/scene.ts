@@ -26,11 +26,64 @@ function rad(deg: number): number {
   return (deg * Math.PI) / 180
 }
 
+const WORLD_UP = new THREE.Vector3(0, 1, 0)
+
+/**
+ * Max distance of the chain tip from origin over one full cycle — the true
+ * visual extent of the figure. Framing + axis length are based on this (the
+ * raw sum of vector magnitudes would overestimate complex presets and make
+ * the axes look like they run to infinity).
+ */
+function computeChainReach(vectors: FtVector[]): number {
+  if (vectors.length === 0) return 10
+  let max = 0
+  const N = 256
+  for (let i = 0; i < N; i++) {
+    const t = i / N
+    let x = 0
+    let y = 0
+    let z = 0
+    for (const v of vectors) {
+      if (v.secperRound === 0) {
+        x += v.x
+        y += v.y
+        z += v.z ?? 0
+        continue
+      }
+      const angle = (2 * Math.PI * t) / v.secperRound + ((v.orot ?? 0) * Math.PI) / 180
+      const cos = Math.cos(angle)
+      const sin = Math.sin(angle)
+      x += v.x * cos - v.y * sin
+      y += v.x * sin + v.y * cos
+      z += v.z ?? 0
+    }
+    max = Math.max(max, Math.hypot(x, y, z))
+  }
+  return Math.max(10, max)
+}
+
 /**
  * three.js renderer for the epicycle scene. The canvas is fully transparent
  * (alpha:true, clear alpha 0) so the app's Background/Fuse layers show through
  * — the ft ability automatically follows the window background settings.
  */
+/**
+ * Build a circle outline geometry from perimeter points only. `CircleGeometry`
+ * puts the center vertex first, so a `Line` primitive renders it as a radial
+ * tail from the center — this keeps a clean loop with no center vertex.
+ */
+function makeCircleOutline(radius: number, segments = 64): THREE.BufferGeometry {
+  const pts = new Float32Array(segments * 3)
+  for (let s = 0; s < segments; s++) {
+    const a = (s / segments) * Math.PI * 2
+    pts[s * 3] = radius * Math.cos(a)
+    pts[s * 3 + 1] = radius * Math.sin(a)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pts, 3))
+  return geo
+}
+
 export class FtScene {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
@@ -45,7 +98,10 @@ export class FtScene {
   private trackLine: THREE.Line
   private finalLine: THREE.Line
   private tipDot: THREE.Mesh
-  private circleMeshes: THREE.Line[] = []
+  /** Each vector's orbit circle, keyed by its vector index (a zero/DC vector
+   *  gets no circle, so indices must be tracked explicitly — a flat array would
+   *  misalign pivots). */
+  private circleMeshes: { index: number; mesh: THREE.Line }[] = []
 
   private armPositions = new Float32Array(3)
   private trackPositions = new Float32Array(0)
@@ -136,30 +192,28 @@ export class FtScene {
 
   /** Rebuild meshes for a new vector set. */
   setVectors(vectors: FtVector[], verticesLimit?: number): void {
-    this.reach = Math.max(
-      10,
-      vectors.reduce((s, v) => s + Math.hypot(v.x, v.y), 0)
-    )
+    this.reach = computeChainReach(vectors)
     this.viewDistance = this.defaultViewDistance()
     this.orbitRadius = this.viewDistance * 1.3
     this.target.set(0, 0, 0)
 
     // circles: one static outline per vector, radius = vector length
     for (const c of this.circleMeshes) {
-      this.circleGroup.remove(c)
-      c.geometry.dispose()
-      ;(c.material as THREE.Material).dispose()
+      this.circleGroup.remove(c.mesh)
+      c.mesh.geometry.dispose()
+      ;(c.mesh.material as THREE.Material).dispose()
     }
     this.circleMeshes = []
-    for (const v of vectors) {
+    for (let i = 0; i < vectors.length; i++) {
+      const v = vectors[i]
       const r = Math.hypot(v.x, v.y)
       if (r < 0.01) continue
-      const mesh = new THREE.Line(
-        new THREE.CircleGeometry(r, 64),
+      const mesh = new THREE.LineLoop(
+        makeCircleOutline(r),
         new THREE.LineBasicMaterial({ color: 0x8b97a5 })
       )
       this.circleGroup.add(mesh)
-      this.circleMeshes.push(mesh)
+      this.circleMeshes.push({ index: i, mesh })
     }
 
     // arms: continuous polyline origin → p0 → p1 → … → tip
@@ -206,21 +260,19 @@ export class FtScene {
   }
 
   private updateAxes(): void {
-    const ext = this.reach * 1.4
     const geo = this.coordsGroup.children[0] as THREE.LineSegments
-    const attr = geo.geometry.getAttribute('position') as THREE.BufferAttribute
-    const arr = attr.array as Float32Array
-    const pts = [-ext, 0, 0, ext, 0, 0, 0, -ext, 0, 0, ext, 0, 0, 0, -ext * 0.8, 0, 0, ext * 0.8]
-    arr.set(pts)
-    attr.needsUpdate = true
-    // per-vertex colors: X red, Y green, Z blue
-    const colorAttr = geo.geometry.getAttribute('color')
-    if (!colorAttr) {
-      const colorArr = [
-        1, 0.36, 0.36, 1, 0.36, 0.36, 0.36, 1, 0.36, 0.36, 1, 0.36, 0.42, 0.6, 1, 0.42, 0.6, 1
-      ]
-      geo.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colorArr), 3))
+    // Effectively infinite axes (span far beyond the view at any zoom): X red,
+    // Y green. Z is only drawn in 3D — in 2D the camera looks down -Z so a Z
+    // axis would be meaningless.
+    const L = 1e6
+    const pts = [-L, 0, 0, L, 0, 0, 0, -L, 0, 0, L, 0]
+    const colors = [1, 0.36, 0.36, 1, 0.36, 0.36, 0.36, 1, 0.36, 0.36, 1, 0.36]
+    if (this.mode === '3d') {
+      pts.push(0, 0, -L, 0, 0, L)
+      colors.push(0.42, 0.6, 1, 0.42, 0.6, 1)
     }
+    geo.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3))
+    geo.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
   }
 
   setMode(mode: FtMode): void {
@@ -234,6 +286,7 @@ export class FtScene {
       this.viewDistance = this.orbitRadius
       if (this.grid) this.grid.visible = false
     }
+    this.updateAxes()
     this.updateCamera()
   }
 
@@ -270,17 +323,33 @@ export class FtScene {
     this.updateCamera()
   }
 
-  /** 2D pan in pixels (already sign-flipped: positive dx moves content right). */
+  /**
+   * Pan along the camera's view (screen) plane in world units — both 2D and 3D.
+   * Positive dx/dy follows the cursor: content moves right/down with the drag.
+   * In 3D the drag is mapped onto the camera's right/up axes, so the scene
+   * moves exactly as if it were glued to the screen under the cursor.
+   */
   panBy(dx: number, dy: number): void {
-    if (this.mode === '3d' || this.follow) return
-    const units =
-      (this.viewDistance * Math.tan(rad(this.camera.fov / 2)) * 2) / this.container.clientHeight
-    this.target.x -= dx * units
-    this.target.y += dy * units
+    if (this.follow) return
+    const dist = this.mode === '3d' ? this.orbitRadius : this.viewDistance
+    const units = (dist * Math.tan(rad(this.camera.fov / 2)) * 2) / this.container.clientHeight
+
+    const right = new THREE.Vector3()
+    const up = new THREE.Vector3()
+    if (this.mode === '3d') {
+      const forward = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize()
+      right.crossVectors(forward, WORLD_UP).normalize()
+      up.crossVectors(right, forward)
+    } else {
+      right.set(1, 0, 0)
+      up.set(0, 1, 0)
+    }
+    this.target.addScaledVector(right, -dx * units)
+    this.target.addScaledVector(up, dy * units)
     this.updateCamera()
   }
 
-  /** 3D orbit drag in pixels. */
+  /** 3D orbit drag in pixels — rotates the view direction (azimuth/elevation). */
   orbitBy(dx: number, dy: number): void {
     if (this.mode !== '3d') return
     this.azimuth -= dx * 0.006
@@ -324,11 +393,11 @@ export class FtScene {
       THREE.BufferAttribute | undefined
     if (!armAttr) return // no vectors loaded yet
 
-    // circles → move each to its pivot
-    const n = Math.min(this.circleMeshes.length, chain.pivots.length)
-    for (let i = 0; i < n; i++) {
-      const p = chain.pivots[i]
-      this.circleMeshes[i].position.set(p.x, p.y, p.z)
+    // circles → move each to its own vector's pivot (indices tracked because
+    // zero-length vectors get no circle and would desync a flat array)
+    for (const c of this.circleMeshes) {
+      const p = chain.pivots[c.index]
+      if (p) c.mesh.position.set(p.x, p.y, p.z)
     }
 
     // arms: origin → pivots → tip

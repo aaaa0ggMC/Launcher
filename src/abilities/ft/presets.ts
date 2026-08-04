@@ -1,3 +1,4 @@
+import { readFile, writeFile } from 'fs/promises'
 import type { FtPreset, FtVector } from './types'
 import { dftVectors, sampleParametric, samplePolyline, type Point2 } from './dft'
 
@@ -127,4 +128,60 @@ export function listFtPresets(): FtPresetMeta[] {
 export function loadFtPreset(name: string): FtPreset | null {
   if (name === 'random') return { name: 'random', vectors: randomVectors(), runSpeed: 1 }
   return PRESETS[name] ?? null
+}
+
+/** Normalize one raw vector from a JSON file into a valid FtVector. */
+function normalizeVector(raw: unknown): FtVector {
+  const v = (raw ?? {}) as Record<string, unknown>
+  const vec: FtVector = {
+    x: Number(v.x ?? 0),
+    y: Number(v.y ?? 0),
+    secperRound: Number(v.secperRound ?? 1)
+  }
+  if (v.z !== undefined) vec.z = Number(v.z)
+  if (v.orot !== undefined) vec.orot = Number(v.orot)
+  return vec
+}
+
+/**
+ * Load vectors from a JSON file. Accepted shapes:
+ *   - `{ "vectors": [...], "runSpeed": 1, "verticesLimit": 4096 }`
+ *   - a bare `[...]` array of vectors
+ * Each vector: `{ x, y, secperRound, orot?, z? }`.
+ */
+export async function loadFtFile(path: string): Promise<{
+  ok: boolean
+  vectors?: FtVector[]
+  runSpeed?: number
+  verticesLimit?: number
+  error?: string
+}> {
+  try {
+    const raw = await readFile(path, 'utf-8')
+    const data = JSON.parse(raw) as Record<string, unknown> | unknown[]
+    const list = Array.isArray(data) ? data : (data as Record<string, unknown>).vectors
+    if (!Array.isArray(list)) return { ok: false, error: '文件缺少 vectors 数组' }
+    const obj = Array.isArray(data) ? {} : (data as Record<string, unknown>)
+    return {
+      ok: true,
+      vectors: list.map(normalizeVector),
+      ...(obj.runSpeed !== undefined ? { runSpeed: Number(obj.runSpeed) } : {}),
+      ...(obj.verticesLimit !== undefined ? { verticesLimit: Number(obj.verticesLimit) } : {})
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Write a vectors payload (`{ vectors, runSpeed?, verticesLimit? }`) to a JSON file. */
+export async function exportFtFile(
+  path: string,
+  data: unknown
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await writeFile(path, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
