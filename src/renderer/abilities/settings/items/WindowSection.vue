@@ -147,7 +147,13 @@ async function commitFuseBlur(): Promise<void> {
           @change="setBackgroundImage"
         >
           <template #append-inner>
-            <v-btn icon variant="text" size="small" title="选择图片" @click="browseBackgroundImage">
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              :title="translate(uiLang, 'dialog.selectBackground')"
+              @click="browseBackgroundImage"
+            >
               <v-icon>mdi-folder-image</v-icon>
             </v-btn>
           </template>

@@ -17,20 +17,20 @@ export interface BackgroundDef {
 export const backgrounds: BackgroundDef[] = [
   {
     id: 'transparent',
-    name: '透明',
-    description: '不绘制背景，仅由 Fuse 半透明蒙层提供底色',
+    name: 'Transparent',
+    description: 'No background drawn; Fuse translucent overlay provides the base tint.',
     component: defineAsyncComponent(() => import('./transparent.vue'))
   },
   {
     id: 'image',
-    name: '图片',
-    description: '自定义图片路径，可高斯模糊',
+    name: 'Image',
+    description: 'Custom image path, supports Gaussian blur.',
     component: defineAsyncComponent(() => import('./image.vue'))
   },
   {
     id: 'wallpaper',
-    name: '桌面壁纸',
-    description: '自动读取 KDE 桌面壁纸，可高斯模糊',
+    name: 'Desktop Wallpaper',
+    description: 'Automatically reads the KDE desktop wallpaper, supports Gaussian blur.',
     component: defineAsyncComponent(() => import('./wallpaper.vue'))
   }
 ]
