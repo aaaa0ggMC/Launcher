@@ -1,6 +1,6 @@
 {
   "theme": "dark",
-  "language": "zh",
+  "language": "en-US",
   "uiScale": 1.3,
   "animations": {
     "enabled": true,
@@ -11,8 +11,8 @@
     "height": 800,
     "frameless": true,
     "rounded": true,
-    "background": "transparent",
-    "fuseAlpha": 0.94,
+    "background": "wallpaper",
+    "fuseAlpha": 1,
     "fuseBlur": 0,
     "backgroundImage": "/home/aaaa0ggmc/Pictures/Wallpapers/IMG_20250610_132729.jpg",
     "backgroundOpacity": 1
