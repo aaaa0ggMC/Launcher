@@ -223,6 +223,45 @@ pre,
 }
 
 /* ---------------------------------------------------------------------------
+ * Page transition — animated ability switching (out-in). Controlled by the
+ * animations config in 设置 → 外观 → 界面动画: `fade` | `slide` | off (empty
+ * transition name → instant swap, no classes applied).
+ * ------------------------------------------------------------------------- */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.page-slide-enter-active,
+.page-slide-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.page-slide-enter-from {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.page-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+/* ---------------------------------------------------------------------------
  * Content background — a barely-perceptible gradient for depth. The solid
  * backdrop color now lives in the Fuse layer, so only the top sheen remains.
  * ------------------------------------------------------------------------- */

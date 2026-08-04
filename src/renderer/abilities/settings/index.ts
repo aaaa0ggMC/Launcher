@@ -41,6 +41,14 @@ export default {
           component: defineAsyncComponent(() => import('./items/WindowSection.vue'))
         },
         {
+          key: 'animations',
+          label: '界面动画',
+          icon: 'mdi-motion-play-outline',
+          description: '切换能力页面的过渡动画',
+          keywords: ['动画', '过渡', '切换', '淡入淡出', '滑动', 'transition'],
+          component: defineAsyncComponent(() => import('./items/AnimationSection.vue'))
+        },
+        {
           key: 'dashboard',
           label: '总览排版',
           icon: 'mdi-view-dashboard-outline',

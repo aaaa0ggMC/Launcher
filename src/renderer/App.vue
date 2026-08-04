@@ -182,6 +182,18 @@ const abilities = computed<SidebarAbility[]>(() => {
 const currentAbility = computed(() => abilities.value.find((a) => a.id === currentId.value) ?? null)
 
 /**
+ * Ability switch transition (设置 → 外观 → 界面动画). Empty name = off
+ * (instant swap); otherwise the CSS class prefix for the active style.
+ */
+const pageTransitionName = computed(() => {
+  const a =
+    (runtimeConfig.value.animations as
+      { enabled?: boolean; pageTransition?: string } | undefined) ?? {}
+  if (a.enabled === false) return ''
+  return a.pageTransition === 'slide' ? 'page-slide' : 'page-fade'
+})
+
+/**
  * Settings injection list — built from the same ability modules the sidebar
  * uses, then provided to the settings page so it never re-scans.
  */
@@ -637,17 +649,20 @@ onBeforeUnmount(() => {
       <v-container fluid class="pa-4">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
           <!-- keep-alive: only abilities that opted in are cached (by name);
-               the rest remount fresh each visit. -->
-          <keep-alive v-if="currentAbility" :include="keepAliveNames">
-            <component :is="currentAbility.comp" ref="abilityRef" class="flex-grow-1" />
-          </keep-alive>
-          <v-empty-state
-            v-else
-            icon="mdi-view-dashboard-outline"
-            title="选择一个功能"
-            text="从左侧边栏选择功能，或使用顶部搜索框。"
-            class="align-self-center mt-8"
-          />
+               the rest remount fresh each visit. Wrapped in <transition> for
+               the configurable out-in page switch animation. -->
+          <transition :name="pageTransitionName" mode="out-in">
+            <keep-alive v-if="currentAbility" :include="keepAliveNames">
+              <component :is="currentAbility.comp" ref="abilityRef" class="flex-grow-1" />
+            </keep-alive>
+            <v-empty-state
+              v-else
+              icon="mdi-view-dashboard-outline"
+              title="选择一个功能"
+              text="从左侧边栏选择功能，或使用顶部搜索框。"
+              class="align-self-center mt-8"
+            />
+          </transition>
         </div>
       </v-container>
     </v-main>

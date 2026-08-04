@@ -2,19 +2,27 @@
   "theme": "dark",
   "language": "zh",
   "uiScale": 1.3,
+  "animations": {
+    "enabled": true,
+    "pageTransition": "fade"
+  },
   "window": {
     "width": 1280,
     "height": 800,
     "frameless": true,
     "rounded": true,
-    "background": "image",
-    "fuseAlpha": 0.91,
-    "fuseBlur": 5,
+    "background": "transparent",
+    "fuseAlpha": 0.94,
+    "fuseBlur": 0,
     "backgroundImage": "/home/aaaa0ggmc/Pictures/Wallpapers/IMG_20250610_132729.jpg",
-    "backgroundOpacity": 0.7
+    "backgroundOpacity": 1
   },
   "runtime": {
-    "terminal": ["konsole", "--hold", "-e"],
+    "terminal": [
+      "konsole",
+      "--hold",
+      "-e"
+    ],
     "confirmBeforeLaunch": true
   }
 }
