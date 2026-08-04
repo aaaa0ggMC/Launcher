@@ -69,7 +69,7 @@ async function doTogglePm(): Promise<void> {
   try {
     const v = await window.cockpit.togglePm()
     if (v !== null) pm.value = v
-    else error.value = '切换电源管理失败'
+    else error.value = translate(uiLang.value, 'dashboard.pmToggleFailed')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -237,7 +237,10 @@ onBeforeUnmount(() => {
       <div>
         <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'dashboard.heading') }}</div>
         <div v-if="stats" class="text-caption on-surface-variant mt-1">
-          {{ stats.hostname }} · {{ stats.platform }} · 已运行 {{ fmtUptime(stats.uptime) }}
+          {{ stats.hostname }} · {{ stats.platform }} ·
+          {{
+            translateTemplate(uiLang, 'dashboard.uptimeLabel', { time: fmtUptime(stats.uptime) })
+          }}
         </div>
       </div>
       <v-btn
@@ -480,7 +483,9 @@ onBeforeUnmount(() => {
                   </div>
                   <div v-if="g.vramPercent !== undefined" class="mt-1">
                     <div class="d-flex justify-space-between text-caption">
-                      <span class="on-surface-variant">显存占用</span>
+                      <span class="on-surface-variant">{{
+                        translate(uiLang, 'dashboard.vramUsage')
+                      }}</span>
                       <span class="font-family-mono">{{ g.vramPercent }}%</span>
                     </div>
                     <v-progress-linear
@@ -502,7 +507,8 @@ onBeforeUnmount(() => {
                       NVreg_PreserveVideoMemoryAllocations
                     </div>
                     <div class="text-caption on-surface-variant mt-1">
-                      当前: <code>{{ pm ?? '—' }}</code> · 修改后需重启生效
+                      {{ translate(uiLang, 'dashboard.pmLabel') }} <code>{{ pm ?? '—' }}</code>
+                      {{ translate(uiLang, 'dashboard.pmNoteSuffix') }}
                     </div>
                   </div>
                   <v-btn
@@ -511,7 +517,11 @@ onBeforeUnmount(() => {
                     :loading="pmBusy"
                     @click="pmConfirm = true"
                   >
-                    {{ pm === 1 ? '已启用' : '已禁用' }}
+                    {{
+                      pm === 1
+                        ? translate(uiLang, 'dashboard.pmEnabled')
+                        : translate(uiLang, 'dashboard.pmDisabled')
+                    }}
                   </v-btn>
                 </div>
               </template>
@@ -519,7 +529,7 @@ onBeforeUnmount(() => {
               <!-- Disk -->
               <template v-else-if="c.id === 'disk'">
                 <div v-if="disks.length === 0" class="text-caption on-surface-variant">
-                  无磁盘信息
+                  {{ translate(uiLang, 'dashboard.noDisk') }}
                 </div>
                 <div v-for="d in disks" :key="d.path" class="mb-2">
                   <div class="d-flex justify-space-between text-caption">
@@ -538,7 +548,11 @@ onBeforeUnmount(() => {
                       {{ fmtBytes(d.used) }} / {{ fmtBytes(d.total) }}
                     </span>
                     <span class="text-caption on-surface-variant">
-                      可用 {{ fmtBytes(d.free) }}
+                      {{
+                        translateTemplate(uiLang, 'dashboard.availLabel', {
+                          size: fmtBytes(d.free)
+                        })
+                      }}
                     </span>
                   </div>
                 </div>
@@ -548,15 +562,19 @@ onBeforeUnmount(() => {
               <template v-else-if="c.id === 'docker'">
                 <div v-if="containers.length > 0" class="d-flex ga-2 mb-2">
                   <v-chip size="x-small" variant="tonal" color="success">
-                    运行 {{ containers.filter((ct) => ct.state === 'running').length }}
+                    {{ translate(uiLang, 'dashboard.running') }}
+                    {{ containers.filter((ct) => ct.state === 'running').length }}
                   </v-chip>
                   <v-chip size="x-small" variant="tonal" color="on-surface-variant">
-                    停止 {{ containers.filter((ct) => ct.state !== 'running').length }}
+                    {{ translate(uiLang, 'dashboard.stopped') }}
+                    {{ containers.filter((ct) => ct.state !== 'running').length }}
                   </v-chip>
-                  <v-chip size="x-small" variant="tonal"> 共 {{ containers.length }} </v-chip>
+                  <v-chip size="x-small" variant="tonal">
+                    {{ translate(uiLang, 'dashboard.total') }} {{ containers.length }}
+                  </v-chip>
                 </div>
                 <div v-if="containers.length === 0" class="text-caption on-surface-variant">
-                  Docker 未运行或无容器
+                  {{ translate(uiLang, 'dashboard.dockerEmpty') }}
                 </div>
                 <div
                   v-for="ct in containers"
@@ -589,15 +607,19 @@ onBeforeUnmount(() => {
 
     <v-dialog v-model="pmConfirm" width="440">
       <v-card rounded="lg">
-        <v-card-title class="text-subtitle-1">切换 NVIDIA 电源管理？</v-card-title>
-        <v-card-text class="text-body-2">
-          将修改 <code>/etc/modprobe.d/nvidia-pm-override.conf</code>（自动备份），
-          需要管理员密码，且需重启才能生效。
+        <v-card-title class="text-subtitle-1">{{
+          translate(uiLang, 'dashboard.pmDialogTitle')
+        }}</v-card-title>
+        <v-card-text class="text-body-2" v-html="translate(uiLang, 'dashboard.pmDialogText')">
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="pmConfirm = false">取消</v-btn>
-          <v-btn color="primary" @click="doTogglePm">确认</v-btn>
+          <v-btn variant="text" @click="pmConfirm = false">{{
+            translate(uiLang, 'dashboard.cancel')
+          }}</v-btn>
+          <v-btn color="primary" @click="doTogglePm">{{
+            translate(uiLang, 'dashboard.confirm')
+          }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

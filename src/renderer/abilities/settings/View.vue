@@ -116,7 +116,7 @@ function selectCategory(id: string): void {
           >
             <v-icon v-if="isMdiIcon(cat.icon)" start size="18">{{ cat.icon }}</v-icon>
             <AbilityIcon v-else :icon="cat.icon" :size="18" class="mr-1" />
-            {{ cat.label }}
+            {{ translate(uiLang, 'label.' + cat.label, cat.label) }}
           </v-chip>
         </v-slide-group-item>
       </v-slide-group>
@@ -132,7 +132,9 @@ function selectCategory(id: string): void {
           <div class="d-flex align-center ga-2 mb-2">
             <v-icon v-if="isMdiIcon(g.category.icon)" size="16">{{ g.category.icon }}</v-icon>
             <AbilityIcon v-else :icon="g.category.icon" :size="16" />
-            <span class="text-caption font-weight-medium">{{ g.category.label }}</span>
+            <span class="text-caption font-weight-medium">{{
+              translate(uiLang, 'label.' + g.category.label, g.category.label)
+            }}</span>
             <span class="text-caption on-surface-variant">·</span>
             <span class="text-caption on-surface-variant">{{ g.category.abilityName }}</span>
           </div>
@@ -156,9 +158,11 @@ function selectCategory(id: string): void {
       <div class="d-flex align-center ga-2 mb-3">
         <v-icon v-if="isMdiIcon(activeCategory.icon)" size="20">{{ activeCategory.icon }}</v-icon>
         <AbilityIcon v-else :icon="activeCategory.icon" :size="20" />
-        <span class="text-subtitle-1 font-weight-medium">{{ activeCategory.label }}</span>
+        <span class="text-subtitle-1 font-weight-medium">{{
+          translate(uiLang, 'label.' + activeCategory.label, activeCategory.label)
+        }}</span>
         <span v-if="activeCategory.description" class="text-caption on-surface-variant ml-2">
-          {{ activeCategory.description }}
+          {{ translate(uiLang, 'desc.' + activeCategory.description, activeCategory.description) }}
         </span>
       </div>
       <v-row dense>
