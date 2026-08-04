@@ -4,7 +4,7 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { getManifest, watchRoots } from './registry'
 import { cliExec } from './cli'
-import { runCommand, listCommands } from './commands'
+import { runCommand, listCommands, UnknownCommandError } from './commands'
 
 function mainWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
@@ -90,9 +90,21 @@ export function registerIpc(): void {
   })
 
   // CLI-first dispatcher: single source of truth for every ability action.
-  ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) =>
-    runCommand(name, args ?? {})
-  )
+  ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) => {
+    try {
+      return await runCommand(name, args ?? {})
+    } catch (err) {
+      // Command not registered (backing ability removed etc.) — notify every
+      // window so the renderer can show a friendly toast, then rethrow so
+      // existing callers keep their current error semantics.
+      if (err instanceof UnknownCommandError) {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send('cockpit:command-error', err.commandName)
+        }
+      }
+      throw err
+    }
+  })
   ipcMain.handle('command:list', async () =>
     listCommands().map(({ name, description, usage }) => ({ name, description, usage }))
   )

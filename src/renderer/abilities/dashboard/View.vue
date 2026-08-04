@@ -610,7 +610,10 @@ onBeforeUnmount(() => {
         <v-card-title class="text-subtitle-1">{{
           translate(uiLang, 'dashboard.pmDialogTitle')
         }}</v-card-title>
-        <v-card-text class="text-body-2" v-html="translate(uiLang, 'dashboard.pmDialogText')">
+        <v-card-text class="text-body-2">
+          <span
+            v-html="translateTemplate(uiLang, 'dashboard.pmDialogText', { path: '<code>/etc/modprobe.d/nvidia-pm-override.conf</code>' })"
+          ></span>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />

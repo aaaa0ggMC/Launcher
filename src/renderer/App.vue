@@ -83,6 +83,8 @@ const sidebarIconSize = computed(() => (rail.value ? 32 : 28))
 const abilityRef = ref<{ $el?: Element; toMarkdown?: () => string } | null>(null)
 const copySnackOpen = ref(false)
 const copySnackText = ref('')
+const commandErrorOpen = ref(false)
+const commandErrorText = ref('')
 
 /** Generic DOM→markdown extraction of the current ability view. */
 function viewToMarkdown(root: Element): string {
@@ -312,6 +314,16 @@ function subscribeConfig(): void {
   })
 }
 
+// Command-not-found toast: the main process broadcasts the exact command name
+// when a UI call references a command whose backing ability was removed.
+let commandErrorUnsub: (() => void) | null = null
+function subscribeCommandErrors(): void {
+  commandErrorUnsub = window.cockpit.on('cockpit:command-error', (name) => {
+    commandErrorText.value = te('commandError.notFound', { name: String(name) })
+    commandErrorOpen.value = true
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Shared launch flow (used by search quick-launch + abilities)
 // ---------------------------------------------------------------------------
@@ -489,6 +501,7 @@ onMounted(async () => {
     isMaximized.value = Boolean(v)
   })
   subscribeConfig()
+  subscribeCommandErrors()
   resolveBackgroundImage()
 })
 
@@ -499,6 +512,7 @@ onBeforeUnmount(() => {
   unsub?.()
   winUnsub?.()
   configUnsub?.()
+  commandErrorUnsub?.()
 })
 </script>
 
@@ -728,6 +742,10 @@ onBeforeUnmount(() => {
 
     <v-snackbar v-model="copySnackOpen" :timeout="2500" color="success" location="top">
       {{ copySnackText }}
+    </v-snackbar>
+
+    <v-snackbar v-model="commandErrorOpen" :timeout="4000" color="error" location="top">
+      {{ commandErrorText }}
     </v-snackbar>
   </v-app>
 </template>

@@ -95,7 +95,7 @@
   "dashboard.stopped": "停止",
   "dashboard.dockerEmpty": "Docker 未运行或无容器",
   "dashboard.pmDialogTitle": "切换 NVIDIA 电源管理？",
-  "dashboard.pmDialogText": "将修改 <code>/etc/modprobe.d/nvidia-pm-override.conf</code>（自动备份），需要管理员密码，且需重启才能生效。",
+  "dashboard.pmDialogText": "将修改 {path} （自动备份），需要管理员密码，且需重启才能生效。",
   "dashboard.cancel": "取消",
   "dashboard.confirm": "确认",
   "theme.title": "主题",
@@ -317,5 +317,8 @@
   "display.wallpapers.desc": "列出壁纸 (--dir)",
   "display.apply.desc": "应用壁纸 (--path)",
   "display.outputs.desc": "列出显示输出",
-  "settings.languageCaption": "切换语言后需重载页面才能生效。"
+  "settings.languageCaption": "切换语言后需重载页面才能生效。",
+  "commandError.notFound": "功能「{name}」不存在或已被移除",
+  "label.总览": "总览",
+  "desc.dashboard.dashboard": "总览页卡片排版"
 }

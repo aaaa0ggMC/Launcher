@@ -12,7 +12,7 @@ export default {
       key: 'appearance',
       label: '外观',
       icon: 'mdi-palette-outline',
-      description: '主题、界面缩放、窗口边框、背景与 Fuse 蒙层、总览排版、启动与关于',
+      description: '主题、界面缩放、窗口边框、背景与 Fuse 蒙层、启动与关于',
       keywords: ['外观', '显示', '界面', 'appearance'],
       items: [
         {
@@ -55,14 +55,6 @@ export default {
           description: 'Interface language (中文 / English)',
           keywords: ['语言', 'language', '翻译', 'translate', 'i18n'],
           component: defineAsyncComponent(() => import('./items/LanguageSection.vue'))
-        },
-        {
-          key: 'dashboard',
-          label: '总览排版',
-          icon: 'mdi-view-dashboard-outline',
-          description: '重置总览页卡片排版',
-          keywords: ['重置', '排版', '布局', '卡片', '总览'],
-          component: defineAsyncComponent(() => import('./items/DashboardSection.vue'))
         },
         {
           key: 'launch',

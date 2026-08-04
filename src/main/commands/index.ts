@@ -33,5 +33,5 @@ registerAll([
 ])
 
 // Re-export the dispatch surface so callers keep `from './commands'`.
-export { listCommands, tryRunCommand, runCommand, parseArgs } from './registry'
+export { listCommands, tryRunCommand, runCommand, parseArgs, UnknownCommandError } from './registry'
 export type { CommandSpec, CommandContext } from './types'

@@ -1,6 +1,20 @@
 import type { CommandSpec } from './types'
 
 /**
+ * Thrown when a command name isn't registered (e.g. the backing ability was
+ * removed). Carries the exact name so the IPC layer can notify the UI without
+ * parsing the message.
+ */
+export class UnknownCommandError extends Error {
+  readonly commandName: string
+  constructor(name: string) {
+    super(`未知命令: ${name}`)
+    this.commandName = name
+    this.name = 'UnknownCommandError'
+  }
+}
+
+/**
  * Central command store. Abilities register their specs here; the CLI REPL and
  * the UI (window.cockpit.command) both dispatch through it (CLI-first).
  *
@@ -84,6 +98,6 @@ export async function runCommand(
   args: Record<string, unknown> = {}
 ): Promise<unknown> {
   const spec = commands.get(name)
-  if (!spec) throw new Error(`未知命令: ${name}`)
+  if (!spec) throw new UnknownCommandError(name)
   return await spec.run({ named: args, positional: [] })
 }

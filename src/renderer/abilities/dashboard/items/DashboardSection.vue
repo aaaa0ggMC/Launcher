@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-settings-dashboard' })
+defineOptions({ name: 'cockpit-dashboard-reset' })
 
 import { ref, inject } from 'vue'
 import type { Ref } from 'vue'

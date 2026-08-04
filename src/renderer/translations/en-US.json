@@ -95,7 +95,7 @@
   "dashboard.stopped": "Stopped",
   "dashboard.dockerEmpty": "Docker is not running or no containers",
   "dashboard.pmDialogTitle": "Toggle NVIDIA Power Management?",
-  "dashboard.pmDialogText": "Modify <code>/etc/modprobe.d/nvidia-pm-override.conf</code> (backed up automatically). Admin password required; reboot to take effect.",
+  "dashboard.pmDialogText": "Modify {path} (backed up automatically). Admin password required; reboot to take effect.",
   "dashboard.cancel": "Cancel",
   "dashboard.confirm": "Confirm",
   "theme.title": "Theme",
@@ -317,5 +317,8 @@
   "display.wallpapers.desc": "List wallpapers (--dir)",
   "display.apply.desc": "Apply a wallpaper (--path)",
   "display.outputs.desc": "List display outputs",
-  "settings.languageCaption": "Switch language — reloads the page to apply."
+  "settings.languageCaption": "Switch language — reloads the page to apply.",
+  "commandError.notFound": "Command \"{name}\" no longer exists",
+  "label.总览": "Dashboard",
+  "desc.dashboard.dashboard": "Dashboard card layout"
 }
