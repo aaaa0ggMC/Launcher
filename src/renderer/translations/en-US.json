@@ -320,5 +320,8 @@
   "settings.languageCaption": "Switch language — reloads the page to apply.",
   "commandError.notFound": "Command \"{name}\" no longer exists",
   "label.总览": "Dashboard",
-  "desc.dashboard.dashboard": "Dashboard card layout"
+  "desc.dashboard.dashboard": "Dashboard card layout",
+  "animation.slideUp": "Slide Up",
+  "animation.zoom": "Zoom",
+  "animation.flip": "Flip"
 }

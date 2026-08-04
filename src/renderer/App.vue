@@ -12,6 +12,7 @@ import { fileIconUrl } from './icon'
 import { buildSettingsSections } from './abilities/settings/registry'
 import type { SettingsCategory } from './abilities/settings/registry'
 import { translate, translateTemplate, localize } from './i18n'
+import { PAGE_TRANSITIONS } from './animations'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -204,7 +205,8 @@ const pageTransitionName = computed(() => {
     (runtimeConfig.value.animations as
       { enabled?: boolean; pageTransition?: string } | undefined) ?? {}
   if (a.enabled === false) return ''
-  return a.pageTransition === 'slide' ? 'page-slide' : 'page-fade'
+  const known = PAGE_TRANSITIONS.some((t) => t.key === a.pageTransition)
+  return `page-${known ? a.pageTransition : 'fade'}`
 })
 
 /**

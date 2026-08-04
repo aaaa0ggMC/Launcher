@@ -4,22 +4,27 @@ defineOptions({ name: 'cockpit-settings-animations' })
 import { ref, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '../../../i18n'
+import { PAGE_TRANSITIONS, type PageTransitionKey } from '../../../animations'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 const enabled = ref(true)
-const pageTransition = ref<'fade' | 'slide'>('fade')
+const pageTransition = ref<PageTransitionKey>('fade')
+
+function isKnown(v: string | null | undefined): v is PageTransitionKey {
+  return !!v && PAGE_TRANSITIONS.some((t) => t.key === v)
+}
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
   const a = (cfg?.animations as { enabled?: boolean; pageTransition?: string } | undefined) ?? {}
   enabled.value = a.enabled !== false
-  pageTransition.value = a.pageTransition === 'slide' ? 'slide' : 'fade'
+  pageTransition.value = isKnown(a.pageTransition) ? a.pageTransition : 'fade'
 })
 
 async function save(patch: {
   enabled?: boolean
-  pageTransition?: 'fade' | 'slide'
+  pageTransition?: PageTransitionKey
 }): Promise<void> {
   const next = {
     enabled: patch.enabled ?? enabled.value,
@@ -35,7 +40,7 @@ async function setEnabled(v: boolean | null): Promise<void> {
 }
 
 async function setStyle(v: string | null): Promise<void> {
-  await save({ pageTransition: v === 'slide' ? 'slide' : 'fade' })
+  await save({ pageTransition: isKnown(v) ? v : 'fade' })
 }
 </script>
 
@@ -59,8 +64,12 @@ async function setStyle(v: string | null): Promise<void> {
         :disabled="!enabled"
         @update:model-value="setStyle"
       >
-        <v-radio :label="translate(uiLang, 'animation.fade')" value="fade" />
-        <v-radio :label="translate(uiLang, 'animation.slide')" value="slide" />
+        <v-radio
+          v-for="t in PAGE_TRANSITIONS"
+          :key="t.key"
+          :label="translate(uiLang, t.labelKey)"
+          :value="t.key"
+        />
       </v-radio-group>
       <div class="text-caption on-surface-variant mt-2">
         {{ translate(uiLang, 'animation.caption') }}

@@ -261,6 +261,58 @@ pre,
   transform: translateX(-28px);
 }
 
+.page-slide-up-enter-active,
+.page-slide-up-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.page-slide-up-enter-from {
+  opacity: 0;
+  transform: translateY(28px);
+}
+
+.page-slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(-28px);
+}
+
+.page-zoom-enter-active,
+.page-zoom-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.page-zoom-enter-from {
+  opacity: 0;
+  transform: scale(0.94);
+}
+
+.page-zoom-leave-to {
+  opacity: 0;
+  transform: scale(1.03);
+}
+
+.page-flip-enter-active,
+.page-flip-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+  transform-style: preserve-3d;
+}
+
+.page-flip-enter-from {
+  opacity: 0;
+  transform: perspective(1000px) rotateY(-12deg);
+}
+
+.page-flip-leave-to {
+  opacity: 0;
+  transform: perspective(1000px) rotateY(12deg);
+}
+
 /* ---------------------------------------------------------------------------
  * Content background — a barely-perceptible gradient for depth. The solid
  * backdrop color now lives in the Fuse layer, so only the top sheen remains.

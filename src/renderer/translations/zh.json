@@ -320,5 +320,8 @@
   "settings.languageCaption": "切换语言后需重载页面才能生效。",
   "commandError.notFound": "功能「{name}」不存在或已被移除",
   "label.总览": "总览",
-  "desc.dashboard.dashboard": "总览页卡片排版"
+  "desc.dashboard.dashboard": "总览页卡片排版",
+  "animation.slideUp": "上滑",
+  "animation.zoom": "缩放",
+  "animation.flip": "翻转"
 }
