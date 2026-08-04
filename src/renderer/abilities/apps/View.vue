@@ -254,8 +254,13 @@ function removeActionRow(i: number): void {
 async function browseIcon(actionIndex?: number): Promise<void> {
   if (!form.value) return
   const path = await window.cockpit.pickFile({
-    title: '选择图标',
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico'] }]
+    title: translate(uiLang.value, 'dialog.selectIcon'),
+    filters: [
+      {
+        name: translate(uiLang.value, 'dialog.filterImages'),
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico']
+      }
+    ]
   })
   if (!path) return
   const v = `file/${path}`
@@ -433,7 +438,10 @@ async function addRoot(): Promise<void> {
 
 /** Pick a search-root directory via the native dialog. */
 async function pickNewRoot(): Promise<void> {
-  const path = await window.cockpit.pickFile({ title: '选择搜索目录', directory: true })
+  const path = await window.cockpit.pickFile({
+    title: translate(uiLang.value, 'dialog.selectDir'),
+    directory: true
+  })
   if (!path) return
   newRootPath.value = path
 }
@@ -441,7 +449,10 @@ async function pickNewRoot(): Promise<void> {
 /** Pick a directory or script for the new entry's main path. */
 async function browseNewPath(): Promise<void> {
   if (!newForm.value) return
-  const path = await window.cockpit.pickFile({ title: '选择目录或脚本', any: true })
+  const path = await window.cockpit.pickFile({
+    title: translate(uiLang.value, 'dialog.selectPath'),
+    any: true
+  })
   if (!path) return
   newForm.value.path = path
 }
@@ -450,8 +461,13 @@ async function browseNewPath(): Promise<void> {
 async function browseNewIcon(): Promise<void> {
   if (!newForm.value) return
   const path = await window.cockpit.pickFile({
-    title: '选择图标',
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico'] }]
+    title: translate(uiLang.value, 'dialog.selectIcon'),
+    filters: [
+      {
+        name: translate(uiLang.value, 'dialog.filterImages'),
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico']
+      }
+    ]
   })
   if (!path) return
   newForm.value.icon = `file/${path}`
@@ -480,7 +496,9 @@ onBeforeUnmount(() => unsub?.())
         <v-btn variant="tonal" prepend-icon="mdi-folder-search" @click="newRootOpen = true">
           {{ translate(uiLang, 'apps.addDir') }}
         </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNew">{{ translate(uiLang, 'apps.addApp') }}</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNew">{{
+          translate(uiLang, 'apps.addApp')
+        }}</v-btn>
       </div>
     </div>
 
@@ -581,7 +599,9 @@ onBeforeUnmount(() => unsub?.())
                   >
                     mdi-shield-alert-outline
                   </v-icon>
-                  <v-chip v-if="entry.missing" size="x-small" variant="tonal">{{ translate(uiLang, 'apps.missing') }}</v-chip>
+                  <v-chip v-if="entry.missing" size="x-small" variant="tonal">{{
+                    translate(uiLang, 'apps.missing')
+                  }}</v-chip>
                 </div>
                 <div class="text-caption on-surface-variant text-truncate mt-1">
                   {{ localize(entry, 'description', uiLang) || entry.description || entry.path }}
@@ -601,7 +621,9 @@ onBeforeUnmount(() => unsub?.())
             </div>
           </v-card-text>
           <v-card-actions class="px-4 pb-4 pt-0 ga-2">
-            <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">{{ translate(uiLang, 'apps.edit') }}</v-btn>
+            <v-btn variant="text" prepend-icon="mdi-pencil" @click="openEdit(id)">{{
+              translate(uiLang, 'apps.edit')
+            }}</v-btn>
             <v-spacer />
             <div class="d-flex ga-2 justify-end flex-wrap">
               <v-btn
@@ -609,7 +631,7 @@ onBeforeUnmount(() => unsub?.())
                 :variant="riskBtn(entry).variant"
                 prepend-icon="mdi-play"
                 :disabled="entry.missing"
-@click="launch(entry.root ?? '', id, entry)"
+                @click="launch(entry.root ?? '', id, entry)"
               >
                 {{ translate(uiLang, 'apps.launch') }}
               </v-btn>
@@ -654,7 +676,13 @@ onBeforeUnmount(() => unsub?.())
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectDir')" @click="pickNewRoot">
+              <v-btn
+                icon
+                variant="text"
+                size="small"
+                :title="translate(uiLang, 'apps.selectDir')"
+                @click="pickNewRoot"
+              >
                 <v-icon>mdi-folder-open</v-icon>
               </v-btn>
             </template>
@@ -662,7 +690,9 @@ onBeforeUnmount(() => unsub?.())
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="newRootOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
+          <v-btn variant="text" @click="newRootOpen = false">{{
+            translate(uiLang, 'apps.cancel')
+          }}</v-btn>
           <v-btn color="primary" @click="addRoot">{{ translate(uiLang, 'apps.add') }}</v-btn>
         </v-card-actions>
       </v-card>
@@ -703,7 +733,13 @@ onBeforeUnmount(() => unsub?.())
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectPath')" @click="browseNewPath">
+              <v-btn
+                icon
+                variant="text"
+                size="small"
+                :title="translate(uiLang, 'apps.selectPath')"
+                @click="browseNewPath"
+              >
                 <v-icon>mdi-folder-open</v-icon>
               </v-btn>
             </template>
@@ -723,7 +759,13 @@ onBeforeUnmount(() => unsub?.())
             hide-details
           >
             <template #append-inner>
-              <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectIcon')" @click="browseNewIcon">
+              <v-btn
+                icon
+                variant="text"
+                size="small"
+                :title="translate(uiLang, 'apps.selectIcon')"
+                @click="browseNewIcon"
+              >
                 <v-icon>mdi-folder-image</v-icon>
               </v-btn>
             </template>
@@ -778,8 +820,12 @@ onBeforeUnmount(() => unsub?.())
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="newOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
-          <v-btn color="primary" :loading="newBusy" @click="saveNew">{{ translate(uiLang, 'apps.create') }}</v-btn>
+          <v-btn variant="text" @click="newOpen = false">{{
+            translate(uiLang, 'apps.cancel')
+          }}</v-btn>
+          <v-btn color="primary" :loading="newBusy" @click="saveNew">{{
+            translate(uiLang, 'apps.create')
+          }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -787,7 +833,9 @@ onBeforeUnmount(() => unsub?.())
     <!-- Edit entry -->
     <v-dialog v-model="editOpen" width="640">
       <v-card v-if="form">
-        <v-card-title>{{ translateTemplate(uiLang, 'apps.editTitle', { name: form.name || '' }) }}</v-card-title>
+        <v-card-title>{{
+          translateTemplate(uiLang, 'apps.editTitle', { name: form.name || '' })
+        }}</v-card-title>
         <v-card-text class="d-flex flex-column ga-3">
           <v-text-field
             v-model="form.name"
@@ -822,7 +870,13 @@ onBeforeUnmount(() => unsub?.())
               class="flex-grow-1"
             >
               <template #append-inner>
-                <v-btn icon variant="text" size="small" :title="translate(uiLang, 'apps.selectIcon')" @click="browseIcon()">
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  :title="translate(uiLang, 'apps.selectIcon')"
+                  @click="browseIcon()"
+                >
                   <v-icon>mdi-folder-image</v-icon>
                 </v-btn>
               </template>
@@ -893,7 +947,12 @@ onBeforeUnmount(() => unsub?.())
           </v-row>
           <v-row dense>
             <v-col cols="6">
-              <v-switch v-model="form.terminal" :label="translate(uiLang, 'apps.terminal')" density="compact" hide-details />
+              <v-switch
+                v-model="form.terminal"
+                :label="translate(uiLang, 'apps.terminal')"
+                density="compact"
+                hide-details
+              />
             </v-col>
             <v-col cols="6">
               <v-switch
@@ -1026,10 +1085,20 @@ onBeforeUnmount(() => unsub?.())
                 />
               </v-col>
               <v-col cols="2">
-                <v-switch v-model="a.terminal" :label="translate(uiLang, 'apps.actionTerminal')" density="compact" hide-details />
+                <v-switch
+                  v-model="a.terminal"
+                  :label="translate(uiLang, 'apps.actionTerminal')"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
               <v-col cols="2">
-                <v-switch v-model="a.rootFlag" :label="translate(uiLang, 'apps.actionRoot')" density="compact" hide-details />
+                <v-switch
+                  v-model="a.rootFlag"
+                  :label="translate(uiLang, 'apps.actionRoot')"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
             </v-row>
             <v-textarea
@@ -1052,8 +1121,12 @@ onBeforeUnmount(() => unsub?.())
             {{ translate(uiLang, 'apps.delete') }}
           </v-btn>
           <v-spacer />
-          <v-btn variant="text" @click="editOpen = false">{{ translate(uiLang, 'apps.cancel') }}</v-btn>
-          <v-btn color="primary" :loading="editBusy" @click="saveEdit">{{ translate(uiLang, 'apps.save') }}</v-btn>
+          <v-btn variant="text" @click="editOpen = false">{{
+            translate(uiLang, 'apps.cancel')
+          }}</v-btn>
+          <v-btn color="primary" :loading="editBusy" @click="saveEdit">{{
+            translate(uiLang, 'apps.save')
+          }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

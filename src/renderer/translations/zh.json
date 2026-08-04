@@ -233,5 +233,18 @@
   "label.应用": "应用",
   "desc.应用": "应用注册表的扫描目录",
   "label.搜索目录": "搜索目录",
-  "desc.搜索目录": "添加或移除应用扫描根目录"
+  "desc.搜索目录": "添加或移除应用扫描根目录",
+  "mirror.mdHeading": "## 软件源",
+  "mirror.mdEnabledCount": "已启用 {n} / {total} 个",
+  "mirror.mdEnabled": "✅ 启用",
+  "mirror.mdDisabled": "⛔ 未启用",
+  "mirror.mdTestOk": "  - 测速: {latency}ms · {speed}",
+  "mirror.mdTestFail": "  - 测速: 失败 — {error}",
+  "cli.welcome": "Linux Cockpit CLI — 输入 help 查看命令, Tab 补全",
+  "settings.languageTitle": "语言 / Language",
+  "dialog.selectBackground": "选择背景图片",
+  "dialog.filterImages": "图片",
+  "dialog.selectIcon": "选择图标",
+  "dialog.selectDir": "选择应用目录",
+  "dialog.selectPath": "选择目录或脚本"
 }

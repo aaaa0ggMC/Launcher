@@ -6,7 +6,7 @@ import type { Ref } from 'vue'
 import type { AppEntry } from '@shared/types'
 import { translate } from '../../i18n'
 
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 interface Line {
   kind: 'in' | 'out' | 'err'
@@ -125,7 +125,7 @@ function focusInput(): void {
 
 onMounted(async () => {
   await refreshAliases()
-  history.value.push({ kind: 'out', text: 'Linux Cockpit CLI — 输入 help 查看命令, Tab 补全' })
+  history.value.push({ kind: 'out', text: translate(uiLang.value, 'cli.welcome') })
   await nextTick()
   focusInput()
 })
@@ -139,7 +139,10 @@ onActivated(async () => {
 <template>
   <div class="d-flex flex-column fill-height">
     <div class="text-h6 font-weight-medium mb-1">{{ translate(uiLang, 'cli.heading') }}</div>
-    <div class="text-caption on-surface-variant mb-3" v-html="translate(uiLang, 'cli.subtitle')"></div>
+    <div
+      class="text-caption on-surface-variant mb-3"
+      v-html="translate(uiLang, 'cli.subtitle')"
+    ></div>
 
     <v-card
       ref="outputEl"
@@ -159,7 +162,9 @@ onActivated(async () => {
         <template v-if="l.kind === 'in'"><span class="cli-prompt">❯</span> {{ l.text }}</template>
         <template v-else>{{ l.text }}</template>
       </div>
-      <div v-if="busy" class="text-caption on-surface-variant mb-1">{{ translate(uiLang, 'cli.busy') }}</div>
+      <div v-if="busy" class="text-caption on-surface-variant mb-1">
+        {{ translate(uiLang, 'cli.busy') }}
+      </div>
 
       <div v-if="suggestions.length" class="mb-1 d-flex flex-wrap gap-1">
         <v-chip

@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
 import type { MirrorInfo, MirrorEntry } from '@shared/types'
 import { translate, translateTemplate } from '../../i18n'
 
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 interface MirrorTestItem {
   name: string
@@ -93,16 +93,30 @@ onMounted(load)
  * (the generic DOM extractor can't tell an on/off switch apart). */
 function toMarkdown(): string {
   const lines: string[] = []
-  lines.push('## 软件源')
-  lines.push(`已启用 ${enabledCount.value} / ${info.value?.mirrors.length ?? 0} 个`)
+  lines.push(translate(uiLang.value, 'mirror.mdHeading'))
+  lines.push(
+    translateTemplate(uiLang.value, 'mirror.mdEnabledCount', {
+      n: String(enabledCount.value),
+      total: String(info.value?.mirrors.length ?? 0)
+    })
+  )
   lines.push('')
   for (const m of sortedMirrors.value) {
-    lines.push(`- **${m.name}** — ${m.enabled ? '✅ 启用' : '⛔ 未启用'}`)
+    lines.push(
+      `- **${m.name}** — ${m.enabled ? translate(uiLang.value, 'mirror.mdEnabled') : translate(uiLang.value, 'mirror.mdDisabled')}`
+    )
     lines.push(`  - URL: \`${m.url}\``)
     const t = testResults.value[m.name]
     if (t) {
-      if (t.ok) lines.push(`  - 测速: ${t.latency}ms · ${fmtSpeed(t.speed)}`)
-      else if (t.error) lines.push(`  - 测速: 失败 — ${t.error}`)
+      if (t.ok)
+        lines.push(
+          translateTemplate(uiLang.value, 'mirror.mdTestOk', {
+            latency: String(t.latency),
+            speed: fmtSpeed(t.speed)
+          })
+        )
+      else if (t.error)
+        lines.push(translateTemplate(uiLang.value, 'mirror.mdTestFail', { error: t.error }))
     }
   }
   return lines.join('\n')
@@ -153,7 +167,9 @@ defineExpose({ toMarkdown })
                 >
                   {{ testResults[m.name].latency }}ms
                 </v-chip>
-                <v-chip v-else size="x-small" color="error" variant="tonal">{{ translate(uiLang, 'mirror.timeout') }}</v-chip>
+                <v-chip v-else size="x-small" color="error" variant="tonal">{{
+                  translate(uiLang, 'mirror.timeout')
+                }}</v-chip>
               </template>
             </div>
             <div class="text-caption on-surface-variant mt-2 text-truncate">{{ m.url }}</div>
@@ -176,7 +192,11 @@ defineExpose({ toMarkdown })
               density="compact"
               hide-details
               :loading="toggling === m.name"
-              :label="m.enabled ? translate(uiLang, 'mirror.enabled') : translate(uiLang, 'mirror.disabled')"
+              :label="
+                m.enabled
+                  ? translate(uiLang, 'mirror.enabled')
+                  : translate(uiLang, 'mirror.disabled')
+              "
               @update:model-value="(v: boolean | null) => toggle(m, !!v)"
             />
           </v-card-actions>

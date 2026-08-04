@@ -34,7 +34,10 @@ async function removeRoot(p: string): Promise<void> {
 
 /** Pick a directory via the native dialog and fill the input with it. */
 async function pickDirectory(): Promise<void> {
-  const path = await window.cockpit.pickFile({ title: '选择应用目录', directory: true })
+  const path = await window.cockpit.pickFile({
+    title: translate(uiLang.value, 'dialog.selectDir'),
+    directory: true
+  })
   if (!path) return
   searching.value = path
 }

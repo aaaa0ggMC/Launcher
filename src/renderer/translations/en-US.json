@@ -233,5 +233,18 @@
   "label.应用": "Apps",
   "desc.应用": "App registry search directories",
   "label.搜索目录": "Search Directories",
-  "desc.搜索目录": "Add or remove app scan directories"
+  "desc.搜索目录": "Add or remove app scan directories",
+  "mirror.mdHeading": "## Mirrors",
+  "mirror.mdEnabledCount": "{n} / {total} enabled",
+  "mirror.mdEnabled": "✅ Enabled",
+  "mirror.mdDisabled": "⛔ Disabled",
+  "mirror.mdTestOk": "  - Test: {latency}ms · {speed}",
+  "mirror.mdTestFail": "  - Test: failed — {error}",
+  "cli.welcome": "Linux Cockpit CLI - type help for commands, Tab to complete",
+  "settings.languageTitle": "Language",
+  "dialog.selectBackground": "Select background image",
+  "dialog.filterImages": "Images",
+  "dialog.selectIcon": "Select icon",
+  "dialog.selectDir": "Select application directory",
+  "dialog.selectPath": "Select directory or script"
 }

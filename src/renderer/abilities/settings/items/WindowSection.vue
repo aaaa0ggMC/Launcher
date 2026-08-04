@@ -73,9 +73,12 @@ async function setBackgroundImage(): Promise<void> {
 
 async function browseBackgroundImage(): Promise<void> {
   const path = await window.cockpit.pickFile({
-    title: '选择背景图片',
+    title: translate(uiLang.value, 'dialog.selectBackground'),
     filters: [
-      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'svg', 'gif', 'avif'] }
+      {
+        name: translate(uiLang.value, 'dialog.filterImages'),
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'svg', 'gif', 'avif']
+      }
     ]
   })
   if (!path) return
