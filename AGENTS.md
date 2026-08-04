@@ -199,3 +199,42 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 
 通过 Electron `webFrame.setZoomFactor()` 实现真正的等比缩放 (不是只改 rem)。
 设置页滑块拖动时只更新数值，松手 (`@end`) 才应用缩放 + 持久化。
+
+## 10. 国际化 (i18n)
+
+翻译文件位于 `src/renderer/translations/`，目前支持 `zh`（中文）和 `en-US`（美国英语）。
+
+### 10.1 UI 字符串
+
+- `src/renderer/i18n.ts` 提供 `translate(lang, key, fallback?)` 和 `translateTemplate(lang, key, vars, fallback?)`
+- 每个 ability View 通过 `inject('cockpit:lang')` 获取当前语言 Ref
+- 回退链：当前语言 → zh → fallback 入参 → key 本身
+- 主进程通过 `src/main/i18n.ts` 的 `t()`/`te()` 读取同一份翻译文件
+- 添加新键时必须在 `zh.json` 和 `en-US.json` 同时添加
+
+### 10.2 Ability 设置注入
+
+每个 ability 的 `index.ts` 可通过 `settings` 数组注入设置页分类。分类的 `label`/`description` 通过 `translate('label.{text}', text)` 走翻译文件。
+
+### 10.3 apps.json 多语言
+
+`name`、`description`、`alias` 支持对象格式：
+
+```json
+"name": {
+  "zh": "哔哩观看器",
+  "en_US": "Bili Viewer"
+}
+```
+
+回退链：当前语言 → `en_US` → 第一个可用值 → 原始字符串。
+`normalizeEntry`（`registry.ts`）在读取时自动解析，编辑器（`apps/View.vue`）支持通过可折叠「多语言」区域填写翻译。
+
+### 10.4 AI 开发注意事项
+
+> **任何涉及用户可见文本的新增/修改，都必须考虑多语言。**
+> 所有 ability View 的 `<template>` 中的中文文本必须通过 `translate(uiLang, 'key')` 输出。
+> 所有 `scripts` 中的用户可见字符串（dialog title、error message、help text 等）必须通过 `translate()`/`t()` 输出。
+> 新键必须同步添加到 `src/renderer/translations/zh.json` 和 `src/renderer/translations/en-US.json`。
+> 主进程中的字符串使用 `src/main/i18n.ts` 的 `t(key, fallback?)` / `te(key, vars)`。
+> apps.json 的 `name`/`description`/`alias` 默认生成时至少包含 `zh` 和 `en_US` 两个语言。

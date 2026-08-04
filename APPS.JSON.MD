@@ -3,6 +3,8 @@
 每个搜索目录（config/abilities.yaml 里 apps 的 `searchRoots`）下有一份 `apps.json`，定义该目录下"应用 → 一键操作"的注册表。
 手工编辑优先，扫描器（`apps.rescan`）只补充草稿、不覆盖你的修改。
 
+> **多语言注意**：新增条目时，`name`/`description`/`alias` 推荐使用对象格式提供至少 `zh` 和 `en_US` 两种语言，见 [§8 多语言](#8-多语言)。
+
 ```jsonc
 {
   "version": 1,
