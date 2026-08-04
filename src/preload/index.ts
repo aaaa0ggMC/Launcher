@@ -97,6 +97,8 @@ const cockpit = {
   getWallpaper: (): Promise<string | null> => ipcRenderer.invoke('window:wallpaper'),
   pickFile: (opts?: {
     title?: string
+    directory?: boolean
+    any?: boolean
     filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke('dialog:pick-file', opts),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),

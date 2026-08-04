@@ -426,6 +426,32 @@ async function addRoot(): Promise<void> {
   await load()
 }
 
+/** Pick a search-root directory via the native dialog. */
+async function pickNewRoot(): Promise<void> {
+  const path = await window.cockpit.pickFile({ title: '选择搜索目录', directory: true })
+  if (!path) return
+  newRootPath.value = path
+}
+
+/** Pick a directory or script for the new entry's main path. */
+async function browseNewPath(): Promise<void> {
+  if (!newForm.value) return
+  const path = await window.cockpit.pickFile({ title: '选择目录或脚本', any: true })
+  if (!path) return
+  newForm.value.path = path
+}
+
+/** Pick an image for the new entry's icon. */
+async function browseNewIcon(): Promise<void> {
+  if (!newForm.value) return
+  const path = await window.cockpit.pickFile({
+    title: '选择图标',
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico'] }]
+  })
+  if (!path) return
+  newForm.value.icon = `file/${path}`
+}
+
 let unsub: (() => void) | null = null
 
 onMounted(() => {
@@ -527,7 +553,7 @@ onBeforeUnmount(() => unsub?.())
           rounded="lg"
           variant="tonal"
           :class="entry.missing ? 'opacity-60' : ''"
-          class="app-card fill-height"
+          class="app-card card-fill"
         >
           <v-card-text class="d-flex flex-column">
             <div class="d-flex align-start ga-3">
@@ -619,7 +645,13 @@ onBeforeUnmount(() => unsub?.())
             variant="outlined"
             density="compact"
             hide-details
-          />
+          >
+            <template #append-inner>
+              <v-btn icon variant="text" size="small" title="选择目录" @click="pickNewRoot">
+                <v-icon>mdi-folder-open</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
@@ -662,7 +694,13 @@ onBeforeUnmount(() => unsub?.())
             variant="outlined"
             density="compact"
             hide-details
-          />
+          >
+            <template #append-inner>
+              <v-btn icon variant="text" size="small" title="选择目录或脚本" @click="browseNewPath">
+                <v-icon>mdi-folder-open</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
           <v-text-field
             v-model="newForm.description"
             label="描述"
@@ -676,7 +714,13 @@ onBeforeUnmount(() => unsub?.())
             variant="outlined"
             density="compact"
             hide-details
-          />
+          >
+            <template #append-inner>
+              <v-btn icon variant="text" size="small" title="选择图标文件" @click="browseNewIcon">
+                <v-icon>mdi-folder-image</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
           <v-row dense>
             <v-col cols="6">
               <v-select
@@ -769,10 +813,13 @@ onBeforeUnmount(() => unsub?.())
               density="compact"
               hide-details
               class="flex-grow-1"
-            />
-            <v-btn icon variant="tonal" size="small" @click="browseIcon()">
-              <v-icon size="small">mdi-folder-image</v-icon>
-            </v-btn>
+            >
+              <template #append-inner>
+                <v-btn icon variant="text" size="small" title="选择图标文件" @click="browseIcon()">
+                  <v-icon>mdi-folder-image</v-icon>
+                </v-btn>
+              </template>
+            </v-text-field>
             <v-avatar size="40" color="surface-variant" rounded="lg">
               <AbilityIcon :icon="form.icon || null" :size="22" />
             </v-avatar>
@@ -913,10 +960,19 @@ onBeforeUnmount(() => unsub?.())
                 density="compact"
                 hide-details
                 class="flex-grow-1"
-              />
-              <v-btn icon variant="text" size="small" @click="browseIcon(i)">
-                <v-icon size="small">mdi-folder-image</v-icon>
-              </v-btn>
+              >
+                <template #append-inner>
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="small"
+                    title="选择图标文件"
+                    @click="browseIcon(i)"
+                  >
+                    <v-icon>mdi-folder-image</v-icon>
+                  </v-btn>
+                </template>
+              </v-text-field>
               <v-btn icon variant="text" color="error" @click="removeActionRow(i)">
                 <v-icon>mdi-delete</v-icon>
               </v-btn>

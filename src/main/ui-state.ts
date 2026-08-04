@@ -1,11 +1,13 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { USER_CONFIG_DIR } from './paths'
+import { DASHBOARD_LAYOUT_VERSION } from '../shared/types'
 
 const UI_STATE_FILE = join(USER_CONFIG_DIR, 'ui-state.json')
 
 interface UiState {
   dashboardLayout?: unknown[]
+  dashboardLayoutVersion?: number
 }
 
 async function getUiState(): Promise<UiState> {
@@ -16,14 +18,21 @@ async function getUiState(): Promise<UiState> {
   }
 }
 
-export async function getDashboardLayout(): Promise<unknown[]> {
+export async function getDashboardLayout(): Promise<{
+  layout: unknown[]
+  version: number | null
+}> {
   const state = await getUiState()
-  return Array.isArray(state.dashboardLayout) ? state.dashboardLayout : []
+  return {
+    layout: Array.isArray(state.dashboardLayout) ? state.dashboardLayout : [],
+    version: typeof state.dashboardLayoutVersion === 'number' ? state.dashboardLayoutVersion : null
+  }
 }
 
 export async function setDashboardLayout(layout: unknown[]): Promise<void> {
   const state = await getUiState()
   state.dashboardLayout = layout
+  state.dashboardLayoutVersion = DASHBOARD_LAYOUT_VERSION
   await mkdir(USER_CONFIG_DIR, { recursive: true })
   await writeFile(UI_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
 }
@@ -31,6 +40,7 @@ export async function setDashboardLayout(layout: unknown[]): Promise<void> {
 export async function resetDashboardLayout(): Promise<void> {
   const state = await getUiState()
   delete state.dashboardLayout
+  delete state.dashboardLayoutVersion
   await mkdir(USER_CONFIG_DIR, { recursive: true })
   await writeFile(UI_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8')
 }

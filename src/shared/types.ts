@@ -1,5 +1,12 @@
 // Shared domain types used across main / preload / renderer.
 
+/**
+ * Dashboard grid layout version. Bumped whenever the grid geometry changes
+ * (e.g. cellHeight), so stale saved layouts are discarded and rebuilt from the
+ * defaults instead of rendering at the old scale.
+ */
+export const DASHBOARD_LAYOUT_VERSION = 2
+
 export type ExecType =
   'uv' | 'python' | 'node' | 'docker' | 'systemd' | 'script' | 'desktop' | 'custom'
 

@@ -6,6 +6,7 @@ import { GridStack } from 'gridstack'
 import type { GridStackNode, GridItemHTMLElement } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import type { SystemStats } from '@shared/types'
+import { DASHBOARD_LAYOUT_VERSION } from '@shared/types'
 import { fmtBytes, fmtUptime } from '../../composables/format'
 import LoadingBar from '../../components/LoadingBar.vue'
 
@@ -67,8 +68,16 @@ async function doTogglePm(): Promise<void> {
 /** Read persisted layout via the CLI-first dashboard.get-layout command. */
 async function loadSavedLayout(): Promise<GridStackNode[] | null> {
   try {
-    const layout = (await window.cockpit.command('dashboard.get-layout')) as GridStackNode[] | null
+    const res = (await window.cockpit.command('dashboard.get-layout')) as {
+      layout?: GridStackNode[]
+      version?: number | null
+    }
+    const layout = res?.layout
     if (!Array.isArray(layout) || layout.length === 0) return null
+    // Discard layouts saved under a different grid geometry (cellHeight etc.)
+    // — they were authored on a coarser grid and would render at the wrong
+    // scale. Fall back to the default layout; it gets re-saved on first change.
+    if (res?.version !== DASHBOARD_LAYOUT_VERSION) return null
     // Guard against corrupt/legacy layouts pushing cards off-grid.
     const valid = layout.every(
       (n) => typeof n.x === 'number' && typeof n.w === 'number' && n.x >= 0 && n.x + n.w <= 12
@@ -103,7 +112,10 @@ async function initGrid(): Promise<void> {
     {
       column: 12,
       margin: 12,
-      cellHeight: 96,
+      // Fine vertical grid: 48px per row (was 96) — drag/resize snaps in half
+      // the previous steps, so card heights can be tuned precisely. Default
+      // card h values are doubled below to keep the same pixel sizes.
+      cellHeight: 48,
       animate: true,
       // float: cards stay exactly where dropped; container height grows to the
       // lowest widget's bottom (never snap-backs, never leaves stale ghosts).
@@ -187,13 +199,13 @@ function layoutCards(
 
 const cards = computed<GridCard[]>(() => {
   const defs = [
-    { id: 'host', w: 6, h: 4, title: '主机', icon: 'mdi-desktop-tower' },
-    { id: 'cpu', w: 6, h: 4, title: '处理器', icon: 'mdi-chip' },
-    { id: 'mem', w: 6, h: 4, title: '内存', icon: 'mdi-memory' },
-    { id: 'gpu', w: 6, h: 4, title: 'GPU', icon: 'mdi-expansion-card' },
-    { id: 'pm', w: 6, h: 3, title: 'NVIDIA 电源管理', icon: 'mdi-power-plug' },
-    { id: 'disk', w: 6, h: 4, title: '磁盘', icon: 'mdi-harddisk' },
-    { id: 'docker', w: 6, h: 4, title: '容器', icon: 'mdi-docker' }
+    { id: 'host', w: 6, h: 8, title: '主机', icon: 'mdi-desktop-tower' },
+    { id: 'cpu', w: 6, h: 8, title: '处理器', icon: 'mdi-chip' },
+    { id: 'mem', w: 6, h: 8, title: '内存', icon: 'mdi-memory' },
+    { id: 'gpu', w: 6, h: 8, title: 'GPU', icon: 'mdi-expansion-card' },
+    { id: 'pm', w: 6, h: 6, title: 'NVIDIA 电源管理', icon: 'mdi-power-plug' },
+    { id: 'disk', w: 6, h: 8, title: '磁盘', icon: 'mdi-harddisk' },
+    { id: 'docker', w: 6, h: 8, title: '容器', icon: 'mdi-docker' }
   ]
   return layoutCards(defs)
 })
@@ -246,7 +258,7 @@ onBeforeUnmount(() => {
         :gs-h="String(c.h)"
       >
         <div class="grid-stack-item-content">
-          <v-card class="fill-height" flat variant="tonal" rounded="lg">
+          <v-card class="card-fill" flat variant="tonal" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 text-subtitle-2 pb-1">
               <v-icon size="18" color="primary">{{ c.icon }}</v-icon>
               <span>{{ c.title }}</span>
@@ -467,7 +479,6 @@ onBeforeUnmount(() => {
                   <v-btn
                     :color="pm === 1 ? 'success' : ''"
                     variant="tonal"
-                    size="small"
                     :loading="pmBusy"
                     @click="pmConfirm = true"
                   >

@@ -6,5 +6,65 @@ export default {
   name: '设置',
   icon: 'gi:settings',
   category: '系统',
-  component: defineAsyncComponent(() => import('./View.vue'))
+  component: defineAsyncComponent(() => import('./View.vue')),
+  settings: [
+    {
+      key: 'appearance',
+      label: '外观',
+      icon: 'mdi-palette-outline',
+      description: '主题、界面缩放、窗口边框、背景与 Fuse 蒙层、总览排版、启动与关于',
+      keywords: ['外观', '显示', '界面', 'appearance'],
+      items: [
+        {
+          key: 'theme',
+          label: '主题',
+          icon: 'mdi-palette',
+          description: '深色 / 纯黑 / 跟随系统',
+          keywords: ['深色', '纯黑', '跟随系统', '明亮', 'dark', 'theme'],
+          component: defineAsyncComponent(() => import('./items/ThemeSection.vue'))
+        },
+        {
+          key: 'zoom',
+          label: '界面缩放',
+          icon: 'mdi-magnify-plus-outline',
+          description: '整体 UI 等比缩放比例',
+          keywords: ['缩放', '大小', '比例', 'zoom', 'scale'],
+          component: defineAsyncComponent(() => import('./items/ZoomSection.vue'))
+        },
+        {
+          key: 'window',
+          label: '窗口',
+          icon: 'mdi-window-maximize',
+          description: '无边框、圆角、背景与 Fuse 蒙层',
+          keywords: ['无边框', '圆角', '背景', '图片', '壁纸', '蒙层', '模糊', '透明', '不透明'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/WindowSection.vue'))
+        },
+        {
+          key: 'dashboard',
+          label: '总览排版',
+          icon: 'mdi-view-dashboard-outline',
+          description: '重置总览页卡片排版',
+          keywords: ['重置', '排版', '布局', '卡片', '总览'],
+          component: defineAsyncComponent(() => import('./items/DashboardSection.vue'))
+        },
+        {
+          key: 'launch',
+          label: '启动',
+          icon: 'mdi-rocket-launch-outline',
+          description: '启动前确认行为',
+          keywords: ['启动', '确认', 'confirm', '弹窗'],
+          component: defineAsyncComponent(() => import('./items/LaunchSection.vue'))
+        },
+        {
+          key: 'about',
+          label: '关于',
+          icon: 'mdi-information-outline',
+          description: '版本与技术栈',
+          keywords: ['版本', '关于', 'electron', 'vue', 'vuetify'],
+          component: defineAsyncComponent(() => import('./items/AboutSection.vue'))
+        }
+      ]
+    }
+  ]
 } satisfies Ability

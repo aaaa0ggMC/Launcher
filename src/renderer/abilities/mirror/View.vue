@@ -127,7 +127,12 @@ defineExpose({ toMarkdown })
 
     <v-row dense class="mt-2">
       <v-col v-for="m in sortedMirrors" :key="m.name" cols="12" sm="6" md="4">
-        <v-card rounded="lg" variant="tonal" :class="m.enabled ? 'mirror-enabled' : ''">
+        <v-card
+          rounded="lg"
+          variant="tonal"
+          class="card-fill"
+          :class="m.enabled ? 'mirror-enabled' : ''"
+        >
           <v-card-text>
             <div class="d-flex align-center ga-2">
               <v-icon :color="m.enabled ? 'success' : 'on-surface-variant'">
@@ -152,7 +157,11 @@ defineExpose({ toMarkdown })
               <v-icon size="12" class="mr-1">mdi-download</v-icon>
               {{ fmtSpeed(testResults[m.name].speed) }}
             </div>
-            <div v-else-if="testResults[m.name]?.error" class="text-caption text-error mt-1">
+            <div
+              v-else-if="testResults[m.name]?.error"
+              class="text-caption text-error mt-1 text-truncate"
+              :title="testResults[m.name].error"
+            >
               {{ testResults[m.name].error }}
             </div>
           </v-card-text>

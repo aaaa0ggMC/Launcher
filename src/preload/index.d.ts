@@ -68,6 +68,8 @@ export interface CockpitApi {
   getWallpaper: () => Promise<string | null>
   pickFile: (opts?: {
     title?: string
+    directory?: boolean
+    any?: boolean
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
   copyText: (text: string) => Promise<void>

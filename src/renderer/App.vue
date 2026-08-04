@@ -9,6 +9,8 @@ import TransformerModal from './components/TransformerModal.vue'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
+import { buildSettingsSections } from './abilities/settings/registry'
+import type { SettingsCategory } from './abilities/settings/registry'
 
 // ---------------------------------------------------------------------------
 // Dynamic ability loading: one Vite chunk per ability folder. index.ts carries
@@ -178,6 +180,14 @@ const abilities = computed<SidebarAbility[]>(() => {
 })
 
 const currentAbility = computed(() => abilities.value.find((a) => a.id === currentId.value) ?? null)
+
+/**
+ * Settings injection list — built from the same ability modules the sidebar
+ * uses, then provided to the settings page so it never re-scans.
+ */
+const settingsSections = computed<SettingsCategory[]>(() =>
+  buildSettingsSections(abilities.value, abilityModules)
+)
 
 // keep-alive caches only abilities that opted in (keepAlive !== false).
 // Each cached page must declare a matching name via defineOptions.
@@ -427,6 +437,7 @@ const abilityConfigs = computed(() => {
 })
 
 provide('cockpit:config', runtimeConfig)
+provide('cockpit:settings', settingsSections)
 provide('cockpit:abilities', {
   configs: abilityConfigs,
   launch: launchApp,

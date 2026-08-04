@@ -54,14 +54,31 @@ export function registerIpc(): void {
   // Desktop wallpaper for the `wallpaper` background preset.
   ipcMain.handle('window:wallpaper', async () => kdeWallpaperPath())
 
-  // Native file picker (image paths for background / app icons).
+  // Native file/directory picker (image paths for backgrounds/icons, or an
+  // app search root). `directory: true` opens the folder chooser instead,
+  // `any: true` allows selecting either a file or a folder.
   ipcMain.handle(
     'dialog:pick-file',
-    async (_e, opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    async (
+      _e,
+      opts?: {
+        title?: string
+        directory?: boolean
+        any?: boolean
+        filters?: { name: string; extensions: string[] }[]
+      }
+    ) => {
+      const isDir = opts?.directory === true
+      const isAny = opts?.any === true
+      const properties: Array<'openFile' | 'openDirectory'> = isAny
+        ? ['openFile', 'openDirectory']
+        : isDir
+          ? ['openDirectory']
+          : ['openFile']
       const res = await dialog.showOpenDialog(mainWindow() ?? undefined!, {
-        title: opts?.title ?? '选择文件',
-        properties: ['openFile'],
-        filters: opts?.filters ?? []
+        title: opts?.title ?? (isDir ? '选择目录' : '选择文件'),
+        properties,
+        filters: isDir || isAny ? undefined : (opts?.filters ?? [])
       })
       return res.canceled || !res.filePaths[0] ? null : res.filePaths[0]
     }

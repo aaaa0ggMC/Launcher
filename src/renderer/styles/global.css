@@ -86,6 +86,28 @@ pre,
     box-shadow 0.18s ease;
 }
 
+/* ---------------------------------------------------------------------------
+ * Equal-height grid cards — the alignment paradigm for every <v-card> inside a
+ * <v-col>/<v-row> grid. Cards stretch to the full column height (all siblings
+ * in a row stay aligned no matter how long one's content is — long error text,
+ * missing buttons, etc.), and v-card-actions pins to the bottom.
+ *
+ * Usage:  <v-col ...><v-card class="card-fill">...</v-card></v-col>
+ * ------------------------------------------------------------------------- */
+.card-fill {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-fill .v-card-text {
+  flex: 1 1 auto;
+}
+
+.card-fill .v-card-actions {
+  margin-top: auto;
+}
+
 .app-card:hover,
 .wallpaper-card:hover {
   border-color: rgba(var(--v-theme-primary), 0.45);
