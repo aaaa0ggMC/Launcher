@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
 import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from '@shared/types'
 import LoadingBar from '../../components/LoadingBar.vue'
 import AbilityIcon from '../../components/AbilityIcon.vue'
-import { localize, translate, translateTemplate } from '../../i18n'
+import { localize, translate, translateTemplate, availableLanguages } from '../../i18n'
 
 interface AbilitiesCtx {
   configs: Record<string, Record<string, unknown>>
@@ -93,6 +93,7 @@ interface EditForm {
   description: string
   icon: string
   tags: string
+  localized: Record<string, { name?: string; description?: string; alias?: string }>
   execType: string
   execCwd: string
   execCommand: string
@@ -120,6 +121,7 @@ interface NewEntryForm {
   path: string
   description: string
   icon: string
+  localized: Record<string, { name?: string; description?: string; alias?: string }>
   execType: string
   execCwd: string
   execCommand: string
@@ -197,6 +199,7 @@ function openEdit(id: string): void {
     description: entry.description ?? '',
     icon: entry.icon ?? '',
     tags: (entry.tags ?? []).join(', '),
+    localized: JSON.parse(JSON.stringify(entry.localized ?? {})),
     execType: entry.exec.type,
     execCwd: entry.exec.cwd ?? '',
     execCommand: entry.exec.command.join(' '),
@@ -248,6 +251,17 @@ function addActionRow(): void {
 
 function removeActionRow(i: number): void {
   form.value?.actions.splice(i, 1)
+}
+
+/** Set a localized field value on a form's localized map. */
+function setLocalized(
+  f: { localized: Record<string, Record<string, string | undefined>> },
+  langCode: string,
+  field: string,
+  value: string
+): void {
+  if (!f.localized[langCode]) f.localized[langCode] = {}
+  f.localized[langCode][field] = value || undefined
 }
 
 /** Pick an image via the native dialog and store it as a file:// icon. */
@@ -329,6 +343,7 @@ async function saveEdit(): Promise<void> {
       alias: f.alias || undefined,
       description: f.description || undefined,
       icon: f.icon || undefined,
+      localized: Object.keys(f.localized).length ? f.localized : undefined,
       tags: f.tags
         .split(/[,，]/)
         .map((t) => t.trim())
@@ -375,6 +390,7 @@ function openNew(): void {
     path: '',
     description: '',
     icon: '',
+    localized: {},
     execType: 'custom',
     execCwd: '{self}',
     execCommand: '',
@@ -400,6 +416,7 @@ async function saveNew(): Promise<void> {
         name: f.name.trim(),
         description: f.description || undefined,
         icon: f.icon.trim() || undefined,
+        localized: Object.keys(f.localized).length ? f.localized : undefined,
         path: f.path.trim() || id,
         exec: {
           type: f.execType as AppEntry['exec']['type'],
@@ -817,6 +834,35 @@ onBeforeUnmount(() => unsub?.())
               />
             </v-col>
           </v-row>
+          <v-expansion-panels variant="accordion" class="mt-2">
+            <v-expansion-panel>
+              <v-expansion-panel-title class="text-subtitle-2">
+                多语言 / Multi-language
+              </v-expansion-panel-title>
+              <v-expansion-panel-text>
+                <div v-for="lang in availableLanguages" :key="lang.code" class="mb-2">
+                  <div class="text-caption font-weight-medium mb-1">{{ lang.label }}</div>
+                  <v-text-field
+                    :model-value="newForm.localized[lang.code]?.name ?? ''"
+                    :label="translate(uiLang, 'apps.name')"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    class="mb-2"
+                    @update:model-value="setLocalized(newForm, lang.code, 'name', $event)"
+                  />
+                  <v-text-field
+                    :model-value="newForm.localized[lang.code]?.description ?? ''"
+                    :label="translate(uiLang, 'apps.description')"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    @update:model-value="setLocalized(newForm, lang.code, 'description', $event)"
+                  />
+                </div>
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
@@ -1115,6 +1161,35 @@ onBeforeUnmount(() => unsub?.())
           <div v-if="form.actions.length === 0" class="text-caption on-surface-variant">
             {{ translate(uiLang, 'apps.noActions') }}
           </div>
+          <v-expansion-panels variant="accordion" class="mt-2">
+            <v-expansion-panel>
+              <v-expansion-panel-title class="text-subtitle-2">
+                多语言 / Multi-language
+              </v-expansion-panel-title>
+              <v-expansion-panel-text>
+                <div v-for="lang in availableLanguages" :key="lang.code" class="mb-2">
+                  <div class="text-caption font-weight-medium mb-1">{{ lang.label }}</div>
+                  <v-text-field
+                    :model-value="form.localized[lang.code]?.name ?? ''"
+                    :label="translate(uiLang, 'apps.name')"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    class="mb-2"
+                    @update:model-value="setLocalized(form, lang.code, 'name', $event)"
+                  />
+                  <v-text-field
+                    :model-value="form.localized[lang.code]?.description ?? ''"
+                    :label="translate(uiLang, 'apps.description')"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    @update:model-value="setLocalized(form, lang.code, 'description', $event)"
+                  />
+                </div>
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-btn color="error" variant="text" prepend-icon="mdi-delete" @click="deleteEntry">
