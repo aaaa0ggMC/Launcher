@@ -1,6 +1,6 @@
 # APPS.JSON — 应用注册表使用说明
 
-每个搜索目录（config/abilities.yaml 里 apps 的 `searchRoots`）下有一份 `apps.json`，定义该目录下"应用 → 一键操作"的注册表。
+每个搜索目录（`~/.config/LinuxCockpit/abilities.yaml` 里 apps 的 `searchRoots`）下有一份 `apps.json`，定义该目录下"应用 → 一键操作"的注册表。
 手工编辑优先，扫描器（`apps.rescan`）只补充草稿、不覆盖你的修改。
 
 > **多语言注意**：新增条目时，`name`/`description`/`alias` 推荐使用对象格式提供至少 `zh` 和 `en_US` 两种语言，见 [§9 多语言](#9-多语言)。
@@ -289,7 +289,7 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 
 显示时按以下优先级选取：
 
-1. 当前配置语言（`config.json` 的 `language`）
+1. 当前配置语言（`~/.config/LinuxCockpit/config.json` 的 `language`）
 2. `en_US` / `en-US`
 3. 对象中第一个有效值
 4. 原始 `name`/`description`/`alias` 字段（纯字符串）

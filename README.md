@@ -15,7 +15,7 @@
 - NVIDIA GPU 信息与电源管理切换
 - 自启动项管理
 - 自定义仪表盘（gridstack 布局持久化，可锁定布局以便选中复制）
-- 侧栏能力动态加载（`config/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
+- 侧栏能力动态加载（`~/.config/LinuxCockpit/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
 - 傅里叶变换可视化（three.js）：预设 / 矢量表编辑 / JSON 导入导出 / 2D·3D 相机
 - 接口调试（playground）：模板驱动 API 请求 + 变量插值（字符串/数字区间/选择/多行/默认值）+ 响应变换（文本/图片/音频/视频/脚本/异步任务），配置本地持久化
 - 日志系统：winston 轮转日志（自动写入 + 归档）+ 日志查看器（逐行虚拟滚动、级别过滤、实时尾随、导出当前会话）
@@ -39,7 +39,7 @@
 - `nvidia-smi` —— GPU 信息
 - `flatpak` —— 包计数
 - `plasma-apply-wallpaperimage` / `kscreen-doctor` —— 壁纸 / 显示输出（KDE Plasma）
-- `konsole` —— 终端启动（可在 `config.json` 的 `runtime.terminal` 改）
+- `konsole` —— 终端启动（可在 `~/.config/LinuxCockpit/config.json` 的 `runtime.terminal` 改）
 
 ## 开发
 

@@ -16,7 +16,6 @@ export function setManifestBroadcast(fn: Broadcast): void {
 
 export { broadcast as manifestBroadcast }
 
-/** Read + parse config/abilities.yaml. */
 export async function getManifest(): Promise<AbilitiesManifest | null> {
   try {
     const raw = await readFile(ABILITIES_YAML, 'utf-8')

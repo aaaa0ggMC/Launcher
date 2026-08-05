@@ -2,12 +2,11 @@
 // Ability-specific domain types live in each ability's own `types.ts` —
 // shared should NOT accumulate per-ability models.
 
-/** Per-ability manifest entry from config/abilities.yaml. */
+/** Per-ability manifest entry from abilities.yaml (no per-ability config). */
 export interface AbilityConfig {
   id: string
   order: number
   enabled: boolean
-  config?: Record<string, unknown>
 }
 
 export interface AbilitiesManifest {

@@ -1,12 +1,11 @@
-import { readFile, readdir, mkdir, appendFile, writeFile } from 'fs/promises'
+import { readFile, readdir, mkdir, appendFile } from 'fs/promises'
 import { join, extname } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import OpenAI from 'openai'
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { getManifest } from '../../main/process/manifest'
 import { makeLogger } from '../../main/process/logger'
-import { USER_CONFIG_DIR, ABILITIES_YAML } from '../../main/process/paths'
+import { USER_CONFIG_DIR, abilityConfigPath } from '../../main/process/paths'
+import { readJson, writeJsonAtomic } from '../../main/process/util'
 import type {
   AidjConfig,
   SongMeta,
@@ -22,23 +21,13 @@ const execFileAsync = promisify(execFile)
 const AIDJ_DIR = join(USER_CONFIG_DIR, AIDJ_DATA_DIR)
 
 export async function loadAidjConfig(): Promise<AidjConfig | null> {
-  const manifest = await getManifest()
-  const cfg = manifest?.abilities.find((a) => a.id === 'aidj')?.config as AidjConfig | undefined
-  if (!cfg) return null
-  return cfg
+  return readJson<AidjConfig>(abilityConfigPath('aidj'))
 }
 
-/** Persist the current AIDJ config back to config/abilities.yaml. */
+/** Persist the current AIDJ config to ~/.config/LinuxCockpit/aidj/config.json. */
 export async function saveAidjConfig(config: AidjConfig): Promise<{ ok: boolean; error?: string }> {
   try {
-    const raw = await readFile(ABILITIES_YAML, 'utf-8')
-    const doc = parseYaml(raw) as Record<string, unknown>
-    const abilities = (doc?.abilities ?? []) as Record<string, unknown>[]
-    const idx = abilities.findIndex((a) => a.id === 'aidj')
-    if (idx === -1) return { ok: false, error: 'abilities.yaml 中未找到 aidj 条目' }
-    abilities[idx] = { ...abilities[idx], config }
-    doc.abilities = abilities
-    await writeFile(ABILITIES_YAML, stringifyYaml(doc), 'utf-8')
+    await writeJsonAtomic(abilityConfigPath('aidj'), config)
     return { ok: true }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
@@ -111,9 +100,13 @@ export async function loadMetadata(): Promise<Map<string, SongMeta>> {
         if (entry.name && entry.metadata) {
           map.set(entry.name, entry.metadata as SongMeta)
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
   return map
 }
 
@@ -346,7 +339,9 @@ export class DBusManager {
   async control(command: string): Promise<boolean> {
     try {
       if (!this.playerProxy) return false
-      const iface = this.playerProxy.getInterface('org.mpris.MediaPlayer2.Player') as unknown as PlayerInterface
+      const iface = this.playerProxy.getInterface(
+        'org.mpris.MediaPlayer2.Player'
+      ) as unknown as PlayerInterface
       const methodMap: Record<string, keyof PlayerInterface> = {
         next: 'Next',
         prev: 'Previous',
@@ -368,7 +363,9 @@ export class DBusManager {
   async sendFiles(paths: string[]): Promise<boolean> {
     try {
       if (!this.playerProxy) return false
-      const iface = this.playerProxy.getInterface('org.mpris.MediaPlayer2.Player') as unknown as PlayerInterface
+      const iface = this.playerProxy.getInterface(
+        'org.mpris.MediaPlayer2.Player'
+      ) as unknown as PlayerInterface
       for (const p of paths) {
         await iface.OpenUri(`file://${p}`)
       }
@@ -408,7 +405,9 @@ export class DBusManager {
     if (this.bus) {
       try {
         this.bus.disconnect()
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       this.bus = null
       this.playerProxy = null
       this.propsProxy = null
@@ -494,7 +493,9 @@ export class LoudnessCache {
             break
           }
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
 
       return { peak_db: peakDb, rms_db: rmsDb, integrated_lufs: integratedLufs }
     } catch {
@@ -605,8 +606,16 @@ export class DJSession {
 
   /** token_sort_ratio: split+sort tokens, then Levenshtein ratio 0-100. */
   tokenSortRatio(a: string, b: string): number {
-    const ta = a.split(/[\s,，、。.\-()（）]+/).filter(Boolean).sort().join(' ')
-    const tb = b.split(/[\s,，、。.\-()（）]+/).filter(Boolean).sort().join(' ')
+    const ta = a
+      .split(/[\s,，、。.\-()（）]+/)
+      .filter(Boolean)
+      .sort()
+      .join(' ')
+    const tb = b
+      .split(/[\s,，、。.\-()（）]+/)
+      .filter(Boolean)
+      .sort()
+      .join(' ')
     const maxLen = Math.max(ta.length, tb.length)
     if (maxLen === 0) return 100
     const dist = this.levenshtein(ta, tb)
@@ -614,15 +623,17 @@ export class DJSession {
   }
 
   private levenshtein(a: string, b: string): number {
-    const m = a.length, n = b.length
+    const m = a.length,
+      n = b.length
     const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
     for (let i = 0; i <= m; i++) dp[i][0] = i
     for (let j = 0; j <= n; j++) dp[0][j] = j
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
-        dp[i][j] = a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1
+        dp[i][j] =
+          a[i - 1] === b[j - 1]
+            ? dp[i - 1][j - 1]
+            : Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1
       }
     }
     return dp[m][n]

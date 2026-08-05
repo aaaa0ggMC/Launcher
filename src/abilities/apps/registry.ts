@@ -1,11 +1,7 @@
 import { join } from 'path'
-import { writeFile } from 'fs/promises'
 import chokidar from 'chokidar'
-import { stringify as stringifyYaml } from 'yaml'
-import type { AbilitiesManifest } from '../../shared/types'
 import type { AppEntry, AppRegistryFile } from './types'
-import { CONFIG_JSON, ABILITIES_YAML } from '../../main/process/paths'
-import { getManifest } from '../../main/process/manifest'
+import { CONFIG_JSON, abilityConfigPath } from '../../main/process/paths'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
 
@@ -24,35 +20,34 @@ export function setRegistryBroadcast(fn: Broadcast): void {
   broadcast = fn
 }
 
+const APPS_CONFIG_PATH = abilityConfigPath('apps')
+
 export async function getAppsConfig(): Promise<{
   searchRoots: SearchRoot[]
   confirmBeforeLaunch: boolean
 }> {
-  const manifest = await getManifest()
-  const apps = manifest?.abilities.find((a) => a.id === 'apps')
-  const cfg = (apps?.config ?? {}) as {
+  const cfg = await readJson<{
     searchRoots?: SearchRoot[]
     confirmBeforeLaunch?: boolean
-  }
+  }>(APPS_CONFIG_PATH)
   return {
-    searchRoots: cfg.searchRoots ?? [],
-    confirmBeforeLaunch: cfg.confirmBeforeLaunch ?? false
+    searchRoots: cfg?.searchRoots ?? [],
+    confirmBeforeLaunch: cfg?.confirmBeforeLaunch ?? false
   }
 }
 
-async function saveSearchRoots(roots: SearchRoot[]): Promise<void> {
-  const manifest = (await getManifest()) as AbilitiesManifest
-  const apps = manifest.abilities.find((a) => a.id === 'apps')
-  if (!apps) return
-  apps.config = { ...(apps.config ?? {}), searchRoots: roots }
-  await writeFile(ABILITIES_YAML, stringifyYaml(manifest), 'utf-8')
+async function saveAppsConfig(config: {
+  searchRoots: SearchRoot[]
+  confirmBeforeLaunch: boolean
+}): Promise<void> {
+  await writeJsonAtomic(APPS_CONFIG_PATH, config)
 }
 
 export async function addSearchRoot(path: string): Promise<SearchRoot[]> {
-  const { searchRoots } = await getAppsConfig()
+  const { searchRoots, confirmBeforeLaunch } = await getAppsConfig()
   if (!searchRoots.some((r) => r.path === path)) {
     searchRoots.push({ path, watch: true })
-    await saveSearchRoots(searchRoots)
+    await saveAppsConfig({ searchRoots, confirmBeforeLaunch })
     log.info('search root added', { path })
     broadcast('cockpit:apps-changed', 'roots', null)
   }
@@ -60,9 +55,9 @@ export async function addSearchRoot(path: string): Promise<SearchRoot[]> {
 }
 
 export async function removeSearchRoot(path: string): Promise<SearchRoot[]> {
-  const { searchRoots } = await getAppsConfig()
+  const { searchRoots, confirmBeforeLaunch } = await getAppsConfig()
   const next = searchRoots.filter((r) => r.path !== path)
-  await saveSearchRoots(next)
+  await saveAppsConfig({ searchRoots: next, confirmBeforeLaunch })
   log.info('search root removed', { path })
   broadcast('cockpit:apps-changed', 'roots', null)
   return next
@@ -113,8 +108,6 @@ async function resolveLocalized(value: unknown, lang: string): Promise<string | 
 /** Read the configured language from config.json (default 'zh'). */
 let cachedConfigLang: string | null = null
 async function readConfigLang(): Promise<string> {
-  // Language rarely changes at runtime; cache it so per-entry normalization
-  // doesn't re-read config.json for every app on every list/get call.
   if (cachedConfigLang) return cachedConfigLang
   try {
     const cfg = await readJson<{ language?: string }>(CONFIG_JSON)
@@ -233,7 +226,6 @@ export async function updateEntry(
     tags: patch.tags ?? current.tags ?? [],
     tags_auto: patch.tags_auto ?? current.tags_auto ?? []
   }
-  // id is the object key; alias falls back to id per schema
   if (!merged.alias) merged.alias = id
   reg.apps[id] = merged
   await writeJsonAtomic(file, reg)
@@ -283,15 +275,10 @@ export function watchRoots(): void {
     ignoreInitial: true,
     ignorePermissionErrors: true,
     depth: 2,
-    // Skip hidden files, VCS, dependency dirs, and high-churn files (db/logs
-    // written by running services inside the search root would otherwise fire
-    // change events constantly and make the Apps page flash).
     ignored:
       /(^|[/\\])\..|node_modules|\.venv|__pycache__|\.git|\.db$|\.db-journal$|\.sqlite3?$|\.log$|(^|[/\\])logs([/\\]|$)/
   })
 
-  // Structural changes only (a new/removed app dir/script); file *content*
-  // changes and bursty rescan churn are coalesced into one debounced notify.
   const STRUCTURAL = new Set(['add', 'addDir', 'unlink', 'unlinkDir'])
   let notifyTimer: NodeJS.Timeout | null = null
   const notify = (root: string): void => {

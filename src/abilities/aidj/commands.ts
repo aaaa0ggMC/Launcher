@@ -42,7 +42,7 @@ async function ensureInit(): Promise<{
   let config = _config
   if (!config) {
     config = await loadAidjConfig()
-    if (!config) throw new Error('AIDJ 配置未找到，请先在 abilities.yaml 中配置 aidj')
+    if (!config) throw new Error('AIDJ 配置未找到，请先在 aidj/config.json 中配置')
     _config = config
   }
 
@@ -390,7 +390,7 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.stop-persistent',
     description: '停止持久模式',
-run: async () => {
+    run: async () => {
       const ps = getPersistentSession()
       if (!ps) return { ok: false, error: '持久模式未运行' }
       ps.stop()
@@ -410,7 +410,7 @@ run: async () => {
   },
   {
     name: 'aidj.save-config',
-    description: '将当前 AIDJ 配置持久化到 abilities.yaml',
+    description: '将当前 AIDJ 配置持久化到 aidj/config.json',
     run: async () => {
       if (!_config) {
         _config = await loadAidjConfig()

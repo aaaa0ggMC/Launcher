@@ -5,8 +5,8 @@ import { tmpdir } from 'os'
 import https from 'https'
 import http from 'http'
 import type { MirrorEntry, MirrorInfo, MirrorTestResult } from './types'
-import { MIRRORLIST, SCRIPTS_DIR } from '../../main/process/paths'
-import { getManifest } from '../../main/process/manifest'
+import { MIRRORLIST, SCRIPTS_DIR, abilityConfigPath } from '../../main/process/paths'
+import { readJson } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
 
 const log = makeLogger('mirror')
@@ -77,11 +77,14 @@ function extractName(url: string): string {
 
 /** Merge file mirrors with config mirrors (add missing config ones as disabled). */
 async function mergeWithConfig(fileMirrors: MirrorEntry[]): Promise<MirrorEntry[]> {
-  const manifest = await getManifest()
-  const cfg = manifest?.abilities.find((a) => a.id === 'mirror')?.config
-  const configMirrors = ((cfg?.mirrors as { name: string; url: string }[] | undefined) ?? []).map(
-    (m) => ({ name: m.name, url: m.url, enabled: false })
+  const cfg = await readJson<{ mirrors?: { name: string; url: string }[] }>(
+    abilityConfigPath('mirror')
   )
+  const configMirrors = (cfg?.mirrors ?? []).map((m) => ({
+    name: m.name,
+    url: m.url,
+    enabled: false
+  }))
 
   const merged = [...fileMirrors]
   for (const cm of configMirrors) {

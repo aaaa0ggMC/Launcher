@@ -19,9 +19,7 @@ export default {
           key: 'general',
           label: 'AI DJ 配置',
           fullWidth: true,
-          component: defineAsyncComponent(
-            () => import('./components/AidjSettingsSection.vue')
-          )
+          component: defineAsyncComponent(() => import('./components/AidjSettingsSection.vue'))
         }
       ]
     }

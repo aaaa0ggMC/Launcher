@@ -23,7 +23,7 @@ Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的
 - `pacman` — 镜像源 / 包计数
 - `systemctl` — systemd 服务
 - `plasma-apply-wallpaperimage` / `kscreen-doctor` — 壁纸 / 显示输出 (KDE)
-- `konsole` — 终端启动 (可在 config.json 改)
+- `konsole` — 终端启动 (可在 `~/.config/LinuxCockpit/config.json` 改)
 
 ## 2. 安装依赖
 
@@ -91,7 +91,7 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 
 ## 4. 配置文件
 
-### config/config.json — 全局外壳配置
+### ~/.config/LinuxCockpit/config.json — 全局外壳配置
 
 ```jsonc
 {
@@ -106,9 +106,9 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 }
 ```
 
-### config/abilities.yaml — 侧栏清单 + 每能力配置
+### ~/.config/LinuxCockpit/abilities.yaml — 侧栏清单
 
-控制侧栏顺序、启用状态、各能力的 config 块 (镜像源列表、搜索目录等)。
+控制侧栏顺序和启用状态。各能力的专属配置已移出 yaml，独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`。
 
 ### ~/Apps/apps.json — 应用注册表
 
@@ -151,7 +151,7 @@ src/
       commands/        # 命令注册表 (CLI-first 核心): types.ts + registry.ts
       abilities-loader.ts  # 加载器: globs src/abilities/*/commands.ts → registerAll
       ability-loader.ts    # 外部用户能力 (esbuild 即时编译)
-      manifest.ts      # abilities.yaml 读取
+      manifest.ts      # ~/.config/LinuxCockpit/abilities.yaml 读取
       background-tasks.ts  # 后台任务框架 (进程/作业任务, 资源统计, stdin/信号)
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/               # 渲染 UI 框架
@@ -187,9 +187,11 @@ src/
     bt-views.ts       # 后台任务 View 注册表 (log 内置 / 能力可注册自定义)
     components/BackgroundTaskViews/  # BtLogView (控制台) / BtResponseView (结构化响应)
     composables/      # download.ts (本地下载经主进程命令) / format.ts / useLoading.ts
-config/
-  config.json
-  abilities.yaml
+~/.config/LinuxCockpit/
+  config.json           # 全局外壳配置（theme / uiScale / window / runtime）
+  abilities.yaml        # 侧栏清单（abilities 列表，不包含能力专属配置）
+  <ability-id>/
+    config.json         # 各能力独立配置（镜像源列表、搜索目录等）
 scripts/               # pkexec helper 脚本 + polkit 规则
 ```
 
@@ -206,7 +208,7 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 
 - 渲染端: `src/abilities/index.ts` 的 Vite `import.meta.glob` → 首次显示时 async `import()` (code-split)
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`
-- 侧栏由 `abilities.yaml` 驱动，增删能力文件夹 + 改 yaml 即可
+- 侧栏由 `~/.config/LinuxCockpit/abilities.yaml` 驱动，增删能力文件夹 + 改 yaml 即可
 
 ### 图标
 
@@ -288,13 +290,13 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 4. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
 5. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
 
-然后在 `config/abilities.yaml` 的 `abilities` 列表注册（`id`/`order`/`enabled`）。
+然后在 `~/.config/LinuxCockpit/abilities.yaml` 的 `abilities` 列表注册（`id`/`order`/`enabled`）。
 
 **依赖原则**：
 
 - settings 是自身能力，其注入项不能调用其他能力已移除的命令（跨能力设置项应由对应能力自己注入）
 - 渲染端页面不应 `import` 其他 ability 模块
-- 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 yaml
+- 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 `~/.config/LinuxCockpit/abilities.yaml`
 - 纯后端能力（无 View.vue，如 `display` / `background`）不需要在 abilities.yaml 注册，命令仍会自动加载，只是不进侧栏
 
 ### 写一个 playground 能力（接口调试）

@@ -76,9 +76,11 @@ src/
     index.ts / index.d.ts   # contextBridge 白名单 API
   shared/
     types.ts                # 仅框架契约：AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt* (后台任务)
-config/
+~/.config/LinuxCockpit/
   config.json               # 全局外壳配置（theme / uiScale / window / runtime）
-  abilities.yaml            # 侧栏清单 + 各能力 config
+  abilities.yaml            # 侧栏清单（abilities 列表，不包含能力专属配置）
+  <ability-id>/
+    config.json             # 各能力独立配置（镜像源列表、搜索目录等）
 scripts/                    # pkexec helper 脚本 + polkit 规则
 ```
 
@@ -113,7 +115,7 @@ CLI: mirror.toggle --name USTC --enable true
 主进程:  process/abilities-loader.ts  globs abilities/*/commands.ts → registerAll
 ```
 
-- 侧栏顺序 / 启用 / 各能力 config 都由 `config/abilities.yaml` 控制。
+- 侧栏顺序 / 启用 / 各能力 config 都由 `~/.config/LinuxCockpit/abilities.yaml` 控制。
 - 加载到的一切通过 `App.vue` 的 `provide('cockpit:*')` 暴露给单个能力，实现跨范围控制（能力列表、当前能力、configs、launch、命令列表、设置聚合等）。
 
 ### 3.3 日志流
@@ -215,11 +217,12 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ## 6. 配置
 
-| 文件                    | 作用                                                   |
-| ----------------------- | ------------------------------------------------------ |
-| `config/config.json`    | 全局外壳：theme / uiScale / window.* / runtime.*       |
-| `config/abilities.yaml` | 侧栏清单 + 各能力 config（镜像列表、搜索目录等）       |
-| `~/Apps/apps.json`      | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖） |
+| 文件                                       | 作用                                                   |
+| ------------------------------------------ | ------------------------------------------------------ |
+| `~/.config/LinuxCockpit/config.json`      | 全局外壳：theme / uiScale / window.* / runtime.*       |
+| `~/.config/LinuxCockpit/abilities.yaml`   | 侧栏清单（abilities 列表，不包含能力专属配置）           |
+| `~/.config/LinuxCockpit/<ability-id>/config.json` | 各能力独立配置（镜像列表、搜索目录等）          |
+| `~/Apps/apps.json`                        | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖） |
 
 ## 7. 开发 / 构建
 
