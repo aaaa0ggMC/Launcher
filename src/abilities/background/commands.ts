@@ -3,6 +3,7 @@ import type { BtTaskInfo } from '../../shared/types'
 import {
   listTasks,
   getTaskOutput,
+  clearTaskOutput,
   writeTaskInput,
   signalTask,
   stopTask,
@@ -42,7 +43,7 @@ export default [
         log.warn('background.output missing id')
         return { ok: false, error: '需要 --id' }
       }
-      return { ok: true, id, lines: getTaskOutput(id) }
+      return { ok: true, id, messages: getTaskOutput(id) }
     }
   },
   {
@@ -56,12 +57,25 @@ export default [
         log.warn('background.export invalid args', { id, path })
         return { ok: false, error: '需要 --id 与 --path' }
       }
-      const lines = getTaskOutput(id)
-      const body = lines.map((l) => l.line).join('\n')
+      const messages = getTaskOutput(id)
+      const body = messages
+        .map((m) => m.line ?? (m.data !== undefined ? JSON.stringify(m.data) : ''))
+        .join('\n')
       const res = await writeTextFile(path, body)
-      if (res.ok) log.info('background.export ok', { id, path, lines: lines.length })
+      if (res.ok) log.info('background.export ok', { id, path, lines: messages.length })
       else log.error('background.export failed', { id, path, error: res.error })
-      return { ...res, id, lines: lines.length }
+      return { ...res, id, lines: messages.length }
+    }
+  },
+  {
+    name: 'background.clear-output',
+    description: '清空后台任务的缓冲输出 (--id)',
+    usage: 'background.clear-output --id bt-xxx',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const ok = clearTaskOutput(id)
+      if (!ok) return { ok: false, error: `任务不存在: ${id}` }
+      return { ok: true }
     }
   },
   {

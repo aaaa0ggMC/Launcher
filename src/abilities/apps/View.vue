@@ -1060,7 +1060,6 @@ onBeforeUnmount(() => unsub?.())
             :hint="translate(uiLang, 'apps.transformerHint')"
             persistent-hint
             variant="outlined"
-            density="compact"
             rows="3"
             auto-grow
             class="font-mono"
@@ -1191,7 +1190,6 @@ onBeforeUnmount(() => unsub?.())
               v-model="a.stepsText"
               :label="translate(uiLang, 'apps.actionSteps')"
               variant="outlined"
-              density="compact"
               rows="2"
               auto-grow
               hide-details

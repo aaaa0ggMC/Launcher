@@ -144,17 +144,19 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 ```
 任何模块:
   startProcessTask(...)          # 进程任务：真实子进程，资源统计 + stdin/信号
-  startJobTask(...)              # 作业任务：无进程，pushLine/setProgress/finish/cancel
+  startJobTask(...)              # 作业任务：无进程，pushLine/push/setProgress/finish/cancel
   registerJobHandler + startJobByName  # 命名作业：前端 background.job --name <handler> 触发
       └→ process/background-tasks.ts
-          ├→ 任务注册表 + 环形输出缓冲
+          ├→ 任务注册表 + 环形输出缓冲（BtOutputMessage：line / 结构化 data / base64）
           ├→ 资源统计（pidusage 跨平台 CPU/内存，nvidia-smi GPU）
-          └→ 广播 cockpit:bt ──→ BackgroundTasksDialog（全局面板：控制台/进度/停止）
+          └→ 广播 cockpit:bt ──→ BackgroundTasksDialog
+              └→ 按任务 view 渲染详情区（bt-views 注册表：log 控制台 / 自定义）
 ```
 
 - **作业 = 协程**：handler 是一段普通 async 函数（`while` + `await` 即循环 + yield），`setProgress`/`pushLine` 更新状态，无模板类。
+- **可定制 View**：任务声明 `view` id，面板按注册表渲染详情区（生命周期按钮属面板不属于 view）；输出消息可携带结构化数据 / base64 二进制，由 view 决定展示。
 - 前端**发起**（`background.job`）不阻塞：任务立即返回，handler 在主进程后台跑（fire-and-forget）。
-- **输出批量推送**：`cockpit:bt` 的 `output` 是 100ms 合并批次（不是逐行），高频日志不压 IPC；日志管线（`cockpit:log`）保持逐条实时。
+- **输出实时 / 状态节流**：`cockpit:bt` 的 `output`（日志/结构化消息）实时推送（同步突发经微任务合并，跨 tick 立即送达）；`changed`（任务列表/进度）100ms 节流合并，避免高频 `setProgress` 打爆 IPC。日志管线（`cockpit:log`）保持逐条实时。
 - 任务**依附于本程序**：退出时 `will-quit` 统一清理；有运行中任务时拦截 close 弹确认。
 - 执行载体并列：终端 / systemd ability / 后台任务，由能力按需选用，非替代关系。
 

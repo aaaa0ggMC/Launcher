@@ -1,4 +1,4 @@
-import type { AbilitiesManifest, LaunchResult, BtTaskInfo } from '../shared/types'
+import type { AbilitiesManifest, LaunchResult, BtOutputMessage, BtTaskInfo } from '../shared/types'
 import type { AppEntry } from '../abilities/apps/types'
 import type { AutostartEntry } from '../abilities/autostart/types'
 import type { DisplayOutput } from '../abilities/display/types'
@@ -41,9 +41,7 @@ export interface CockpitApi {
   launch: (root: string, id: string) => Promise<LaunchResult>
   launchAction: (root: string, id: string, action: string) => Promise<LaunchResult>
   btList: () => Promise<BtTaskInfo[]>
-  btOutput: (
-    id: string
-  ) => Promise<{ ok: boolean; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }>
+  btOutput: (id: string) => Promise<{ ok: boolean; id: string; messages: BtOutputMessage[] }>
   btStart: (
     opts: Record<string, unknown>
   ) => Promise<{ ok: boolean; task?: BtTaskInfo; error?: string }>

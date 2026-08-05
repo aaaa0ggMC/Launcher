@@ -7,7 +7,6 @@ import { makeLogger } from './logger'
 const log = makeLogger('util')
 
 export const execFileAsync = promisify(execFile)
-
 /** Read + parse JSON; returns null on any error. */
 export async function readJson<T>(p: string): Promise<T | null> {
   try {
@@ -42,6 +41,22 @@ export async function writeTextFile(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     log.error('writeTextFile failed', { path: p, error })
+    return { ok: false, error }
+  }
+}
+
+/** Write raw bytes (Buffer / Uint8Array) to a file. */
+export async function writeBinaryFile(
+  p: string,
+  data: Uint8Array
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await mkdir(dirname(p), { recursive: true })
+    await writeFile(p, data)
+    return { ok: true }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    log.error('writeBinaryFile failed', { path: p, error })
     return { ok: false, error }
   }
 }

@@ -232,12 +232,14 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 架构级设施（`src/main/process/background-tasks.ts`，与 logger 同级），**不绑定任何能力**。任何模块都能开一个跨页面存活的长跑作业，全局面板（`BackgroundTasksDialog.vue`）统一展示与交互。
 
 - 两类任务：
-  - **进程任务** `startProcessTask({ name, description, argv, cwd, env })` — 真实子进程，piped stdio 环形缓冲，资源统计（CPU/内存经跨平台的 `pidusage`，GPU 显存经 nvidia-smi，缺失时降级留空），支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
-  - **作业任务** `startJobTask({ name, description, onCancel })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
+  - **进程任务** `startProcessTask({ name, description, argv, cwd, env, view? })` — 真实子进程，piped stdio 环形缓冲，资源统计（CPU/内存经跨平台的 `pidusage`，GPU 显存经 nvidia-smi，缺失时降级留空），支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
+  - **作业任务** `startJobTask({ name, description, onCancel, view? })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `push` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
 - **命名作业**：`registerJobHandler(name, handler)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
-- 广播：`cockpit:bt` 事件（`changed` 全量列表 / `output` **批量行** / `exit`）。**控制台输出是 100ms 批量合并推送**（攒一批行一次广播，500 行硬上限提前 flush，退出时立即 flush tail），不是逐行发——高频打日志的任务不会打爆 IPC。渲染端侧栏按钮徽标只计运行中任务（上限 `99+`）。
+- **可定制 View**：任务带 `view` id，全局面板按 `view` 渲染详情区（`src/main/ui/bt-views.ts` 注册表）。`log`（默认控制台 + stdin 输入）内置；任意能力可 `registerBtView('custom', factory)` 注册自定义展示（如结构化 response 视图）。**终止/移除等生命周期按钮属于面板，不属于 view**。
+- **消息类型**：输出不仅是文本行——`JobControl.push({ line | data, label?, encoding?, mime?, progress? })` 支持结构化数据与 base64 二进制。`BtOutputMessage` 的 `line` 渲染为控制台行，`data` 由 view 按需渲染。
+- 广播：`cockpit:bt` 事件（`changed` 全量列表 / `output` **实时消息** / `exit`）。**输出（日志/结构化消息）实时推送**——同一次同步突发经 `queueMicrotask` 合并为一次 IPC，跨 tick 立即送达，无人工延迟；**状态（`changed`/进度）100ms 节流合并**，避免高频 `setProgress` 打爆 IPC。渲染端侧栏按钮徽标只计运行中任务（上限 `99+`）。
 - 生命周期：任务**依附于本程序**，退出时 `will-quit` 统一 SIGKILL，不留孤儿；退出前若有运行中任务，主进程拦截 `close` 广播 `cockpit:confirm-quit`，渲染端弹确认（可"以后不再提醒"，localStorage `cockpit-bt-quit-suppress`）。
-- 命令：`background.list/output/start/job/input/signal/stop/kill/remove/clear-finished`。
+- 命令：`background.list/output/start/job/input/signal/stop/kill/remove/clear-finished/clear-output`。
 
 #### 写一个 Task（作业样板）
 

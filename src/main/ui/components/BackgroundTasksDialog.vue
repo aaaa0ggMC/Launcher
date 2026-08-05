@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, inject, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, inject, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { Ref } from 'vue'
-import type { BtTaskInfo, BtStats } from '@shared/types'
+import type { BtOutputMessage, BtTaskInfo, BtStats } from '@shared/types'
 import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields } from '@ui/composables/search'
+import { resolveBtView } from '@ui/bt-views'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -23,8 +24,8 @@ const visible = computed({
 // ---------------------------------------------------------------------------
 const tasks = shallowRef<BtTaskInfo[]>([])
 const selectedId = ref<string | null>(null)
-const lines = shallowRef<Record<string, { stream: 'stdout' | 'stderr'; line: string }[]>>({})
-const MAX_LINES = 2000
+const messages = shallowRef<Record<string, BtOutputMessage[]>>({})
+const MAX_MESSAGES = 2000
 const searchText = ref('')
 const statusFilter = ref<'' | BtTaskInfo['status']>('')
 
@@ -92,17 +93,14 @@ async function clearFinished(): Promise<void> {
   }
 }
 
-function pushLine(id: string, stream: 'stdout' | 'stderr', line: string): void {
-  pushLines(id, [{ stream, line }])
-}
-
-/** Append a batch of lines to a task's console buffer (rendered together). */
-function pushLines(id: string, batch: { stream: 'stdout' | 'stderr'; line: string }[]): void {
+/** Append a batch of messages to a task's output buffer. */
+function pushMessages(id: string, batch: BtOutputMessage[]): void {
   if (!batch.length) return
-  const cur = lines.value[id] ?? []
-  cur.push(...batch)
-  if (cur.length > MAX_LINES) cur.splice(0, cur.length - MAX_LINES)
-  lines.value = { ...lines.value, [id]: cur }
+  // Always replace with a NEW array so child views watching by reference
+  // re-render + scroll reliably (in-place push keeps the same identity).
+  const next = [...(messages.value[id] ?? []), ...batch]
+  if (next.length > MAX_MESSAGES) next.splice(0, next.length - MAX_MESSAGES)
+  messages.value = { ...messages.value, [id]: next }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,18 +110,18 @@ function onBtEvent(raw: unknown): void {
   try {
     const evt = raw as
       | { type: 'changed'; tasks: BtTaskInfo[] }
-      | { type: 'output'; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }
+      | { type: 'output'; id: string; messages: BtOutputMessage[] }
       | { type: 'exit'; id: string; code: number | null }
     if (!evt || typeof evt.type !== 'string') return
     if (evt.type === 'changed') {
       tasks.value = evt.tasks
-      // drop line buffers for tasks that no longer exist
+      // drop message buffers for tasks that no longer exist
       const alive = new Set(evt.tasks.map((x) => x.id))
-      const stale = Object.keys(lines.value).filter((id) => !alive.has(id))
+      const stale = Object.keys(messages.value).filter((id) => !alive.has(id))
       if (stale.length) {
-        const next = { ...lines.value }
+        const next = { ...messages.value }
         for (const id of stale) delete next[id]
-        lines.value = next
+        messages.value = next
       }
       if (selectedId.value && !evt.tasks.some((x) => x.id === selectedId.value)) {
         selectedId.value = null
@@ -131,8 +129,8 @@ function onBtEvent(raw: unknown): void {
       return
     }
     if (evt.type === 'output') {
-      // batched: main process coalesces per-line output into 100ms chunks
-      if (evt.lines?.length) pushLines(evt.id, evt.lines)
+      // batched: main process coalesces messages into 100ms chunks
+      if (evt.messages?.length) pushMessages(evt.id, evt.messages)
       return
     }
     if (evt.type === 'exit') {
@@ -144,48 +142,36 @@ function onBtEvent(raw: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// Detail / console
+// Detail area (renders the task's registered view)
 // ---------------------------------------------------------------------------
-const consoleEl = ref<HTMLElement | null>(null)
-const autoScroll = ref(true)
-const inputText = ref('')
 const busy = ref(false)
 
-const selectedLines = computed(() => lines.value[selectedId.value ?? ''] ?? [])
+const selectedMessages = computed(() => messages.value[selectedId.value ?? ''] ?? [])
+
+/** Resolve the view component for the selected task (fallback: log view). */
+const selectedView = computed(() => {
+  const sel = selected.value
+  if (!sel) return null
+  return resolveBtView(sel)
+})
 
 async function selectTask(id: string): Promise<void> {
   selectedId.value = id
-  await nextTick()
-  scrollConsole()
-  // Backfill from the service ring buffer (covers lines emitted while the
+  // Backfill from the service ring buffer (covers messages emitted while the
   // panel was closed / before mount). Replace only when it's strictly longer,
-  // so live lines that raced in are never lost.
+  // so live messages that raced in are never lost.
   const res = (await window.cockpit.btOutput(id)) as {
     ok?: boolean
-    lines?: { stream: 'stdout' | 'stderr'; line: string }[]
+    messages?: BtOutputMessage[]
   } | null
-  if (!res?.ok || !res.lines) return
-  if ((res.lines.length ?? 0) >= (lines.value[id]?.length ?? 0)) {
-    lines.value = { ...lines.value, [id]: [...res.lines] }
-    await nextTick()
-    scrollConsole()
+  if (!res?.ok || !res.messages) return
+  if ((res.messages.length ?? 0) >= (messages.value[id]?.length ?? 0)) {
+    messages.value = { ...messages.value, [id]: [...res.messages] }
   }
-}
-
-function scrollConsole(): void {
-  if (autoScroll.value && consoleEl.value) {
-    consoleEl.value.scrollTop = consoleEl.value.scrollHeight
-  }
-}
-
-function onConsoleScroll(): void {
-  const el = consoleEl.value
-  if (!el) return
-  autoScroll.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 24
 }
 
 function clearConsole(): void {
-  lines.value = { ...lines.value, [selectedId.value ?? '']: [] }
+  void window.cockpit.command('background.clear-output', { id: selectedId.value })
 }
 
 const exporting = ref(false)
@@ -224,37 +210,6 @@ async function exportConsole(): Promise<void> {
   } finally {
     exporting.value = false
   }
-}
-
-// ---------------------------------------------------------------------------
-// Interaction: stdin writes + signals (Ctrl+C → SIGINT, Ctrl+D → EOF)
-// ---------------------------------------------------------------------------
-async function sendInput(text: string): Promise<void> {
-  if (!selectedId.value || !text) return
-  await window.cockpit.btInput(selectedId.value, text)
-}
-
-function onInputEnter(): void {
-  if (!selectedId.value) return
-  const data = inputText.value + '\n'
-  void sendInput(data)
-  // mirror the sent line into the console as a prompt echo
-  pushLine(selectedId.value, 'stdout', `> ${inputText.value}`)
-  inputText.value = ''
-  void nextTick(() => scrollConsole())
-}
-
-function onInputCtrlC(): void {
-  if (!selectedId.value) return
-  void window.cockpit.btSignal(selectedId.value, 'SIGINT')
-  pushLine(selectedId.value, 'stdout', '^C')
-  void nextTick(() => scrollConsole())
-}
-
-function onInputCtrlD(): void {
-  if (!selectedId.value) return
-  // 0x04 = EOF on a tty; node's readline treats it as line-end/close signal.
-  void window.cockpit.btInput(selectedId.value, '\u0004')
 }
 
 async function stopSelected(): Promise<void> {
@@ -527,20 +482,6 @@ onBeforeUnmount(() => {
 
               <!-- view tools (icon-only, compact) -->
               <div class="d-flex align-center ga-1">
-                <v-tooltip :text="t('bt.autoscroll')" location="bottom">
-                  <template #activator="{ props: tp }">
-                    <v-btn
-                      v-bind="tp"
-                      size="small"
-                      variant="flat"
-                      :color="autoScroll ? 'primary' : ''"
-                      icon
-                      @click="autoScroll = !autoScroll"
-                    >
-                      <v-icon size="small">mdi-arrow-down-bold-box-outline</v-icon>
-                    </v-btn>
-                  </template>
-                </v-tooltip>
                 <v-tooltip :text="t('bt.clear')" location="bottom">
                   <template #activator="{ props: tp }">
                     <v-btn v-bind="tp" size="small" variant="flat" icon @click="clearConsole">
@@ -567,14 +508,14 @@ onBeforeUnmount(() => {
               <!-- lifecycle actions (text buttons, separated) -->
               <div class="d-flex align-center ga-2">
                 <v-btn
-                  v-if="selected.kind === 'process' && selected.status === 'running'"
+                  v-if="selected.status === 'running'"
                   variant="tonal"
                   color="warning"
                   prepend-icon="mdi-stop-circle-outline"
                   :loading="busy"
                   @click="stopSelected"
                 >
-                  {{ t('bt.stop') }}
+                  {{ selected.kind === 'job' ? t('bt.cancel') : t('bt.stop') }}
                 </v-btn>
                 <v-btn
                   v-if="selected.kind === 'process' && selected.status === 'running'"
@@ -604,63 +545,17 @@ onBeforeUnmount(() => {
 
             <v-divider />
 
-            <div class="bt-console-wrap">
-              <div ref="consoleEl" class="bt-console" @scroll.passive="onConsoleScroll">
-                <div
-                  v-for="(l, i) in selectedLines"
-                  :key="i"
-                  class="bt-line"
-                  :class="l.stream === 'stderr' ? 'bt-line--err' : ''"
-                >
-                  {{ l.line }}
-                </div>
-                <div v-if="selectedLines.length === 0" class="on-surface-variant text-caption pa-2">
-                  {{ t('bt.noOutput') }}
-                </div>
-              </div>
-            </div>
-
-            <!-- interactive input for running process tasks -->
-            <div
-              v-if="selected.kind === 'process' && selected.status === 'running'"
-              class="d-flex align-center ga-2 px-4 py-4 bt-input-row"
-            >
-              <v-tooltip :text="t('bt.ctrlC')" location="top">
-                <template #activator="{ props: tp }">
-                  <v-btn
-                    v-bind="tp"
-                    variant="tonal"
-                    color="warning"
-                    prepend-icon="mdi-console"
-                    @click="onInputCtrlC"
-                  >
-                    ^C
-                  </v-btn>
-                </template>
-              </v-tooltip>
-              <v-btn variant="tonal" :title="t('bt.ctrlD')" @click="onInputCtrlD"> ^D </v-btn>
-              <v-text-field
-                v-model="inputText"
-                :placeholder="t('bt.inputPlaceholder')"
-                density="compact"
-                variant="solo-filled"
-                flat
-                hide-details
-                clearable
-                class="flex-grow-1"
-                @keydown.enter.prevent="onInputEnter"
-                @keydown.ctrl.c.prevent="onInputCtrlC"
-                @keydown.ctrl.d.prevent="onInputCtrlD"
+            <!-- Task view: resolved from the task's `view` id (default: log console).
+                 Wrapped in a flex:1 min-height:0 container so the view fills the
+                 remaining detail area without overflowing the dialog. -->
+            <div v-if="selectedView && selected" class="bt-view">
+              <component
+                :is="selectedView.component"
+                :key="selected.id"
+                :task="selected"
+                :messages="selectedMessages"
+                v-bind="selectedView.props ?? {}"
               />
-              <v-btn
-                variant="tonal"
-                color="primary"
-                prepend-icon="mdi-send"
-                :disabled="!inputText.trim()"
-                @click="onInputEnter"
-              >
-                {{ t('bt.send') }}
-              </v-btn>
             </div>
           </template>
 
@@ -706,6 +601,17 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+/* The view container hands the task's view component a definite, bounded area:
+   flex:1 fills the remaining detail height, min-height:0 lets it shrink, and
+   overflow:hidden guarantees no view can ever push the whole dialog/page to
+   scroll. The view component is responsible for scrolling its own content
+   inside this box (a root with height:100% + internal overflow-y:auto), so
+   any view — flex-rooted or plain block — adapts safely here. */
+.bt-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 .bt-progress {
   width: 140px;
@@ -783,36 +689,6 @@ onBeforeUnmount(() => {
 }
 .bt-filter :deep(.v-list-item__content) {
   text-align: center;
-}
-
-/* Custom WebKit scrollbars matching the app chrome (global.css) — do NOT use
-   scrollbar-width/scrollbar-color, they switch to the native GTK model and
-   ignore ::-webkit-scrollbar entirely. */
-.bt-list::-webkit-scrollbar,
-.bt-console::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-.bt-list::-webkit-scrollbar-track,
-.bt-console::-webkit-scrollbar-track {
-  background: transparent;
-}
-.bt-list::-webkit-scrollbar-button,
-.bt-console::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-.bt-list::-webkit-scrollbar-thumb,
-.bt-console::-webkit-scrollbar-thumb {
-  background-color: rgba(var(--v-theme-surface-bright), 0.55);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 6px;
-}
-.bt-list::-webkit-scrollbar-thumb:hover,
-.bt-console::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(var(--v-theme-on-surface-variant), 0.4);
 }
 </style>
 

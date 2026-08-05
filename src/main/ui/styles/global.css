@@ -156,33 +156,36 @@ pre,
 
 /* ---------------------------------------------------------------------------
  * Scrollbars — slim, themed, unobtrusive.
+ * Applies to EVERY scrollable surface (main scroll area, navigation drawer,
+ * textareas, custom scroll regions) so no component falls back to the native
+ * GTK scrollbar with its arrow buttons.
  * ------------------------------------------------------------------------- */
 /* NOTE: do NOT set scrollbar-width/scrollbar-color here — newer Chromium honors
  * them and switches to the standard (native GTK) scrollbar model, which then
  * IGNORES all ::-webkit-scrollbar styling below and brings the arrow buttons
  * back. Omitting them keeps the fully-custom WebKit scrollbar active. */
 
-.v-main__scroller::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.v-main__scroller::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.v-main__scroller::-webkit-scrollbar-corner {
+*::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-.v-main__scroller::-webkit-scrollbar-button {
+*::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.v-main__scroller::-webkit-scrollbar-thumb {
-  background-color: rgba(var(--v-theme-surface-bright), 0.55);
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(var(--v-theme-on-surface-variant), 0.45);
   /* inset the light thumb (transparent border + clip) so it never hugs the
    * rounded window corner and reads as a stray paper curl */
   background-clip: padding-box;
@@ -190,8 +193,8 @@ pre,
   border-radius: 6px;
 }
 
-.v-main__scroller::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(var(--v-theme-on-surface-variant), 0.4);
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(var(--v-theme-on-surface-variant), 0.7);
 }
 
 /* ---------------------------------------------------------------------------
@@ -204,6 +207,12 @@ pre,
 
 .v-btn {
   letter-spacing: 0.02em;
+}
+
+/* Small text buttons (non-icon) need breathing room so the label never hugs
+   the tonal border/background. Kept compact but padded. */
+.v-btn--size-small:not(.v-btn--icon):not(.v-btn--plain) {
+  padding-inline: 16px;
 }
 
 /* Icon buttons keep a consistent square hit target. */

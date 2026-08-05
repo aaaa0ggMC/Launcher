@@ -53,6 +53,34 @@ export type ProcOutputEvent =
 export type BtTaskKind = 'process' | 'job'
 export type BtTaskStatus = 'running' | 'exited' | 'error' | 'cancelled' | 'stopped'
 
+/**
+ * How a background task's output should be rendered in the global panel.
+ * `log` is the built-in console (lines + stdin); any other value maps to a
+ * view registered by the task's owner (e.g. `response` for playground).
+ * The lifecycle toolbar (stop/kill/remove) is NOT part of the view.
+ */
+export type BtTaskView = 'log' | string
+
+/**
+ * A message emitted by a background task. The task's view decides how each
+ * kind is rendered:
+ *  - `line`  — a console line (stdout/stderr) for the default log view
+ *  - `data`  — arbitrary structured payload (object/string/number...); binary
+ *    can be transported as `{ data, encoding: 'base64', mime }`
+ */
+export interface BtOutputMessage {
+  stream?: 'stdout' | 'stderr'
+  line?: string
+  data?: unknown
+  /** when data is binary (e.g. base64), the encoding + mime for decoding */
+  encoding?: 'base64' | 'utf8' | 'json'
+  mime?: string
+  /** 0–100 progress carried inside a message (view may show a bar) */
+  progress?: number
+  /** optional label for structured data blocks */
+  label?: string
+}
+
 /** Rough resource snapshot for a background task (best-effort, Linux /proc). */
 export interface BtStats {
   /** CPU usage percent (approx, single-core normalized). */
@@ -70,6 +98,8 @@ export interface BtTaskInfo {
   description?: string
   kind: BtTaskKind
   status: BtTaskStatus
+  /** how the panel renders this task's output; default 'log' */
+  view: BtTaskView
   /** pid of the underlying process (process tasks only). */
   pid?: number
   /** argv join for process tasks. */
@@ -92,4 +122,5 @@ export interface BtTaskInfo {
 /** Live output event from a background task. */
 export type BtOutputEvent =
   | { id: string; type: 'line'; stream: 'stdout' | 'stderr'; line: string }
+  | { id: string; type: 'message'; message: BtOutputMessage }
   | { id: string; type: 'exit'; code: number | null }

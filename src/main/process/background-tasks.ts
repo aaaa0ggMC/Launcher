@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import pidusage from 'pidusage'
 import { run } from './util'
 import { makeLogger } from './logger'
-import type { BtTaskInfo } from '../../shared/types'
+import type { BtOutputMessage, BtTaskInfo } from '../../shared/types'
 
 /**
  * Background task framework — architectural, not tied to any ability.
@@ -30,7 +30,7 @@ const POLL_MS = 2000
 
 export type BackgroundEvent =
   | { type: 'changed'; tasks: BtTaskInfo[] }
-  | { type: 'output'; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }
+  | { type: 'output'; id: string; messages: BtOutputMessage[] }
   | { type: 'exit'; id: string; code: number | null }
 
 type Broadcast = (event: BackgroundEvent) => void
@@ -44,6 +44,8 @@ export function setBackgroundBroadcast(fn: Broadcast): void {
 export interface StartProcessOptions {
   name: string
   description?: string
+  /** how the panel renders this task's output; default 'log' */
+  view?: string
   argv: string[]
   cwd?: string
   env?: NodeJS.ProcessEnv
@@ -52,6 +54,8 @@ export interface StartProcessOptions {
 export interface StartJobOptions {
   name: string
   description?: string
+  /** how the panel renders this task's output; default 'log' */
+  view?: string
   /** called when the user stops/cancels the task */
   onCancel?: () => void | Promise<void>
 }
@@ -59,8 +63,10 @@ export interface StartJobOptions {
 /** Control handle returned for `job` tasks. */
 export interface JobControl {
   id: string
-  /** append a console line to the task's output */
+  /** append a console line to the task's output (default log view) */
   pushLine: (line: string, stream?: 'stdout' | 'stderr') => void
+  /** emit an arbitrary message — structured data, base64 binary, progress */
+  push: (message: BtOutputMessage) => void
   /** 0–100 progress, undefined to switch to indeterminate */
   setProgress: (p?: number) => void
   /** mark the job finished (status defaults to `exited`) */
@@ -93,7 +99,7 @@ interface InternalTask {
   info: BtTaskInfo
   /** process tasks only */
   child?: ChildProcessWithoutNullStreams
-  output: { stream: 'stdout' | 'stderr'; line: string }[]
+  output: BtOutputMessage[]
   /** write to the process stdin (process tasks) */
   write?: (data: string) => void
   /** user-supplied cancellation for job tasks */
@@ -117,6 +123,12 @@ function snapshot(t: InternalTask): BtTaskInfo {
 }
 
 function broadcastChanged(): void {
+  // A structural change supersedes any pending throttled status update.
+  if (statusTimer) {
+    clearTimeout(statusTimer)
+    statusTimer = null
+    statusDirty = false
+  }
   const list = [...tasks.values()].map(snapshot)
   try {
     broadcast({ type: 'changed', tasks: list })
@@ -126,60 +138,78 @@ function broadcastChanged(): void {
 }
 
 /**
- * Output batching: live console lines are buffered and pushed to the renderer
- * every OUTPUT_BATCH_MS (100ms), not per-line. This keeps high-volume tasks
- * (log spam) from flooding the IPC socket — the panel refreshes in bounded
- * 100ms chunks instead of per-line sends. `cockpit:log` (the logging pipeline)
- * stays per-line real-time; this batching applies only to background-task
- * console output.
+ * Status delivery — THROTTLED to STATUS_BATCH_MS (100ms).
+ *
+ * `setProgress` can be called in a tight loop (e.g. a download updating every
+ * chunk); broadcasting the full task list per call would flood the socket.
+ * Progress updates are coalesced into one broadcast per 100ms window, while
+ * structural changes (start/stop/exit/remove) still broadcast immediately via
+ * `broadcastChanged()`. The renderer therefore sees progress lag at most one
+ * window behind, and log output stays real-time.
  */
-const OUTPUT_BATCH_MS = 100
+const STATUS_BATCH_MS = 100
+let statusTimer: NodeJS.Timeout | null = null
+let statusDirty = false
+
+function scheduleStatusChanged(): void {
+  statusDirty = true
+  if (statusTimer) return
+  statusTimer = setTimeout(() => {
+    statusTimer = null
+    if (!statusDirty) return
+    statusDirty = false
+    broadcastChanged()
+  }, STATUS_BATCH_MS)
+}
+
+/**
+ * Output delivery — REAL TIME.
+ *
+ * Every message is broadcast at the end of the current event-loop tick via
+ * queueMicrotask: a synchronous burst from the task (e.g. one big stdout chunk)
+ * is coalesced into a single IPC push, but there is NO artificial delay —
+ * a sparse task's line shows up immediately. This keeps log / structured
+ * output live, exactly as the user expects.
+ */
 const OUTPUT_BATCH_MAX = 500
 
-/** per-task id → pending lines not yet broadcast */
-const pendingOutput = new Map<string, { stream: 'stdout' | 'stderr'; line: string }[]>()
-let outputTimer: NodeJS.Timeout | null = null
+/** per-task id → pending messages not yet broadcast */
+const pendingOutput = new Map<string, BtOutputMessage[]>()
 
 function flushOutput(): void {
-  outputTimer = null
   if (!pendingOutput.size) return
-  for (const [id, lines] of pendingOutput) {
+  for (const [id, messages] of pendingOutput) {
     pendingOutput.delete(id)
-    if (!lines.length) continue
+    if (!messages.length) continue
     try {
-      broadcast({ type: 'output', id, lines })
+      broadcast({ type: 'output', id, messages })
     } catch {
       // never break the task pipeline on broadcast errors
     }
   }
 }
 
-function scheduleFlush(): void {
-  if (outputTimer) return
-  outputTimer = setTimeout(flushOutput, OUTPUT_BATCH_MS)
-}
-
-function appendOutput(t: InternalTask, stream: 'stdout' | 'stderr', line: string): void {
-  t.output.push({ stream, line })
+function appendOutput(t: InternalTask, message: BtOutputMessage): void {
+  t.output.push(message)
   if (t.output.length > MAX_OUTPUT_LINES) t.output.splice(0, t.output.length - MAX_OUTPUT_LINES)
   t.info.outputCount = t.output.length
 
   const q = pendingOutput.get(t.info.id) ?? []
-  q.push({ stream, line })
+  q.push(message)
   pendingOutput.set(t.info.id, q)
-  scheduleFlush()
-  // hard cap: a bursty task must not grow the pending buffer unbounded —
-  // flush early if we've already queued a lot since the last window.
+
+  // Real-time: flush at end of tick; bursty tasks beyond the cap flush early.
+  queueMicrotask(flushOutput)
   if (q.length >= OUTPUT_BATCH_MAX) flushOutput()
 }
 
-/** Flush a task's queued lines immediately (used on exit so the tail isn't delayed). */
+/** Flush a task's queued messages immediately (used on exit so the tail isn't delayed). */
 function flushTaskOutput(id: string): void {
   const q = pendingOutput.get(id)
   if (!q?.length) return
   pendingOutput.delete(id)
   try {
-    broadcast({ type: 'output', id, lines: q })
+    broadcast({ type: 'output', id, messages: q })
   } catch {
     // ignore
   }
@@ -197,7 +227,7 @@ function streamLines(
   while ((idx = buffer.rest.indexOf('\n')) >= 0) {
     const line = buffer.rest.slice(0, idx)
     buffer.rest = buffer.rest.slice(idx + 1)
-    if (line.trim() || stream === 'stderr') appendOutput(t, stream, line)
+    if (line.trim() || stream === 'stderr') appendOutput(t, { stream, line })
   }
 }
 
@@ -315,6 +345,7 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
       id,
       name: opts.name,
       description: opts.description,
+      view: opts.view ?? 'log',
       kind: 'process',
       status: 'running',
       pid: child.pid,
@@ -345,7 +376,7 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
   child.stderr.on('data', (d: string) => streamLines(t, 'stderr', d, errBuf))
   child.on('error', (err) => {
     log.error('process task error', { id, error: err.message })
-    appendOutput(t, 'stderr', `[spawn error] ${err.message}`)
+    appendOutput(t, { stream: 'stderr', line: `[spawn error] ${err.message}` })
     onExit(t, null)
   })
   child.on('exit', (code, signal) => onExit(t, code, signal))
@@ -361,12 +392,13 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
  */
 export function startJobTask(opts: StartJobOptions): JobControl {
   const id = nextId()
-  log.info('start job task', { id, name: opts.name })
+  log.info('start job task', { id, name: opts.name, view: opts.view })
   const t: InternalTask = {
     info: {
       id,
       name: opts.name,
       description: opts.description,
+      view: opts.view ?? 'log',
       kind: 'job',
       status: 'running',
       startedAt: Date.now(),
@@ -383,10 +415,11 @@ export function startJobTask(opts: StartJobOptions): JobControl {
 
   return {
     id,
-    pushLine: (line, stream = 'stdout') => appendOutput(t, stream, line),
+    pushLine: (line, stream = 'stdout') => appendOutput(t, { stream, line }),
+    push: (message) => appendOutput(t, message),
     setProgress: (p) => {
       t.info.progress = p
-      broadcastChanged()
+      scheduleStatusChanged()
     },
     finish: (status = 'exited') => {
       if (t.info.status !== 'running') return
@@ -424,6 +457,7 @@ export function startJobByName(
   const control = startJobTask({
     name: String(args.name ?? name),
     description: args.description ? String(args.description) : undefined,
+    view: typeof args.view === 'string' ? args.view : 'log',
     onCancel: undefined
   })
   // Fire-and-forget: do not await the job — return control to the caller.
@@ -453,10 +487,21 @@ export function runningTaskCount(): number {
   return n
 }
 
-/** Buffered output lines of a task (oldest → newest). */
-export function getTaskOutput(id: string): { stream: 'stdout' | 'stderr'; line: string }[] {
+/** Buffered output messages of a task (oldest → newest). */
+export function getTaskOutput(id: string): BtOutputMessage[] {
   const t = tasks.get(id)
   return t ? [...t.output] : []
+}
+
+/** Clear a task's buffered output (displayed output stays; buffer resets). */
+export function clearTaskOutput(id: string): boolean {
+  const t = tasks.get(id)
+  if (!t) return false
+  t.output = []
+  t.info.outputCount = 0
+  pendingOutput.delete(id)
+  broadcastChanged()
+  return true
 }
 
 /** Write raw data into a task's stdin (process tasks only). */
@@ -570,9 +615,10 @@ export function shutdownBackgroundTasks(): void {
     clearInterval(pollTimer)
     pollTimer = null
   }
-  if (outputTimer) {
-    clearTimeout(outputTimer)
-    outputTimer = null
+  if (statusTimer) {
+    clearTimeout(statusTimer)
+    statusTimer = null
   }
+  statusDirty = false
   pendingOutput.clear()
 }
