@@ -15,6 +15,7 @@ import {
 } from '../../main/process/background-tasks'
 import './jobs'
 import { makeLogger } from '../../main/process/logger'
+import { writeTextFile } from '../../main/process/util'
 
 const log = makeLogger('background')
 
@@ -42,6 +43,25 @@ export default [
         return { ok: false, error: '需要 --id' }
       }
       return { ok: true, id, lines: getTaskOutput(id) }
+    }
+  },
+  {
+    name: 'background.export',
+    description: '导出后台任务的缓冲输出到文件 (--id --path)',
+    usage: 'background.export --id bt-xxx --path /abs/output.log',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const path = String(ctx.named.path ?? '')
+      if (!id || !path) {
+        log.warn('background.export invalid args', { id, path })
+        return { ok: false, error: '需要 --id 与 --path' }
+      }
+      const lines = getTaskOutput(id)
+      const body = lines.map((l) => l.line).join('\n')
+      const res = await writeTextFile(path, body)
+      if (res.ok) log.info('background.export ok', { id, path, lines: lines.length })
+      else log.error('background.export failed', { id, path, error: res.error })
+      return { ...res, id, lines: lines.length }
     }
   },
   {

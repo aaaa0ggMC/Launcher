@@ -3,6 +3,7 @@
   "ability.background.category": "系统",
   "background.list.desc": "列出所有后台任务",
   "background.output.desc": "读取后台任务的缓冲输出 (--id)",
+  "background.export.desc": "导出后台任务的缓冲输出到文件 (--id --path)",
   "background.start.desc": "启动一个进程后台任务 (--name --command <json argv> [--cwd] [--description])",
   "background.input.desc": "向后台任务写入 stdin (--id --data)",
   "background.job.desc": "启动一个注册的后台作业 (--name <handler> --args <json>), 如 download",

@@ -57,6 +57,7 @@ export interface CockpitApi {
   btKill: (id: string) => Promise<{ ok: boolean; error?: string }>
   btRemove: (id: string) => Promise<{ ok: boolean; error?: string }>
   btClearFinished: () => Promise<{ ok: boolean; removed?: number; error?: string }>
+  btExport: (id: string, path: string) => Promise<{ ok: boolean; lines?: number; error?: string }>
   getMirror: () => Promise<MirrorInfo>
   listAutostart: () => Promise<AutostartEntry[]>
   toggleAutostart: (file: string, hidden: boolean) => Promise<AutostartEntry[]>

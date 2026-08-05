@@ -3,6 +3,7 @@
   "ability.background.category": "System",
   "background.list.desc": "List all background tasks",
   "background.output.desc": "Read a task's buffered output (--id)",
+  "background.export.desc": "Export a task's buffered output to a file (--id --path)",
   "background.start.desc": "Start a process background task (--name --command <json argv> [--cwd] [--description])",
   "background.input.desc": "Write to a task's stdin (--id --data)",
   "background.job.desc": "Start a registered background job (--name <handler> --args <json>), e.g. download",

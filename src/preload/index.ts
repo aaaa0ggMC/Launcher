@@ -66,6 +66,8 @@ const cockpit = {
   btKill: (id: string): Promise<unknown> => cockpit.command('background.kill', { id }),
   btRemove: (id: string): Promise<unknown> => cockpit.command('background.remove', { id }),
   btClearFinished: (): Promise<unknown> => cockpit.command('background.clear-finished'),
+  btExport: (id: string, path: string): Promise<unknown> =>
+    cockpit.command('background.export', { id, path }),
 
   // mirror
   getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
