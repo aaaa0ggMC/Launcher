@@ -172,6 +172,8 @@ src/
       types.ts        # 该能力领域类型
       translations/   # 该能力自己的翻译: zh.json / en-US.json
       service.ts      # 主进程后端实现 (可选)
+      jobs.ts         # registerJobHandler 命名作业 (任意能力可加)
+      components/ / parser/ ...  # 能力内聚的其他模块
   background/         # 所有背景 (每种类型一个文件夹)
     index.ts          # 加载器: globs background/*/index.ts
     types.ts          # BackgroundDef
@@ -180,7 +182,11 @@ src/
     index.ts          # contextBridge → window.cockpit.*
     index.d.ts        # 类型声明
   shared/
-    types.ts          # 仅框架契约 (AbilitiesManifest / LaunchResult / ProcOutputEvent)
+    types.ts          # 仅框架契约 (AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt*)
+  main/ui/
+    bt-views.ts       # 后台任务 View 注册表 (log 内置 / 能力可注册自定义)
+    components/BackgroundTaskViews/  # BtLogView (控制台) / BtResponseView (结构化响应)
+    composables/      # download.ts (本地下载经主进程命令) / format.ts / useLoading.ts
 config/
   config.json
   abilities.yaml
@@ -286,6 +292,17 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 - 渲染端页面不应 `import` 其他 ability 模块
 - 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 yaml
 - 纯后端能力（无 View.vue，如 `display` / `background`）不需要在 abilities.yaml 注册，命令仍会自动加载，只是不进侧栏
+
+### 写一个 playground 能力（接口调试）
+
+`src/abilities/playground/` 是 Provider Playground 的完整参考实现——模板驱动 API 调试。要点：
+
+- **变量占位**：URL/headers/body 模板里写 `{name}`、`{name:type}`（`string`/`number`/`textarea`/`select`/`bool`）、约束 `range(a,b)`/`select:a,b,c`、默认值 `default(v)`。`extractAllVars`（`parser/variableParser.ts`）收集变量 → `DynamicForm.vue` 生成表单（数字区间自动变滑块）。
+- **默认值**：`default(..)` 会被解析并**预填进 `varValues`**（模板激活时 `effectiveValuesFor` 合并 defaults + saved），发送时 `interpolate` 兜底，防止缺失变量把原始模板串发出去。
+- **响应变换**：`respTransforms` 支持 `text` / `img` / `audio` / `audio-url` / `video-url` / `script` / `task`。同步变换在渲染端 `applyTransforms` 跑（按签名缓存）；`task` 变换的轮询在 `pg-task` 命名作业（`jobs.ts`）中跑，跨页面存活。
+- **异步任务 view**：`pg-task` 完成后 `push({ data: TransformResult[] })` → `cockpit:bt` → 面板按 `view: 'response'` 渲染（`BtResponseView.vue`，文本/图片/音频/视频 + 长文本折叠）。前端在 `btJob` 返回后从环形缓冲 `btOutput` 回填一次，覆盖"任务瞬间完成、结果早于 IPC 返回"的竞态。
+- **本地下载**：远程媒体/文本下载走 `playground.download-url` 命令（主进程 `fetch` 绕开渲染端 CORS），前端用 `src/main/ui/composables/download.ts` 的 `downloadUrlToLocal` / `downloadTextToLocal`（先弹原生保存对话框）。
+- **持久化**：模板/全局变量/已填值/历史/上次打开的模板/右侧面板折叠态都在 localStorage（`useLocalStorage.ts`）；配置导出导入走 `playground.export` / `playground.import`。
 
 ## 10. 国际化 (i18n)
 

@@ -17,6 +17,7 @@
 - 自定义仪表盘（gridstack 布局持久化，可锁定布局以便选中复制）
 - 侧栏能力动态加载（`config/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
 - 傅里叶变换可视化（three.js）：预设 / 矢量表编辑 / JSON 导入导出 / 2D·3D 相机
+- 接口调试（playground）：模板驱动 API 请求 + 变量插值（字符串/数字区间/选择/多行/默认值）+ 响应变换（文本/图片/音频/视频/脚本/异步任务），配置本地持久化
 - 日志系统：winston 轮转日志（自动写入 + 归档）+ 日志查看器（逐行虚拟滚动、级别过滤、实时尾随、导出当前会话）
 - 后台任务框架：任意能力可注册长跑作业（进程 / 抽象作业），全局面板实时查看控制台、资源占用（CPU/内存/显存）、stdin 输入与 Ctrl+C 信号控制，退出时提示仍在运行的任务
 - 国际化 / 多语言支持（中文 + English，应用条目可配 `zh` / `en_US`）
@@ -102,7 +103,7 @@ registerJobHandler('download-batch', async (control, args) => {
 
 - 框架层：Electron 窗口、IPC、命令注册表、CLI REPL、日志管线（winston）、后台任务框架
 - `apps` 应用注册表：Node fs + `spawn`，纯跨平台（exec 的 `systemd`/`desktop` 类型除外）
-- `ft` 傅里叶可视化、`logs` 日志、`settings` 设置、`cli` 命令行、`background` 背景框架
+- `playground` 接口调试：模板 + fetch 纯前端；`ft` 傅里叶可视化、`logs` 日志、`settings` 设置、`cli` 命令行、`background` 背景框架
 - 国际化 / 配置
 
 **Linux / 发行版特定（需按平台改写 service）**

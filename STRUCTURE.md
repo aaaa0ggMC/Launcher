@@ -67,7 +67,7 @@ src/
       commands.ts           # 主进程命令（可省略）
       types.ts              # 领域类型
       translations/         # 该能力翻译
-      service.ts / items/ / panels/ ...
+      service.ts / items/ / panels/ / components/ / parser/ / jobs.ts ...
   background/
     index.ts                # 加载器：globs background/*/index.ts
     types.ts                # BackgroundDef 契约
@@ -164,9 +164,29 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 
 翻译按模块拆分（框架层 + 每个能力 + 每个背景的 `translations/{zh,en-US}.json`），运行期合并为一张表；渲染端 `ui/i18n.ts` 用 `import.meta.glob` 合并，主进程 `process/i18n.ts` 用 filesystem glob 合并。回退链：当前语言 → zh → fallback → key。
 
+### 3.7 接口调试流（playground）
+
+Provider Playground（`abilities/playground/`）——模板驱动 API 请求调试，全部内聚在一个文件夹：
+
+```
+模板 (RequestTemplate): URL / headers / body 含 {var:type:constraint:default(..)} 占位
+    └→ extractAllVars / interpolate  →  DynamicForm 生成表单（字符串/数字区间滑块/选择/多行/布尔）
+    └→ sendRequest → fetch → ResponseViewer + 响应变换（respTransforms）
+         ├→ 同步变换（text/img/audio/video/script）→ applyTransforms（渲染端，缓存按签名）
+         └→ 异步任务（type: task）→ btJob('pg-task') ─→ 主进程 jobs.ts
+              ├→ 轮询 task-result 直到状态成功/失败，递归嵌套 task
+              ├→ 地址/查询/头模板支持 {var} 插值 + {.jsonpath} 提取 + {task_id}
+              └→ push({ data: TransformResult[] }) ─→ cockpit:bt → BtResponseView 渲染
+```
+
+- **变量语法**：`{name}` / `{name:type}` / `{name:type:range(a,b)}` / `{name:select:a,b,c}` / `{name:default(v)}`；数字区间自动映射为滑块。
+- **持久化**：模板 / 全局变量 / 每模板已填值 / 历史 / 上次打开的模板 / 右侧面板折叠态，全部存 localStorage；导入导出走主进程命令（`playground.export` / `playground.import`）。
+- **异步任务 = 后台作业**：task 变换的轮询在 `pg-task` 命名作业（`jobs.ts`）中跑，跨页面存活，面板以 `response` view 实时展示；启动后从环形缓冲 `btOutput` 回填，覆盖"任务瞬间完成、结果早于 IPC 返回"的竞态。
+- **结果下载**：远程媒体（图片/音视频）经 `playground.download-url` 命令由主进程 fetch 写盘（绕开渲染端 CORS），弹原生保存对话框；响应文本同理。
+
 ---
 
-## 4. Abilities（当前 9 个）
+## 4. Abilities（当前 10 个）
 
 | id | 介绍 |
 |---|---|
@@ -176,6 +196,7 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 | `autostart` 启动项 | `~/.config/autostart` 自启动项启用/禁用（Hidden=true） |
 | `systemd` 服务 | 用户 systemd 服务列表 / 启动 / 停止 / 重启 |
 | `cli` 命令行 | CLI REPL 前端：别名启动、标签补全、`info/list` 等 |
+| `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url` |
 | `ft` 傅里叶变换 | three.js 天体/傅里叶可视化：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机 |
 | `logs` 日志 | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出 |
 | `settings` 设置 | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 缩放 / 窗口 / 动画 / 语言 / 启动 / 关于） |
