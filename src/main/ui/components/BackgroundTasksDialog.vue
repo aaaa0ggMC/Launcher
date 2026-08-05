@@ -188,6 +188,44 @@ function clearConsole(): void {
   lines.value = { ...lines.value, [selectedId.value ?? '']: [] }
 }
 
+const exporting = ref(false)
+const exportSnackOpen = ref(false)
+const exportSnackText = ref('')
+
+/** Export the selected task's full output to a text file via the native dialog. */
+async function exportConsole(): Promise<void> {
+  const id = selectedId.value
+  if (!id) return
+  exporting.value = true
+  try {
+    const defaultName = `${(selected.value?.name ?? 'task').replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}-${new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/[:T]/g, '-')}.log`
+    const path = await window.cockpit.pickSaveFile({
+      title: t('bt.exportTitle'),
+      defaultPath: defaultName,
+      filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
+    })
+    if (!path) return
+    // CLI-first: export through the registered command (main process writes the
+    // authoritative buffered output), like ft.export / logs.export.
+    const res = (await window.cockpit.btExport(id, path)) as {
+      ok?: boolean
+      lines?: number
+      error?: string
+    } | null
+    if (!res?.ok) throw new Error(res?.error ?? t('bt.exportFailed'))
+    exportSnackText.value = te('bt.exported', { name: selected.value?.name ?? '' })
+    exportSnackOpen.value = true
+  } catch (e) {
+    exportSnackText.value = e instanceof Error ? e.message : String(e)
+    exportSnackOpen.value = true
+  } finally {
+    exporting.value = false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Interaction: stdin writes + signals (Ctrl+C → SIGINT, Ctrl+D → EOF)
 // ---------------------------------------------------------------------------
@@ -285,8 +323,10 @@ function fmtMem(mb?: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`
 }
 
-function fmtElapsed(startedAt: number, nowVal: number): string {
-  const s = Math.max(0, Math.floor((nowVal - startedAt) / 1000))
+/** Elapsed time: frozen at endedAt for finished tasks, ticking for running ones. */
+function fmtElapsed(startedAt: number, endedAt: number | undefined, nowVal: number): string {
+  const end = endedAt ?? nowVal
+  const s = Math.max(0, Math.floor((end - startedAt) / 1000))
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   const sec = s % 60
@@ -341,10 +381,10 @@ onBeforeUnmount(() => {
 <template>
   <v-dialog v-model="visible" content-class="bt-overlay" scrim="rgba(13, 17, 23, 0.45)">
     <v-card class="bt-dialog" rounded="xl">
-      <v-card-title class="d-flex align-center ga-3 text-subtitle-1 px-5 py-4">
+      <v-card-title class="d-flex align-center ga-3 text-subtitle-1 px-5 pt-4 pb-3">
         <v-icon color="primary">mdi-tray-full</v-icon>
         <span class="text-body-1 font-weight-medium">{{ t('bt.dialogTitle') }}</span>
-        <v-chip v-if="runningCount" size="x-small" variant="tonal" color="primary">
+        <v-chip v-if="runningCount" variant="tonal" color="primary" class="bt-title-chip">
           {{ te('bt.runningCount', { n: String(runningCount) }) }}
         </v-chip>
         <v-spacer />
@@ -353,7 +393,6 @@ onBeforeUnmount(() => {
             <v-btn
               v-bind="tp"
               variant="tonal"
-              size="small"
               color="secondary"
               prepend-icon="mdi-archive-off-outline"
               :disabled="clearing"
@@ -365,8 +404,8 @@ onBeforeUnmount(() => {
         </v-tooltip>
         <v-tooltip :text="t('bt.tooltip')" location="bottom">
           <template #activator="{ props: tp }">
-            <v-btn v-bind="tp" size="small" variant="text" icon @click="visible = false">
-              <v-icon size="small">mdi-close</v-icon>
+            <v-btn v-bind="tp" variant="text" icon @click="visible = false">
+              <v-icon>mdi-close</v-icon>
             </v-btn>
           </template>
         </v-tooltip>
@@ -408,16 +447,15 @@ onBeforeUnmount(() => {
               :key="task.id"
               :active="selectedId === task.id"
               rounded="lg"
-              class="mb-1"
+              class="mb-1 px-1"
               @click="selectTask(task.id)"
             >
               <v-list-item-title class="d-flex align-center ga-2">
                 <span class="text-truncate">{{ task.name }}</span>
                 <v-chip
-                  size="x-small"
                   variant="tonal"
                   :color="statusColor(task.status)"
-                  class="ml-auto"
+                  class="ml-auto bt-status-chip"
                 >
                   {{ statusLabel(task.status) }}
                 </v-chip>
@@ -431,7 +469,7 @@ onBeforeUnmount(() => {
                   pid {{ task.pid }}
                 </span>
                 <span class="text-caption on-surface-variant ml-auto">{{
-                  fmtElapsed(task.startedAt, now)
+                  fmtElapsed(task.startedAt, task.endedAt, now)
                 }}</span>
               </v-list-item-subtitle>
               <template v-if="task.status === 'running'" #append>
@@ -439,7 +477,6 @@ onBeforeUnmount(() => {
                   <v-chip
                     v-for="c in statsChips(task.stats)"
                     :key="c.icon"
-                    size="x-small"
                     variant="flat"
                     color="secondary-container"
                     :prepend-icon="c.icon"
@@ -472,9 +509,9 @@ onBeforeUnmount(() => {
         <!-- Detail: console + interaction -->
         <div class="bt-detail">
           <template v-if="selected">
-            <div class="d-flex align-center ga-2 px-4 pt-3 pb-2 flex-wrap">
+            <div class="d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
               <span class="text-subtitle-2 font-weight-medium">{{ selected.name }}</span>
-              <v-chip size="x-small" variant="tonal" :color="statusColor(selected.status)">
+              <v-chip variant="tonal" :color="statusColor(selected.status)">
                 {{ statusLabel(selected.status) }}
               </v-chip>
               <template v-if="selected.kind === 'job' && selected.progress !== undefined">
@@ -487,60 +524,79 @@ onBeforeUnmount(() => {
                 />
               </template>
               <v-spacer />
-              <v-tooltip :text="t('bt.autoscroll')" location="bottom">
-                <template #activator="{ props: tp }">
-                  <v-btn
-                    v-bind="tp"
-                    size="small"
-                    variant="flat"
-                    :color="autoScroll ? 'primary' : ''"
-                    icon
-                    @click="autoScroll = !autoScroll"
-                  >
-                    <v-icon size="small">mdi-arrow-down-bold-box-outline</v-icon>
-                  </v-btn>
-                </template>
-              </v-tooltip>
-              <v-tooltip :text="t('bt.clear')" location="bottom">
-                <template #activator="{ props: tp }">
-                  <v-btn v-bind="tp" size="small" variant="flat" icon @click="clearConsole">
-                    <v-icon size="small">mdi-broom</v-icon>
-                  </v-btn>
-                </template>
-              </v-tooltip>
-              <v-btn
-                v-if="selected.kind === 'process' && selected.status === 'running'"
-                size="small"
-                variant="tonal"
-                color="warning"
-                prepend-icon="mdi-stop-circle-outline"
-                :loading="busy"
-                @click="stopSelected"
-              >
-                {{ t('bt.stop') }}
-              </v-btn>
-              <v-btn
-                v-if="selected.kind === 'process' && selected.status === 'running'"
-                size="small"
-                variant="tonal"
-                color="error"
-                prepend-icon="mdi-close-octagon-outline"
-                @click="killSelected"
-              >
-                {{ t('bt.kill') }}
-              </v-btn>
-              <v-btn
-                v-if="selected.status !== 'running'"
-                size="small"
-                variant="tonal"
-                prepend-icon="mdi-archive-arrow-up-outline"
-                @click="removeSelected"
-              >
-                {{ t('bt.remove') }}
-              </v-btn>
+
+              <!-- view tools (icon-only, compact) -->
+              <div class="d-flex align-center ga-1">
+                <v-tooltip :text="t('bt.autoscroll')" location="bottom">
+                  <template #activator="{ props: tp }">
+                    <v-btn
+                      v-bind="tp"
+                      size="small"
+                      variant="flat"
+                      :color="autoScroll ? 'primary' : ''"
+                      icon
+                      @click="autoScroll = !autoScroll"
+                    >
+                      <v-icon size="small">mdi-arrow-down-bold-box-outline</v-icon>
+                    </v-btn>
+                  </template>
+                </v-tooltip>
+                <v-tooltip :text="t('bt.clear')" location="bottom">
+                  <template #activator="{ props: tp }">
+                    <v-btn v-bind="tp" size="small" variant="flat" icon @click="clearConsole">
+                      <v-icon size="small">mdi-broom</v-icon>
+                    </v-btn>
+                  </template>
+                </v-tooltip>
+                <v-tooltip :text="t('bt.export')" location="bottom">
+                  <template #activator="{ props: tp }">
+                    <v-btn
+                      v-bind="tp"
+                      size="small"
+                      variant="flat"
+                      :loading="exporting"
+                      icon
+                      @click="exportConsole"
+                    >
+                      <v-icon size="small">mdi-export</v-icon>
+                    </v-btn>
+                  </template>
+                </v-tooltip>
+              </div>
+
+              <!-- lifecycle actions (text buttons, separated) -->
+              <div class="d-flex align-center ga-2">
+                <v-btn
+                  v-if="selected.kind === 'process' && selected.status === 'running'"
+                  variant="tonal"
+                  color="warning"
+                  prepend-icon="mdi-stop-circle-outline"
+                  :loading="busy"
+                  @click="stopSelected"
+                >
+                  {{ t('bt.stop') }}
+                </v-btn>
+                <v-btn
+                  v-if="selected.kind === 'process' && selected.status === 'running'"
+                  variant="tonal"
+                  color="error"
+                  prepend-icon="mdi-close-octagon-outline"
+                  @click="killSelected"
+                >
+                  {{ t('bt.kill') }}
+                </v-btn>
+                <v-btn
+                  v-if="selected.status !== 'running'"
+                  variant="tonal"
+                  prepend-icon="mdi-archive-arrow-up-outline"
+                  @click="removeSelected"
+                >
+                  {{ t('bt.remove') }}
+                </v-btn>
+              </div>
             </div>
 
-            <div v-if="selected.command" class="px-4 pb-2">
+            <div v-if="selected.command" class="px-4 pb-3">
               <span class="text-caption on-surface-variant font-family-mono bt-cmd">{{
                 selected.command
               }}</span>
@@ -567,13 +623,12 @@ onBeforeUnmount(() => {
             <!-- interactive input for running process tasks -->
             <div
               v-if="selected.kind === 'process' && selected.status === 'running'"
-              class="d-flex align-center ga-2 px-4 py-3 bt-input-row"
+              class="d-flex align-center ga-2 px-4 py-4 bt-input-row"
             >
               <v-tooltip :text="t('bt.ctrlC')" location="top">
                 <template #activator="{ props: tp }">
                   <v-btn
                     v-bind="tp"
-                    size="small"
                     variant="tonal"
                     color="warning"
                     prepend-icon="mdi-console"
@@ -583,9 +638,7 @@ onBeforeUnmount(() => {
                   </v-btn>
                 </template>
               </v-tooltip>
-              <v-btn size="small" variant="tonal" :title="t('bt.ctrlD')" @click="onInputCtrlD">
-                ^D
-              </v-btn>
+              <v-btn variant="tonal" :title="t('bt.ctrlD')" @click="onInputCtrlD"> ^D </v-btn>
               <v-text-field
                 v-model="inputText"
                 :placeholder="t('bt.inputPlaceholder')"
@@ -617,6 +670,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+
+      <v-snackbar v-model="exportSnackOpen" :timeout="2500" color="success" location="top">
+        {{ exportSnackText }}
+      </v-snackbar>
     </v-card>
   </v-dialog>
 </template>
@@ -686,6 +743,17 @@ onBeforeUnmount(() => {
 }
 .bt-stat-chip {
   max-width: 130px;
+}
+/* Chips in this panel get comfortable vertical padding — the default x-small
+   density crams the label against the chip top/bottom. */
+.bt-status-chip,
+.bt-stat-chip,
+.bt-title-chip {
+  padding-block: 4px;
+  min-height: 24px;
+}
+.bt-stat-chip {
+  padding-inline: 8px;
 }
 .bt-filter {
   width: 96px;

@@ -75,6 +75,8 @@ export interface BtTaskInfo {
   /** argv join for process tasks. */
   command?: string
   startedAt: number
+  /** set when the task stops/exits/errors — freezes the elapsed time display. */
+  endedAt?: number
   exitCode?: number | null
   stats: BtStats
   /** number of output lines buffered (details via `background.output`). */

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { readFile } from 'fs/promises'
+import pidusage from 'pidusage'
 import { run } from './util'
 import { makeLogger } from './logger'
 import type { BtTaskInfo } from '../../shared/types'
@@ -14,8 +14,8 @@ import type { BtTaskInfo } from '../../shared/types'
  *
  * Two task kinds:
  *  - `process` — a real child process with piped stdio. Gets rough resource
- *    stats (CPU / memory / GPU) polled from /proc, live console output, and
- *    interactive control.
+ *    stats (CPU / memory via pidusage, GPU via nvidia-smi when present), live
+ *    console output, and interactive control.
  *  - `job` — an abstract long-running operation (download, transform, ...).
  *    The creator pushes output/progress and can cancel; no process involved.
  *
@@ -100,7 +100,6 @@ interface InternalTask {
   cancel?: () => void | Promise<void>
   /** set when stopTask() sent SIGTERM — marks the eventual exit as "stopped" */
   stopRequested?: boolean
-  lastCpu?: { utime: number; stime: number; at: number }
   forceTimer?: NodeJS.Timeout
 }
 
@@ -207,6 +206,7 @@ function onExit(t: InternalTask, code: number | null, signal: string | null = nu
   const stopped = signal === 'SIGTERM' || signal === 'SIGKILL' || t.stopRequested === true
   t.info.status = stopped ? 'stopped' : 'exited'
   t.info.exitCode = code
+  t.info.endedAt = Date.now()
   t.child = undefined
   t.stopRequested = false
   if (t.forceTimer) {
@@ -227,53 +227,20 @@ function onExit(t: InternalTask, code: number | null, signal: string | null = nu
 // Resource stats
 // ---------------------------------------------------------------------------
 
-/** Parse /proc/<pid>/stat → { utime, stime } in clock ticks. */
-async function readProcStat(pid: number): Promise<{ utime: number; stime: number } | null> {
-  try {
-    const raw = await readFile(`/proc/${pid}/stat`, 'utf-8')
-    // comm may contain spaces/parens — split on the first ')'
-    const afterComm = raw.slice(raw.indexOf(')') + 1).trimStart()
-    const f = afterComm.split(/\s+/)
-    // fields: state=0 ppid=1 ... utime=11 stime=12
-    const utime = Number(f[11]) || 0
-    const stime = Number(f[12]) || 0
-    return { utime, stime }
-  } catch {
-    return null
-  }
-}
-
-/** Parse /proc/<pid>/status → resident memory in MB. */
-async function readProcMem(pid: number): Promise<number | undefined> {
-  try {
-    const raw = await readFile(`/proc/${pid}/status`, 'utf-8')
-    const m = raw.match(/VmRSS:\s+(\d+)\s*kB/)
-    if (!m) return undefined
-    return Math.round(Number(m[1]) / 1024)
-  } catch {
-    return undefined
-  }
-}
-
-/** Poll stats for one process task (CPU delta + RSS + optional GPU). */
+/**
+ * Poll stats for one process task via `pidusage` (cross-platform: /proc on
+ * Linux, PowerShell on Windows, ps on macOS). CPU is an instantaneous percent
+ * measured between calls; memory is resident bytes.
+ */
 async function pollProcessTask(t: InternalTask): Promise<void> {
   const pid = t.info.pid
   if (!pid || !t.child) return
-  const stat = await readProcStat(pid)
-  const mem = await readProcMem(pid)
-  if (mem !== undefined) t.info.stats.mem = mem
-
-  // CPU: delta of utime+stime over wall time (assume 100 ticks/s, Linux).
-  if (stat) {
-    const total = stat.utime + stat.stime
-    if (t.lastCpu) {
-      const dt = (Date.now() - t.lastCpu.at) / 1000
-      const dTicks = total - (t.lastCpu.utime + t.lastCpu.stime)
-      if (dt > 0 && dTicks >= 0) {
-        t.info.stats.cpu = Math.max(0, Math.round((dTicks / 100 / dt) * 100))
-      }
-    }
-    t.lastCpu = { utime: stat.utime, stime: stat.stime, at: Date.now() }
+  try {
+    const stat = await pidusage(pid)
+    t.info.stats.cpu = Math.max(0, Math.round(stat.cpu))
+    t.info.stats.mem = Math.round(stat.memory / 1024 / 1024)
+  } catch {
+    // process gone / not inspectable → keep last known stats
   }
 }
 
@@ -424,6 +391,7 @@ export function startJobTask(opts: StartJobOptions): JobControl {
     finish: (status = 'exited') => {
       if (t.info.status !== 'running') return
       t.info.status = status
+      t.info.endedAt = Date.now()
       broadcastChanged()
     },
     setCancel: (fn) => {
@@ -541,6 +509,7 @@ export async function stopTask(id: string): Promise<boolean> {
   }
   // job task
   t.info.status = 'cancelled'
+  t.info.endedAt = Date.now()
   try {
     await t.cancel?.()
   } catch (e) {
