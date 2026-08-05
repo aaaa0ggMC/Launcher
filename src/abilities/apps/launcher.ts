@@ -7,6 +7,7 @@ import type { LaunchResult, ProcOutputEvent } from '../../shared/types'
 import { CONFIG_JSON, SCRIPTS_DIR } from '../../main/process/paths'
 import { readJson } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
+import { startProcessTask } from '../../main/process/background-tasks'
 
 const log = makeLogger('apps-launcher')
 
@@ -223,6 +224,13 @@ function spawnWait(argv: string[], cwd: string, env: NodeJS.ProcessEnv): Promise
 export interface LaunchOptions {
   /** capture stdout/stderr and stream line events to the renderer */
   monitor?: boolean
+  /**
+   * run as a managed background task: spawned with piped stdio and attached to
+   * the framework background-task service (global panel, live console,
+   * stdin/signal control). Overrides terminal:true (a terminal would swallow
+   * the pipe).
+   */
+  background?: boolean
 }
 
 /** Launch an exec spec. Returns immediately; process runs detached. */
@@ -236,6 +244,24 @@ export async function launchSpec(
   const eff = opts.monitor ? { ...spec, terminal: false } : spec
   const cwd = expandCwd(entry, eff)
   const env: NodeJS.ProcessEnv = { ...process.env, ...(eff.env ?? {}) }
+
+  // Background task mode → hand off to the framework service. It keeps the
+  // child attached to the app (not detached), pipes stdio into a ring buffer,
+  // and exposes it in the global Background Tasks panel.
+  if (opts.background || eff.background) {
+    const headless = { ...eff, terminal: false }
+    const argv = await buildArgv(entry, headless)
+    const task = startProcessTask({
+      name: entry.alias ?? entry.name,
+      description: entry.description ?? undefined,
+      argv,
+      cwd,
+      env
+    })
+    log.info('background task started', { task: task.id, name: task.name, argv })
+    return { ok: true, pid: task.pid, taskId: task.id, monitor: true }
+  }
+
   const argv = await buildArgv(entry, eff)
   const res = await spawnDetached(argv, cwd, env, eff.terminal ?? false, opts.monitor ?? false)
   log.info('launch result', {
@@ -294,14 +320,26 @@ export async function launchAction(
     const last = opts.monitor
       ? { ...steps[steps.length - 1], terminal: false }
       : steps[steps.length - 1]
+    const lastCwd = expandCwd(entry, last)
+    const lastEnv: NodeJS.ProcessEnv = { ...process.env, ...(last.env ?? {}) }
+    // Background mode → hand the last step to the framework task service.
+    if (opts.background || last.background) {
+      const argv = await buildArgv(entry, { ...last, terminal: false })
+      const task = startProcessTask({
+        name: entry.alias ?? entry.name,
+        description: entry.description ?? undefined,
+        argv,
+        cwd: lastCwd,
+        env: lastEnv
+      })
+      log.info('action background task started', { task: task.id, name: task.name, argv })
+      return { ok: true, pid: task.pid, taskId: task.id, monitor: true }
+    }
     const argv = await buildArgv(entry, last)
     const res = await spawnDetached(
       argv,
-      expandCwd(entry, last),
-      {
-        ...process.env,
-        ...(last.env ?? {})
-      },
+      lastCwd,
+      lastEnv,
       last.terminal ?? false,
       opts.monitor ?? false
     )

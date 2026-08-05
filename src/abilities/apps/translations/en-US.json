@@ -33,6 +33,8 @@
   "apps.risk": "Risk level",
   "apps.command": "Command (space-separated argv)",
   "apps.terminal": "Run in terminal",
+  "apps.background": "Background task (runs in background, attached to this app)",
+  "apps.actionBackground": "Background",
   "apps.createDir": "Create directory (if path doesn't exist)",
   "apps.cancel": "Cancel",
   "apps.create": "Create",

@@ -1,0 +1,14 @@
+{
+  "ability.background.name": "后台任务",
+  "ability.background.category": "系统",
+  "background.list.desc": "列出所有后台任务",
+  "background.output.desc": "读取后台任务的缓冲输出 (--id)",
+  "background.start.desc": "启动一个进程后台任务 (--name --command <json argv> [--cwd] [--description])",
+  "background.input.desc": "向后台任务写入 stdin (--id --data)",
+  "background.job.desc": "启动一个注册的后台作业 (--name <handler> --args <json>), 如 download",
+  "background.signal.desc": "向后台任务发送信号 (--id --signal SIGINT)",
+  "background.stop.desc": "停止后台任务 (--id, 进程: SIGTERM→SIGKILL; 任务: 取消)",
+  "background.kill.desc": "强制结束后台进程任务 (--id, SIGKILL)",
+  "background.remove.desc": "从列表移除已结束的后台任务 (--id)",
+  "background.clear-finished.desc": "一键移除所有已停止/已结束的后台任务"
+}

@@ -80,6 +80,7 @@ interface ActionForm {
   execCommand: string
   risk: string
   terminal: boolean
+  background: boolean
   rootFlag: boolean
   stepsText: string
   localized?: Record<string, { name?: string; description?: string }>
@@ -100,6 +101,7 @@ interface EditForm {
   risk: string
   note: string
   terminal: boolean
+  background: boolean
   rootFlag: boolean
   managed: boolean
   transformer: string
@@ -127,6 +129,7 @@ interface NewEntryForm {
   execCommand: string
   risk: string
   terminal: boolean
+  background: boolean
   rootFlag: boolean
   createDir: boolean
 }
@@ -207,6 +210,7 @@ function openEdit(id: string): void {
     note: entry.security?.note ?? '',
     terminal: entry.exec.terminal ?? false,
     rootFlag: entry.exec.root ?? false,
+    background: entry.exec.background ?? false,
     managed: entry.managed ?? true,
     transformer: entry.transformer ?? '',
     transformerDisplay: entry.transformer_display ?? false,
@@ -219,6 +223,7 @@ function openEdit(id: string): void {
       execCommand: a.exec.command.join(' '),
       risk: a.risk ?? 'low',
       terminal: a.exec.terminal ?? false,
+      background: a.exec.background ?? false,
       rootFlag: a.exec.root ?? false,
       stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n'),
       localized: a.localized ?? {}
@@ -245,6 +250,7 @@ function addActionRow(): void {
     execCommand: '',
     risk: 'medium',
     terminal: false,
+    background: false,
     rootFlag: false,
     stepsText: ''
   })
@@ -302,10 +308,11 @@ function buildAction(a: ActionForm): AppAction {
     }))
     const last: AppExecSpec = { ...seq[seq.length - 1] }
     // Intermediate steps run headless + awaited; only the last may open a
-    // terminal / escalate. (terminal/root flags on custom specs are honored
-    // by buildArgv in the launcher.)
+    // terminal / escalate / run as a background task. (terminal/root flags on
+    // custom specs are honored by buildArgv in the launcher.)
     if (a.terminal) last.terminal = true
     if (a.rootFlag) last.root = true
+    if (a.background) last.background = true
     seq[seq.length - 1] = last
     return {
       name: a.name.trim() || a.id.trim(),
@@ -324,6 +331,7 @@ function buildAction(a: ActionForm): AppAction {
       command: a.execCommand.trim() ? a.execCommand.trim().split(/\s+/) : [],
       cwd: a.execCwd || undefined,
       terminal: a.terminal,
+      background: a.background,
       root: a.rootFlag
     },
     risk: a.risk as RiskLevel,
@@ -356,6 +364,7 @@ async function saveEdit(): Promise<void> {
         command: f.execCommand.trim() ? f.execCommand.trim().split(/\s+/) : [],
         cwd: f.execCwd || undefined,
         terminal: f.terminal,
+        background: f.background,
         root: f.rootFlag
       },
       actions: Object.keys(actions).length ? actions : undefined,
@@ -399,6 +408,7 @@ function openNew(): void {
     execCommand: '',
     risk: 'low',
     terminal: false,
+    background: false,
     rootFlag: false,
     createDir: false
   }
@@ -426,6 +436,7 @@ async function saveNew(): Promise<void> {
           command: f.execCommand.trim() ? f.execCommand.trim().split(/\s+/) : [],
           cwd: f.execCwd || undefined,
           terminal: f.terminal,
+          background: f.background,
           root: f.rootFlag
         },
         security: { risk: f.risk as RiskLevel },
@@ -837,6 +848,16 @@ onBeforeUnmount(() => unsub?.())
               />
             </v-col>
           </v-row>
+          <v-row dense>
+            <v-col cols="6">
+              <v-switch
+                v-model="newForm.background"
+                :label="translate(uiLang, 'apps.background')"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
           <v-expansion-panels variant="accordion" class="mt-2">
             <v-expansion-panel>
               <v-expansion-panel-title class="text-subtitle-2">
@@ -1005,6 +1026,16 @@ onBeforeUnmount(() => unsub?.())
             </v-col>
             <v-col cols="6">
               <v-switch
+                v-model="form.background"
+                :label="translate(uiLang, 'apps.background')"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+          <v-row dense>
+            <v-col cols="6">
+              <v-switch
                 v-model="form.rootFlag"
                 :label="translate(uiLang, 'apps.rootRun')"
                 density="compact"
@@ -1114,7 +1145,7 @@ onBeforeUnmount(() => unsub?.())
               </v-col>
             </v-row>
             <v-row dense class="mt-2" align="center">
-              <v-col cols="4">
+              <v-col cols="3">
                 <v-text-field
                   v-model="a.execCwd"
                   :label="translate(uiLang, 'apps.actionCwd')"
@@ -1123,7 +1154,7 @@ onBeforeUnmount(() => unsub?.())
                   hide-details
                 />
               </v-col>
-              <v-col cols="4">
+              <v-col cols="3">
                 <v-select
                   v-model="a.risk"
                   :items="['low', 'medium', 'high']"
@@ -1137,6 +1168,14 @@ onBeforeUnmount(() => unsub?.())
                 <v-switch
                   v-model="a.terminal"
                   :label="translate(uiLang, 'apps.actionTerminal')"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="2">
+                <v-switch
+                  v-model="a.background"
+                  :label="translate(uiLang, 'apps.actionBackground')"
                   density="compact"
                   hide-details
                 />

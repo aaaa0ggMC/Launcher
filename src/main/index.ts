@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, protocol } from 'electron'
+import { app, shell, BrowserWindow, protocol, ipcMain } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -8,6 +8,11 @@ import { loadExternalAbilities } from './process/ability-loader'
 import { registerAbilityCommands } from './process/abilities-loader'
 import { setRegistryBroadcast } from '../abilities/apps/registry'
 import { setOutputBroadcast } from '../abilities/apps/launcher'
+import {
+  setBackgroundBroadcast,
+  shutdownBackgroundTasks,
+  runningTaskCount
+} from './process/background-tasks'
 import { readJson } from './process/util'
 import { CONFIG_JSON } from './process/paths'
 import { setLogBroadcast, log } from './process/logger'
@@ -24,6 +29,9 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let mainWindow: BrowserWindow | null = null
+// Once the user has confirmed quitting (or confirmed via the renderer), the
+// next close request is allowed to proceed without re-prompting.
+let quitApproved = false
 
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -72,6 +80,18 @@ async function createWindow(): Promise<void> {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
+  // If background tasks are still running, ask the renderer before closing
+  // (the user may want to keep the window open / be warned that tasks die).
+  // The renderer replies via `window:confirm-close`, which sets quitApproved.
+  mainWindow.on('close', (e) => {
+    if (quitApproved) return
+    const n = runningTaskCount()
+    if (n > 0) {
+      e.preventDefault()
+      broadcast('cockpit:confirm-quit', n)
+    }
+  })
+
   mainWindow.on('maximize', () => broadcast('cockpit:window-maximized', true))
   mainWindow.on('unmaximize', () => broadcast('cockpit:window-maximized', false))
 
@@ -110,9 +130,15 @@ if (!gotLock) {
     setRegistryBroadcast(broadcast)
     setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
     setLogBroadcast((entry) => broadcast('cockpit:log', entry))
+    setBackgroundBroadcast((event) => broadcast('cockpit:bt', event))
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
+    // Renderer confirmed it's OK to close despite running tasks.
+    ipcMain.handle('window:confirm-close', () => {
+      quitApproved = true
+      mainWindow?.close()
+    })
     startWatching()
     log.info('app started', {
       platform: process.platform,
@@ -134,3 +160,9 @@ if (!gotLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 }
+
+// Ensure running background task children are killed when the app exits
+// (tasks are attached to this program, not left orphaned).
+app.on('will-quit', () => {
+  shutdownBackgroundTasks()
+})

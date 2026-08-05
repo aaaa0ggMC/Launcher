@@ -1,0 +1,14 @@
+{
+  "ability.background.name": "Background Tasks",
+  "ability.background.category": "System",
+  "background.list.desc": "List all background tasks",
+  "background.output.desc": "Read a task's buffered output (--id)",
+  "background.start.desc": "Start a process background task (--name --command <json argv> [--cwd] [--description])",
+  "background.input.desc": "Write to a task's stdin (--id --data)",
+  "background.job.desc": "Start a registered background job (--name <handler> --args <json>), e.g. download",
+  "background.signal.desc": "Send a signal to a task (--id --signal SIGINT)",
+  "background.stop.desc": "Stop a task (--id, process: SIGTERM→SIGKILL; job: cancel)",
+  "background.kill.desc": "Force-kill a process task (--id, SIGKILL)",
+  "background.remove.desc": "Remove a finished task from the list (--id)",
+  "background.clear-finished.desc": "Remove all stopped/finished tasks at once"
+}

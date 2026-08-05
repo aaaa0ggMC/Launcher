@@ -33,6 +33,8 @@
   "apps.risk": "风险等级",
   "apps.command": "命令 (空格分隔 argv)",
   "apps.terminal": "终端中运行",
+  "apps.background": "后台任务 (后台运行, 附属于本程序)",
+  "apps.actionBackground": "后台",
   "apps.createDir": "创建目录 (路径不存在时)",
   "apps.cancel": "取消",
   "apps.create": "创建",

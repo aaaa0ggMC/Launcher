@@ -9,6 +9,7 @@ import type { AppAction, AppEntry, RiskLevel } from '@abilities/apps/types'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import TransformerModal from './components/TransformerModal.vue'
+import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
@@ -87,6 +88,49 @@ const copySnackOpen = ref(false)
 const copySnackText = ref('')
 const commandErrorOpen = ref(false)
 const commandErrorText = ref('')
+
+// ---------------------------------------------------------------------------
+// Background tasks (framework-level global panel)
+// ---------------------------------------------------------------------------
+const btOpen = ref(false)
+const btRunning = ref(0)
+
+/** Badge label: active running-task count, capped at "99+". */
+const btBadge = computed(() => (btRunning.value > 99 ? '99+' : String(btRunning.value)))
+
+/** Update the running-task badge from a `cockpit:bt` changed event. */
+function onBtEvent(raw: unknown): void {
+  const evt = raw as { type?: string; tasks?: { status?: string }[] } | null
+  if (evt?.type === 'changed' && Array.isArray(evt.tasks)) {
+    btRunning.value = evt.tasks.filter((x) => x.status === 'running').length
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Quit confirmation — warn when background tasks are still running.
+// ---------------------------------------------------------------------------
+const quitConfirmOpen = ref(false)
+const quitCount = ref(0)
+const quitSuppress = ref(false)
+const QUIT_SUPPRESS_KEY = 'cockpit-bt-quit-suppress'
+
+/** Main asked whether it's OK to close despite running tasks. */
+function onQuitConfirm(raw: unknown): void {
+  const n = Number((raw as number) ?? 0)
+  // If suppressed (or nothing running), close immediately.
+  if (quitSuppress.value || n <= 0) {
+    void window.cockpit.confirmWindowClose()
+    return
+  }
+  quitCount.value = n
+  quitConfirmOpen.value = true
+}
+
+function doConfirmQuit(): void {
+  localStorage.setItem(QUIT_SUPPRESS_KEY, quitSuppress.value ? '1' : '0')
+  quitConfirmOpen.value = false
+  void window.cockpit.confirmWindowClose()
+}
 
 /** Generic DOM→markdown extraction of the current ability view. */
 function viewToMarkdown(root: Element): string {
@@ -407,7 +451,13 @@ const transformerPid = ref<number | null>(null)
 let winUnsub: (() => void) | null = null
 
 function openTransformer(res: LaunchResult | void, entry: AppEntry): void {
-  if (!res || !res.ok || !res.monitor || !entry.transformer || !entry.transformer_display) return
+  if (!res || !res.ok) return
+  // A launch converted into a background task → surface the global panel.
+  if (res.taskId) {
+    btOpen.value = true
+    return
+  }
+  if (!res.monitor || !entry.transformer || !entry.transformer_display) return
   transformerEntry.value = entry
   transformerPid.value = res.pid ?? null
   transformerOpen.value = true
@@ -493,6 +543,8 @@ provide('cockpit:abilities', {
 // Lifecycle
 // ---------------------------------------------------------------------------
 let unsub: (() => void) | null = null
+let btUnsub: (() => void) | null = null
+let quitUnsub: (() => void) | null = null
 
 onMounted(async () => {
   const [cfg, mani] = await Promise.all([window.cockpit.getConfig(), window.cockpit.getManifest()])
@@ -511,6 +563,10 @@ onMounted(async () => {
   subscribeConfig()
   subscribeCommandErrors()
   resolveBackgroundImage()
+  btUnsub = window.cockpit.on('cockpit:bt', onBtEvent)
+  quitUnsub = window.cockpit.on('cockpit:confirm-quit', onQuitConfirm)
+  // restore the "don't remind me again" preference
+  quitSuppress.value = localStorage.getItem(QUIT_SUPPRESS_KEY) === '1'
 })
 
 watch(currentId, () => persistUiState(), { flush: 'post' })
@@ -521,6 +577,8 @@ onBeforeUnmount(() => {
   winUnsub?.()
   configUnsub?.()
   commandErrorUnsub?.()
+  btUnsub?.()
+  quitUnsub?.()
 })
 </script>
 
@@ -636,6 +694,20 @@ onBeforeUnmount(() => {
 
       <template #append>
         <div class="pa-3 d-flex justify-center ga-2" :class="rail ? 'flex-column' : ''">
+          <v-tooltip :text="t('appbar.btTooltip')" location="end">
+            <template #activator="{ props: tp }">
+              <v-badge
+                class="bt-nav-badge"
+                :model-value="btRunning > 0"
+                :content="btBadge"
+                color="primary"
+              >
+                <v-btn v-bind="tp" variant="tonal" icon @click="btOpen = true">
+                  <v-icon>mdi-tray-full</v-icon>
+                </v-btn>
+              </v-badge>
+            </template>
+          </v-tooltip>
           <v-tooltip :text="t('appbar.copyTooltip')" location="end">
             <template #activator="{ props: tp }">
               <v-btn
@@ -748,6 +820,37 @@ onBeforeUnmount(() => {
     <!-- Live output transformer modal -->
     <TransformerModal v-model="transformerOpen" :entry="transformerEntry" :pid="transformerPid" />
 
+    <!-- Background tasks panel (framework-level) -->
+    <BackgroundTasksDialog v-model="btOpen" />
+
+    <!-- Quit confirmation when background tasks are still running -->
+    <v-dialog v-model="quitConfirmOpen" width="440" persistent>
+      <v-card rounded="lg">
+        <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
+          <v-icon color="warning">mdi-tray-full</v-icon>
+          {{ t('quit.title') }}
+        </v-card-title>
+        <v-card-text>
+          <div class="text-body-2 mb-3">
+            {{ te('quit.text', { n: String(quitCount) }) }}
+          </div>
+          <v-checkbox
+            v-model="quitSuppress"
+            :label="t('quit.suppress')"
+            density="compact"
+            hide-details
+          />
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="quitConfirmOpen = false">{{ t('quit.cancel') }}</v-btn>
+          <v-btn color="error" prepend-icon="mdi-power" @click="doConfirmQuit">
+            {{ t('quit.confirm') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-snackbar v-model="copySnackOpen" :timeout="2500" color="success" location="top">
       {{ copySnackText }}
     </v-snackbar>
@@ -793,5 +896,28 @@ body,
   font-size: 0.68rem;
   letter-spacing: 0.04em;
   opacity: 0.7;
+}
+
+/* Background-task count badge in the nav drawer. Vuetify's default "top end"
+   places the badge OUTSIDE the wrapper corner (bottom/left calc), which spills
+   past the 64px rail. Reposition it onto the button's top-right corner. */
+.bt-nav-badge {
+  position: relative;
+}
+.bt-nav-badge .v-badge__wrapper {
+  position: relative;
+}
+.bt-nav-badge .v-badge__badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 0.68rem;
+  line-height: 18px;
 }
 </style>

@@ -1,4 +1,4 @@
-import type { AbilitiesManifest, LaunchResult } from '../shared/types'
+import type { AbilitiesManifest, LaunchResult, BtTaskInfo } from '../shared/types'
 import type { AppEntry } from '../abilities/apps/types'
 import type { AutostartEntry } from '../abilities/autostart/types'
 import type { DisplayOutput } from '../abilities/display/types'
@@ -40,6 +40,23 @@ export interface CockpitApi {
   rescan: (root: string) => Promise<unknown>
   launch: (root: string, id: string) => Promise<LaunchResult>
   launchAction: (root: string, id: string, action: string) => Promise<LaunchResult>
+  btList: () => Promise<BtTaskInfo[]>
+  btOutput: (
+    id: string
+  ) => Promise<{ ok: boolean; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }>
+  btStart: (
+    opts: Record<string, unknown>
+  ) => Promise<{ ok: boolean; task?: BtTaskInfo; error?: string }>
+  btJob: (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<{ ok: boolean; task?: BtTaskInfo; error?: string }>
+  btInput: (id: string, data: string) => Promise<{ ok: boolean; error?: string }>
+  btSignal: (id: string, signal: string) => Promise<{ ok: boolean; error?: string }>
+  btStop: (id: string) => Promise<{ ok: boolean; error?: string }>
+  btKill: (id: string) => Promise<{ ok: boolean; error?: string }>
+  btRemove: (id: string) => Promise<{ ok: boolean; error?: string }>
+  btClearFinished: () => Promise<{ ok: boolean; removed?: number; error?: string }>
   getMirror: () => Promise<MirrorInfo>
   listAutostart: () => Promise<AutostartEntry[]>
   toggleAutostart: (file: string, hidden: boolean) => Promise<AutostartEntry[]>
@@ -59,6 +76,7 @@ export interface CockpitApi {
   windowMinimize: () => Promise<void>
   windowToggleMaximize: () => Promise<boolean>
   windowClose: () => Promise<void>
+  confirmWindowClose: () => Promise<void>
   isMaximized: () => Promise<boolean>
   getWallpaper: () => Promise<string | null>
   pickFile: (opts?: {

@@ -13,6 +13,12 @@ export interface AppExecSpec {
   env?: Record<string, string>
   terminal?: boolean
   root?: boolean
+  /**
+   * run as a managed background task instead of a terminal window — the app is
+   * spawned with piped stdio and attached to the framework task service, so it
+   * appears in the global Background Tasks panel (live console + stdin/signals).
+   */
+  background?: boolean
   /** override the script/desktop target for this spec (default: entry.path) */
   path?: string
 }

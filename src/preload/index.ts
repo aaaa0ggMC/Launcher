@@ -51,6 +51,22 @@ const cockpit = {
   launchAction: (root: string, id: string, action: string): Promise<unknown> =>
     cockpit.command('launch.action', { root, id, action }),
 
+  // background tasks (framework-level)
+  btList: (): Promise<unknown> => cockpit.command('background.list'),
+  btOutput: (id: string): Promise<unknown> => cockpit.command('background.output', { id }),
+  btStart: (opts: Record<string, unknown>): Promise<unknown> =>
+    cockpit.command('background.start', opts),
+  btJob: (name: string, args: Record<string, unknown>): Promise<unknown> =>
+    cockpit.command('background.job', { name, args }),
+  btInput: (id: string, data: string): Promise<unknown> =>
+    cockpit.command('background.input', { id, data }),
+  btSignal: (id: string, signal: string): Promise<unknown> =>
+    cockpit.command('background.signal', { id, signal }),
+  btStop: (id: string): Promise<unknown> => cockpit.command('background.stop', { id }),
+  btKill: (id: string): Promise<unknown> => cockpit.command('background.kill', { id }),
+  btRemove: (id: string): Promise<unknown> => cockpit.command('background.remove', { id }),
+  btClearFinished: (): Promise<unknown> => cockpit.command('background.clear-finished'),
+
   // mirror
   getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
 
@@ -93,6 +109,7 @@ const cockpit = {
   windowMinimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
   windowToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke('window:toggle-maximize'),
   windowClose: (): Promise<void> => ipcRenderer.invoke('window:close'),
+  confirmWindowClose: (): Promise<void> => ipcRenderer.invoke('window:confirm-close'),
   isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
   getWallpaper: (): Promise<string | null> => ipcRenderer.invoke('window:wallpaper'),
   pickFile: (opts?: {
