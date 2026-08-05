@@ -28,7 +28,7 @@ function metaVal(meta: SongMeta | null | undefined, field: keyof SongMeta): stri
       variant="flat"
       size="small"
       class="msg-role-chip"
-      :color="isSystem(message) ? 'grey' : 'primary'"
+      :color="isSystem(message) ? 'secondary' : 'primary'"
     >
       {{ isUser(message) ? 'You' : isSystem(message) ? 'System' : 'AI DJ' }}
     </v-chip>
@@ -36,7 +36,13 @@ function metaVal(meta: SongMeta | null | undefined, field: keyof SongMeta): stri
     <div
       v-if="message.content"
       class="msg-bubble pa-3"
-      :class="isUser(message) ? 'msg-bubble-user' : isSystem(message) ? 'msg-bubble-system' : 'msg-bubble-ai'"
+      :class="
+        isUser(message)
+          ? 'msg-bubble-user'
+          : isSystem(message)
+            ? 'msg-bubble-system'
+            : 'msg-bubble-ai'
+      "
     >
       <div class="text-body-2" style="white-space: pre-wrap">{{ message.content }}</div>
     </div>

@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ref, inject, type Ref, computed, onMounted, onActivated, onDeactivated, nextTick } from 'vue'
+import {
+  ref,
+  inject,
+  type Ref,
+  computed,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  nextTick
+} from 'vue'
 import { translate } from '../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from './types'
 import ChatMessageVue from './components/ChatMessage.vue'
@@ -117,7 +126,10 @@ function listenBt(): void {
     if (ev?.type === 'changed') {
       const tasks = (ev.tasks ?? []) as Record<string, unknown>[]
       for (const task of tasks) {
-        if (String(task.name ?? '').includes('aidj') || String(task.name ?? '').includes('persistent')) {
+        if (
+          String(task.name ?? '').includes('aidj') ||
+          String(task.name ?? '').includes('persistent')
+        ) {
           persistentRunning.value = task.status === 'running'
         }
       }
@@ -158,7 +170,9 @@ async function pollStatus(): Promise<void> {
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
       if (result.statusBar) sbOrder.value = result.statusBar as Record<string, number>
     }
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -183,7 +197,8 @@ async function sendMessage(): Promise<void> {
         prompt: text
       })) as Record<string, unknown>
       if (result?.ok) {
-        if (result.tokens) lastTokens.value = result.tokens as { prompt: number; completion: number }
+        if (result.tokens)
+          lastTokens.value = result.tokens as { prompt: number; completion: number }
         const pl = result.playlist as { name: string; path: string }[] | undefined
         if (pl && pl.length > 0) {
           messages.value.push({
@@ -318,10 +333,10 @@ function scrollToBottom(): void {
             variant="flat"
             :color="
               playerStatus.status === 'Playing'
-                ? 'green'
+                ? 'success'
                 : playerStatus.status === 'Paused'
-                  ? 'orange'
-                  : 'grey'
+                  ? 'warning'
+                  : 'secondary'
             "
             class="ml-2 status-chip"
           >
@@ -331,7 +346,7 @@ function scrollToBottom(): void {
       </v-row>
       <v-row v-if="persistentRunning" dense class="mt-1">
         <v-col cols="auto">
-          <v-chip size="small" color="blue" variant="flat" class="status-chip">
+          <v-chip size="small" color="info" variant="flat" class="status-chip">
             {{ t('aidj.mode_persistent') }}
           </v-chip>
         </v-col>
@@ -358,11 +373,7 @@ function scrollToBottom(): void {
         <div class="text-body-2 mt-1">{{ t('aidj.input_placeholder') }}</div>
       </div>
 
-      <ChatMessageVue
-        v-for="(msg, idx) in messages"
-        :key="idx"
-        :message="msg"
-      />
+      <ChatMessageVue v-for="(msg, idx) in messages" :key="idx" :message="msg" />
     </div>
 
     <v-divider />
@@ -372,35 +383,49 @@ function scrollToBottom(): void {
         <template v-for="key in visibleStatus" :key="key">
           <template v-if="key === 'tokens'">
             <v-chip variant="flat" size="small" class="status-chip is-on">
-              <span class="status-label">Prompt</span><span class="status-value">{{ formatTokens(lastTokens.prompt) }}</span>
+              <span class="status-label">Prompt</span
+              ><span class="status-value">{{ formatTokens(lastTokens.prompt) }}</span>
             </v-chip>
             <v-chip variant="flat" size="small" class="status-chip is-on">
-              <span class="status-label">Completion</span><span class="status-value">{{ formatTokens(lastTokens.completion) }}</span>
+              <span class="status-label">Completion</span
+              ><span class="status-value">{{ formatTokens(lastTokens.completion) }}</span>
             </v-chip>
           </template>
 
-          <v-chip v-else-if="key === 'tracks'" variant="flat" size="small" class="status-chip is-on">
-            <span class="status-label">Tracks</span><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
+          <v-chip
+            v-else-if="key === 'tracks'"
+            variant="flat"
+            size="small"
+            class="status-chip is-on"
+          >
+            <span class="status-label">Tracks</span
+            ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
           </v-chip>
 
           <v-chip
             v-else-if="key === 'volbal'"
-            variant="flat" size="small" class="status-chip clickable"
+            variant="flat"
+            size="small"
+            class="status-chip clickable"
             :class="{ 'is-on': sbVolbal.enabled }"
             @click="toggleVolbal"
             :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
           >
-            <span class="status-label">Volbal</span><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
+            <span class="status-label">Volbal</span
+            ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
           </v-chip>
 
           <v-chip
             v-else-if="key === 'record_freq'"
-            variant="flat" size="small" class="status-chip clickable"
+            variant="flat"
+            size="small"
+            class="status-chip clickable"
             :class="{ 'is-on': sbRecordFreq }"
             @click="toggleRecordFreq"
             :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
           >
-            <span class="status-label">RecordFreq</span><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
+            <span class="status-label">RecordFreq</span
+            ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
           </v-chip>
         </template>
       </div>
@@ -408,8 +433,11 @@ function scrollToBottom(): void {
       <template v-if="!expanded">
         <div class="input-bar d-flex ga-2 align-start px-4 pb-3">
           <v-btn-toggle
-            v-model="mode" mandatory color="primary"
-            variant="outlined" divided
+            v-model="mode"
+            mandatory
+            color="primary"
+            variant="outlined"
+            divided
             class="mode-toggle flex-shrink-0"
             style="white-space: nowrap"
           >
@@ -424,26 +452,35 @@ function scrollToBottom(): void {
           <div class="textarea-wrap flex-grow-1">
             <v-textarea
               v-model="inputText"
-              rows="1" :max-rows="3" auto-grow no-resize
+              rows="1"
+              :max-rows="3"
+              auto-grow
+              no-resize
               :placeholder="t('aidj.input_placeholder')"
               :disabled="thinking || (mode === 'persistent' && !persistentRunning)"
-              hide-details variant="outlined"
+              hide-details
+              variant="outlined"
               class="input-textarea"
               @keydown="onKeydown"
             />
             <v-btn
               v-if="inputText.includes('\n')"
-              variant="text" size="small"
+              variant="text"
+              size="small"
               class="expand-btn"
               @click="expanded = true"
               title="展开"
-            >&lt;&gt;</v-btn>
+              >&lt;&gt;</v-btn
+            >
           </div>
 
           <v-btn
             :loading="thinking"
-            :disabled="!inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)"
-            color="primary" variant="elevated"
+            :disabled="
+              !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
+            "
+            color="primary"
+            variant="elevated"
             class="flex-shrink-0"
             @click="sendMessage"
           >
@@ -453,7 +490,8 @@ function scrollToBottom(): void {
 
           <v-btn
             v-if="persistentRunning"
-            color="error" variant="text"
+            color="error"
+            variant="text"
             class="flex-shrink-0"
             @click="stopPersistent"
           >
@@ -466,8 +504,11 @@ function scrollToBottom(): void {
       <template v-else>
         <div class="d-flex align-center ga-2 px-4 pt-1">
           <v-btn-toggle
-            v-model="mode" mandatory color="primary"
-            variant="outlined" divided
+            v-model="mode"
+            mandatory
+            color="primary"
+            variant="outlined"
+            divided
             class="mode-toggle flex-shrink-0"
             style="white-space: nowrap"
           >
@@ -483,8 +524,11 @@ function scrollToBottom(): void {
 
           <v-btn
             :loading="thinking"
-            :disabled="!inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)"
-            color="primary" variant="elevated"
+            :disabled="
+              !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
+            "
+            color="primary"
+            variant="elevated"
             class="flex-shrink-0"
             @click="sendMessage"
           >
@@ -494,7 +538,8 @@ function scrollToBottom(): void {
 
           <v-btn
             v-if="persistentRunning"
-            color="error" variant="text"
+            color="error"
+            variant="text"
             class="flex-shrink-0"
             @click="stopPersistent"
           >
@@ -503,11 +548,13 @@ function scrollToBottom(): void {
           </v-btn>
 
           <v-btn
-            variant="text" size="small"
+            variant="text"
+            size="small"
             class="flex-shrink-0"
             @click="expanded = false"
             title="收缩"
-          >&gt;&lt;</v-btn>
+            >&gt;&lt;</v-btn
+          >
         </div>
 
         <div class="expanded-textarea-wrap flex-grow-1 px-4 pb-3">
@@ -517,7 +564,8 @@ function scrollToBottom(): void {
             rows="8"
             :placeholder="t('aidj.input_placeholder')"
             :disabled="thinking || (mode === 'persistent' && !persistentRunning)"
-            hide-details variant="outlined"
+            hide-details
+            variant="outlined"
             class="h-100 input-textarea"
             @keydown="onKeydown"
           />
@@ -541,13 +589,13 @@ function scrollToBottom(): void {
   width: 6px;
 }
 .chat-area::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.3);
+  background: rgba(var(--v-theme-on-surface-variant), 0.45);
   border-radius: 3px;
 }
 .input-overlay {
   flex-shrink: 0;
   background: rgb(var(--v-theme-surface));
-  border-top: 1px solid rgba(var(--v-theme-border-color), 0.12);
+  border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
 }
 .aidj-status-bar {
   display: flex;
@@ -567,8 +615,8 @@ function scrollToBottom(): void {
   filter: brightness(1.15);
 }
 .status-chip.is-on {
-  background: rgba(76, 175, 80, 0.28);
-  color: rgb(165, 214, 167);
+  background: rgba(var(--v-theme-success-container), 0.9);
+  color: rgb(var(--v-theme-on-success-container));
 }
 .status-chip .status-label {
   opacity: 0.6;
