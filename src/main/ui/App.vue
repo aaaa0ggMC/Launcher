@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, provide, ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
+import {
+  computed,
+  provide,
+  ref,
+  shallowRef,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+  nextTick
+} from 'vue'
 import { useTheme } from 'vuetify'
 import type { Ability } from '@abilities/types'
 import { getAbilityModuleEntries, buildSettingsSections } from '@abilities'
@@ -14,6 +23,7 @@ import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
 import { translate, translateTemplate, localize } from './i18n'
+import { resolveSchemeId } from './color_schemes'
 import { filterByQuery, scoreFields, fields } from './composables/search'
 import { getEntryActions, type EntryAction } from './entry-actions'
 import { PAGE_TRANSITIONS } from './animations'
@@ -230,7 +240,7 @@ const abilities = computed<SidebarAbility[]>(() => {
       return {
         id: cfg.id,
         order: cfg.order,
-        config: (cfg.config ?? {}) as Record<string, unknown>,
+        config: {} as Record<string, unknown>,
         name: t(`ability.${cfg.id}.name`, meta.name),
         icon: meta.icon ?? null,
         category: t(`ability.${cfg.id}.category`, meta.category),
@@ -250,8 +260,9 @@ const currentAbility = computed(() => abilities.value.find((a) => a.id === curre
 const pageTransitionName = computed(() => {
   const a =
     (runtimeConfig.value.animations as
-      { enabled?: boolean; pageTransition?: string } | undefined) ?? {}
-  if (a.enabled === false) return ''
+      { enabled?: boolean; pageTransition?: string; modernMotion?: boolean } | undefined) ?? {}
+  // 现代动效 is the master switch: off → no page-switch motion either.
+  if (a.modernMotion === false || a.enabled === false) return ''
   const known = PAGE_TRANSITIONS.some((t) => t.key === a.pageTransition)
   return `page-${known ? a.pageTransition : 'fade'}`
 })
@@ -297,10 +308,45 @@ const groups = computed<Group[]>(() => {
 // ---------------------------------------------------------------------------
 // Theme + UI zoom from config.json
 // ---------------------------------------------------------------------------
+const prefersDark = (): boolean => window.matchMedia('(prefers-color-scheme: dark)').matches
+
+/** 设置 → 外观 → 现代动效. Gates theme-tear + page transitions. */
+function modernMotionEnabled(): boolean {
+  const a = (runtimeConfig.value.animations as { modernMotion?: boolean } | undefined) ?? {}
+  return a.modernMotion !== false
+}
+
+/**
+ * Toggle a `motion-off` class on <html>. global.css uses it to neuter every
+ * remaining CSS transition/animation app-wide (hover lifts, drawer items,
+ * Vuetify internals) so "现代动效 关" really means no motion anywhere.
+ */
+function applyMotionClass(): void {
+  if (modernMotionEnabled()) document.documentElement.classList.remove('motion-off')
+  else document.documentElement.classList.add('motion-off')
+}
+
+/**
+ * Apply the resolved scheme id. When 「现代动效」is on, the color swap is
+ * wrapped in the View Transitions API and revealed with an accelerating
+ * ripple that expands from the top-left corner to cover the whole area (see
+ * the `::view-transition-*` rules in global.css). When off, swap instantly.
+ */
 function applyTheme(): void {
-  const t = (runtimeConfig.value.theme as string) ?? 'dark'
-  const resolved = t === 'system' || t === 'light' ? 'dark' : t
-  theme.global.name.value = resolved === 'pureblack' ? 'pureblack' : 'dark'
+  const t = (runtimeConfig.value.theme as string) ?? null
+  const resolved = resolveSchemeId(t, prefersDark())
+  if (theme.global.name.value === resolved) return
+  if (modernMotionEnabled() && typeof document.startViewTransition === 'function') {
+    const vt = document.startViewTransition(async () => {
+      theme.global.name.value = resolved
+      await nextTick()
+    })
+    // A second theme change mid-transition skips the running one; swallowing
+    // the rejection keeps the UI responsive instead of surfacing an error.
+    vt.finished.catch(() => {})
+  } else {
+    theme.global.name.value = resolved
+  }
 }
 
 function applyUiScale(): void {
@@ -311,6 +357,7 @@ function applyUiScale(): void {
 function onConfigChanged(cfg: Record<string, unknown> | null): void {
   runtimeConfig.value = cfg ?? {}
   applyTheme()
+  applyMotionClass()
   applyUiScale()
   resolveBackgroundImage()
 }
@@ -362,6 +409,23 @@ function subscribeConfig(): void {
   configUnsub = window.cockpit.on('cockpit:config-changed', (cfg) => {
     if (cfg && typeof cfg === 'object') onConfigChanged(cfg as Record<string, unknown>)
   })
+}
+
+/** Re-apply the theme when the OS color scheme flips (system mode). */
+let schemeMedia: MediaQueryList | null = null
+function onSchemeChange(): void {
+  applyTheme()
+}
+function subscribeSchemeMedia(): void {
+  if (typeof window.matchMedia !== 'function') return
+  schemeMedia = window.matchMedia('(prefers-color-scheme: dark)')
+  if (typeof schemeMedia.addEventListener === 'function') {
+    schemeMedia.addEventListener('change', onSchemeChange)
+  } else {
+    ;(schemeMedia as MediaQueryList & { addListener?: (fn: () => void) => void }).addListener?.(
+      onSchemeChange
+    )
+  }
 }
 
 // Command-not-found toast: the main process broadcasts the exact command name
@@ -627,6 +691,7 @@ onMounted(async () => {
     isMaximized.value = Boolean(v)
   })
   subscribeConfig()
+  subscribeSchemeMedia()
   subscribeCommandErrors()
   resolveBackgroundImage()
   btUnsub = window.cockpit.on('cockpit:bt', onBtEvent)
@@ -643,6 +708,7 @@ onBeforeUnmount(() => {
   winUnsub?.()
   configUnsub?.()
   commandErrorUnsub?.()
+  schemeMedia?.removeEventListener?.('change', onSchemeChange)
   btUnsub?.()
   quitUnsub?.()
   if (searchDebounce) {

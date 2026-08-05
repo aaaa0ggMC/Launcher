@@ -220,6 +220,22 @@ pre,
   --v-icon-size-multiplier: 1;
 }
 
+/* ---------------------------------------------------------------------------
+ * 现代动效总开关 — when 设置 → 外观 → 现代动效 is OFF, App.vue toggles
+ * `motion-off` on <html> and every remaining transition/animation in the app
+ * is neutralized (hover lifts, drawer items, Vuetify internals, ...). This is
+ * the catch-all that complements the JS-side gates (page transitions + theme
+ * tear both short-circuit before they ever start).
+ * ------------------------------------------------------------------------- */
+html.motion-off *,
+html.motion-off *::before,
+html.motion-off *::after {
+  transition:
+    none !important;
+  animation:
+    none !important;
+}
+
 /* Card action rows get consistent breathing room. */
 .v-card-actions {
   gap: 4px;
@@ -320,6 +336,50 @@ pre,
 .page-flip-leave-to {
   opacity: 0;
   transform: perspective(1000px) rotateY(12deg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme-switch reveal — 设置 → 外观 → 现代动效.
+ * When the scheme changes, App.vue wraps the swap in the View Transitions API;
+ * the NEW theme snapshot ripples outward from the top-left corner (circular
+ * center) to cover the whole area, accelerating as it spreads. The OLD theme
+ * stays put underneath (no fade). Disabled entirely when modernMotion is off
+ * (App.vue then skips startViewTransition, so these rules never run).
+ * ------------------------------------------------------------------------- */
+::view-transition-old(root) {
+  animation: none;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  /* Soft-edged sector reveal from the top-left corner.
+     - Animating mask-image (gradient stop interpolation) re-rasterizes the
+       full-page snapshot every frame → multi-second freeze on iGPUs. Instead
+       animate mask-SIZE: it just scales one pre-rasterized mask (fast).
+     - Use EQUAL vmax lengths (not percentages): `300% 300%` stretches each
+       axis independently so a circle becomes a square on non-square windows;
+       equal absolute units keep the gradient box square.
+     - `farthest-side` makes the circle radius equal the box edge (with the
+       default `farthest-corner` the radius is √2× the edge, so the 88%→100%
+       soft band lands OUTSIDE the box and the whole box reads as opaque →
+       a square). With farthest-side the soft band falls inside the box, giving
+       a genuine quarter-circle sector with a fading edge. */
+  mask-image: radial-gradient(circle farthest-side at 0 0, #000 0%, #000 88%, transparent 100%);
+  mask-size: 0vmax 0vmax;
+  mask-repeat: no-repeat;
+  mask-position: 0 0;
+  /* ease-in: slow ripple at the corner, accelerating outward */
+  animation: cockpit-radial-in 0.65s cubic-bezier(0.65, 0, 0.85, 0) both;
+  z-index: 2;
+}
+
+@keyframes cockpit-radial-in {
+  from {
+    mask-size: 0vmax 0vmax;
+  }
+  to {
+    mask-size: 300vmax 300vmax;
+  }
 }
 
 /* ---------------------------------------------------------------------------

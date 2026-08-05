@@ -8,6 +8,7 @@ import { PAGE_TRANSITIONS, type PageTransitionKey } from '@ui/animations'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
+const modernMotion = ref(true)
 const enabled = ref(true)
 const pageTransition = ref<PageTransitionKey>('fade')
 
@@ -17,22 +18,32 @@ function isKnown(v: string | null | undefined): v is PageTransitionKey {
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
-  const a = (cfg?.animations as { enabled?: boolean; pageTransition?: string } | undefined) ?? {}
+  const a =
+    (cfg?.animations as
+      { enabled?: boolean; pageTransition?: string; modernMotion?: boolean } | undefined) ?? {}
+  modernMotion.value = a.modernMotion !== false
   enabled.value = a.enabled !== false
   pageTransition.value = isKnown(a.pageTransition) ? a.pageTransition : 'fade'
 })
 
 async function save(patch: {
+  modernMotion?: boolean
   enabled?: boolean
   pageTransition?: PageTransitionKey
 }): Promise<void> {
   const next = {
+    modernMotion: patch.modernMotion ?? modernMotion.value,
     enabled: patch.enabled ?? enabled.value,
     pageTransition: patch.pageTransition ?? pageTransition.value
   }
+  modernMotion.value = next.modernMotion
   enabled.value = next.enabled
   pageTransition.value = next.pageTransition
   await window.cockpit.setConfig({ animations: next })
+}
+
+async function setModernMotion(v: boolean | null): Promise<void> {
+  await save({ modernMotion: !!v })
 }
 
 async function setEnabled(v: boolean | null): Promise<void> {
@@ -49,11 +60,24 @@ async function setStyle(v: string | null): Promise<void> {
     <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'animation.title') }}</v-card-title>
     <v-card-text>
       <v-switch
+        :model-value="modernMotion"
+        :label="translate(uiLang, 'animation.modernMotion')"
+        color="primary"
+        density="compact"
+        hide-details
+        @update:model-value="setModernMotion"
+      />
+      <div class="text-caption on-surface-variant mt-1 mb-2">
+        {{ translate(uiLang, 'animation.modernMotionCaption') }}
+      </div>
+      <v-divider class="my-3" />
+      <v-switch
         :model-value="enabled"
         :label="translate(uiLang, 'animation.enabled')"
         color="primary"
         density="compact"
         hide-details
+        :disabled="!modernMotion"
         @update:model-value="setEnabled"
       />
       <v-divider class="my-3" />
@@ -62,7 +86,7 @@ async function setStyle(v: string | null): Promise<void> {
         :model-value="enabled ? pageTransition : null"
         density="compact"
         hide-details
-        :disabled="!enabled"
+        :disabled="!enabled || !modernMotion"
         @update:model-value="setStyle"
       >
         <v-radio
