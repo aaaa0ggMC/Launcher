@@ -26,6 +26,26 @@ export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
   await rename(tmp, p)
 }
 
+/**
+ * Write arbitrary text to a file (exported console logs, sessions, ...).
+ * Shared by every ability's export command so file-writing stays in one place
+ * instead of each ability re-implementing writeFile.
+ */
+export async function writeTextFile(
+  p: string,
+  text: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await mkdir(dirname(p), { recursive: true })
+    await writeFile(p, text ?? '', 'utf-8')
+    return { ok: true }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    log.error('writeTextFile failed', { path: p, error })
+    return { ok: false, error }
+  }
+}
+
 /** Run a command, return stdout; throws on non-zero exit. */
 export async function run(
   cmd: string,

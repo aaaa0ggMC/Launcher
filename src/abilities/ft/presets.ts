@@ -1,7 +1,8 @@
-import { readFile, writeFile } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import type { FtPreset, FtVector } from './types'
 import { dftVectors, sampleParametric, samplePolyline, type Point2 } from './dft'
 import { makeLogger } from '../../main/process/logger'
+import { writeTextFile } from '../../main/process/util'
 
 const log = makeLogger('ft')
 
@@ -196,18 +197,14 @@ export async function exportFtFile(
   path: string,
   data: unknown
 ): Promise<{ ok: boolean; error?: string }> {
-  try {
-    await writeFile(path, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+  const res = await writeTextFile(path, JSON.stringify(data, null, 2) + '\n')
+  if (res.ok) {
     const count = Array.isArray(data)
       ? data.length
       : Array.isArray((data as Record<string, unknown> | null)?.vectors)
         ? ((data as Record<string, unknown>).vectors as unknown[]).length
         : 0
     log.info('ft file exported', { path, count })
-    return { ok: true }
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e)
-    log.error('ft file export failed', { path, error })
-    return { ok: false, error }
   }
+  return res
 }
