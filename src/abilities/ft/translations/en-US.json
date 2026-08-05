@@ -1,6 +1,6 @@
 {
   "ability.ft.name": "Fourier Transform",
-  "ability.ft.category": "Tools",
+  "ability.ft.category": "Misc",
   "ft.panelTitle": "Fourier Transform",
   "ft.panelExpand": "Expand panel",
   "ft.panelCollapse": "Collapse panel",

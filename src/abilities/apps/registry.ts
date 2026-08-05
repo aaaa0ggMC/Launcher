@@ -72,6 +72,27 @@ function appsJsonPath(root: string): string {
   return join(root, 'apps.json')
 }
 
+/**
+ * Per-root registry cache. Search / quick-launch / context menu read the same
+ * apps.json repeatedly; caching avoids redundant disk I/O. The chokidar watcher
+ * (watchRoots) invalidates the cache whenever apps.json changes, and every
+ * write path (update/delete/writeRegistry) invalidates too — so the cache only
+ * ever holds fresh data.
+ */
+const registryCache = new Map<string, AppRegistryFile>()
+
+function invalidateRegistry(root: string): void {
+  registryCache.delete(root)
+}
+
+async function readRegistryCached(root: string): Promise<AppRegistryFile> {
+  const cached = registryCache.get(root)
+  if (cached) return cached
+  const fresh = await readRegistry(root)
+  registryCache.set(root, fresh)
+  return fresh
+}
+
 async function readRegistry(root: string): Promise<AppRegistryFile> {
   return (await readJson<AppRegistryFile>(appsJsonPath(root))) ?? { version: 1, apps: {} }
 }
@@ -90,13 +111,18 @@ async function resolveLocalized(value: unknown, lang: string): Promise<string | 
 }
 
 /** Read the configured language from config.json (default 'zh'). */
+let cachedConfigLang: string | null = null
 async function readConfigLang(): Promise<string> {
+  // Language rarely changes at runtime; cache it so per-entry normalization
+  // doesn't re-read config.json for every app on every list/get call.
+  if (cachedConfigLang) return cachedConfigLang
   try {
     const cfg = await readJson<{ language?: string }>(CONFIG_JSON)
-    return cfg?.language ?? 'zh'
+    cachedConfigLang = cfg?.language ?? 'zh'
   } catch {
-    return 'zh'
+    cachedConfigLang = 'zh'
   }
+  return cachedConfigLang
 }
 
 /** Normalize a raw entry from apps.json: convert object-format name/description/
@@ -162,7 +188,7 @@ export async function listAllApps(): Promise<{
   const { searchRoots } = await getAppsConfig()
   const out: Record<string, AppEntry> = {}
   for (const root of searchRoots) {
-    const reg = await readRegistry(root.path)
+    const reg = await readRegistryCached(root.path)
     for (const [id, raw] of Object.entries(reg.apps)) {
       out[id] = {
         ...(await normalizeEntry(raw as unknown as Record<string, unknown>)),
@@ -175,7 +201,7 @@ export async function listAllApps(): Promise<{
 }
 
 export async function getEntry(root: string, id: string): Promise<AppEntry | null> {
-  const reg = await readRegistry(root)
+  const reg = await readRegistryCached(root)
   const raw = reg.apps[id]
   return raw ? { ...(await normalizeEntry(raw as unknown as Record<string, unknown>)), root } : null
 }
@@ -211,6 +237,7 @@ export async function updateEntry(
   if (!merged.alias) merged.alias = id
   reg.apps[id] = merged
   await writeJsonAtomic(file, reg)
+  invalidateRegistry(root)
   log.info('entry saved', { root, id })
   broadcast('cockpit:apps-changed', 'update', { root, id })
   return { ...merged, root }
@@ -221,12 +248,14 @@ export async function deleteEntry(root: string, id: string): Promise<void> {
   const reg = await readRegistry(root)
   delete reg.apps[id]
   await writeJsonAtomic(file, reg)
+  invalidateRegistry(root)
   log.info('entry deleted', { root, id })
   broadcast('cockpit:apps-changed', 'delete', { root, id })
 }
 
 export async function writeRegistry(root: string, reg: AppRegistryFile): Promise<void> {
   await writeJsonAtomic(appsJsonPath(root), reg)
+  invalidateRegistry(root)
   log.info('registry written (rescan broadcast)', { root, apps: Object.keys(reg.apps).length })
   broadcast('cockpit:apps-changed', 'rescan', root)
 }
@@ -280,6 +309,7 @@ export function watchRoots(): void {
     const id = rel.split('/')[0]
     if (rel.endsWith('apps.json')) {
       log.debug('watcher apps.json change', { root })
+      invalidateRegistry(root)
       broadcast('cockpit:apps-changed', 'file', root)
     } else if (rel && !id.startsWith('.') && STRUCTURAL.has(event)) {
       log.debug('watcher structural event', { root, event, path: rel })
