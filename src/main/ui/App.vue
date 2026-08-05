@@ -14,6 +14,8 @@ import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
 import { translate, translateTemplate, localize } from './i18n'
+import { filterByQuery, scoreFields, fields } from './composables/search'
+import { getEntryActions, type EntryAction } from './entry-actions'
 import { PAGE_TRANSITIONS } from './animations'
 
 // ---------------------------------------------------------------------------
@@ -268,11 +270,13 @@ const keepAliveNames = computed(() =>
 )
 
 const filteredAbilities = computed(() => {
-  const q = searchText.value.trim().toLowerCase()
+  const q = searchText.value.trim()
   if (!q) return abilities.value
-  return abilities.value.filter(
-    (a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)
-  )
+  return filterByQuery(abilities.value, q, (a) => [
+    { text: a.name.toLowerCase(), weight: 3 },
+    { text: a.id.toLowerCase(), weight: 2 },
+    { text: a.category.toLowerCase(), weight: 1 }
+  ])
 })
 
 interface Group {
@@ -487,6 +491,59 @@ interface SearchApp {
 const searchApps = shallowRef<SearchApp[]>([])
 const searchBusy = ref(false)
 
+// -- quick-launch context menu: right-click a search result to pick any action
+const ctxMenuOpen = ref(false)
+const ctxMenuEl = ref<HTMLElement | null>(null)
+const ctxApp = shallowRef<SearchApp | null>(null)
+
+function openCtxMenu(e: MouseEvent, app: SearchApp): void {
+  ctxMenuEl.value = e.currentTarget as HTMLElement
+  ctxApp.value = app
+  ctxMenuOpen.value = true
+  // 快搜索数据可能是老快照（apps.json 可能已变更）——右键时重新拉取该条目
+  // 最新数据，确保 action 列表/风险是最新的，而不是沿用搜索时的缓存。
+  void window.cockpit.getEntry(app.root, app.id).then((fresh) => {
+    if (fresh && ctxApp.value?.id === app.id) {
+      ctxApp.value = { ...app, entry: fresh }
+    }
+  })
+}
+const ctxActions = computed<EntryAction[]>(() => {
+  const app = ctxApp.value
+  if (!app) return []
+  const list: EntryAction[] = [{ kind: 'launch', id: '__launch', label: t('search.ctxLaunch') }]
+  return list.concat(getEntryActions(app))
+})
+
+function ctxRun(action: EntryAction): void {
+  const app = ctxApp.value
+  if (!app) return
+  ctxMenuOpen.value = false
+  if (action.kind === 'launch') {
+    void launchApp(app.root, app.id, app.entry)
+  } else if (action.kind === 'action') {
+    void launchActionApp(app.root, app.id, app.entry, action.id, action.action)
+  } else {
+    void window.cockpit.command(action.command, action.args ?? {})
+  }
+}
+
+/**
+ * Debounce search input: keystrokes only schedule a fetch; the actual (possibly
+ * IO-heavy) provider query runs after the user pauses. This keeps per-keystroke
+ * cost near-zero regardless of how heavy a registered search provider is.
+ */
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
+const SEARCH_DEBOUNCE_MS = 200
+
+function scheduleSearchApps(): void {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    void loadSearchApps()
+    searchDebounce = null
+  }, SEARCH_DEBOUNCE_MS)
+}
+
 async function loadSearchApps(): Promise<void> {
   if (!searchText.value.trim()) {
     searchApps.value = []
@@ -495,22 +552,25 @@ async function loadSearchApps(): Promise<void> {
   searchBusy.value = true
   try {
     const res = await window.cockpit.listApps()
-    const q = searchText.value.trim().toLowerCase()
-    const hits: SearchApp[] = []
+    const scored: { app: SearchApp; score: number }[] = []
     for (const [id, entry] of Object.entries(res.apps)) {
       if (!entry || entry.missing) continue
       const locName = localize(entry, 'name', lang.value) ?? entry.name
       const locAlias = localize(entry, 'alias', lang.value) ?? ''
+      const locDesc = localize(entry, 'description', lang.value) ?? ''
       const tags = [...(entry.tags ?? []), ...(entry.tags_auto ?? [])]
-      if (
-        locName.toLowerCase().includes(q) ||
-        locAlias.toLowerCase().includes(q) ||
-        tags.some((t) => t.toLowerCase().includes(q))
-      ) {
-        hits.push({ id, root: entry.root ?? '', entry })
-      }
+      // tags 作为 weight-1 字段并入 AND 打分，保持联合语义：
+      // "music bilibili" 不会因为单个 tag 命中就放行。
+      const score = scoreFields(searchText.value, [
+        ...fields(locName, locAlias, locDesc),
+        ...(tags.length ? [{ text: tags.join(' ').toLowerCase(), weight: 1 }] : [])
+      ])
+      if (score > 0) scored.push({ app: { id, root: entry.root ?? '', entry }, score })
     }
-    searchApps.value = hits.slice(0, 12)
+    searchApps.value = scored
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 12)
+      .map((x) => x.app)
   } finally {
     searchBusy.value = false
   }
@@ -555,7 +615,13 @@ onMounted(async () => {
     currentId.value = def && abilities.value.some((a) => a.id === def) ? def : null
   }
   restoreUiState()
-  unsub = window.cockpit.on('cockpit:apps-changed', () => loadSearchApps())
+  unsub = window.cockpit.on('cockpit:apps-changed', () => {
+    if (searchDebounce) {
+      clearTimeout(searchDebounce)
+      searchDebounce = null
+    }
+    void loadSearchApps()
+  })
   window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
     isMaximized.value = Boolean(v)
@@ -579,6 +645,10 @@ onBeforeUnmount(() => {
   commandErrorUnsub?.()
   btUnsub?.()
   quitUnsub?.()
+  if (searchDebounce) {
+    clearTimeout(searchDebounce)
+    searchDebounce = null
+  }
 })
 </script>
 
@@ -626,7 +696,7 @@ onBeforeUnmount(() => {
           hide-details
           clearable
           rounded="lg"
-          @input="loadSearchApps"
+          @input="scheduleSearchApps"
         />
       </div>
 
@@ -641,11 +711,39 @@ onBeforeUnmount(() => {
           density="compact"
           rounded="lg"
           @click="launchApp(app.root, app.id, app.entry)"
+          @contextmenu.prevent="openCtxMenu($event, app)"
         />
         <v-list-item v-if="searchApps.length === 0 && !searchBusy">
           <v-list-item-subtitle>{{ t('search.noMatch') }}</v-list-item-subtitle>
         </v-list-item>
       </v-list>
+
+      <!-- Quick-launch context menu: main launch + any ability-injected actions -->
+      <v-menu
+        v-model="ctxMenuOpen"
+        :activator="ctxMenuEl ?? undefined"
+        :close-on-content-click="false"
+        :close-on-back="true"
+        offset="0"
+      >
+        <v-list density="compact" class="pa-1">
+          <v-list-subheader v-if="ctxApp" class="px-3">
+            {{ localize(ctxApp.entry, 'name', lang) || ctxApp.entry.name }}
+          </v-list-subheader>
+          <v-list-item
+            v-for="action in ctxActions"
+            :key="action.id"
+            density="compact"
+            rounded="lg"
+            @click="ctxRun(action)"
+          >
+            <template #prepend>
+              <AbilityIcon :icon="action.icon ?? null" :size="16" />
+            </template>
+            <v-list-item-title class="text-body-2">{{ action.label }}</v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-menu>
 
       <v-divider v-if="!rail && searchText.trim()" class="my-2 mx-2" />
 

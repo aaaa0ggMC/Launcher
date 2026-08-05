@@ -32,7 +32,6 @@
   "bt.searchPlaceholder": "Search name / description / command",
   "bt.noMatch": "No matching background tasks",
   "bt.noMatchText": "Try adjusting your search terms.",
-  "bt.filterStatus": "Status",
   "bt.filterAll": "All",
   "bt.noSelect": "Select a task to view its console and interact",
   "bt.noOutput": "No output yet",

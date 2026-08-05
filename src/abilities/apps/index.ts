@@ -1,5 +1,6 @@
 import { defineAsyncComponent } from 'vue'
 import type { Ability } from '../types'
+import './entry-actions'
 
 export default {
   id: 'apps',
