@@ -3,9 +3,10 @@ import { ref, shallowRef, computed, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import type { SystemdUnit } from './types'
 import { translate } from '@ui/i18n'
+import { filterByQuery, fields } from '@ui/composables/search'
 import LoadingBar from '@ui/components/LoadingBar.vue'
 
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 const units = shallowRef<SystemdUnit[]>([])
 const loading = ref(false)
@@ -26,12 +27,11 @@ async function load(): Promise<void> {
 }
 
 const filtered = computed(() => {
-  const q = filter.value.trim().toLowerCase()
-  return units.value.filter((u) => {
-    if (!showAll.value && u.active !== 'active') return false
-    if (!q) return true
-    return u.name.toLowerCase().includes(q) || u.description.toLowerCase().includes(q)
-  })
+  let list = units.value
+  if (!showAll.value) list = list.filter((u) => u.active === 'active')
+  if (!filter.value.trim()) return list
+  // shared weighted AND search: name > description
+  return filterByQuery(list, filter.value, (u) => fields(u.name, '', u.description))
 })
 
 async function act(u: SystemdUnit, action: 'start' | 'stop' | 'restart'): Promise<void> {
@@ -57,7 +57,9 @@ onMounted(load)
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
         <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'systemd.heading') }}</div>
-        <div class="text-caption on-surface-variant">{{ translate(uiLang, 'systemd.subtitle') }}</div>
+        <div class="text-caption on-surface-variant">
+          {{ translate(uiLang, 'systemd.subtitle') }}
+        </div>
       </div>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loading" @click="load">
         {{ translate(uiLang, 'systemd.refresh') }}
@@ -77,7 +79,12 @@ onMounted(load)
         />
       </v-col>
       <v-col cols="12" sm="7" class="d-flex align-center">
-        <v-checkbox v-model="showAll" :label="translate(uiLang, 'systemd.showAll')" density="compact" hide-details />
+        <v-checkbox
+          v-model="showAll"
+          :label="translate(uiLang, 'systemd.showAll')"
+          density="compact"
+          hide-details
+        />
       </v-col>
     </v-row>
 

@@ -6,6 +6,7 @@ import type { Ref } from 'vue'
 import type { SettingsCategory, SettingsItem } from '../index'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { translate, translateTemplate } from '@ui/i18n'
+import { scoreFields, type SearchField } from '@ui/composables/search'
 
 /**
  * Settings page — consumes the injection list built & provided by App.vue
@@ -43,13 +44,36 @@ const activeCategory = computed<SettingsCategory | null>(() => {
   return sections.value.find((c) => c.id === activeCategoryId.value) ?? sections.value[0]
 })
 
+function catFields(cat: SettingsCategory): SearchField[] {
+  const kw = [...cat.keywords].join(' ')
+  const f: SearchField[] = [
+    { text: cat.label.toLowerCase(), weight: 3 },
+    { text: cat.description.toLowerCase(), weight: 2 }
+  ]
+  if (kw) f.push({ text: kw.toLowerCase(), weight: 1 })
+  return f
+}
+
+function itemFields(item: SettingsItem): SearchField[] {
+  const kw = [...item.keywords].join(' ')
+  const f: SearchField[] = [
+    { text: item.label.toLowerCase(), weight: 3 },
+    { text: item.description.toLowerCase(), weight: 2 }
+  ]
+  if (kw) f.push({ text: kw.toLowerCase(), weight: 1 })
+  return f
+}
+
 function catMatches(cat: SettingsCategory, q: string): boolean {
-  return cat.haystack.includes(q) || cat.items.some((i) => i.haystack.includes(q))
+  return (
+    scoreFields(q, catFields(cat)) > 0 ||
+    cat.items.some((i) => itemFields(i).length && scoreFields(q, itemFields(i)) > 0)
+  )
 }
 
 /** Categories that survive the query — drives the top chips. */
 const filteredCategories = computed(() => {
-  const q = trimmed.value.toLowerCase()
+  const q = trimmed.value
   if (!q) return sections.value
   return sections.value.filter((c) => catMatches(c, q))
 })
@@ -57,13 +81,13 @@ const filteredCategories = computed(() => {
 /** Items to show for a category during search: matches, else all when the
  *  category itself matched. */
 function itemsForSearch(cat: SettingsCategory, q: string): SettingsItem[] {
-  const matched = cat.items.filter((i) => i.haystack.includes(q))
+  const matched = cat.items.filter((i) => scoreFields(q, itemFields(i)) > 0)
   if (matched.length) return matched
-  return cat.haystack.includes(q) ? cat.items : []
+  return scoreFields(q, catFields(cat)) > 0 ? cat.items : []
 }
 
 const resultGroups = computed(() => {
-  const q = trimmed.value.toLowerCase()
+  const q = trimmed.value
   if (!q) return []
   return sections.value
     .map((cat) => ({ category: cat, items: itemsForSearch(cat, q) }))

@@ -5,6 +5,7 @@ import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from './types'
 import LoadingBar from '@ui/components/LoadingBar.vue'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { localize, translate, translateTemplate, availableLanguages } from '@ui/i18n'
+import { filterByQuery, fields } from '@ui/composables/search'
 
 interface AbilitiesCtx {
   configs: Record<string, Record<string, unknown>>
@@ -167,24 +168,21 @@ const allTags = computed(() => {
 })
 
 const filtered = computed(() => {
-  const q = searchText.value.trim().toLowerCase()
-  return entries.value.filter(({ id, entry }) => {
-    if (
-      activeTag.value &&
-      ![...(entry.tags ?? []), ...(entry.tags_auto ?? [])].includes(activeTag.value)
-    ) {
-      return false
-    }
-    if (!q) return true
-    const locName = localize(entry, 'name', uiLang.value) ?? entry.name
-    const locAlias = localize(entry, 'alias', uiLang.value) ?? ''
-    const locDesc = localize(entry, 'description', uiLang.value) ?? ''
-    return (
-      locName.toLowerCase().includes(q) ||
-      id.toLowerCase().includes(q) ||
-      locAlias.toLowerCase().includes(q) ||
-      locDesc.toLowerCase().includes(q)
+  let list = entries.value
+  if (activeTag.value) {
+    list = list.filter(({ entry }) =>
+      [...(entry.tags ?? []), ...(entry.tags_auto ?? [])].includes(activeTag.value)
     )
+  }
+  if (!searchText.value.trim()) return list
+  // shared weighted AND search: name > alias > description > id
+  return filterByQuery(list, searchText.value, ({ id, entry }) => {
+    const name = localize(entry, 'name', uiLang.value) ?? entry.name
+    const alias = localize(entry, 'alias', uiLang.value) ?? ''
+    const desc = localize(entry, 'description', uiLang.value) ?? ''
+    const f = fields(name, alias, desc)
+    if (id) f.push({ text: id.toLowerCase(), weight: 2 })
+    return f
   })
 })
 
