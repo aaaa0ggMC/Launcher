@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
+import type { Ref } from 'vue'
 import type { RequestTemplate, RespTransform } from '../types'
 import { extractAllVars } from '../parser/variableParser'
 import type { ParsedVar } from '../types'
+import { translate, translateTemplate } from '@ui/i18n'
+import { fence, inline } from '../markdown'
 import TransformEditor from './TransformEditor.vue'
 
 const props = defineProps<{
@@ -15,6 +18,9 @@ const emit = defineEmits<{
   change: [t: RequestTemplate]
   delete: []
 }>()
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as const
 
@@ -62,6 +68,39 @@ function defaultLabel(d?: string): string {
 function onTransformsChange(next: RespTransform[]): void {
   update({ respTransforms: next })
 }
+
+const transformRef = ref<{ toMarkdown?: () => string } | null>(null)
+
+/** Export the active template config as markdown (name/method/url/headers/body
+ *  + variable badges + the transform chain from TransformEditor). */
+function toMarkdown(): string {
+  const name = props.template.name || t('pg.untitled')
+  const lines: string[] = [translateTemplate(uiLang.value, 'pg.mdTemplate', { name })]
+  lines.push(`- ${t('pg.method')}: ${props.template.method}`)
+  if (props.template.urlTemplate)
+    lines.push(`- ${t('pg.url')}:`, '', fence(props.template.urlTemplate))
+  if (props.template.headersTemplate)
+    lines.push(`- ${t('pg.headers')}:`, '', fence(props.template.headersTemplate))
+  if (props.template.bodyTemplate)
+    lines.push(`- ${t('pg.body')}:`, '', fence(props.template.bodyTemplate, 'json'))
+  if (varInfo.value.all.length) {
+    lines.push(
+      '',
+      `- ${t('pg.varsGlobal')}:`,
+      ...varInfo.value.global.map((v) => `  - \`${inline(v.name)}\``)
+    )
+    lines.push(
+      '',
+      `- ${t('pg.varsForm')}:`,
+      ...varInfo.value.form.map((v) => `  - \`${inline(v.name)}\``)
+    )
+  }
+  const tf = transformRef.value?.toMarkdown?.()
+  if (tf) lines.push('', tf)
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>
@@ -73,7 +112,7 @@ function onTransformsChange(next: RespTransform[]): void {
         flat
         density="compact"
         hide-details
-        placeholder="模板名称…"
+        :placeholder="t('pg.templateNamePlaceholder')"
         class="pg-name"
         @update:model-value="update({ name: $event as string })"
       />
@@ -94,28 +133,30 @@ function onTransformsChange(next: RespTransform[]): void {
         prepend-icon="mdi-delete-outline"
         @click="emit('delete')"
       >
-        删除
+        {{ t('pg.delete') }}
       </v-btn>
     </div>
 
     <!-- Copy from another template -->
     <div v-if="otherTemplates.length" class="d-flex align-center ga-2 mb-3 flex-wrap">
-      <span class="text-caption on-surface-variant">复制自:</span>
+      <span class="text-caption on-surface-variant">{{ t('pg.copyFrom') }}:</span>
       <v-select
         v-model="copySrc"
         :items="
-          otherTemplates.map((t) => ({ title: `${t.name || '未命名'} (${t.method})`, value: t.id }))
+          otherTemplates.map((x) => ({
+            title: `${x.name || t('pg.untitled')} (${x.method})`,
+            value: x.id
+          }))
         "
         density="compact"
         variant="solo-filled"
         flat
         hide-details
         class="pg-copysrc"
-        placeholder="选择源模板"
+        :placeholder="t('pg.chooseSource')"
       />
       <template v-if="srcTemplate">
         <v-btn
-          size="small"
           variant="tonal"
           @click="
             update({
@@ -125,25 +166,18 @@ function onTransformsChange(next: RespTransform[]): void {
               respTransforms: [...srcTemplate.respTransforms]
             })
           "
-          >全部</v-btn
+          >{{ t('pg.copyAll') }}</v-btn
         >
+        <v-btn variant="tonal" @click="update({ headersTemplate: srcTemplate.headersTemplate })">{{
+          t('pg.copyHeaders')
+        }}</v-btn>
+        <v-btn variant="tonal" @click="update({ bodyTemplate: srcTemplate.bodyTemplate })">{{
+          t('pg.copyBody')
+        }}</v-btn>
         <v-btn
-          size="small"
-          variant="tonal"
-          @click="update({ headersTemplate: srcTemplate.headersTemplate })"
-          >请求头</v-btn
-        >
-        <v-btn
-          size="small"
-          variant="tonal"
-          @click="update({ bodyTemplate: srcTemplate.bodyTemplate })"
-          >请求体</v-btn
-        >
-        <v-btn
-          size="small"
           variant="tonal"
           @click="update({ respTransforms: [...srcTemplate.respTransforms] })"
-          >变换</v-btn
+          >{{ t('pg.copyTransforms') }}</v-btn
         >
       </template>
     </div>
@@ -153,8 +187,8 @@ function onTransformsChange(next: RespTransform[]): void {
       variant="outlined"
       hide-details
       class="mb-3 font-mono"
-      label="URL 模板"
-      placeholder="https://api.example.com/v1/{model:string}"
+      :label="t('pg.url')"
+      :placeholder="t('pg.urlPlaceholder')"
       @update:model-value="update({ urlTemplate: $event as string })"
     />
 
@@ -163,9 +197,9 @@ function onTransformsChange(next: RespTransform[]): void {
       variant="outlined"
       hide-details
       class="mb-3 font-mono"
-      label="请求头 (每行 Key: value)"
+      :label="t('pg.headersPerLine')"
       rows="3"
-      placeholder="Authorization: Bearer {api_key:string}&#10;Content-Type: application/json"
+      :placeholder="t('pg.headersPlaceholder')"
       @update:model-value="update({ headersTemplate: $event as string })"
     />
 
@@ -174,14 +208,15 @@ function onTransformsChange(next: RespTransform[]): void {
       variant="outlined"
       hide-details
       class="mb-3 font-mono"
-      label="请求体"
+      :label="t('pg.body')"
       rows="5"
-      placeholder='{"model": "{model_name:string}", "prompt": "{prompt:string}"}'
+      :placeholder="t('pg.bodyPlaceholder')"
       @update:model-value="update({ bodyTemplate: $event as string })"
     />
 
     <!-- Response transforms -->
     <TransformEditor
+      ref="transformRef"
       :transforms="template.respTransforms"
       :global-var-names="globalVarNames"
       @change="onTransformsChange"
@@ -190,7 +225,7 @@ function onTransformsChange(next: RespTransform[]): void {
     <!-- Variable badges -->
     <div v-if="varInfo.all.length && !collapsed" class="pg-vars mt-3">
       <template v-if="varInfo.global.length">
-        <div class="text-caption on-surface-variant mb-1">全局（自动填充）:</div>
+        <div class="text-caption on-surface-variant mb-1">{{ t('pg.varsGlobal') }}:</div>
         <div class="d-flex flex-wrap gap-1 mb-2">
           <v-chip
             v-for="v in varInfo.global"
@@ -207,7 +242,7 @@ function onTransformsChange(next: RespTransform[]): void {
         </div>
       </template>
       <template v-if="varInfo.form.length">
-        <div class="text-caption on-surface-variant mb-1">表单字段:</div>
+        <div class="text-caption on-surface-variant mb-1">{{ t('pg.varsForm') }}:</div>
         <div class="d-flex flex-wrap gap-1">
           <v-chip v-for="v in varInfo.form" :key="v.name" variant="flat">
             {{ v.name }}

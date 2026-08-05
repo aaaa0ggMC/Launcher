@@ -32,5 +32,6 @@
   "cli.launch.failed": "Failed: {error}",
   "cli.launch.started": "Launched {name}{pid}",
   "cli.launch.failedStart": "Launch failed: {error}",
-  "cli.info.usageGeneric": "Usage: info <alias>"
+  "cli.info.usageGeneric": "Usage: info <alias>",
+  "cli.mdHeading": "## CLI Transcript"
 }

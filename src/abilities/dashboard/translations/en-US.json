@@ -64,5 +64,6 @@
   "label.总览": "Dashboard",
   "desc.dashboard.dashboard": "Dashboard card layout",
   "dashboard.lock": "Lock layout (enable text selection)",
-  "dashboard.unlock": "Unlock layout (drag to rearrange)"
+  "dashboard.unlock": "Unlock layout (drag to rearrange)",
+  "dashboard.mdUsage": "Usage"
 }

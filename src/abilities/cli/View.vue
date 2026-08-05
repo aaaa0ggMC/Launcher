@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-cli' })
+defineOptions({ name: 'CockpitCli' })
 
 import { ref, shallowRef, nextTick, onMounted, onActivated, inject } from 'vue'
 import type { Ref } from 'vue'
@@ -134,6 +134,22 @@ onActivated(async () => {
   await nextTick()
   focusInput()
 })
+
+/** Export the CLI transcript as markdown (prompts bold, output verbatim). */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'cli.mdHeading')]
+  for (const l of history.value) {
+    const text = l.text.replace(/\r?\n/g, '\n')
+    if (l.kind === 'in') {
+      lines.push(`- **❯ ${text.replace(/\n/g, ' ')}**`)
+    } else {
+      for (const seg of text.split('\n')) lines.push(seg)
+    }
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

@@ -73,5 +73,6 @@
   "settings.languageCaption": "切换语言后需重载页面才能生效。",
   "animation.slideUp": "上滑",
   "animation.zoom": "缩放",
-  "animation.flip": "翻转"
+  "animation.flip": "翻转",
+  "settings.mdHeading": "## 设置"
 }

@@ -73,5 +73,6 @@
   "settings.languageCaption": "Switch language — reloads the page to apply.",
   "animation.slideUp": "Slide Up",
   "animation.zoom": "Zoom",
-  "animation.flip": "Flip"
+  "animation.flip": "Flip",
+  "settings.mdHeading": "## Settings"
 }

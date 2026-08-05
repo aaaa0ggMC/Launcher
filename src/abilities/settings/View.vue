@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-settings' })
+defineOptions({ name: 'CockpitSettings' })
 
 import { computed, inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
@@ -100,6 +100,26 @@ function selectCategory(id: string): void {
   activeCategoryId.value = id
   query.value = ''
 }
+
+/** Export all injected settings sections as markdown (labels + descriptions). */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'settings.mdHeading')]
+  if (sections.value.length === 0) {
+    lines.push(`- ${translate(uiLang.value, 'settings.empty')}`)
+    return lines.join('\n')
+  }
+  for (const cat of sections.value) {
+    const label = translate(uiLang.value, 'label.' + cat.label, cat.label)
+    lines.push('', `### ${label}${cat.description ? ` — ${cat.description}` : ''}`)
+    for (const item of cat.items) {
+      const ilabel = translate(uiLang.value, 'label.' + item.label, item.label)
+      lines.push(`- **${ilabel}**${item.description ? ` — ${item.description}` : ''}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

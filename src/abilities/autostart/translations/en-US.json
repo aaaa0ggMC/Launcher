@@ -8,5 +8,8 @@
   "autostart.empty": "No autostart entries",
   "autostart.emptyText": "No .desktop files found in ~/.config/autostart.",
   "autostart.list.desc": "List autostart entries",
-  "autostart.toggle.desc": "Enable/disable an autostart entry (--file --hidden true|false)"
+  "autostart.toggle.desc": "Enable/disable an autostart entry (--file --hidden true|false)",
+  "autostart.mdHeading": "## Autostart",
+  "autostart.mdExec": "Exec",
+  "autostart.mdFile": "File"
 }

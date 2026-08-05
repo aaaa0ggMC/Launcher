@@ -83,5 +83,12 @@
   "apps.create.desc": "Create a new entry (--root --id --patch <json> [--mkdir true])",
   "apps.rescan.desc": "Rescan a directory for drafts (--root)",
   "launch.run.desc": "Launch an app (--root --id)",
-  "launch.action.desc": "Run an app action (--root --id --action)"
+  "launch.action.desc": "Run an app action (--root --id --action)",
+  "apps.mdHeading": "## App Registry",
+  "apps.mdRoots": "Search roots: {paths}",
+  "apps.mdMissing": "missing",
+  "apps.mdExec": "Exec",
+  "apps.mdRisk": "Risk",
+  "apps.mdTags": "Tags",
+  "apps.mdActions": "Actions"
 }

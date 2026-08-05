@@ -510,6 +510,46 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => unsub?.())
+
+/** Export the app registry as markdown (name/desc/path/exec/risk/tags/actions). */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'apps.mdHeading')]
+  if (roots.value.length) {
+    lines.push(
+      translateTemplate(uiLang.value, 'apps.mdRoots', {
+        paths: roots.value.map((r) => `\`${r.path}\``).join(' · ')
+      })
+    )
+    lines.push('')
+  }
+  for (const { id, entry } of entries.value) {
+    const name = localize(entry, 'name', uiLang.value) || entry.name
+    const missing = entry.missing ? ` _(${translate(uiLang.value, 'apps.mdMissing')})_` : ''
+    lines.push(`- **${name}**${missing} — ${entry.description || entry.path}`)
+    lines.push(`  - ID: \`${id}\` · Path: \`${entry.path}\``)
+    if (entry.exec.command.length)
+      lines.push(
+        `  - ${translate(uiLang.value, 'apps.mdExec')}: \`${entry.exec.command.join(' ')}\``
+      )
+    const risk = entry.security?.risk
+    if (risk && risk !== 'low')
+      lines.push(`  - ${translate(uiLang.value, 'apps.mdRisk')}: **${risk}**`)
+    const tags = entryTags(entry)
+    if (tags.length) lines.push(`  - ${translate(uiLang.value, 'apps.mdTags')}: ${tags.join(', ')}`)
+    const acts = Object.entries(entry.actions ?? {})
+    if (acts.length) {
+      lines.push(`  - ${translate(uiLang.value, 'apps.mdActions')}:`)
+      for (const [aid, a] of acts) {
+        const cmd = a.exec?.command?.join(' ') ?? ''
+        lines.push(`    - **${a.name || aid}**${cmd ? ` — \`${cmd}\`` : ''}`)
+      }
+    }
+  }
+  if (entries.value.length === 0) lines.push(`- ${translate(uiLang.value, 'apps.empty')}`)
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

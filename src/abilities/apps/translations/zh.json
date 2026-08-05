@@ -83,5 +83,12 @@
   "apps.create.desc": "创建新条目 (--root --id --patch <json> [--mkdir true])",
   "apps.rescan.desc": "重扫目录生成草稿 (--root)",
   "launch.run.desc": "启动应用 (--root --id)",
-  "launch.action.desc": "运行应用的附加操作 (--root --id --action)"
+  "launch.action.desc": "运行应用的附加操作 (--root --id --action)",
+  "apps.mdHeading": "## 应用注册表",
+  "apps.mdRoots": "搜索目录: {paths}",
+  "apps.mdMissing": "缺失",
+  "apps.mdExec": "执行",
+  "apps.mdRisk": "风险",
+  "apps.mdTags": "标签",
+  "apps.mdActions": "操作"
 }

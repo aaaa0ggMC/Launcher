@@ -12,5 +12,6 @@
   "logs.exported": "已导出 {n} 条日志",
   "logs.loadOlder": "加载更早日志",
   "logs.empty": "暂无日志",
-  "logs.total": "共 {n} 条"
+  "logs.total": "共 {n} 条",
+  "logs.mdHeading": "## 日志"
 }

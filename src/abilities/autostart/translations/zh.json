@@ -8,5 +8,8 @@
   "autostart.empty": "没有自启动项",
   "autostart.emptyText": "~/.config/autostart 中没有 .desktop 文件。",
   "autostart.list.desc": "列出开机自启动项",
-  "autostart.toggle.desc": "启用/禁用启动项 (--file --hidden true|false)"
+  "autostart.toggle.desc": "启用/禁用启动项 (--file --hidden true|false)",
+  "autostart.mdHeading": "## 自启动项",
+  "autostart.mdExec": "执行",
+  "autostart.mdFile": "文件"
 }

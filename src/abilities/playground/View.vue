@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-playground' })
+defineOptions({ name: 'CockpitPlayground' })
 
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
@@ -100,6 +100,58 @@ const snackOpen = ref(false)
 const snackText = ref('')
 // Remember whether the right Provider panel is expanded or collapsed.
 const [panelCollapsed, setPanelCollapsed] = useLocalStorage<boolean>('rp_panel_collapsed', false)
+
+/** delete confirmation dialog — the delete button sits right by the collapse
+ *  header, so a misclick must never wipe a template silently. */
+const confirmDelete = ref(false)
+const deleting = ref(false)
+function requestDelete(): void {
+  confirmDelete.value = true
+}
+async function confirmDeleteTemplate(): Promise<void> {
+  deleting.value = true
+  try {
+    deleteTemplate()
+    confirmDelete.value = false
+  } finally {
+    deleting.value = false
+  }
+}
+
+// --- markdown export (copy current view → App.vue calls toMarkdown) ---
+interface MdComponent {
+  toMarkdown?: () => string
+}
+const editorRef = ref<MdComponent | null>(null)
+const formRef = ref<MdComponent | null>(null)
+const finalRef = ref<MdComponent | null>(null)
+const responseRef = ref<MdComponent | null>(null)
+const globalsRef = ref<MdComponent | null>(null)
+const listRef = ref<MdComponent | null>(null)
+
+/** Compose the page into markdown: template list, active template config,
+ *  filled form values, global vars (secrets masked by GlobalVars), raw
+ *  response and final transformed results. */
+function toMarkdown(): string {
+  const parts: string[] = []
+  const listMd = listRef.value?.toMarkdown?.()
+  if (listMd) parts.push(listMd)
+  if (active.value) {
+    const editorMd = editorRef.value?.toMarkdown?.()
+    if (editorMd) parts.push(editorMd)
+    const formMd = formRef.value?.toMarkdown?.()
+    if (formMd) parts.push(formMd)
+  }
+  const globalsMd = globalsRef.value?.toMarkdown?.()
+  if (globalsMd) parts.push(globalsMd)
+  const responseMd = responseRef.value?.toMarkdown?.()
+  if (responseMd) parts.push(responseMd)
+  const finalMd = finalRef.value?.toMarkdown?.()
+  if (finalMd) parts.push(finalMd)
+  return parts.join('\n\n')
+}
+
+defineExpose({ toMarkdown })
 
 /** background tasks subscribed to catch async-task results pushed as data */
 const btTaskId = ref<string | null>(null)
@@ -431,7 +483,7 @@ async function handleExport(): Promise<void> {
     }
   }
   const path = await window.cockpit.pickSaveFile({
-    title: '导出配置',
+    title: t('pg.export'),
     defaultPath: `playground-${Date.now()}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
@@ -446,14 +498,14 @@ async function handleExport(): Promise<void> {
     })
     snackOpen.value = true
   } else {
-    snackText.value = res?.error ?? '导出失败'
+    snackText.value = res?.error ?? t('pg.exportFailed')
     snackOpen.value = true
   }
 }
 
 async function handleImport(): Promise<void> {
   const path = await window.cockpit.pickFile({
-    title: '导入配置',
+    title: t('pg.import'),
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (!path) return
@@ -467,7 +519,7 @@ async function handleImport(): Promise<void> {
   } | null
   if (!res?.ok) {
     snackText.value = translateTemplate(uiLang.value, 'pg.importFailed', {
-      err: res?.error ?? '未知错误'
+      err: res?.error ?? t('pg.unknownError')
     })
     snackOpen.value = true
     return
@@ -505,25 +557,31 @@ onBeforeUnmount(() => {
     <div class="d-flex align-center ga-2 mb-3 flex-wrap">
       <div>
         <div class="text-h6 font-weight-medium">{{ t('pg.title') }}</div>
-        <div class="text-caption on-surface-variant mt-1">API 请求模板 · 变量插值 · 响应变换</div>
+        <div class="text-caption on-surface-variant mt-1">{{ t('pg.pgSubtitle') }}</div>
       </div>
       <v-spacer />
-      <v-btn variant="tonal" prepend-icon="mdi-export" @click="handleExport">导出</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-import" @click="handleImport">导入</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-export" @click="handleExport">{{
+        t('pg.export')
+      }}</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-import" @click="handleImport">{{
+        t('pg.import')
+      }}</v-btn>
     </div>
 
     <!-- main area: editor + form + response fills the page -->
     <div class="pg-main">
       <template v-if="active">
         <TemplateEditor
+          ref="editorRef"
           :template="active"
           :global-var-names="globalVarNames"
           :templates="templates"
           @change="updateTemplate"
-          @delete="deleteTemplate"
+          @delete="requestDelete"
         />
         <v-divider class="my-3" />
         <DynamicForm
+          ref="formRef"
           :vars="allVars"
           :values="varValues"
           :loading="loading"
@@ -534,8 +592,9 @@ onBeforeUnmount(() => {
           @clear-history="clearHistory"
         />
         <v-divider class="my-3" />
-        <FinalResponse :results="allResults" @retry="handleRetryTask" />
+        <FinalResponse ref="finalRef" :results="allResults" @retry="handleRetryTask" />
         <ResponseViewer
+          ref="responseRef"
           :status="response.status"
           :body="response.body"
           :duration="response.duration"
@@ -545,7 +604,7 @@ onBeforeUnmount(() => {
           @copy-raw="handleCopyRaw"
         />
       </template>
-      <div v-else class="text-caption on-surface-variant pa-3">请选择或新建一个请求模板</div>
+      <div v-else class="text-caption on-surface-variant pa-3">{{ t('pg.noActive') }}</div>
     </div>
 
     <!-- right floating collapsible sidebar: templates + globals -->
@@ -556,15 +615,16 @@ onBeforeUnmount(() => {
           :icon="panelCollapsed ? 'mdi-chevron-left' : 'mdi-chevron-right'"
           size="small"
           variant="tonal"
-          :title="panelCollapsed ? '展开' : '折叠'"
+          :title="panelCollapsed ? t('pg.expandAll') : t('pg.collapse')"
           @click="setPanelCollapsed(!panelCollapsed)"
         />
       </div>
 
       <div v-if="!panelCollapsed" class="pg-panel__body">
-        <GlobalVars :vars="globalVars" @change="setGlobalVars" />
+        <GlobalVars ref="globalsRef" :vars="globalVars" @change="setGlobalVars" />
         <v-divider class="my-2" />
         <TemplateList
+          ref="listRef"
           :templates="templates"
           :active-id="activeId"
           @select="selectTemplate"
@@ -576,6 +636,29 @@ onBeforeUnmount(() => {
     <v-snackbar v-model="snackOpen" :timeout="2500" color="success" location="top">
       {{ snackText }}
     </v-snackbar>
+
+    <v-dialog v-model="confirmDelete" max-width="420">
+      <v-card rounded="xl">
+        <v-card-title class="d-flex align-center ga-2 px-5 pt-4 pb-2">
+          <v-icon color="error">mdi-delete-alert-outline</v-icon>
+          <span class="text-subtitle-1 font-weight-medium">{{ t('pg.deleteTitle') }}</span>
+        </v-card-title>
+        <v-card-text class="px-5 pb-4 text-body-2">
+          {{
+            translateTemplate(uiLang, 'pg.deleteConfirm', {
+              name: active?.name || t('pg.untitled')
+            })
+          }}
+        </v-card-text>
+        <v-card-actions class="px-4 pb-3">
+          <v-spacer />
+          <v-btn variant="tonal" @click="confirmDelete = false">{{ t('pg.cancel') }}</v-btn>
+          <v-btn variant="tonal" color="error" :loading="deleting" @click="confirmDeleteTemplate">
+            {{ t('pg.delete') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 

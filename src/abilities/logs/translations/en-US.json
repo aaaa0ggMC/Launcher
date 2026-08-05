@@ -12,5 +12,6 @@
   "logs.exported": "Exported {n} log lines",
   "logs.loadOlder": "Load older",
   "logs.empty": "No logs yet",
-  "logs.total": "{n} lines"
+  "logs.total": "{n} lines",
+  "logs.mdHeading": "## Logs"
 }

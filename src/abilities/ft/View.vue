@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-ft' })
+defineOptions({ name: 'CockpitFt' })
 
 import {
   inject,
@@ -64,9 +64,11 @@ let engine: FtEngine | null = null
 let scene: FtScene | null = null
 let raf = 0
 let last = 0
+let lastTick = 0
 let fpsCount = 0
 let fpsStart = 0
 let statsLast = 0
+let watchdog: number | null = null
 let dragButton = -1
 let lastX = 0
 let lastY = 0
@@ -137,12 +139,13 @@ interface FtVectorLike {
 // ---------------------------------------------------------------------------
 // Render loop
 // ---------------------------------------------------------------------------
-function tick(now: number): void {
-  if (!engine || !scene) {
-    raf = requestAnimationFrame(tick)
-    return
-  }
-  const dt = Math.min((now - last) / 1000, 0.05)
+/**
+ * Advance one simulation frame and draw it. Everything that must happen every
+ * frame lives here so BOTH the rAF chain and the stall watchdog can drive it.
+ */
+function step(now: number): void {
+  if (!engine || !scene) return
+  const dt = Math.min(Math.max((now - last) / 1000, 0), 0.05)
   last = now
   const chain = engine.step(dt)
   if (chain) {
@@ -151,6 +154,7 @@ function tick(now: number): void {
     scene.updateTrack(engine.track, engine.time)
   }
   scene.render()
+  lastTick = now
 
   fpsCount++
   if (now - fpsStart >= 1000) {
@@ -166,21 +170,51 @@ function tick(now: number): void {
     if (currentChain) state.tip = { ...currentChain.tip }
     state.zoom = scene.getZoom()
   }
+}
+
+function tick(now: number): void {
+  step(now)
   raf = requestAnimationFrame(tick)
 }
 
 function startLoop(): void {
-  if (raf) return
+  if (raf || watchdog) return
   last = performance.now()
   fpsStart = last
   statsLast = last
+  lastTick = last
   raf = requestAnimationFrame(tick)
+  // Watchdog: on some Wayland/Electron setups `requestAnimationFrame` can be
+  // throttled to a standstill after the window has been occluded or idle for a
+  // long time, silently freezing any rAF-driven canvas (blank, no errors).
+  // Whenever the rAF chain stops producing frames, drive `step` from a timer
+  // so the scene keeps rendering (~30fps); as soon as rAF resumes it takes
+  // over again.
+  watchdog = window.setInterval(() => {
+    if (raf && performance.now() - lastTick > 100) {
+      step(performance.now())
+    }
+  }, 33)
 }
 
 function stopLoop(): void {
   if (raf) cancelAnimationFrame(raf)
   raf = 0
+  if (watchdog !== null) window.clearInterval(watchdog)
+  watchdog = null
 }
+
+/** Restart rendering when the window becomes visible again (also heals a
+ *  stuck rAF loop — the visibility event re-arms the chain from scratch). */
+function onVisibility(): void {
+  if (document.visibilityState === 'visible') {
+    startLoop()
+    scene?.resize()
+  } else {
+    stopLoop()
+  }
+}
+document.addEventListener('visibilitychange', onVisibility)
 
 // ---------------------------------------------------------------------------
 // Actions (also keyboard-triggered)
@@ -246,6 +280,7 @@ function onPointerUp(): void {
 onMounted(async () => {
   const host = hostRef.value
   if (!host) return
+  if (engine && scene) return
   engine = new FtEngine()
   scene = new FtScene(host)
 
@@ -264,6 +299,12 @@ onMounted(async () => {
   ro = new ResizeObserver(() => scene?.resize())
   ro.observe(host)
 
+  // Start the loop here as well (not only in onActivated) so a mount that the
+  // keep-alive/transition layer fails to "activate" still steps the sim —
+  // otherwise time stays 0.0s and the canvas stays blank. startLoop is guarded
+  // against double-starting.
+  startLoop()
+
   try {
     const meta = (await window.cockpit.command('ft.presets')) as FtPresetMeta[] | null
     if (Array.isArray(meta)) presets.value = meta
@@ -274,8 +315,14 @@ onMounted(async () => {
 })
 
 onActivated(() => {
+  // If the cached instance survived an unmount/double-mount dance with its
+  // scene disposed, rebuild it from scratch instead of freezing.
+  if (!engine || !scene) void initScene()
   startLoop()
-  scene?.resize()
+  // Re-measure after the browser has laid the re-inserted page out (the same
+  // double-rAF pattern the dashboard uses for keep-alive re-entry); the canvas
+  // must never be left at the 0×0 it had while the page was hidden.
+  requestAnimationFrame(() => requestAnimationFrame(() => scene?.resize()))
 })
 
 onDeactivated(() => {
@@ -284,11 +331,34 @@ onDeactivated(() => {
 
 onBeforeUnmount(() => {
   stopLoop()
+  document.removeEventListener('visibilitychange', onVisibility)
   ro?.disconnect()
   scene?.dispose()
   scene = null
   engine = null
 })
+
+/** (Re)create the engine + scene — used by onMounted and to heal a cached
+ *  instance whose scene was disposed by an intermediate unmount. */
+async function initScene(): Promise<void> {
+  const host = hostRef.value
+  if (!host || engine || scene) return
+  engine = new FtEngine()
+  scene = new FtScene(host)
+  scene.setOptions({
+    showCoords: state.show.coords,
+    showCircles: state.show.circles,
+    showVectors: state.show.vectors,
+    showTrack: state.show.track,
+    showFinal: state.show.final,
+    neon: state.neon
+  })
+  scene.setMode(state.mode)
+  scene.setFollow(state.follow)
+  ro = new ResizeObserver(() => scene?.resize())
+  ro.observe(host)
+  await loadPreset(state.currentPreset || 'circle')
+}
 
 // ---------------------------------------------------------------------------
 // State → engine/scene sync
@@ -333,6 +403,39 @@ watch(
     }),
   { deep: true }
 )
+
+/** Export the current simulation config (state + vector set) as markdown. */
+function toMarkdown(): string {
+  const lines: string[] = [t('ft.mdHeading')]
+  const status = state.running ? t('ft.info.running') : t('ft.info.paused')
+  lines.push(
+    `- ${t('ft.info.status')}: **${status}** · ${t('ft.info.mode')}: ${state.mode} · ${t('ft.info.zoom')}: ${state.zoom.toFixed(2)}`
+  )
+  lines.push(
+    `- ${t('ft.info.time')}: ${state.time.toFixed(2)}s · ${t('ft.info.vectors')}: ${state.vectorCount} · ${t('ft.info.points')}: ${state.trackCount} · FPS: ${state.fps}`
+  )
+  if (state.tip) {
+    lines.push(`- ${t('ft.info.tip')}: (${state.tip.x.toFixed(3)}, ${state.tip.y.toFixed(3)})`)
+  }
+  if (state.currentPreset) {
+    lines.push(`- ${t('ft.mdPreset')}: ${state.currentPreset}`)
+  }
+  lines.push('', `### ${t('ft.mdVectors')} (${state.vectors.length})`)
+  if (state.vectors.length === 0) {
+    lines.push(`- ${t('ft.edit.empty')}`)
+    return lines.join('\n')
+  }
+  state.vectors.forEach((v, i) => {
+    const x = Number(v.x.toFixed(3))
+    const y = Number(v.y.toFixed(3))
+    const period =
+      v.secperRound === 0 ? t('ft.mdStatic') : `${v.secperRound}s/${t('ft.mdPerRound')}`
+    lines.push(`- **${i + 1}** — x: \`${x}\`, y: \`${y}\` · ${period}`)
+  })
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

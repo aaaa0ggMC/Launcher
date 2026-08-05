@@ -11,5 +11,6 @@
   "systemd.start": "启动",
   "systemd.empty": "没有匹配的服务",
   "systemd.list.desc": "列出用户 systemd 服务",
-  "systemd.action.desc": "启动/停止/重启服务 (--name --action)"
+  "systemd.action.desc": "启动/停止/重启服务 (--name --action)",
+  "systemd.mdHeading": "## Systemd 服务"
 }

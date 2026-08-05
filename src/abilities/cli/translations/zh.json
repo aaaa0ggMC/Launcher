@@ -32,5 +32,6 @@
   "cli.launch.failed": "执行失败: {error}",
   "cli.launch.started": "已启动 {name}{pid}",
   "cli.launch.failedStart": "启动失败: {error}",
-  "cli.info.usageGeneric": "用法: info <alias>"
+  "cli.info.usageGeneric": "用法: info <alias>",
+  "cli.mdHeading": "## CLI 会话记录"
 }

@@ -5,7 +5,7 @@ import type { AutostartEntry } from './types'
 import { translate } from '@ui/i18n'
 import LoadingBar from '@ui/components/LoadingBar.vue'
 
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 const entries = shallowRef<AutostartEntry[]>([])
 const loading = ref(false)
@@ -34,12 +34,34 @@ async function toggle(e: AutostartEntry): Promise<void> {
 }
 
 onMounted(load)
+
+/** Export autostart entries as markdown (name + enabled state + exec + file). */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'autostart.mdHeading')]
+  if (entries.value.length === 0) {
+    lines.push(`- ${translate(uiLang.value, 'autostart.empty')}`)
+    return lines.join('\n')
+  }
+  for (const e of entries.value) {
+    const state = e.hidden
+      ? translate(uiLang.value, 'autostart.disabled')
+      : translate(uiLang.value, 'autostart.enabled')
+    lines.push(`- **${e.name}** — ${state}`)
+    lines.push(`  - ${translate(uiLang.value, 'autostart.mdExec')}: \`${e.exec}\``)
+    lines.push(`  - ${translate(uiLang.value, 'autostart.mdFile')}: \`${e.file}\``)
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>
   <div>
     <div class="text-h6 font-weight-medium mb-1">{{ translate(uiLang, 'autostart.heading') }}</div>
-    <div class="text-caption on-surface-variant mb-4">{{ translate(uiLang, 'autostart.subtitle') }}</div>
+    <div class="text-caption on-surface-variant mb-4">
+      {{ translate(uiLang, 'autostart.subtitle') }}
+    </div>
 
     <LoadingBar :loading="loading" :error="error" />
 
@@ -54,7 +76,11 @@ onMounted(load)
               <div class="d-flex align-center ga-2">
                 <span class="text-body-1 font-weight-medium text-truncate">{{ e.name }}</span>
                 <v-chip size="x-small" variant="tonal" :color="e.hidden ? '' : 'success'">
-                  {{ e.hidden ? translate(uiLang, 'autostart.disabled') : translate(uiLang, 'autostart.enabled') }}
+                  {{
+                    e.hidden
+                      ? translate(uiLang, 'autostart.disabled')
+                      : translate(uiLang, 'autostart.enabled')
+                  }}
                 </v-chip>
               </div>
               <div class="text-caption on-surface-variant text-truncate mt-1">{{ e.exec }}</div>

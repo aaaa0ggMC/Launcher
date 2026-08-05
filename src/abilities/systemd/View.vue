@@ -50,6 +50,23 @@ function colorFor(u: SystemdUnit): string {
 }
 
 onMounted(load)
+
+/** Export the (filtered) systemd unit list as markdown. */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'systemd.mdHeading')]
+  if (filtered.value.length === 0) {
+    lines.push(`- ${translate(uiLang.value, 'systemd.empty')}`)
+    return lines.join('\n')
+  }
+  for (const u of filtered.value) {
+    lines.push(
+      `- **\`${u.name}\`** — \`${u.active} / ${u.sub}\`${u.description ? ` — ${u.description}` : ''}`
+    )
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

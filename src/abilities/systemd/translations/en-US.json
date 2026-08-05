@@ -11,5 +11,6 @@
   "systemd.start": "Start",
   "systemd.empty": "No matching services",
   "systemd.list.desc": "List user systemd services",
-  "systemd.action.desc": "Start/stop/restart a service (--name --action)"
+  "systemd.action.desc": "Start/stop/restart a service (--name --action)",
+  "systemd.mdHeading": "## Systemd Services"
 }

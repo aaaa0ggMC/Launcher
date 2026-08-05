@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { inject, ref } from 'vue'
+import type { Ref } from 'vue'
 import type { RespTransform } from '../types'
+import { translate } from '@ui/i18n'
+import { inline } from '../markdown'
 
 const props = defineProps<{
   transforms: RespTransform[]
@@ -11,7 +14,71 @@ const emit = defineEmits<{
   change: [transforms: RespTransform[]]
 }>()
 
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+
+/** Render one transform as a compact markdown bullet (recurses into nested). */
+function transformMd(rt: RespTransform, indent: string): string[] {
+  const out: string[] = []
+  const head = `${indent}- [\`${rt.type}\`] ${rt.label || '#'}`
+  const detail: string[] = []
+  if (rt.type === 'text' && rt.format) detail.push(`format=\`${inline(rt.format)}\``)
+  if (rt.type === 'script') {
+    if (rt.script) detail.push(`script=\`${inline(rt.script.slice(0, 120))}\``)
+    if (rt.localVars?.length)
+      detail.push(
+        `local=${rt.localVars.map((v) => `${v.key}=${v.value ?? ''}`.slice(0, 40)).join(';')}`
+      )
+  }
+  if (['img', 'audio', 'audio-url', 'video-url'].includes(rt.type) && rt.entry)
+    detail.push(`entry=\`${inline(rt.entry)}\``)
+  if (rt.type === 'task') {
+    if (rt.entry) detail.push(`id=\`${inline(rt.entry)}\``)
+    if (rt.taskAddr) detail.push(`poll=\`${inline(rt.taskAddr)}\``)
+    if (rt.taskPollMs) detail.push(`pollMs=${rt.taskPollMs}`)
+  }
+  out.push(detail.length ? `${head} — ${detail.join(' · ')}` : head)
+  for (const sub of rt.taskTransforms ?? []) out.push(...transformMd(sub, indent + '  '))
+  return out
+}
+
+/** Export the transform chain as markdown (used by TemplateEditor's toMarkdown). */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'pg.mdTransforms')]
+  if (props.transforms.length === 0) {
+    lines.push(`- ${t('pg.noTransforms')}`)
+    return lines.join('\n')
+  }
+  for (const rt of props.transforms) lines.push(...transformMd(rt, ''))
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
+
 const collapsedIds = ref<Record<string, boolean>>({})
+
+/** Script transform: local edit → explicit commit (Update). Drafts are keyed
+ *  by transform id; typing only updates the draft, Update writes it back and
+ *  bumps scriptVersion (which is what actually re-runs the transform). */
+const scriptDrafts = ref<Record<string, string>>({})
+function scriptDraft(t: RespTransform): string {
+  return scriptDrafts.value[t.id] ?? t.script ?? ''
+}
+function setScriptDraft(id: string, v: string): void {
+  scriptDrafts.value = { ...scriptDrafts.value, [id]: v }
+}
+function isScriptDirty(t: RespTransform): boolean {
+  return (scriptDrafts.value[t.id] ?? t.script ?? '') !== (t.script ?? '')
+}
+function commitScript(i: number, t: RespTransform): void {
+  const draft = scriptDrafts.value[t.id] ?? t.script ?? ''
+  // commit: write draft into the transform + bump version to re-run
+  const next = props.transforms.map((x, j) =>
+    j === i ? { ...x, script: draft, scriptVersion: (x.scriptVersion ?? 0) + 1 } : x
+  )
+  scriptDrafts.value = { ...scriptDrafts.value, [t.id]: draft }
+  emit('change', next)
+}
 
 const TYPES = [
   { title: 'Text', value: 'text' },
@@ -138,13 +205,15 @@ function removeLocalVar(i: number, j: number): void {
 <template>
   <div class="pg-transforms">
     <div class="d-flex align-center justify-space-between mb-2">
-      <span class="text-subtitle-2 font-weight-medium">响应变换</span>
-      <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addTransform">
-        添加变换
+      <span class="text-subtitle-2 font-weight-medium">{{ t('pg.respTransforms') }}</span>
+      <v-btn variant="tonal" prepend-icon="mdi-plus" @click="addTransform">
+        {{ t('pg.addTransform') }}
       </v-btn>
     </div>
 
-    <div v-if="transforms.length === 0" class="text-caption on-surface-variant mb-2">暂无变换</div>
+    <div v-if="transforms.length === 0" class="text-caption on-surface-variant mb-2">
+      {{ t('pg.noTransforms') }}
+    </div>
 
     <div v-for="(rt, i) in transforms" :key="rt.id" class="pg-transform-item mb-2">
       <div class="d-flex align-center ga-2 pa-2 pg-transform-header" @click="toggle(rt.id)">
@@ -181,7 +250,7 @@ function removeLocalVar(i: number, j: number): void {
               density="compact"
               variant="outlined"
               hide-details
-              label="名称"
+              :label="t('pg.name')"
               placeholder="e.g. Extract reply text"
               @update:model-value="patch(i, 'label', $event as string)"
             />
@@ -193,7 +262,7 @@ function removeLocalVar(i: number, j: number): void {
               density="compact"
               variant="outlined"
               hide-details
-              label="类型"
+              :label="t('pg.type')"
               @update:model-value="patch(i, 'type', $event as RespTransform['type'])"
             />
           </v-col>
@@ -206,9 +275,9 @@ function removeLocalVar(i: number, j: number): void {
           variant="outlined"
           hide-details
           class="mt-2 font-mono"
-          label="格式 — JSON 路径"
+          :label="t('pg.formatLabel')"
           rows="2"
-          :hint="'— {.path}；数组枚举 0. … 1. …；[X] 同步多路径；不同数组根笛卡尔积'"
+          :hint="t('pg.formatHintShort')"
           persistent-hint
           placeholder="{.choices[0].message.content}"
           @update:model-value="patch(i, 'format', $event as string)"
@@ -217,26 +286,21 @@ function removeLocalVar(i: number, j: number): void {
         <!-- script -->
         <template v-if="rt.type === 'script'">
           <v-textarea
-            :model-value="rt.script"
+            :model-value="scriptDraft(rt)"
             variant="outlined"
             hide-details
             class="mt-2 font-mono"
-            label="脚本 (JS)"
+            :label="t('pg.scriptLabel')"
             rows="8"
-            :hint="'object=解析后的 JSON，global_vars=全局变量。用 context.transform.add_text/add_img/add_audio/add_video。点击「更新」运行。'"
+            :hint="t('pg.scriptHintShort')"
             persistent-hint
             placeholder="context.transform.add_text('Reply', object.choices[0].message.content)"
-            @update:model-value="patch(i, 'script', $event as string)"
+            @update:model-value="setScriptDraft(rt.id, $event as string)"
           />
           <div class="d-flex align-center justify-space-between mt-2">
-            <span class="text-caption on-surface-variant">局部变量 (context.local.NAME)</span>
-            <v-btn
-              size="small"
-              variant="tonal"
-              prepend-icon="mdi-check"
-              @click="patch(i, 'scriptVersion', (rt.scriptVersion ?? 0) + 1)"
-            >
-              更新{{ (rt.script ?? '') !== '' ? ' *' : '' }}
+            <span class="text-caption on-surface-variant">{{ t('pg.localVarsLabel') }}</span>
+            <v-btn variant="tonal" prepend-icon="mdi-check" @click="commitScript(i, rt)">
+              {{ t('pg.update') }}{{ isScriptDirty(rt) ? ' *' : '' }}
             </v-btn>
           </div>
           <div v-for="(lv, j) in rt.localVars ?? []" :key="j" class="d-flex align-center ga-2 mt-1">
@@ -262,14 +326,8 @@ function removeLocalVar(i: number, j: number): void {
               <v-icon>mdi-close</v-icon>
             </v-btn>
           </div>
-          <v-btn
-            size="small"
-            variant="text"
-            prepend-icon="mdi-plus"
-            class="mt-1"
-            @click="addLocalVar(i)"
-          >
-            添加局部变量
+          <v-btn variant="text" prepend-icon="mdi-plus" class="mt-1" @click="addLocalVar(i)">
+            {{ t('pg.addLocalVar') }}
           </v-btn>
         </template>
 
@@ -281,7 +339,7 @@ function removeLocalVar(i: number, j: number): void {
             density="compact"
             hide-details
             class="mt-2 font-mono"
-            :label="rt.type === 'img' || rt.type === 'audio' ? '入口路径' : '入口 URL'"
+            :label="rt.type === 'img' || rt.type === 'audio' ? t('pg.entry') : t('pg.entryUrl')"
             placeholder=".images[0]"
             @update:model-value="patch(i, 'entry', $event as string)"
           />
@@ -296,7 +354,7 @@ function removeLocalVar(i: number, j: number): void {
                 density="compact"
                 variant="outlined"
                 hide-details
-                label="编码"
+                :label="t('pg.encoding')"
                 @update:model-value="patch(i, 'encoding', $event as RespTransform['encoding'])"
               />
             </v-col>
@@ -308,7 +366,7 @@ function removeLocalVar(i: number, j: number): void {
             density="compact"
             hide-details
             class="mt-2"
-            label="MIME 类型 (留空自动检测)"
+            :label="t('pg.mimeAuto')"
             placeholder="auto"
             spellcheck="false"
             @update:model-value="patch(i, 'audioMime', $event as string)"
@@ -324,7 +382,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="任务 ID 路径"
+                :label="t('pg.taskIdPath')"
                 placeholder=".task_id"
                 class="font-mono"
                 @update:model-value="patch(i, 'entry', $event as string)"
@@ -336,7 +394,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="轮询 URL"
+                :label="t('pg.pollUrl')"
                 placeholder="https://api.example.com/v1/task"
                 class="font-mono"
                 @update:model-value="patch(i, 'taskAddr', $event as string)"
@@ -348,7 +406,7 @@ function removeLocalVar(i: number, j: number): void {
             variant="outlined"
             hide-details
             class="mt-2 font-mono"
-            label="请求头 (每行 Key: value)"
+            :label="t('pg.taskHeaders')"
             rows="2"
             @update:model-value="patch(i, 'taskHeaders', $event as string)"
           />
@@ -358,7 +416,7 @@ function removeLocalVar(i: number, j: number): void {
             density="compact"
             hide-details
             class="mt-2 font-mono"
-            label="查询参数 (task_id 自动填充)"
+            :label="t('pg.queryAuto')"
             placeholder="&other={.path}"
             @update:model-value="patch(i, 'taskQuery', $event as string)"
           />
@@ -369,7 +427,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="状态路径"
+                :label="t('pg.statusPath')"
                 placeholder=".task.status"
                 class="font-mono"
                 @update:model-value="patch(i, 'taskStatusPath', $event as string)"
@@ -381,7 +439,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="成功值"
+                :label="t('pg.successVal')"
                 placeholder="SUCCESS"
                 class="font-mono"
                 @update:model-value="patch(i, 'taskStatusVal', $event as string)"
@@ -395,7 +453,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="失败原因路径"
+                :label="t('pg.failReasonPath')"
                 placeholder=".task.reason"
                 class="font-mono"
                 @update:model-value="patch(i, 'taskFailReasonPath', $event as string)"
@@ -407,7 +465,7 @@ function removeLocalVar(i: number, j: number): void {
                 variant="outlined"
                 density="compact"
                 hide-details
-                label="失败值"
+                :label="t('pg.failVal')"
                 placeholder="FAILED"
                 class="font-mono"
                 @update:model-value="patch(i, 'taskFailVal', $event as string)"
@@ -421,7 +479,7 @@ function removeLocalVar(i: number, j: number): void {
             density="compact"
             hide-details
             class="mt-2"
-            label="轮询间隔 (ms)"
+            :label="t('pg.pollInterval')"
             style="max-width: 160px"
             @update:model-value="patch(i, 'taskPollMs', Number($event))"
           />
@@ -429,16 +487,16 @@ function removeLocalVar(i: number, j: number): void {
           <!-- nested transforms -->
           <div class="mt-3">
             <div class="d-flex align-center justify-space-between mb-1">
-              <span class="text-caption on-surface-variant">响应变换</span>
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addNested(i)"
-                >添加</v-btn
-              >
+              <span class="text-caption on-surface-variant">{{ t('pg.nestedTransforms') }}</span>
+              <v-btn variant="tonal" prepend-icon="mdi-plus" @click="addNested(i)">{{
+                t('pg.addTransform')
+              }}</v-btn>
             </div>
             <div
               v-if="(rt.taskTransforms ?? []).length === 0"
               class="text-caption on-surface-variant mb-1"
             >
-              暂无响应变换
+              {{ t('pg.noTransforms') }}
             </div>
             <div
               v-for="(sub, si) in rt.taskTransforms ?? []"
@@ -485,7 +543,7 @@ function removeLocalVar(i: number, j: number): void {
                       density="compact"
                       variant="outlined"
                       hide-details
-                      label="名称"
+                      :label="t('pg.name')"
                       @update:model-value="patchNested(i, si, 'label', $event as string)"
                     />
                   </v-col>
@@ -496,7 +554,7 @@ function removeLocalVar(i: number, j: number): void {
                       density="compact"
                       variant="outlined"
                       hide-details
-                      label="类型"
+                      :label="t('pg.type')"
                       @update:model-value="
                         patchNested(i, si, 'type', $event as RespTransform['type'])
                       "
@@ -509,7 +567,7 @@ function removeLocalVar(i: number, j: number): void {
                   variant="outlined"
                   hide-details
                   class="mt-2 font-mono"
-                  label="格式"
+                  :label="t('pg.format')"
                   rows="2"
                   placeholder="{.choices[0].message.content}"
                   @update:model-value="patchNested(i, si, 'format', $event as string)"
@@ -521,7 +579,9 @@ function removeLocalVar(i: number, j: number): void {
                   density="compact"
                   hide-details
                   class="mt-2 font-mono"
-                  :label="sub.type === 'img' || sub.type === 'audio' ? '入口路径' : '入口 URL'"
+                  :label="
+                    sub.type === 'img' || sub.type === 'audio' ? t('pg.entry') : t('pg.entryUrl')
+                  "
                   @update:model-value="patchNested(i, si, 'entry', $event as string)"
                 />
                 <v-row v-if="sub.type === 'audio'" dense class="mt-2">
@@ -535,7 +595,7 @@ function removeLocalVar(i: number, j: number): void {
                       density="compact"
                       variant="outlined"
                       hide-details
-                      label="编码"
+                      :label="t('pg.encoding')"
                       @update:model-value="
                         patchNested(i, si, 'encoding', $event as RespTransform['encoding'])
                       "
@@ -549,7 +609,7 @@ function removeLocalVar(i: number, j: number): void {
                   density="compact"
                   hide-details
                   class="mt-2"
-                  label="MIME 类型"
+                  :label="t('pg.mime')"
                   placeholder="auto"
                   spellcheck="false"
                   @update:model-value="patchNested(i, si, 'audioMime', $event as string)"

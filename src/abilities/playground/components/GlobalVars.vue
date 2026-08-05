@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { inject, ref } from 'vue'
+import type { Ref } from 'vue'
 import type { GlobalVar } from '../types'
+import { translate } from '@ui/i18n'
+import { inline } from '../markdown'
 
 const props = defineProps<{ vars: GlobalVar[] }>()
 const emit = defineEmits<{ change: [vars: GlobalVar[]] }>()
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const collapsed = ref(true)
 
@@ -22,30 +28,52 @@ function remove(i: number): void {
     props.vars.filter((_, j) => j !== i)
   )
 }
+
+/** Export globals as markdown — secret (password) vars are masked, never dumped. */
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'pg.mdGlobals')]
+  const vars = props.vars.filter((v) => v.key.trim())
+  if (vars.length === 0) {
+    lines.push(`- ${t('pg.noGlobals')}`)
+    return lines.join('\n')
+  }
+  for (const v of vars) {
+    if (v.secret) {
+      lines.push(`- \`${inline(v.key)}\` = \`••••••\` ${t('pg.mdHidden')}`)
+    } else {
+      lines.push(`- \`${inline(v.key)}\` = \`${inline(v.value)}\``)
+    }
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>
   <div class="pg-globals mb-3">
     <div class="d-flex align-center ga-2 pa-2 pg-global-header" @click="collapsed = !collapsed">
       <v-icon>{{ collapsed ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-      <span class="text-subtitle-2 font-weight-medium">全局变量</span>
+      <span class="text-subtitle-2 font-weight-medium">{{ t('pg.globalVars') }}</span>
       <v-chip size="small" variant="tonal">{{ vars.length }}</v-chip>
       <v-spacer />
-      <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click.stop="add"> 添加 </v-btn>
+      <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click.stop="add">
+        {{ t('pg.addGlobalVar') }}
+      </v-btn>
     </div>
 
     <div v-if="!collapsed" class="pa-3">
-      <div class="text-caption on-surface-variant mb-2">
-        此处定义的变量会自动注入模板，不显示为表单字段。
+      <div class="text-caption on-surface-variant mb-2">{{ t('pg.globalHint') }}</div>
+      <div v-if="vars.length === 0" class="text-caption on-surface-variant mb-2">
+        {{ t('pg.noGlobals') }}
       </div>
-      <div v-if="vars.length === 0" class="text-caption on-surface-variant mb-2">暂无全局变量</div>
       <div v-for="(v, i) in vars" :key="i" class="d-flex align-center ga-2 mb-1">
         <v-text-field
           :model-value="v.key"
           density="compact"
           variant="outlined"
           hide-details
-          placeholder="name"
+          :placeholder="t('pg.namePlaceholder')"
           class="pg-gv-key font-mono"
           spellcheck="false"
           @update:model-value="update(i, { key: $event as string })"
@@ -56,7 +84,7 @@ function remove(i: number): void {
           density="compact"
           variant="outlined"
           hide-details
-          placeholder="value"
+          :placeholder="t('pg.valuePlaceholder')"
           class="flex-grow-1 font-mono"
           spellcheck="false"
           @update:model-value="update(i, { value: $event as string })"
@@ -65,7 +93,7 @@ function remove(i: number): void {
           size="small"
           variant="flat"
           icon
-          :title="v.secret ? '显示' : '隐藏'"
+          :title="v.secret ? t('pg.show') : t('pg.hide')"
           @click="update(i, { secret: !v.secret })"
         >
           <v-icon>{{ v.secret ? 'mdi-eye' : 'mdi-eye-off' }}</v-icon>

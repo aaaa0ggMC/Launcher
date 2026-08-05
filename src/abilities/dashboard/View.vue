@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-dashboard' })
+defineOptions({ name: 'CockpitDashboard' })
 
 import {
   ref,
@@ -260,6 +260,62 @@ const containers = computed(() => stats.value?.docker ?? [])
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
 })
+
+/** Export the current system snapshot as markdown. */
+function toMarkdown(): string {
+  const s = stats.value
+  const L = (key: string, fb?: string): string => translate(uiLang.value, key, fb)
+  const LT = (key: string, vars: Record<string, string>, fb?: string): string =>
+    translateTemplate(uiLang.value, key, vars, fb)
+  const lines: string[] = [`## ${L('dashboard.heading')}`]
+  if (!s) return lines.join('\n')
+
+  lines.push(
+    `- ${L('dashboard.card.host')}: ${s.hostname} · ${L('dashboard.sys')}: ${s.platform} ${s.arch}`
+  )
+  lines.push(
+    `- ${L('dashboard.user')}: ${s.username ?? '—'} · ${L('dashboard.desktop')}: ${s.de ?? '—'}`
+  )
+  lines.push(`- ${L('dashboard.uptime')}: ${fmtUptime(s.uptime, uiLang.value)}`)
+  if (s.packages) lines.push(`- pacman: ${s.packages.pacman} · flatpak: ${s.packages.flatpak}`)
+  if (s.loadAvg)
+    lines.push(`- ${L('dashboard.load')}: ${s.loadAvg.map((x) => x.toFixed(2)).join(' / ')}`)
+
+  lines.push('', `### ${L('dashboard.card.cpu')}`)
+  lines.push(`- ${s.cpu.model} · ${LT('dashboard.cores', { n: String(s.cpu.cores) })}`)
+  lines.push(
+    `- ${L('dashboard.mdUsage')}: ${s.cpu.usage}% · ${L('dashboard.temp')}: ${s.cpu.temp ? s.cpu.temp + '°C' : '—'}${s.cpu.freq ? ` · ${s.cpu.freq} MHz` : ''}`
+  )
+
+  lines.push('', `### ${L('dashboard.card.mem')}`)
+  lines.push(`- ${s.mem.percent}% — ${fmtBytes(s.mem.used)} / ${fmtBytes(s.mem.total)}`)
+  if (s.swap)
+    lines.push(
+      `- ${L('dashboard.swap')}: ${s.swap.percent}% — ${fmtBytes(s.swap.used)} / ${fmtBytes(s.swap.total)}`
+    )
+
+  if (s.gpu.length) {
+    lines.push('', `### ${L('dashboard.card.gpu')}`)
+    for (const g of s.gpu) {
+      lines.push(`- **${g.name}** — ${g.temp} · ${L('dashboard.driver')}: ${g.driver}`)
+      lines.push(`  - ${L('dashboard.vram')}: ${g.vram} · ${L('dashboard.gpuUtil')}: ${g.usage}`)
+    }
+  }
+
+  if (s.disk.length) {
+    lines.push('', `### ${L('dashboard.card.disk')}`)
+    for (const d of s.disk)
+      lines.push(`- \`${d.path}\` — ${d.percent}% — ${fmtBytes(d.used)} / ${fmtBytes(d.total)}`)
+  }
+
+  if (s.docker.length) {
+    lines.push('', `### ${L('dashboard.card.docker')}`)
+    for (const c of s.docker) lines.push(`- ${c.name} — ${c.state} (\`${c.image}\`)`)
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>
@@ -309,8 +365,8 @@ onBeforeUnmount(() => {
     <div v-if="firstLoaded" ref="gridEl" class="grid-stack">
       <div
         v-for="c in cards"
-        :key="c.id"
         :id="c.id"
+        :key="c.id"
         :gs-id="c.id"
         class="grid-stack-item"
         :gs-x="String(c.x)"

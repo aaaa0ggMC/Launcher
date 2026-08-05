@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import type { Ref } from 'vue'
 import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
 import type { TransformResult } from '@abilities/playground/parser/variableParser'
+import { translate } from '@ui/i18n'
 import { downloadTextToLocal, downloadUrlToLocal } from '@ui/composables/download'
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 /**
  * Structured response view for background tasks — renders transform results
@@ -49,11 +54,47 @@ function toggleText(key: string): void {
 
 const TEXT_COLLAPSE_LEN = 400
 
-const downloadText = (text: string): void => {
-  void downloadTextToLocal(text)
+/**
+ * Incremental render — reveal results in chunks so 200+ items never block
+ * interaction. `limit` grows as a sentinel enters the viewport.
+ */
+const CHUNK = 40
+const limit = ref(CHUNK)
+const shown = computed(() => results.value.slice(0, limit.value))
+let observer: IntersectionObserver | null = null
+const sentinel = ref<HTMLElement | null>(null)
+function revealMore(): void {
+  limit.value = Math.min(results.value.length, limit.value + CHUNK)
 }
-const downloadMedia = (url: string): void => {
-  void downloadUrlToLocal(url)
+watch(
+  () => results.value.length,
+  () => {
+    limit.value = Math.min(results.value.length, limit.value)
+  }
+)
+watch(sentinel, (el) => {
+  observer?.disconnect()
+  observer = null
+  if (el && results.value.length > limit.value) {
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          revealMore()
+          observer?.disconnect()
+        }
+      },
+      { rootMargin: '200px' }
+    )
+    observer.observe(el)
+  }
+})
+onBeforeUnmount(() => observer?.disconnect())
+
+const downloadText = (text: string): void => {
+  void downloadTextToLocal(text, undefined, t('pg.saveLocal'))
+}
+const downloadMedia = (url: string, mime?: string): void => {
+  void downloadUrlToLocal(url, { mime, title: t('pg.saveLocal') })
 }
 </script>
 
@@ -73,12 +114,12 @@ const downloadMedia = (url: string): void => {
       rounded
       class="btv-progress__bar"
     />
-    <span class="text-caption on-surface-variant">任务轮询中…</span>
+    <span class="text-caption on-surface-variant">{{ t('pg.polling') }}</span>
   </div>
 
   <div v-else-if="results.length" class="btv-response" style="height: 100%">
     <div class="btv-response__scroll">
-      <div v-for="(r, i) in results" :key="i" class="btv-result">
+      <div v-for="(r, i) in shown" :key="i" class="btv-result">
         <div class="d-flex align-center ga-2 btv-result__head">
           <span class="text-body-2 font-weight-medium">{{ r.label }}</span>
           <v-spacer />
@@ -87,7 +128,7 @@ const downloadMedia = (url: string): void => {
             size="small"
             variant="flat"
             icon
-            title="下载响应"
+            :title="t('pg.downloadResponse')"
             @click="r.value && downloadText(r.value)"
           >
             <v-icon size="small">mdi-download</v-icon>
@@ -97,7 +138,7 @@ const downloadMedia = (url: string): void => {
             size="small"
             variant="flat"
             icon
-            title="重试任务"
+            :title="t('pg.retryTask')"
             @click="emit('retry', r.label)"
           >
             <v-icon size="small">mdi-refresh</v-icon>
@@ -120,30 +161,56 @@ const downloadMedia = (url: string): void => {
             class="mt-1"
             @click="toggleText(`t${i}`)"
           >
-            {{ textExpanded(`t${i}`) ? '收起' : '展开全部' }}
+            {{ textExpanded(`t${i}`) ? t('pg.collapse') : t('pg.expandAll') }}
           </v-btn>
         </div>
         <div
           v-if="!r.children?.length && r.kind === 'img' && r.images"
           class="d-flex flex-wrap gap-2 mt-1"
         >
-          <div v-for="(url, j) in r.images" :key="j" class="d-flex flex-column align-center ga-1">
+          <div
+            v-for="(url, j) in r.images"
+            :key="j"
+            class="d-flex flex-column align-center ga-1 pg-img-cell"
+          >
             <img :src="url" :alt="`${r.label || 'Image'} ${j + 1}`" class="btv-result__img" />
             <v-btn
               variant="tonal"
               prepend-icon="mdi-download"
               class="text-none"
-              @click="downloadMedia(url)"
+              @click="downloadMedia(url, 'image/jpeg')"
             >
-              下载
+              {{ t('pg.download') }}
             </v-btn>
           </div>
         </div>
-        <div v-if="!r.children?.length && r.kind === 'audio' && r.audioSrc" class="mt-1">
-          <audio controls :src="r.audioSrc" style="max-width: 100%" />
+        <div
+          v-if="!r.children?.length && r.kind === 'audio' && r.audioSrc"
+          class="mt-1 d-flex align-center ga-2 flex-wrap"
+        >
+          <audio controls :src="r.audioSrc" class="pg-media" />
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-download"
+            class="text-none"
+            @click="downloadMedia(r.value, r.audioType)"
+          >
+            {{ t('pg.download') }}
+          </v-btn>
         </div>
-        <div v-if="!r.children?.length && r.kind === 'video' && r.videoSrc" class="mt-1">
-          <video controls :src="r.videoSrc" style="max-width: 100%; border-radius: 6px" />
+        <div
+          v-if="!r.children?.length && r.kind === 'video' && r.videoSrc"
+          class="mt-1 d-flex align-center ga-2 flex-wrap"
+        >
+          <video controls :src="r.videoSrc" class="pg-media" />
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-download"
+            class="text-none"
+            @click="downloadMedia(r.value, r.videoType)"
+          >
+            {{ t('pg.download') }}
+          </v-btn>
         </div>
 
         <div v-if="r.children?.length" class="pl-3 mt-1 d-flex flex-column ga-1">
@@ -170,44 +237,68 @@ const downloadMedia = (url: string): void => {
                 class="mt-1"
                 @click="toggleText(`t${i}c${ci}`)"
               >
-                {{ textExpanded(`t${i}c${ci}`) ? '收起' : '展开全部' }}
+                {{ textExpanded(`t${i}c${ci}`) ? t('pg.collapse') : t('pg.expandAll') }}
               </v-btn>
             </div>
             <div v-if="c.kind === 'img' && c.images" class="d-flex flex-wrap gap-2 mt-1">
               <div
                 v-for="(url, j) in c.images"
                 :key="j"
-                class="d-flex flex-column align-center ga-1"
+                class="d-flex flex-column align-center ga-1 pg-img-cell"
               >
                 <img :src="url" :alt="`${c.label || 'Image'} ${j + 1}`" class="btv-result__img" />
                 <v-btn
                   variant="tonal"
                   prepend-icon="mdi-download"
                   class="text-none"
-                  @click="downloadMedia(url)"
+                  @click="downloadMedia(url, 'image/jpeg')"
                 >
-                  下载
+                  {{ t('pg.download') }}
                 </v-btn>
               </div>
             </div>
-            <audio
+            <div
               v-if="c.kind === 'audio' && c.audioSrc"
-              controls
-              :src="c.audioSrc"
-              style="max-width: 100%"
-            />
-            <video
+              class="mt-1 d-flex align-center ga-2 flex-wrap"
+            >
+              <audio controls :src="c.audioSrc" class="pg-media" />
+              <v-btn
+                variant="tonal"
+                prepend-icon="mdi-download"
+                class="text-none"
+                @click="downloadMedia(c.value, c.audioType)"
+              >
+                {{ t('pg.download') }}
+              </v-btn>
+            </div>
+            <div
               v-if="c.kind === 'video' && c.videoSrc"
-              controls
-              :src="c.videoSrc"
-              style="max-width: 100%"
-            />
+              class="mt-1 d-flex align-center ga-2 flex-wrap"
+            >
+              <video controls :src="c.videoSrc" class="pg-media" />
+              <v-btn
+                variant="tonal"
+                prepend-icon="mdi-download"
+                class="text-none"
+                @click="downloadMedia(c.value, c.videoType)"
+              >
+                {{ t('pg.download') }}
+              </v-btn>
+            </div>
           </div>
         </div>
       </div>
+      <!-- reveal more when scrolled near the end -->
+      <div
+        v-if="shown.length < results.length"
+        ref="sentinel"
+        class="text-caption on-surface-variant pa-2 text-center"
+      >
+        {{ t('pg.loadingMore') }}
+      </div>
     </div>
   </div>
-  <div v-else class="on-surface-variant text-caption pa-3">等待响应…</div>
+  <div v-else class="on-surface-variant text-caption pa-3">{{ t('pg.waitingResponse') }}</div>
 </template>
 
 <style scoped>
@@ -310,9 +401,21 @@ const downloadMedia = (url: string): void => {
   color: rgb(var(--v-theme-error));
 }
 .btv-result__img {
-  max-width: 200px;
-  max-height: 150px;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
   border-radius: 6px;
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.2);
+}
+/* image cell takes a full row so media fills the response width */
+.btv-img-cell,
+.pg-img-cell {
+  width: 100%;
+  flex: 1 1 100%;
+}
+/* audio/video fill the response width too (height grows naturally) */
+.pg-media {
+  width: 100%;
+  border-radius: 6px;
 }
 </style>

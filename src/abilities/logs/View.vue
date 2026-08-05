@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'cockpit-logs' })
+defineOptions({ name: 'CockpitLogs' })
 
 import { ref, shallowRef, computed, watch, inject, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Ref } from 'vue'
@@ -206,6 +206,23 @@ function fmtTime(ts: number): string {
   const p = (n: number, l = 2): string => String(n).padStart(l, '0')
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`
 }
+
+// ---------------------------------------------------------------------------
+// Markdown export — dump the currently visible (filtered) log entries.
+// ---------------------------------------------------------------------------
+function toMarkdown(): string {
+  const lines: string[] = [translate(uiLang.value, 'logs.mdHeading')]
+  lines.push(translateTemplate(uiLang.value, 'logs.total', { n: String(entries.value.length) }))
+  for (const e of entries.value) {
+    const count = e.count && e.count > 1 ? ` (*${e.count})` : ''
+    lines.push(
+      `- \`${fmtTime(e.ts)}\` **${e.level.toUpperCase()}** \`[${e.scope}]\` ${e.message}${count}`
+    )
+  }
+  return lines.join('\n')
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>

@@ -54,5 +54,10 @@
   "ft.presetDesc.square": "Square · Gibbs ringing at corners",
   "ft.presetDesc.star": "Five-pointed star · DFT",
   "ft.presetDesc.heart": "Heart · surprisingly few vectors",
-  "ft.presetDesc.random": "Random vectors · doodle"
+  "ft.presetDesc.random": "Random vectors · doodle",
+  "ft.mdHeading": "## Fourier Transform",
+  "ft.mdPreset": "Preset: {name}",
+  "ft.mdVectors": "Vectors",
+  "ft.mdStatic": "static",
+  "ft.mdPerRound": "round"
 }

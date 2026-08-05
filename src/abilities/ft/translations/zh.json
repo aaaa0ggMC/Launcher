@@ -54,5 +54,10 @@
   "ft.presetDesc.square": "方形 · 角点吉布斯振铃",
   "ft.presetDesc.star": "五角星 · DFT",
   "ft.presetDesc.heart": "爱心 · 极小矢量数",
-  "ft.presetDesc.random": "随机矢量 · 手写涂鸦"
+  "ft.presetDesc.random": "随机矢量 · 手写涂鸦",
+  "ft.mdHeading": "## 傅里叶变换",
+  "ft.mdPreset": "预设: {name}",
+  "ft.mdVectors": "矢量",
+  "ft.mdStatic": "静态",
+  "ft.mdPerRound": "圈"
 }
