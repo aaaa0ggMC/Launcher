@@ -49,11 +49,12 @@ src/
       ability-loader.ts     # 外部用户能力（esbuild 即时编译）
       manifest.ts           # abilities.yaml 读取
       logger.ts             # 日志管线（winston 轮转文件 + 内存缓冲 + 广播）
+      background-tasks.ts   # 后台任务框架（进程/作业任务、资源统计、stdin/信号、广播）
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/
       App.vue               # 侧栏 + app-bar + keep-alive 宿主（provide cockpit:* 上下文）
       main.ts               # Vuetify 初始化 + renderer 日志转发
-      components/           # GameIcon / AbilityIcon / BackgroundLayer / FuseLayer / TransformerModal / UiNode / LoadingBar
+      components/           # GameIcon / AbilityIcon / BackgroundLayer / FuseLayer / TransformerModal / BackgroundTasksDialog / UiNode / LoadingBar
       styles/               # theme.ts (Material tokens) + global.css
       translations/         # 框架层翻译 + 语言列表
       i18n.ts               # 合并各模块翻译的 translate/translateTemplate/localize
@@ -74,7 +75,7 @@ src/
   preload/
     index.ts / index.d.ts   # contextBridge 白名单 API
   shared/
-    types.ts                # 仅框架契约：AbilitiesManifest / LaunchResult / ProcOutputEvent
+    types.ts                # 仅框架契约：AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt* (后台任务)
 config/
   config.json               # 全局外壳配置（theme / uiScale / window / runtime）
   abilities.yaml            # 侧栏清单 + 各能力 config
@@ -136,7 +137,28 @@ Fuse        —— 半透明蒙层（rgba(background, fuseAlpha)）
 Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片 / KDE 壁纸（可模糊）
 ```
 
-### 3.5 国际化
+### 3.5 后台任务流
+
+框架级设施（`process/background-tasks.ts`），让任意能力开一个跨页面存活的长跑作业：
+
+```
+任何模块:
+  startProcessTask(...)          # 进程任务：真实子进程，资源统计 + stdin/信号
+  startJobTask(...)              # 作业任务：无进程，pushLine/setProgress/finish/cancel
+  registerJobHandler + startJobByName  # 命名作业：前端 background.job --name <handler> 触发
+      └→ process/background-tasks.ts
+          ├→ 任务注册表 + 环形输出缓冲
+          ├→ /proc 轮询 CPU/内存/显存
+          └→ 广播 cockpit:bt ──→ BackgroundTasksDialog（全局面板：控制台/进度/停止）
+```
+
+- **作业 = 协程**：handler 是一段普通 async 函数（`while` + `await` 即循环 + yield），`setProgress`/`pushLine` 更新状态，无模板类。
+- 前端**发起**（`background.job`）不阻塞：任务立即返回，handler 在主进程后台跑（fire-and-forget）。
+- **输出批量推送**：`cockpit:bt` 的 `output` 是 100ms 合并批次（不是逐行），高频日志不压 IPC；日志管线（`cockpit:log`）保持逐条实时。
+- 任务**依附于本程序**：退出时 `will-quit` 统一清理；有运行中任务时拦截 close 弹确认。
+- 执行载体并列：终端 / systemd ability / 后台任务，由能力按需选用，非替代关系。
+
+### 3.6 国际化
 
 翻译按模块拆分（框架层 + 每个能力 + 每个背景的 `translations/{zh,en-US}.json`），运行期合并为一张表；渲染端 `ui/i18n.ts` 用 `import.meta.glob` 合并，主进程 `process/i18n.ts` 用 filesystem glob 合并。回退链：当前语言 → zh → fallback → key。
 
@@ -156,7 +178,7 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 | `logs` 日志 | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出 |
 | `settings` 设置 | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 缩放 / 窗口 / 动画 / 语言 / 启动 / 关于） |
 
-另有 `display`（纯后端能力，无页面）：壁纸列出/应用、显示输出查询（`display.*`）。
+另有纯后端能力（无页面）：`display`（壁纸列出/应用、显示输出查询）与 `background`（后台任务命令 `background.*`，由全局面板驱动）。
 
 ## 5. Backgrounds（当前 3 个）
 

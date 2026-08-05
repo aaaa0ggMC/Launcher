@@ -3,7 +3,7 @@
 Linux System Cockpit — 个人系统控制中心，当前面向 Arch Linux + KDE Plasma 6 (Wayland) 开发。
 Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的完整流程。
 
-> 核心（框架、命令注册表、UI、日志、应用注册表、ft、logs 等）跨平台，不依赖具体发行版/桌面；
+> 核心（框架、命令注册表、UI、日志、后台任务、应用注册表、ft、logs 等）跨平台，不依赖具体发行版/桌面；
 > Linux/发行版相关逻辑都隔离在对应 ability 的 service 与 `scripts/`，保持命令接口不变即可改写适配（见 README「平台适配」）。
 
 ## 1. 环境要求
@@ -150,6 +150,7 @@ src/
       abilities-loader.ts  # 加载器: globs src/abilities/*/commands.ts → registerAll
       ability-loader.ts    # 外部用户能力 (esbuild 即时编译)
       manifest.ts      # abilities.yaml 读取
+      background-tasks.ts  # 后台任务框架 (进程/作业任务, 资源统计, stdin/信号)
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/               # 渲染 UI 框架
       App.vue         # 侧栏 + app-bar + keep-alive 宿主 (provide cockpit:* 上下文)
@@ -224,6 +225,46 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 - Logs ability（`src/abilities/logs/`）提供 UI：虚拟滚动逐行展示、按级别过滤、滑动窗口向后翻页、实时尾部、导出当前会话（`logs.query` / `logs.export` / `logs.post`）。
 - 渲染端 `main.ts` 会把 `console.warn/error` 与未捕获错误通过 `logs.post` 转发进主进程日志。
 
+### 后台任务框架
+
+架构级设施（`src/main/process/background-tasks.ts`，与 logger 同级），**不绑定任何能力**。任何模块都能开一个跨页面存活的长跑作业，全局面板（`BackgroundTasksDialog.vue`）统一展示与交互。
+
+- 两类任务：
+  - **进程任务** `startProcessTask({ name, description, argv, cwd, env })` — 真实子进程，piped stdio 环形缓冲，`/proc` 轮询 CPU/内存/GPU 显存，支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
+  - **作业任务** `startJobTask({ name, description, onCancel })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
+- **命名作业**：`registerJobHandler(name, handler)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
+- 广播：`cockpit:bt` 事件（`changed` 全量列表 / `output` **批量行** / `exit`）。**控制台输出是 100ms 批量合并推送**（攒一批行一次广播，500 行硬上限提前 flush，退出时立即 flush tail），不是逐行发——高频打日志的任务不会打爆 IPC。渲染端侧栏按钮徽标只计运行中任务（上限 `99+`）。
+- 生命周期：任务**依附于本程序**，退出时 `will-quit` 统一 SIGKILL，不留孤儿；退出前若有运行中任务，主进程拦截 `close` 广播 `cockpit:confirm-quit`，渲染端弹确认（可"以后不再提醒"，localStorage `cockpit-bt-quit-suppress`）。
+- 命令：`background.list/output/start/job/input/signal/stop/kill/remove/clear-finished`。
+
+#### 写一个 Task（作业样板）
+
+`registerJobHandler` 的 handler 就是一段普通 async 协程——`while` + `await` 即协程式循环，`setProgress`/`pushLine` 更新状态，无需任何模板类：
+
+```ts
+// src/abilities/<id>/jobs.ts —— 任意能力都能加，如：把一批文件下载到本地
+import { registerJobHandler, type JobControl } from '../../main/process/background-tasks'
+
+registerJobHandler('download-batch', async (control: JobControl, args: Record<string, unknown>) => {
+  const { base, files, outDir } = args as { base: string; files: string[]; outDir: string }
+  const ac = new AbortController()
+  control.setCancel(() => ac.abort())          // 面板「停止」→ abort
+
+  for (let i = 0; i < files.length; i++) {
+    if (ac.signal.aborted) { control.finish('cancelled'); return }
+    control.pushLine(`[${i + 1}/${files.length}] 下载 ${files[i]}`)
+    control.setProgress(Math.round(((i + 1) / files.length) * 100))
+    await someAsyncWork(base, files[i], { signal: ac.signal })  // yield
+  }
+  control.finish('exited')                     // resolve → 自动 exited（可省）
+})
+```
+
+- **协程式**：`await` 就是 yield，`while`/`for` 就是循环，和普通长任务写法无差别。
+- **取消**：`setCancel` 注册 abort 回调，循环内检查 `ac.signal.aborted`（精确中断；若想零样板可只 `while(true)`，停止时靠抛异常中断，但粒度较粗，不推荐）。
+- **自动收尾**：handler resolve → `exited`，reject → `error`；`control.finish(status)` 可手动覆盖（`cancelled` 等）。
+- **前端触发**：`await window.cockpit.btJob('download-batch', { base, files, outDir })` —— 立即返回 taskId，任务在后台跑，面板实时看进度/日志，可随时停止。
+
 ### 新增一个 Ability
 
 每个 ability 由几个可选的注入点组成，全部内聚在 `src/abilities/<id>/` 一个文件夹，按需添加：
@@ -240,6 +281,7 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 - settings 是自身能力，其注入项不能调用其他能力已移除的命令（跨能力设置项应由对应能力自己注入）
 - 渲染端页面不应 `import` 其他 ability 模块
 - 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 yaml
+- 纯后端能力（无 View.vue，如 `display` / `background`）不需要在 abilities.yaml 注册，命令仍会自动加载，只是不进侧栏
 
 ## 10. 国际化 (i18n)
 

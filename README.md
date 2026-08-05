@@ -18,6 +18,7 @@
 - 侧栏能力动态加载（`config/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
 - 傅里叶变换可视化（three.js）：预设 / 矢量表编辑 / JSON 导入导出 / 2D·3D 相机
 - 日志系统：winston 轮转日志（自动写入 + 归档）+ 日志查看器（逐行虚拟滚动、级别过滤、实时尾随、导出当前会话）
+- 后台任务框架：任意能力可注册长跑作业（进程 / 抽象作业），全局面板实时查看控制台、资源占用（CPU/内存/显存）、stdin 输入与 Ctrl+C 信号控制，退出时提示仍在运行的任务
 - 国际化 / 多语言支持（中文 + English，应用条目可配 `zh` / `en_US`）
 
 ## 环境要求
@@ -61,13 +62,45 @@ pnpm lint
 pnpm format
 ```
 
+## 运行载体
+
+核心是**框架**，不是任何单一能力。让一段长跑逻辑跑起来，有几种并列的执行载体，由能力按需选用，互不替代：
+
+| 载体 | 用途 | 特点 |
+|---|---|---|
+| 终端 (`terminal: true`) | 交互式程序 | 交给系统终端（konsole），脱离 Cockpit |
+| systemd ability | 用户服务 | 开机自启、崩溃自动拉起、系统级持久 |
+| 后台任务框架 | 会话内长跑作业 | 跨页面存活、实时控制台/进度/取消、进程级资源统计 |
+
+其中**后台任务框架**是纯框架层设施（`src/main/process/background-tasks.ts`，与 logger 同级），任意能力都能通过 `registerJobHandler` + `background.job` 让前端触发"后端执行"的作业（如下载），不绑定 apps。
+
+写一个作业 = 注册一个普通 async 协程（`while`/`for` + `await` 即循环 + yield，`setProgress`/`pushLine` 更新状态），无模板类：
+
+```ts
+import { registerJobHandler } from '../../main/process/background-tasks'
+
+registerJobHandler('download-batch', async (control, args) => {
+  const ac = new AbortController()
+  control.setCancel(() => ac.abort())                 // 面板「停止」→ abort
+  for (const f of (args as { files: string[] }).files) {
+    if (ac.signal.aborted) { control.finish('cancelled'); return }
+    control.pushLine(`下载 ${f}`)
+    control.setProgress(/* 0–100 */)
+    await someAsyncWork(f, { signal: ac.signal })     // yield
+  }
+  control.finish('exited')
+})
+```
+
+前端 `await window.cockpit.btJob('download-batch', { files: [...] })` 立即返回，任务在后台跑，全局面板实时看进度/日志、可随时停止。完整样板见 `AGENTS.md`「写一个 Task」。
+
 ## 平台适配
 
 架构把「能力 = 页面 + 命令 + 领域类型 + 翻译」内聚在 `src/abilities/<id>/`，命令是唯一对外接口。因此跨平台/跨发行版适配 = **在保持命令接口不变的前提下，改写对应能力的 service / scripts**：
 
 **开箱即跨平台（可移植）**
 
-- 框架层：Electron 窗口、IPC、命令注册表、CLI REPL、日志管线（winston）
+- 框架层：Electron 窗口、IPC、命令注册表、CLI REPL、日志管线（winston）、后台任务框架
 - `apps` 应用注册表：Node fs + `spawn`，纯跨平台（exec 的 `systemd`/`desktop` 类型除外）
 - `ft` 傅里叶可视化、`logs` 日志、`settings` 设置、`cli` 命令行、`background` 背景框架
 - 国际化 / 配置

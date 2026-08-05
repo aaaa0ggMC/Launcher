@@ -3,7 +3,7 @@
 每个搜索目录（config/abilities.yaml 里 apps 的 `searchRoots`）下有一份 `apps.json`，定义该目录下"应用 → 一键操作"的注册表。
 手工编辑优先，扫描器（`apps.rescan`）只补充草稿、不覆盖你的修改。
 
-> **多语言注意**：新增条目时，`name`/`description`/`alias` 推荐使用对象格式提供至少 `zh` 和 `en_US` 两种语言，见 [§8 多语言](#8-多语言)。
+> **多语言注意**：新增条目时，`name`/`description`/`alias` 推荐使用对象格式提供至少 `zh` 和 `en_US` 两种语言，见 [§9 多语言](#9-多语言)。
 
 ```jsonc
 {
@@ -20,12 +20,12 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `name` | string 或对象 | 显示名，见 [§8 多语言](#8-多语言) |
-| `alias` | string 或对象 | CLI 快捷名（`<alias>` 直接启动），见 [§8 多语言](#8-多语言) |
-| `description` | string 或对象 | 描述，见 [§8 多语言](#8-多语言) |
+| `name` | string 或对象 | 显示名，见 [§9 多语言](#9-多语言) |
+| `alias` | string 或对象 | CLI 快捷名（`<alias>` 直接启动），见 [§9 多语言](#9-多语言) |
+| `description` | string 或对象 | 描述，见 [§9 多语言](#9-多语言) |
 | `path` | string | 相对搜索根或绝对路径（脚本文件 / 项目目录） |
 | `icon` | string | 图标，见 [§5 图标语法](#5-图标语法) |
-| `localized` | Record<string, object> | 备用多语言映射，见 [§8.2](#82-localized-字段) |
+| `localized` | Record<string, object> | 备用多语言映射，见 [§9.2](#92-localized-字段) |
 | `exec` | AppExecSpec | **主操作**：卡片上的「启动」按钮 |
 | `actions` | Record<string, AppAction> | 附加操作（聚类按钮），见 [§3 附加操作](#3-附加操作-actions) |
 | `tags` / `tags_auto` | string[] | 手工标签 / 扫描自动标签（显示时去重） |
@@ -45,6 +45,7 @@
   "cwd": "{self}",         // 工作目录: "{self}"=条目自身目录 / 绝对 / 相对
   "env": { "FOO": "bar" }, // 额外环境变量
   "terminal": true,        // 在终端中运行
+  "background": false,     // 作为后台任务运行（见 §6.1）
   "root": false,           // pkexec 提权
   "path": "newapi/setup"   // script/desktop 类型的脚本目标覆盖 (默认=entry.path)
 }
@@ -192,6 +193,30 @@ function Transformer() {
 
 ---
 
+## 6.1 后台运行 (exec.background)
+
+`exec.background: true` 让主操作（或某 action）以**后台任务**方式运行，而不是弹终端：
+
+```jsonc
+"exec": {
+  "type": "script",
+  "command": ["start_music"],
+  "cwd": "{self}",
+  "terminal": false,
+  "background": true
+}
+```
+
+效果：
+- 进程以 piped stdio 启动，**依附于本程序**（退出时终止，不留孤儿）。
+- 在侧栏后台任务按钮（有运行数徽标）打开的面板中，实时查看控制台输出、CPU/内存/显存占用，可向 stdin 输入、发送 Ctrl+C (SIGINT)、停止/强制结束/移除。
+- 与 `terminal: true` 互斥（background 优先，会自动去掉 terminal 包装）；与 `transformer_display` 也可共存，但后台面板本身就是输出视图。
+- CLI 同理：`launch.run --root ~/Apps --id music` 也会走后台（若该条目 exec 标了 background）。
+
+> 这是"前端发起、后端执行"作业的一个实例（apps 走进程任务）。任意能力都可注册命名作业（`registerJobHandler` + `background.job`），见 `src/abilities/background/jobs.ts`。
+
+---
+
 ## 7. managed / missing / 扫描策略
 
 - `managed: false` → 扫描器完全不动它（手工条目）。
@@ -204,7 +229,7 @@ function Transformer() {
 
 **UI（应用页）**：
 - 「添加应用」：选存储目录、填名字/ID/路径/exec，可选创建目录（`--mkdir`）。
-- 「编辑」：改主 exec、风险、图标、标签、附加操作（含多步命令文本框）、transformer。
+- 「编辑」：改主 exec（含「后台任务」开关）、风险、图标、标签、附加操作（含多步命令文本框）、transformer。
 - 卡片按钮：启动 + 各 action，颜色编码风险。
 
 **CLI 命令**：
@@ -220,11 +245,22 @@ launch.run     --root ~/Apps --id bili-viewer
 launch.action  --root ~/Apps --id newapi --action stop
 ```
 
+**后台任务相关**（框架能力，见 `src/abilities/background/`）：
+
+```bash
+background.list            # 列出所有后台任务
+background.job --name download --args '{"url":"https://...","out":"~/Downloads/x"}'
+background.output --id bt-xxx    # 读取任务缓冲输出
+background.input  --id bt-xxx --data "y\n"
+background.signal --id bt-xxx --signal SIGINT
+background.stop / kill / remove / clear-finished --id bt-xxx
+```
+
 CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <alias>`、`list`。
 
 ---
 
-## 8. 多语言
+## 9. 多语言
 
 `name`、`description`、`alias` 支持两种格式：
 
@@ -243,7 +279,7 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 
 可用码：`zh`（中文）、`en_US`/`en-US`（美国英语）。`en_US` 和 `en-US` 互通。
 
-### 8.1 回退链
+### 9.1 回退链
 
 显示时按以下优先级选取：
 1. 当前配置语言（`config.json` 的 `language`）
@@ -251,7 +287,7 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 3. 对象中第一个有效值
 4. 原始 `name`/`description`/`alias` 字段（纯字符串）
 
-### 8.2 `localized` 字段
+### 9.2 `localized` 字段
 
 也可用 `localized` 字段存储翻译（与对象格式互斥）：
 ```json
@@ -268,6 +304,6 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 
 ---
 
-## 9. 跨目录
+## 10. 跨目录
 
 多个搜索根各有一份 apps.json，`apps.list` 会把所有根合并返回（条目带上运行时 `root` 字段，不持久化）。同一 id 在不同目录会互相覆盖（后加载的赢），所以 id 建议全局唯一。
