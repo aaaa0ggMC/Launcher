@@ -6,7 +6,7 @@ import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 
 const theme = ref('dark')
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()

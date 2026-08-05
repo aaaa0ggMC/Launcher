@@ -51,6 +51,7 @@ async function setStyle(v: string | null): Promise<void> {
       <v-switch
         :model-value="enabled"
         :label="translate(uiLang, 'animation.enabled')"
+        color="primary"
         density="compact"
         hide-details
         @update:model-value="setEnabled"

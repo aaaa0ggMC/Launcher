@@ -106,6 +106,7 @@ async function commitFuseBlur(): Promise<void> {
       <v-switch
         :model-value="frameless"
         :label="translate(uiLang, 'window.frameless')"
+        color="primary"
         density="compact"
         hide-details
         @update:model-value="setFrameless"
@@ -113,6 +114,7 @@ async function commitFuseBlur(): Promise<void> {
       <v-switch
         :model-value="rounded"
         :label="translate(uiLang, 'window.rounded')"
+        color="primary"
         density="compact"
         hide-details
         class="mt-1"

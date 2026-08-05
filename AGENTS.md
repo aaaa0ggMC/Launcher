@@ -258,15 +258,18 @@ import { registerJobHandler, type JobControl } from '../../main/process/backgrou
 registerJobHandler('download-batch', async (control: JobControl, args: Record<string, unknown>) => {
   const { base, files, outDir } = args as { base: string; files: string[]; outDir: string }
   const ac = new AbortController()
-  control.setCancel(() => ac.abort())          // 面板「停止」→ abort
+  control.setCancel(() => ac.abort()) // 面板「停止」→ abort
 
   for (let i = 0; i < files.length; i++) {
-    if (ac.signal.aborted) { control.finish('cancelled'); return }
+    if (ac.signal.aborted) {
+      control.finish('cancelled')
+      return
+    }
     control.pushLine(`[${i + 1}/${files.length}] 下载 ${files[i]}`)
     control.setProgress(Math.round(((i + 1) / files.length) * 100))
-    await someAsyncWork(base, files[i], { signal: ac.signal })  // yield
+    await someAsyncWork(base, files[i], { signal: ac.signal }) // yield
   }
-  control.finish('exited')                     // resolve → 自动 exited（可省）
+  control.finish('exited') // resolve → 自动 exited（可省）
 })
 ```
 
@@ -288,6 +291,7 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 然后在 `config/abilities.yaml` 的 `abilities` 列表注册（`id`/`order`/`enabled`）。
 
 **依赖原则**：
+
 - settings 是自身能力，其注入项不能调用其他能力已移除的命令（跨能力设置项应由对应能力自己注入）
 - 渲染端页面不应 `import` 其他 ability 模块
 - 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 yaml

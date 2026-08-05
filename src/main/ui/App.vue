@@ -852,7 +852,7 @@ onBeforeUnmount(() => {
 
     <v-main scrollable class="content-bg">
       <v-container fluid class="pa-4">
-        <div class="d-flex flex-column" style="min-height: calc(100vh - 64px)">
+        <div class="d-flex flex-column" style="min-height: calc(100vh - 64px - 32px)">
           <!-- keep-alive: only abilities that opted in are cached (by name);
                the rest remount fresh each visit. Wrapped in <transition> for
                the configurable out-in page switch animation. -->

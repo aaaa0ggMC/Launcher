@@ -67,11 +67,11 @@ pnpm format
 
 核心是**框架**，不是任何单一能力。让一段长跑逻辑跑起来，有几种并列的执行载体，由能力按需选用，互不替代：
 
-| 载体 | 用途 | 特点 |
-|---|---|---|
-| 终端 (`terminal: true`) | 交互式程序 | 交给系统终端（konsole），脱离 Cockpit |
-| systemd ability | 用户服务 | 开机自启、崩溃自动拉起、系统级持久 |
-| 后台任务框架 | 会话内长跑作业 | 跨页面存活、实时控制台/进度/取消、进程级资源统计 |
+| 载体                    | 用途           | 特点                                             |
+| ----------------------- | -------------- | ------------------------------------------------ |
+| 终端 (`terminal: true`) | 交互式程序     | 交给系统终端（konsole），脱离 Cockpit            |
+| systemd ability         | 用户服务       | 开机自启、崩溃自动拉起、系统级持久               |
+| 后台任务框架            | 会话内长跑作业 | 跨页面存活、实时控制台/进度/取消、进程级资源统计 |
 
 其中**后台任务框架**是纯框架层设施（`src/main/process/background-tasks.ts`，与 logger 同级），任意能力都能通过 `registerJobHandler` + `background.job` 让前端触发"后端执行"的作业（如下载），不绑定 apps。
 
@@ -82,12 +82,15 @@ import { registerJobHandler } from '../../main/process/background-tasks'
 
 registerJobHandler('download-batch', async (control, args) => {
   const ac = new AbortController()
-  control.setCancel(() => ac.abort())                 // 面板「停止」→ abort
+  control.setCancel(() => ac.abort()) // 面板「停止」→ abort
   for (const f of (args as { files: string[] }).files) {
-    if (ac.signal.aborted) { control.finish('cancelled'); return }
+    if (ac.signal.aborted) {
+      control.finish('cancelled')
+      return
+    }
     control.pushLine(`下载 ${f}`)
     control.setProgress(/* 0–100 */)
-    await someAsyncWork(f, { signal: ac.signal })     // yield
+    await someAsyncWork(f, { signal: ac.signal }) // yield
   }
   control.finish('exited')
 })
@@ -108,15 +111,15 @@ registerJobHandler('download-batch', async (control, args) => {
 
 **Linux / 发行版特定（需按平台改写 service）**
 
-| 能力 | 当前实现 | 适配其它平台 |
-|---|---|---|
-| `mirror` | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写 | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变 |
-| `systemd` | `systemctl --user` | 换成 launchd / OpenRC / 服务管理器 |
-| `dashboard` | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi` | 换成对应平台的采集实现（`system.ts` / `gpu.ts`） |
-| `autostart` | `~/.config/autostart` (XDG) | macOS LaunchAgents / Windows 启动项目录 |
-| `display` | `plasma-apply-wallpaperimage` / `kscreen-doctor` | 对应 DE / OS 的壁纸与输出工具 |
-| `background/wallpaper` | 解析 KDE plasma 配置 | 对应 DE 的壁纸读取 |
-| `scripts/` | `pkexec` + shell helper | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services） |
+| 能力                   | 当前实现                                                                           | 适配其它平台                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `mirror`               | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写                             | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变                     |
+| `systemd`              | `systemctl --user`                                                                 | 换成 launchd / OpenRC / 服务管理器                                  |
+| `dashboard`            | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi` | 换成对应平台的采集实现（`system.ts` / `gpu.ts`）                    |
+| `autostart`            | `~/.config/autostart` (XDG)                                                        | macOS LaunchAgents / Windows 启动项目录                             |
+| `display`              | `plasma-apply-wallpaperimage` / `kscreen-doctor`                                   | 对应 DE / OS 的壁纸与输出工具                                       |
+| `background/wallpaper` | 解析 KDE plasma 配置                                                               | 对应 DE 的壁纸读取                                                  |
+| `scripts/`             | `pkexec` + shell helper                                                            | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services） |
 
 `src/main/process/paths.ts` 集中了所有系统路径，适配时优先改这里；`scripts/` 按平台替换即可。改一个能力 = 只动那个文件夹，不影响其它能力与框架。
 

@@ -188,38 +188,38 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ## 4. Abilities（当前 10 个）
 
-| id | 介绍 |
-|---|---|
-| `dashboard` 总览 | GridStack 卡片总览：主机 / CPU / 内存 / GPU / NVIDIA 电源管理 / 磁盘 / 容器，后台轮询实时刷新；命令 `system.stats` / `hardware.*` / `docker.*` / `dashboard.*` |
-| `apps` 应用 | 应用注册表（apps.json）：搜索目录扫描、条目 CRUD、多语言、风险分级、聚类操作按钮；命令 `apps.*` / `launch.*`；服务 registry / launcher / scanner / security |
-| `mirror` 软件源 | Arch 镜像源管理：`[MIRROR]` 格式解析、行级 toggle（pkexec 原子写）、测速 |
-| `autostart` 启动项 | `~/.config/autostart` 自启动项启用/禁用（Hidden=true） |
-| `systemd` 服务 | 用户 systemd 服务列表 / 启动 / 停止 / 重启 |
-| `cli` 命令行 | CLI REPL 前端：别名启动、标签补全、`info/list` 等 |
+| id                    | 介绍                                                                                                                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dashboard` 总览      | GridStack 卡片总览：主机 / CPU / 内存 / GPU / NVIDIA 电源管理 / 磁盘 / 容器，后台轮询实时刷新；命令 `system.stats` / `hardware.*` / `docker.*` / `dashboard.*`                                            |
+| `apps` 应用           | 应用注册表（apps.json）：搜索目录扫描、条目 CRUD、多语言、风险分级、聚类操作按钮；命令 `apps.*` / `launch.*`；服务 registry / launcher / scanner / security                                               |
+| `mirror` 软件源       | Arch 镜像源管理：`[MIRROR]` 格式解析、行级 toggle（pkexec 原子写）、测速                                                                                                                                  |
+| `autostart` 启动项    | `~/.config/autostart` 自启动项启用/禁用（Hidden=true）                                                                                                                                                    |
+| `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                |
+| `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                         |
 | `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url` |
-| `ft` 傅里叶变换 | three.js 天体/傅里叶可视化：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机 |
-| `logs` 日志 | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出 |
-| `settings` 设置 | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 缩放 / 窗口 / 动画 / 语言 / 启动 / 关于） |
+| `ft` 傅里叶变换       | three.js 天体/傅里叶可视化：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机                                                                                                                                |
+| `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                        |
+| `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 缩放 / 窗口 / 动画 / 语言 / 启动 / 关于）                                                                                                           |
 
 另有纯后端能力（无页面）：`display`（壁纸列出/应用、显示输出查询）与 `background`（后台任务命令 `background.*`，由全局面板驱动）。
 
 ## 5. Backgrounds（当前 3 个）
 
-| id | 介绍 |
-|---|---|
-| `transparent` 透明 | 不绘制背景，仅由 Fuse 蒙层提供底色 |
-| `image` 图片 | 自定义图片路径，可高斯模糊 |
-| `wallpaper` 桌面壁纸 | 自动读取 KDE 桌面壁纸，可高斯模糊 |
+| id                   | 介绍                               |
+| -------------------- | ---------------------------------- |
+| `transparent` 透明   | 不绘制背景，仅由 Fuse 蒙层提供底色 |
+| `image` 图片         | 自定义图片路径，可高斯模糊         |
+| `wallpaper` 桌面壁纸 | 自动读取 KDE 桌面壁纸，可高斯模糊  |
 
 ---
 
 ## 6. 配置
 
-| 文件 | 作用 |
-|---|---|
-| `config/config.json` | 全局外壳：theme / uiScale / window.* / runtime.* |
-| `config/abilities.yaml` | 侧栏清单 + 各能力 config（镜像列表、搜索目录等） |
-| `~/Apps/apps.json` | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖） |
+| 文件                    | 作用                                                   |
+| ----------------------- | ------------------------------------------------------ |
+| `config/config.json`    | 全局外壳：theme / uiScale / window.* / runtime.*       |
+| `config/abilities.yaml` | 侧栏清单 + 各能力 config（镜像列表、搜索目录等）       |
+| `~/Apps/apps.json`      | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖） |
 
 ## 7. 开发 / 构建
 

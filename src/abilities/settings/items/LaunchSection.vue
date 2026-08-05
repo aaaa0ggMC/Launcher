@@ -6,7 +6,7 @@ import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
-const uiLang = (inject('cockpit:lang', ref('zh')) as Ref<string>)
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const confirmBeforeLaunch = ref(false)
 
 onMounted(async () => {
@@ -34,6 +34,7 @@ async function setConfirm(v: boolean | null): Promise<void> {
       <v-switch
         :model-value="confirmBeforeLaunch"
         :label="translate(uiLang, 'launch.switch')"
+        color="primary"
         density="compact"
         hide-details
         @update:model-value="setConfirm"

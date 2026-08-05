@@ -9,7 +9,7 @@
 {
   "version": 1,
   "apps": {
-    "bili-viewer": { /* AppEntry */ }
+    "bili-viewer": {/* AppEntry */}
   }
 }
 ```
@@ -18,51 +18,51 @@
 
 ## 1. 条目字段 (AppEntry)
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `name` | string 或对象 | 显示名，见 [§9 多语言](#9-多语言) |
-| `alias` | string 或对象 | CLI 快捷名（`<alias>` 直接启动），见 [§9 多语言](#9-多语言) |
-| `description` | string 或对象 | 描述，见 [§9 多语言](#9-多语言) |
-| `path` | string | 相对搜索根或绝对路径（脚本文件 / 项目目录） |
-| `icon` | string | 图标，见 [§5 图标语法](#5-图标语法) |
-| `localized` | Record<string, object> | 备用多语言映射，见 [§9.2](#92-localized-字段) |
-| `exec` | AppExecSpec | **主操作**：卡片上的「启动」按钮 |
-| `actions` | Record<string, AppAction> | 附加操作（聚类按钮），见 [§3 附加操作](#3-附加操作-actions) |
-| `tags` / `tags_auto` | string[] | 手工标签 / 扫描自动标签（显示时去重） |
-| `security` | AppSecurity | 风险等级与备注 |
-| `managed` | boolean | `false` 表示扫描器不再合并覆盖（手工条目） |
-| `transformer` | string | JS 源码，见 [§6 输出 Transformer](#6-输出-transformer) |
-| `transformer_display` | boolean | 存在 transformer 且为 true 时弹实时输出窗 |
-| `missing` | boolean | 运行时标记：路径/目录已消失（不持久化） |
+| 字段                  | 类型                      | 说明                                                        |
+| --------------------- | ------------------------- | ----------------------------------------------------------- |
+| `name`                | string 或对象             | 显示名，见 [§9 多语言](#9-多语言)                           |
+| `alias`               | string 或对象             | CLI 快捷名（`<alias>` 直接启动），见 [§9 多语言](#9-多语言) |
+| `description`         | string 或对象             | 描述，见 [§9 多语言](#9-多语言)                             |
+| `path`                | string                    | 相对搜索根或绝对路径（脚本文件 / 项目目录）                 |
+| `icon`                | string                    | 图标，见 [§5 图标语法](#5-图标语法)                         |
+| `localized`           | Record<string, object>    | 备用多语言映射，见 [§9.2](#92-localized-字段)               |
+| `exec`                | AppExecSpec               | **主操作**：卡片上的「启动」按钮                            |
+| `actions`             | Record<string, AppAction> | 附加操作（聚类按钮），见 [§3 附加操作](#3-附加操作-actions) |
+| `tags` / `tags_auto`  | string[]                  | 手工标签 / 扫描自动标签（显示时去重）                       |
+| `security`            | AppSecurity               | 风险等级与备注                                              |
+| `managed`             | boolean                   | `false` 表示扫描器不再合并覆盖（手工条目）                  |
+| `transformer`         | string                    | JS 源码，见 [§6 输出 Transformer](#6-输出-transformer)      |
+| `transformer_display` | boolean                   | 存在 transformer 且为 true 时弹实时输出窗                   |
+| `missing`             | boolean                   | 运行时标记：路径/目录已消失（不持久化）                     |
 
 ### 1.1 exec (AppExecSpec)
 
 ```jsonc
 {
-  "type": "uv",            // 见下方类型表
+  "type": "uv", // 见下方类型表
   "command": ["bili-viewer"],
-  "args": [],              // 追加参数
-  "cwd": "{self}",         // 工作目录: "{self}"=条目自身目录 / 绝对 / 相对
+  "args": [], // 追加参数
+  "cwd": "{self}", // 工作目录: "{self}"=条目自身目录 / 绝对 / 相对
   "env": { "FOO": "bar" }, // 额外环境变量
-  "terminal": true,        // 在终端中运行
-  "background": false,     // 作为后台任务运行（见 §6.1）
-  "root": false,           // pkexec 提权
-  "path": "newapi/setup"   // script/desktop 类型的脚本目标覆盖 (默认=entry.path)
+  "terminal": true, // 在终端中运行
+  "background": false, // 作为后台任务运行（见 §6.1）
+  "root": false, // pkexec 提权
+  "path": "newapi/setup" // script/desktop 类型的脚本目标覆盖 (默认=entry.path)
 }
 ```
 
 `type` 可选值：
 
-| type | 行为 |
-|---|---|
-| `uv` | `uv run --directory <cwd> <command...>` |
-| `python` | 优先 `<cwd>/.venv/bin/python`，否则 `python3` |
-| `node` | `node <command...>` |
-| `docker` | `docker <command...>` |
+| type      | 行为                                                        |
+| --------- | ----------------------------------------------------------- |
+| `uv`      | `uv run --directory <cwd> <command...>`                     |
+| `python`  | 优先 `<cwd>/.venv/bin/python`，否则 `python3`               |
+| `node`    | `node <command...>`                                         |
+| `docker`  | `docker <command...>`                                       |
 | `systemd` | `systemctl [--user] <command...>`（`root:true` 时用系统级） |
-| `script` | `bash <脚本>`（脚本目标 = `path` 或 `entry.path`） |
-| `desktop` | `gio launch <desktop 文件>` |
-| `custom` | 直接 spawn `<command...>` |
+| `script`  | `bash <脚本>`（脚本目标 = `path` 或 `entry.path`）          |
+| `desktop` | `gio launch <desktop 文件>`                                 |
+| `custom`  | 直接 spawn `<command...>`                                   |
 
 > 一律 `spawn(argv)`，不做 shell 拼接。
 
@@ -112,6 +112,7 @@
 ```
 
 字段：
+
 - `name`：按钮文字
 - `icon`：图标语法（可选）
 - `risk`：per-action 风险覆盖；缺省用条目 `security.risk`
@@ -140,14 +141,14 @@ CLI 执行操作：`launch <alias> <action>` 或 `launch.action --root ~/Apps --
 
 ## 5. 图标语法
 
-| 语法 | 含义 |
-|---|---|
-| `default/<名字>` | game-icon-pack 图标（无 padding） |
-| `default/<名字>/padding` | 带 padding 版本 |
-| `emoji/😎` | 直接展示 emoji |
-| `file//abs/path` | 本地图片（绝对路径） |
-| `file/abs/path` | 同上（简写，都按绝对处理） |
-| 留空 / `auto` | 兜底 😎 |
+| 语法                     | 含义                              |
+| ------------------------ | --------------------------------- |
+| `default/<名字>`         | game-icon-pack 图标（无 padding） |
+| `default/<名字>/padding` | 带 padding 版本                   |
+| `emoji/😎`               | 直接展示 emoji                    |
+| `file//abs/path`         | 本地图片（绝对路径）              |
+| `file/abs/path`          | 同上（简写，都按绝对处理）        |
+| 留空 / `auto`            | 兜底 😎                           |
 
 找不到的图标名也会回落 😎。图标名列表见 `src/main/ui/assets/game-icon-pack/Icon_Catalog.json`。
 UI 里编辑对话框的图标字段旁有 📁 按钮，可弹原生文件选择器。
@@ -171,22 +172,23 @@ UI 里编辑对话框的图标字段旁有 📁 按钮，可弹原生文件选�
 
 ```js
 function Transformer() {
-  this.head = ['平台', '余额'];
-  this.rows = [];
+  this.head = ['平台', '余额']
+  this.rows = []
   this.onNewLine = function (e, ui) {
-    var line = String(e).trim();
-    if (!line) return;
-    var m = line.match(/^([^:]+):\s*(.*)$/);
-    if (!m) return ui.NewText(line, { size: 'sm', mono: true });
-    var isErr = /ERROR|Failed/i.test(m[2]);
-    this.rows.push([m[1], { t: 'status', v: m[2], color: isErr ? 'err' : 'ok' }]);
-    ui.clear();
-    return ui.NewTable(this.head, this.rows);
-  };
+    var line = String(e).trim()
+    if (!line) return
+    var m = line.match(/^([^:]+):\s*(.*)$/)
+    if (!m) return ui.NewText(line, { size: 'sm', mono: true })
+    var isErr = /ERROR|Failed/i.test(m[2])
+    this.rows.push([m[1], { t: 'status', v: m[2], color: isErr ? 'err' : 'ok' }])
+    ui.clear()
+    return ui.NewTable(this.head, this.rows)
+  }
 }
 ```
 
 注意：
+
 - 弹窗有 视图（组件）/ Raw（原始行）切换、自动滚动。
 - 启用 transformer_display 时，launch 会自动进入 monitor 模式并**去掉 terminal 包装**（输出才能进管道）。
 - transformer 运行在渲染进程（沙箱内、无 node 权限），CSP 已允许 `unsafe-eval`。
@@ -208,6 +210,7 @@ function Transformer() {
 ```
 
 效果：
+
 - 进程以 piped stdio 启动，**依附于本程序**（退出时终止，不留孤儿）。
 - 在侧栏后台任务按钮（有运行数徽标）打开的面板中，实时查看控制台输出、CPU/内存/显存占用，可向 stdin 输入、发送 Ctrl+C (SIGINT)、停止/强制结束/移除。
 - 与 `terminal: true` 互斥（background 优先，会自动去掉 terminal 包装）；与 `transformer_display` 也可共存，但后台面板本身就是输出视图。
@@ -228,6 +231,7 @@ function Transformer() {
 ## 8. UI 与 CLI 操作
 
 **UI（应用页）**：
+
 - 「添加应用」：选存储目录、填名字/ID/路径/exec，可选创建目录（`--mkdir`）。
 - 「编辑」：改主 exec（含「后台任务」开关）、风险、图标、标签、附加操作（含多步命令文本框）、transformer。
 - 卡片按钮：启动 + 各 action，颜色编码风险。
@@ -265,11 +269,13 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 `name`、`description`、`alias` 支持两种格式：
 
 **纯字符串**（向后兼容，无翻译时直接显示）：
+
 ```json
 "name": "Bili Viewer"
 ```
 
 **对象格式**（按当前语言自动选取）：
+
 ```json
 "name": {
   "zh": "哔哩观看器",
@@ -282,6 +288,7 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 ### 9.1 回退链
 
 显示时按以下优先级选取：
+
 1. 当前配置语言（`config.json` 的 `language`）
 2. `en_US` / `en-US`
 3. 对象中第一个有效值
@@ -290,6 +297,7 @@ CLI REPL 简写：`<alias>` 启动、`<alias> <action>` 执行操作、`info <al
 ### 9.2 `localized` 字段
 
 也可用 `localized` 字段存储翻译（与对象格式互斥）：
+
 ```json
 {
   "name": "Bili Viewer",

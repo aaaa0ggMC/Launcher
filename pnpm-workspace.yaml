@@ -2,6 +2,7 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+  usocket: true
 onlyBuiltDependencies:
   - electron
   - esbuild
