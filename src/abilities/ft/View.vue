@@ -14,8 +14,9 @@ import {
 } from 'vue'
 import type { Ref } from 'vue'
 import { FtEngine } from './engine'
-import { FtScene } from './scene'
+import { FtScene, paletteFromTheme } from './scene'
 import type { FtUiState, FtVector } from './types'
+import { useTheme } from 'vuetify'
 import { translate } from '@ui/i18n'
 import InfoPanel from './panels/InfoPanel.vue'
 import ControlsPanel from './panels/ControlsPanel.vue'
@@ -25,6 +26,14 @@ import type { FtPresetMeta } from './panels/SamplesPanel.vue'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+
+/** Current Vuetify scheme — used to theme the canvas palette. */
+const vuetifyTheme = useTheme()
+
+function syncPalette(): void {
+  const colors = vuetifyTheme.global.current.value.colors as Record<string, string>
+  scene?.setPalette(paletteFromTheme(colors))
+}
 
 // ---------------------------------------------------------------------------
 // Reactive UI state — panels mutate this; watchers push it into engine/scene.
@@ -283,6 +292,7 @@ onMounted(async () => {
   if (engine && scene) return
   engine = new FtEngine()
   scene = new FtScene(host)
+  syncPalette()
 
   // sync initial state into the scene
   scene.setOptions({
@@ -345,6 +355,7 @@ async function initScene(): Promise<void> {
   if (!host || engine || scene) return
   engine = new FtEngine()
   scene = new FtScene(host)
+  syncPalette()
   scene.setOptions({
     showCoords: state.show.coords,
     showCircles: state.show.circles,
@@ -390,6 +401,10 @@ watch(
 watch(
   () => state.neon,
   (n) => scene?.setOptions({ neon: n })
+)
+watch(
+  () => vuetifyTheme.global.name.value,
+  () => syncPalette()
 )
 watch(
   () => state.show,

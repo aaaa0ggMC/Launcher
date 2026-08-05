@@ -52,7 +52,27 @@ function normalize(v: Vec3): Vec3 {
   return { x: v.x / len, y: v.y / len, z: v.z / len }
 }
 
-const COLORS = {
+/**
+ * Canvas palette — theme-driven. The scene draws with these colors; the host
+ * (`View.vue`) reads the active color scheme's CSS variables (`--v-theme-*`)
+ * and pushes them here via `setPalette`, so the FT drawing follows whichever
+ * scheme is active instead of hardcoding its own hex.
+ */
+export interface FtPalette {
+  axisX: string
+  axisY: string
+  axisZ: string
+  gridMinor: string
+  gridCenter: string
+  circle: string
+  arm: string
+  track: string
+  final: string
+  tip: string
+}
+
+/** Fallback palette (the historical hardcoded dark-toned values). */
+const DEFAULT_PALETTE: FtPalette = {
   axisX: '#ff5c5c',
   axisY: '#5cff5c',
   axisZ: '#6b99ff',
@@ -63,6 +83,28 @@ const COLORS = {
   track: '#ffffff',
   final: '#9adcff',
   tip: '#4cc4d6'
+}
+
+/**
+ * Build an FtPalette from the active Vuetify scheme colors (hex values as
+ * exposed by `theme.global.current.value.colors`). The scheme only provides
+ * GENERIC tokens (the `accent-N` family + semantic/neutral ramps) — the
+ * ability decides which role maps to which token, never the other way round.
+ */
+export function paletteFromTheme(colors: Record<string, string>): FtPalette {
+  const pick = (token: string, fallback: string): string => colors[token] || fallback
+  return {
+    axisX: pick('accent-1', DEFAULT_PALETTE.axisX),
+    axisY: pick('accent-2', DEFAULT_PALETTE.axisY),
+    axisZ: pick('accent-3', DEFAULT_PALETTE.axisZ),
+    gridMinor: pick('surface-variant', DEFAULT_PALETTE.gridMinor),
+    gridCenter: pick('secondary-container', DEFAULT_PALETTE.gridCenter),
+    circle: pick('on-surface-variant', DEFAULT_PALETTE.circle),
+    arm: pick('accent-4', DEFAULT_PALETTE.arm),
+    track: pick('on-surface', DEFAULT_PALETTE.track),
+    final: pick('accent-5', DEFAULT_PALETTE.final),
+    tip: pick('primary', DEFAULT_PALETTE.tip)
+  }
 }
 
 /**
@@ -118,6 +160,7 @@ export class FtScene {
   private height = 1
 
   options: FtDisplayOptions = { ...DEFAULT_OPTIONS }
+  palette: FtPalette = { ...DEFAULT_PALETTE }
 
   // camera state
   private reach = 100
@@ -163,6 +206,11 @@ export class FtScene {
 
   setOptions(patch: Partial<FtDisplayOptions>): void {
     this.options = { ...this.options, ...patch }
+  }
+
+  /** Replace the drawing palette (the host pushes the active scheme's colors). */
+  setPalette(palette: Partial<FtPalette>): void {
+    this.palette = { ...this.palette, ...palette }
   }
 
   /** Reset for a new vector set. */
@@ -458,10 +506,10 @@ export class FtScene {
     if (this.options.showCoords) this.drawAxes()
     if (this.options.showCircles) this.drawCircles()
     if (this.options.showTrack) this.drawTrack()
-    if (this.options.showVectors) this.strokePath(this.armPoints, COLORS.arm)
+    if (this.options.showVectors) this.strokePath(this.armPoints, this.palette.arm)
     if (this.options.showFinal) {
-      this.strokePath(this.finalPoints, COLORS.final)
-      if (this.currentTip) this.fillDot(this.currentTip, 4, COLORS.tip)
+      this.strokePath(this.finalPoints, this.palette.final)
+      if (this.currentTip) this.fillDot(this.currentTip, 4, this.palette.tip)
     }
   }
 
@@ -475,7 +523,7 @@ export class FtScene {
     }
     const style = this.options.neon
       ? `hsl(${Math.round(((((this.trackTime * 0.4) % 1) + 1) % 1) * 360)}, 85%, 62%)`
-      : COLORS.track
+      : this.palette.track
     this.strokePath(pts, style)
   }
 
@@ -489,14 +537,14 @@ export class FtScene {
       { x: 0, y: -L, z: 0 },
       { x: 0, y: L, z: 0 }
     ]
-    this.strokePath(xAxis, COLORS.axisX)
-    this.strokePath(yAxis, COLORS.axisY)
+    this.strokePath(xAxis, this.palette.axisX)
+    this.strokePath(yAxis, this.palette.axisY)
     if (this.mode === '3d') {
       const zAxis = [
         { x: 0, y: 0, z: -L },
         { x: 0, y: 0, z: L }
       ]
-      this.strokePath(zAxis, COLORS.axisZ)
+      this.strokePath(zAxis, this.palette.axisZ)
     }
   }
 
@@ -511,7 +559,7 @@ export class FtScene {
         const a = (s / SEGMENTS) * Math.PI * 2
         pts.push({ x: p.x + r * Math.cos(a), y: p.y + r * Math.sin(a), z: p.z })
       }
-      this.strokePath(pts, COLORS.circle)
+      this.strokePath(pts, this.palette.circle)
     }
   }
 
@@ -531,8 +579,8 @@ export class FtScene {
         minor.push({ x: -reach, y: p, z: 0 }, { x: reach, y: p, z: 0 })
       }
     }
-    this.strokePath(minor, COLORS.gridMinor, true)
-    this.strokePath(center, COLORS.gridCenter, true)
+    this.strokePath(minor, this.palette.gridMinor, true)
+    this.strokePath(center, this.palette.gridCenter, true)
   }
 
   dispose(): void {
