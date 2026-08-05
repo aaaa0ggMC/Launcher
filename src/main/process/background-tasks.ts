@@ -30,7 +30,7 @@ const POLL_MS = 2000
 
 export type BackgroundEvent =
   | { type: 'changed'; tasks: BtTaskInfo[] }
-  | { type: 'output'; id: string; stream: 'stdout' | 'stderr'; line: string }
+  | { type: 'output'; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }
   | { type: 'exit'; id: string; code: number | null }
 
 type Broadcast = (event: BackgroundEvent) => void
@@ -126,12 +126,61 @@ function broadcastChanged(): void {
   }
 }
 
+/**
+ * Output batching: live console lines are buffered and pushed to the renderer
+ * every OUTPUT_BATCH_MS (100ms), not per-line. This keeps high-volume tasks
+ * (log spam) from flooding the IPC socket — the panel refreshes in bounded
+ * 100ms chunks instead of per-line sends. `cockpit:log` (the logging pipeline)
+ * stays per-line real-time; this batching applies only to background-task
+ * console output.
+ */
+const OUTPUT_BATCH_MS = 100
+const OUTPUT_BATCH_MAX = 500
+
+/** per-task id → pending lines not yet broadcast */
+const pendingOutput = new Map<string, { stream: 'stdout' | 'stderr'; line: string }[]>()
+let outputTimer: NodeJS.Timeout | null = null
+
+function flushOutput(): void {
+  outputTimer = null
+  if (!pendingOutput.size) return
+  for (const [id, lines] of pendingOutput) {
+    pendingOutput.delete(id)
+    if (!lines.length) continue
+    try {
+      broadcast({ type: 'output', id, lines })
+    } catch {
+      // never break the task pipeline on broadcast errors
+    }
+  }
+}
+
+function scheduleFlush(): void {
+  if (outputTimer) return
+  outputTimer = setTimeout(flushOutput, OUTPUT_BATCH_MS)
+}
+
 function appendOutput(t: InternalTask, stream: 'stdout' | 'stderr', line: string): void {
   t.output.push({ stream, line })
   if (t.output.length > MAX_OUTPUT_LINES) t.output.splice(0, t.output.length - MAX_OUTPUT_LINES)
   t.info.outputCount = t.output.length
+
+  const q = pendingOutput.get(t.info.id) ?? []
+  q.push({ stream, line })
+  pendingOutput.set(t.info.id, q)
+  scheduleFlush()
+  // hard cap: a bursty task must not grow the pending buffer unbounded —
+  // flush early if we've already queued a lot since the last window.
+  if (q.length >= OUTPUT_BATCH_MAX) flushOutput()
+}
+
+/** Flush a task's queued lines immediately (used on exit so the tail isn't delayed). */
+function flushTaskOutput(id: string): void {
+  const q = pendingOutput.get(id)
+  if (!q?.length) return
+  pendingOutput.delete(id)
   try {
-    broadcast({ type: 'output', id: t.info.id, stream, line })
+    broadcast({ type: 'output', id, lines: q })
   } catch {
     // ignore
   }
@@ -164,6 +213,7 @@ function onExit(t: InternalTask, code: number | null, signal: string | null = nu
     clearTimeout(t.forceTimer)
     t.forceTimer = undefined
   }
+  flushTaskOutput(t.info.id) // deliver any queued tail lines immediately
   try {
     broadcast({ type: 'exit', id: t.info.id, code })
   } catch {
@@ -551,4 +601,9 @@ export function shutdownBackgroundTasks(): void {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  if (outputTimer) {
+    clearTimeout(outputTimer)
+    outputTimer = null
+  }
+  pendingOutput.clear()
 }

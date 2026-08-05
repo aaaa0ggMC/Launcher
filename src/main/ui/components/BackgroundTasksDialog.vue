@@ -3,6 +3,7 @@ import { ref, shallowRef, computed, inject, nextTick, watch, onMounted, onBefore
 import type { Ref } from 'vue'
 import type { BtTaskInfo, BtStats } from '@shared/types'
 import { translate, translateTemplate } from '@ui/i18n'
+import { scoreFields } from '@ui/composables/search'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -32,13 +33,6 @@ const runningCount = computed(() => tasks.value.filter((x) => x.status === 'runn
 const finishedCount = computed(() => tasks.value.filter((x) => x.status !== 'running').length)
 const clearing = ref(false)
 
-/** Search haystack: name + description + command (+ kind + pid). */
-function taskHaystack(t: BtTaskInfo): string {
-  return [t.name, t.description ?? '', t.command ?? '', t.kind, t.pid ? String(t.pid) : '']
-    .join(' ')
-    .toLowerCase()
-}
-
 /** Status filter options, matching the logs ability's level-select style. */
 const statusOptions = computed(() => [
   { title: t('bt.filterAll'), value: '' },
@@ -52,12 +46,23 @@ const statusOptions = computed(() => [
 /**
  * Display order: running tasks first, then by name (case-insensitive).
  * A secondary sort by status keeps stopped/exited/error grouped cleanly.
+ * Search is the shared weighted AND mechanism (name > description > command
+ * > kind/pid); the status dropdown further narrows the set.
  */
 const sortedTasks = computed<BtTaskInfo[]>(() => {
-  const q = searchText.value.trim().toLowerCase()
   const filter = statusFilter.value
   return [...tasks.value]
-    .filter((t) => (!q || taskHaystack(t).includes(q)) && (!filter || t.status === filter))
+    .filter(
+      (t) =>
+        scoreFields(searchText.value, [
+          { text: t.name.toLowerCase(), weight: 3 },
+          { text: (t.description ?? '').toLowerCase(), weight: 2 },
+          { text: (t.command ?? '').toLowerCase(), weight: 2 },
+          { text: t.kind.toLowerCase(), weight: 1 },
+          { text: t.pid ? String(t.pid) : '', weight: 1 }
+        ]) > 0 &&
+        (!filter || t.status === filter)
+    )
     .sort((a, b) => {
       const aRun = a.status === 'running' ? 0 : 1
       const bRun = b.status === 'running' ? 0 : 1
@@ -88,8 +93,14 @@ async function clearFinished(): Promise<void> {
 }
 
 function pushLine(id: string, stream: 'stdout' | 'stderr', line: string): void {
+  pushLines(id, [{ stream, line }])
+}
+
+/** Append a batch of lines to a task's console buffer (rendered together). */
+function pushLines(id: string, batch: { stream: 'stdout' | 'stderr'; line: string }[]): void {
+  if (!batch.length) return
   const cur = lines.value[id] ?? []
-  cur.push({ stream, line })
+  cur.push(...batch)
   if (cur.length > MAX_LINES) cur.splice(0, cur.length - MAX_LINES)
   lines.value = { ...lines.value, [id]: cur }
 }
@@ -101,7 +112,7 @@ function onBtEvent(raw: unknown): void {
   try {
     const evt = raw as
       | { type: 'changed'; tasks: BtTaskInfo[] }
-      | { type: 'output'; id: string; stream: 'stdout' | 'stderr'; line: string }
+      | { type: 'output'; id: string; lines: { stream: 'stdout' | 'stderr'; line: string }[] }
       | { type: 'exit'; id: string; code: number | null }
     if (!evt || typeof evt.type !== 'string') return
     if (evt.type === 'changed') {
@@ -120,7 +131,8 @@ function onBtEvent(raw: unknown): void {
       return
     }
     if (evt.type === 'output') {
-      pushLine(evt.id, evt.stream, evt.line)
+      // batched: main process coalesces per-line output into 100ms chunks
+      if (evt.lines?.length) pushLines(evt.id, evt.lines)
       return
     }
     if (evt.type === 'exit') {
@@ -386,7 +398,6 @@ onBeforeUnmount(() => {
               flat
               hide-details
               attach
-              :label="t('bt.filterStatus')"
               :menu-props="{ maxHeight: 200, contentClass: 'bt-filter-menu' }"
               class="bt-filter"
             />
@@ -632,7 +643,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   overflow-y: auto;
   border-right: 1px solid rgba(var(--v-theme-surface-bright), 0.12);
-  scrollbar-width: thin;
 }
 .bt-detail {
   flex: 1;
@@ -662,8 +672,6 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 0.8rem;
   line-height: 1.5;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-primary), 0.45) transparent;
 }
 .bt-line {
   color: rgba(var(--v-theme-on-surface), 0.92);
@@ -692,21 +700,51 @@ onBeforeUnmount(() => {
   min-height: 32px;
 }
 .bt-filter :deep(.v-field__input) {
-  justify-content: flex-end;
+  justify-content: center;
   align-items: center;
-  text-align: right;
-  font-size: 0.75rem;
+  text-align: center;
+  font-size: 0.85rem;
   line-height: 1;
 }
 .bt-filter :deep(.v-field__input input) {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
-.bt-filter :deep(.v-label) {
-  font-size: 0.68rem;
-  line-height: 1;
+.bt-filter :deep(.v-field__append-inner .v-icon) {
+  font-size: 0.85rem;
+  opacity: 0.6;
 }
 .bt-filter :deep(.v-list-item__content) {
-  text-align: right;
+  text-align: center;
+}
+
+/* Custom WebKit scrollbars matching the app chrome (global.css) — do NOT use
+   scrollbar-width/scrollbar-color, they switch to the native GTK model and
+   ignore ::-webkit-scrollbar entirely. */
+.bt-list::-webkit-scrollbar,
+.bt-console::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.bt-list::-webkit-scrollbar-track,
+.bt-console::-webkit-scrollbar-track {
+  background: transparent;
+}
+.bt-list::-webkit-scrollbar-button,
+.bt-console::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.bt-list::-webkit-scrollbar-thumb,
+.bt-console::-webkit-scrollbar-thumb {
+  background-color: rgba(var(--v-theme-surface-bright), 0.55);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+}
+.bt-list::-webkit-scrollbar-thumb:hover,
+.bt-console::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(var(--v-theme-on-surface-variant), 0.4);
 }
 </style>
 
