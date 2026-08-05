@@ -61,7 +61,7 @@ const SQUARE: FtPreset = {
 
 const STAR: FtPreset = {
   name: 'star',
-  vectors: dftVectors(samplePolyline(starPolygon(130, 55, 10), 50), 45),
+  vectors: dftVectors(samplePolyline(starPolygon(130, 55, 5), 50), 45),
   runSpeed: 1
 }
 

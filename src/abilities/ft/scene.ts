@@ -1,4 +1,3 @@
-import * as THREE from 'three'
 import type { FtVector } from './types'
 import type { FtChain, FtPoint } from './engine'
 
@@ -26,7 +25,45 @@ function rad(deg: number): number {
   return (deg * Math.PI) / 180
 }
 
-const WORLD_UP = new THREE.Vector3(0, 1, 0)
+const FOV = 45
+const NEAR = 0.5
+const WORLD_UP = { x: 0, y: 1, z: 0 }
+
+interface Vec3 {
+  x: number
+  y: number
+  z: number
+}
+
+/** Point in camera space; z = depth along the view direction (positive in front). */
+interface CamPoint {
+  x: number
+  y: number
+  z: number
+}
+
+function cross(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
+}
+
+function normalize(v: Vec3): Vec3 {
+  const len = Math.hypot(v.x, v.y, v.z)
+  if (len === 0) return { x: 0, y: 0, z: 0 }
+  return { x: v.x / len, y: v.y / len, z: v.z / len }
+}
+
+const COLORS = {
+  axisX: '#ff5c5c',
+  axisY: '#5cff5c',
+  axisZ: '#6b99ff',
+  gridMinor: '#1c242f',
+  gridCenter: '#2c3640',
+  circle: '#8b97a5',
+  arm: '#ffe066',
+  track: '#ffffff',
+  final: '#9adcff',
+  tip: '#4cc4d6'
+}
 
 /**
  * Max distance of the chain tip from origin over one full cycle — the true
@@ -63,216 +100,94 @@ function computeChainReach(vectors: FtVector[]): number {
 }
 
 /**
- * three.js renderer for the epicycle scene. The canvas is fully transparent
- * (alpha:true, clear alpha 0) so the app's Background/Fuse layers show through
- * — the ft ability automatically follows the window background settings.
+ * Canvas2D renderer for the epicycle scene. No WebGL: the geometry here is
+ * only lines/circles/dots, so we draw them with a manual perspective
+ * projection on a plain 2D canvas. This deliberately avoids the GPU entirely
+ * — the previous three.js/WebGL implementation crashed the AMD iGPU driver
+ * (radeonsi page-fault hang) on hybrid systems, taking the whole Wayland
+ * session down with it.
  */
-/**
- * Build a circle outline geometry from perimeter points only. `CircleGeometry`
- * puts the center vertex first, so a `Line` primitive renders it as a radial
- * tail from the center — this keeps a clean loop with no center vertex.
- */
-function makeCircleOutline(radius: number, segments = 64): THREE.BufferGeometry {
-  const pts = new Float32Array(segments * 3)
-  for (let s = 0; s < segments; s++) {
-    const a = (s / segments) * Math.PI * 2
-    pts[s * 3] = radius * Math.cos(a)
-    pts[s * 3 + 1] = radius * Math.sin(a)
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(pts, 3))
-  return geo
-}
-
 export class FtScene {
-  private renderer: THREE.WebGLRenderer
-  private scene = new THREE.Scene()
-  private camera: THREE.PerspectiveCamera
   private container: HTMLElement
+  private canvasEl: HTMLCanvasElement
+  private ctx: CanvasRenderingContext2D
   private disposed = false
 
-  private coordsGroup = new THREE.Group()
-  private grid: THREE.GridHelper
-  private circleGroup = new THREE.Group()
-  private armLine: THREE.Line
-  private trackLine: THREE.Line
-  private finalLine: THREE.Line
-  private tipDot: THREE.Mesh
-  /** Each vector's orbit circle, keyed by its vector index (a zero/DC vector
-   *  gets no circle, so indices must be tracked explicitly — a flat array would
-   *  misalign pivots). */
-  private circleMeshes: { index: number; mesh: THREE.Line }[] = []
+  private dpr = 1
+  private width = 1
+  private height = 1
 
-  private armPositions = new Float32Array(3)
-  private trackPositions = new Float32Array(0)
-  private finalPositions = new Float32Array(6)
+  options: FtDisplayOptions = { ...DEFAULT_OPTIONS }
 
+  // camera state
   private reach = 100
   private viewDistance = 500
   private orbitRadius = 700
   private azimuth = Math.PI / 4
   private elevation = 0.55
-  private target = new THREE.Vector3(0, 0, 0)
+  private target: Vec3 = { x: 0, y: 0, z: 0 }
+  private camera: Vec3 = { x: 0, y: 0, z: 0 }
   private mode: FtMode = '2d'
   private follow = false
+  private currentTip: FtPoint | null = null
 
-  options: FtDisplayOptions = { ...DEFAULT_OPTIONS }
+  // frame geometry
+  private circlePivots: FtPoint[] = []
+  private circleRadii: number[] = []
+  private armPoints: Vec3[] = []
+  private finalPoints: Vec3[] = []
+  private trackPoints: FtPoint[] = []
+  private trackTime = 0
+  private trackCap = 4096
+
+  // per-frame camera basis
+  private camRight: Vec3 = { x: 1, y: 0, z: 0 }
+  private camUp: Vec3 = { x: 0, y: 1, z: 0 }
+  private camForward: Vec3 = { x: 0, y: 0, z: -1 }
+  private aspect = 1
 
   constructor(container: HTMLElement) {
     this.container = container
-    const w = container.clientWidth || 1
-    const h = container.clientHeight || 1
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true
-    })
-    this.renderer.setClearColor(0x000000, 0)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.setSize(w, h)
-    container.appendChild(this.renderer.domElement)
-
-    this.camera = new THREE.PerspectiveCamera(45, w / h, 1, 200000)
-
-    // coordinate axes
-    const axisGeo = new THREE.BufferGeometry()
-    axisGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6 * 3), 3))
-    const axisMat = new THREE.LineBasicMaterial({ vertexColors: true })
-    this.coordsGroup.add(new THREE.LineSegments(axisGeo, axisMat))
-    this.scene.add(this.coordsGroup)
-
-    this.scene.add(this.circleGroup)
-
-    this.armLine = new THREE.Line(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: 0xffe066 })
-    )
-    this.armLine.frustumCulled = false
-    this.scene.add(this.armLine)
-
-    this.trackLine = new THREE.Line(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: 0xffffff })
-    )
-    this.trackLine.frustumCulled = false
-    this.scene.add(this.trackLine)
-
-    this.finalLine = new THREE.Line(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: 0x9adcff })
-    )
-    this.finalLine.frustumCulled = false
-    this.scene.add(this.finalLine)
-
-    this.tipDot = new THREE.Mesh(
-      new THREE.SphereGeometry(4, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0x4cc4d6 })
-    )
-    this.scene.add(this.tipDot)
-
-    this.grid = new THREE.GridHelper(1, 10, 0x2c3640, 0x1c242f)
-    this.grid.visible = false
-    this.scene.add(this.grid)
-
-    this.updateAxes()
+    this.canvasEl = document.createElement('canvas')
+    this.canvasEl.style.display = 'block'
+    const ctx = this.canvasEl.getContext('2d')
+    if (!ctx) throw new Error('Canvas2D is unavailable')
+    this.ctx = ctx
+    container.appendChild(this.canvasEl)
+    this.resize()
   }
 
   get canvas(): HTMLCanvasElement {
-    return this.renderer.domElement
+    return this.canvasEl
   }
 
   setOptions(patch: Partial<FtDisplayOptions>): void {
     this.options = { ...this.options, ...patch }
-    this.coordsGroup.visible = this.options.showCoords
-    this.circleGroup.visible = this.options.showCircles
-    this.armLine.visible = this.options.showVectors
-    this.trackLine.visible = this.options.showTrack
-    this.finalLine.visible = this.options.showFinal
-    this.tipDot.visible = this.options.showFinal
   }
 
-  /** Rebuild meshes for a new vector set. */
+  /** Reset for a new vector set. */
   setVectors(vectors: FtVector[], verticesLimit?: number): void {
     this.reach = computeChainReach(vectors)
     this.viewDistance = this.defaultViewDistance()
     this.orbitRadius = this.viewDistance * 1.3
-    this.target.set(0, 0, 0)
+    this.target = { x: 0, y: 0, z: 0 }
 
-    // circles: one static outline per vector, radius = vector length
-    for (const c of this.circleMeshes) {
-      this.circleGroup.remove(c.mesh)
-      c.mesh.geometry.dispose()
-      ;(c.mesh.material as THREE.Material).dispose()
-    }
-    this.circleMeshes = []
-    for (let i = 0; i < vectors.length; i++) {
-      const v = vectors[i]
-      const r = Math.hypot(v.x, v.y)
-      if (r < 0.01) continue
-      const mesh = new THREE.LineLoop(
-        makeCircleOutline(r),
-        new THREE.LineBasicMaterial({ color: 0x8b97a5 })
-      )
-      this.circleGroup.add(mesh)
-      this.circleMeshes.push({ index: i, mesh })
-    }
+    this.circleRadii = vectors.map((v) => Math.hypot(v.x, v.y))
+    this.circlePivots = []
+    this.armPoints = []
+    this.finalPoints = []
+    this.trackPoints = []
+    this.trackCap = Math.max(500, verticesLimit ?? 500)
 
-    // arms: continuous polyline origin → p0 → p1 → … → tip
-    const count = vectors.length + 2
-    this.armPositions = new Float32Array(count * 3)
-    this.armLine.geometry.setAttribute('position', new THREE.BufferAttribute(this.armPositions, 3))
-    this.armLine.geometry.setDrawRange(0, 0)
-
-    // track buffer
-    const limit = Math.max(500, verticesLimit ?? 500)
-    this.trackPositions = new Float32Array(limit * 3)
-    this.trackLine.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(this.trackPositions, 3)
-    )
-    this.trackLine.geometry.setDrawRange(0, 0)
-
-    // final vector origin→tip
-    this.finalPositions = new Float32Array(6)
-    this.finalLine.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(this.finalPositions, 3)
-    )
-    this.finalLine.geometry.setDrawRange(0, 0)
-
-    this.grid.scale.set(this.reach * 2, this.reach * 2, 1)
-    this.grid.position.z = 0
-
-    this.updateAxes()
     this.updateCamera()
   }
 
   setVerticesLimit(limit: number): void {
-    if (this.trackPositions.length >= limit * 3) return
-    this.trackPositions = new Float32Array(limit * 3)
-    this.trackLine.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(this.trackPositions, 3)
-    )
+    this.trackCap = Math.max(500, limit)
   }
 
   private defaultViewDistance(): number {
-    return (this.reach * 1.9) / Math.tan(rad(this.camera.fov / 2))
-  }
-
-  private updateAxes(): void {
-    const geo = this.coordsGroup.children[0] as THREE.LineSegments
-    // Effectively infinite axes (span far beyond the view at any zoom): X red,
-    // Y green. Z is only drawn in 3D — in 2D the camera looks down -Z so a Z
-    // axis would be meaningless.
-    const L = 1e6
-    const pts = [-L, 0, 0, L, 0, 0, 0, -L, 0, 0, L, 0]
-    const colors = [1, 0.36, 0.36, 1, 0.36, 0.36, 0.36, 1, 0.36, 0.36, 1, 0.36]
-    if (this.mode === '3d') {
-      pts.push(0, 0, -L, 0, 0, L)
-      colors.push(0.42, 0.6, 1, 0.42, 0.6, 1)
-    }
-    geo.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3))
-    geo.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+    return (this.reach * 1.9) / Math.tan(rad(FOV / 2))
   }
 
   setMode(mode: FtMode): void {
@@ -281,12 +196,9 @@ export class FtScene {
       this.orbitRadius = this.viewDistance
       this.azimuth = Math.PI / 4
       this.elevation = 0.55
-      if (this.grid) this.grid.visible = true
     } else {
       this.viewDistance = this.orbitRadius
-      if (this.grid) this.grid.visible = false
     }
-    this.updateAxes()
     this.updateCamera()
   }
 
@@ -296,7 +208,7 @@ export class FtScene {
 
   /** Frame the whole chain in view. */
   resetView(): void {
-    this.target.set(0, 0, 0)
+    this.target = { x: 0, y: 0, z: 0 }
     this.viewDistance = this.defaultViewDistance()
     this.orbitRadius = this.defaultViewDistance() * 1.3
     this.azimuth = Math.PI / 4
@@ -331,21 +243,15 @@ export class FtScene {
    */
   panBy(dx: number, dy: number): void {
     if (this.follow) return
+    this.updateBasis()
     const dist = this.mode === '3d' ? this.orbitRadius : this.viewDistance
-    const units = (dist * Math.tan(rad(this.camera.fov / 2)) * 2) / this.container.clientHeight
-
-    const right = new THREE.Vector3()
-    const up = new THREE.Vector3()
-    if (this.mode === '3d') {
-      const forward = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize()
-      right.crossVectors(forward, WORLD_UP).normalize()
-      up.crossVectors(right, forward)
-    } else {
-      right.set(1, 0, 0)
-      up.set(0, 1, 0)
-    }
-    this.target.addScaledVector(right, -dx * units)
-    this.target.addScaledVector(up, dy * units)
+    const units = (dist * Math.tan(rad(FOV / 2)) * 2) / (this.container.clientHeight || 1)
+    this.target.x += this.camRight.x * -dx * units
+    this.target.y += this.camRight.y * -dx * units
+    this.target.z += this.camRight.z * -dx * units
+    this.target.x += this.camUp.x * dy * units
+    this.target.y += this.camUp.y * dy * units
+    this.target.z += this.camUp.z * dy * units
     this.updateCamera()
   }
 
@@ -360,121 +266,279 @@ export class FtScene {
   resize(): void {
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
-    this.renderer.setSize(w, h)
-    this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+    const pw = Math.max(1, Math.round(w * this.dpr))
+    const ph = Math.max(1, Math.round(h * this.dpr))
+    if (this.canvasEl.width !== pw) this.canvasEl.width = pw
+    if (this.canvasEl.height !== ph) this.canvasEl.height = ph
+    this.canvasEl.style.width = `${w}px`
+    this.canvasEl.style.height = `${h}px`
+    this.width = w
+    this.height = h
   }
 
   private updateCamera(): void {
-    if (this.follow) {
-      const p = this.currentTip ?? this.target
-      this.target.set(p.x, p.y, p.z)
+    if (this.follow && this.currentTip) {
+      this.target.x = this.currentTip.x
+      this.target.y = this.currentTip.y
+      this.target.z = this.currentTip.z
     }
     if (this.mode === '3d') {
       const r = this.orbitRadius
       const cp = Math.cos(this.elevation)
-      this.camera.position.set(
-        this.target.x + r * cp * Math.cos(this.azimuth),
-        this.target.y + r * Math.sin(this.elevation),
-        this.target.z + r * cp * Math.sin(this.azimuth)
-      )
+      this.camera.x = this.target.x + r * cp * Math.cos(this.azimuth)
+      this.camera.y = this.target.y + r * Math.sin(this.elevation)
+      this.camera.z = this.target.z + r * cp * Math.sin(this.azimuth)
     } else {
-      this.camera.position.set(this.target.x, this.target.y, this.target.z + this.viewDistance)
+      this.camera.x = this.target.x
+      this.camera.y = this.target.y
+      this.camera.z = this.target.z + this.viewDistance
     }
-    this.camera.lookAt(this.target)
   }
-
-  private currentTip: FtPoint | null = null
 
   /** Refresh all moving geometry from the latest simulation frame. */
   update(chain: FtChain): void {
     this.currentTip = chain.tip
-    const armAttr = this.armLine.geometry.getAttribute('position') as
-      THREE.BufferAttribute | undefined
-    if (!armAttr) return // no vectors loaded yet
+    this.circlePivots = chain.pivots
 
-    // circles → move each to its own vector's pivot (indices tracked because
-    // zero-length vectors get no circle and would desync a flat array)
-    for (const c of this.circleMeshes) {
-      const p = chain.pivots[c.index]
-      if (p) c.mesh.position.set(p.x, p.y, p.z)
-    }
+    this.armPoints = [{ x: 0, y: 0, z: 0 }]
+    for (const p of chain.pivots) this.armPoints.push(p)
+    this.armPoints.push(chain.tip)
 
-    // arms: origin → pivots → tip
-    const aa = armAttr.array as Float32Array
-    aa[0] = 0
-    aa[1] = 0
-    aa[2] = 0
-    for (let i = 0; i < chain.pivots.length; i++) {
-      aa[(i + 1) * 3] = chain.pivots[i].x
-      aa[(i + 1) * 3 + 1] = chain.pivots[i].y
-      aa[(i + 1) * 3 + 2] = chain.pivots[i].z
-    }
-    const last = chain.tips.length
-    aa[(last + 1) * 3] = chain.tip.x
-    aa[(last + 1) * 3 + 1] = chain.tip.y
-    aa[(last + 1) * 3 + 2] = chain.tip.z
-    armAttr.needsUpdate = true
-    this.armLine.geometry.setDrawRange(0, last + 2)
-
-    // tip dot
-    this.tipDot.position.set(chain.tip.x, chain.tip.y, chain.tip.z)
-
-    // final vector
-    const fa = this.finalLine.geometry.getAttribute('position') as THREE.BufferAttribute
-    const farr = fa.array as Float32Array
-    farr[0] = 0
-    farr[1] = 0
-    farr[2] = 0
-    farr[3] = chain.tip.x
-    farr[4] = chain.tip.y
-    farr[5] = chain.tip.z
-    fa.needsUpdate = true
-    this.finalLine.geometry.setDrawRange(0, 2)
+    this.finalPoints = [
+      { x: 0, y: 0, z: 0 },
+      { x: chain.tip.x, y: chain.tip.y, z: chain.tip.z }
+    ]
   }
 
   /** Stream track points (already capped by the engine). */
   updateTrack(track: FtPoint[], time: number): void {
-    const attr = this.trackLine.geometry.getAttribute('position') as
-      THREE.BufferAttribute | undefined
-    if (!attr) return // no vectors loaded yet
-    const arr = attr.array as Float32Array
-    const cap = Math.floor(arr.length / 3)
-    const n = Math.min(track.length, cap)
-    for (let i = 0; i < n; i++) {
-      arr[i * 3] = track[i].x
-      arr[i * 3 + 1] = track[i].y
-      arr[i * 3 + 2] = track[i].z
-    }
-    attr.needsUpdate = true
-    this.trackLine.geometry.setDrawRange(0, n)
+    this.trackTime = time
+    this.trackPoints = track
+  }
 
-    if (this.options.neon) {
-      const mat = this.trackLine.material as THREE.LineBasicMaterial
-      mat.color.setHSL((((time * 0.4) % 1) + 1) % 1, 0.85, 0.62)
+  // ---------------------------------------------------------------------------
+  // Projection
+  // ---------------------------------------------------------------------------
+
+  /** Look-at camera basis from the current position/target. */
+  private updateBasis(): void {
+    const fwd = normalize({
+      x: this.target.x - this.camera.x,
+      y: this.target.y - this.camera.y,
+      z: this.target.z - this.camera.z
+    })
+    let right = cross(fwd, WORLD_UP)
+    const rl = Math.hypot(right.x, right.y, right.z)
+    if (rl < 1e-6) {
+      right = { x: 1, y: 0, z: 0 }
     } else {
-      const mat = this.trackLine.material as THREE.LineBasicMaterial
-      if (mat.color.getHex() !== 0xffffff) mat.color.setHex(0xffffff)
+      right = { x: right.x / rl, y: right.y / rl, z: right.z / rl }
+    }
+    this.camForward = fwd
+    this.camRight = right
+    this.camUp = cross(right, fwd)
+  }
+
+  private toCam(p: Vec3): CamPoint {
+    const dx = p.x - this.camera.x
+    const dy = p.y - this.camera.y
+    const dz = p.z - this.camera.z
+    return {
+      x: dx * this.camRight.x + dy * this.camRight.y + dz * this.camRight.z,
+      y: dx * this.camUp.x + dy * this.camUp.y + dz * this.camUp.z,
+      z: dx * this.camForward.x + dy * this.camForward.y + dz * this.camForward.z
     }
   }
 
+  private project(c: CamPoint): { x: number; y: number } | null {
+    // Near-plane boundary points (z === NEAR, produced by near-plane clipping)
+    // are valid and must project — only strictly-behind points are rejected.
+    if (c.z < NEAR) return null
+    const t = this.projT
+    const nx = c.x / (c.z * t * this.aspect)
+    const ny = c.y / (c.z * t)
+    return { x: ((nx + 1) / 2) * this.width, y: (1 - (ny + 1) / 2) * this.height }
+  }
+
+  private get projT(): number {
+    return Math.tan(rad(FOV / 2))
+  }
+
+  /**
+   * Stroke world-space segments, clipping each against the near plane (a
+   * segment crossing behind the camera is cut, so the path stays intact).
+   *
+   * - `discrete: false` — treat the points as one continuous polyline (track /
+   *   arms / circles): consecutive points that project to the same screen
+   *   position extend the current subpath (keeps round joins), anything else
+   *   starts a fresh subpath.
+   * - `discrete: true` — treat the points as a batch of independent segments
+   *   (`[a0,b0, a1,b1, …]`), each drawn as its own moveTo/lineTo. Without this,
+   *   the bridges between consecutive segments would get drawn as spurious
+   *   diagonal connectors (the grid lines looked like a tangled crosshatch).
+   */
+  private strokePath(points: Vec3[], style: string, discrete = false): void {
+    const ctx = this.ctx
+    ctx.strokeStyle = style
+    ctx.lineWidth = 1
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    let penX: number | null = null
+    let penY: number | null = null
+    const stride = discrete ? 2 : 1
+    for (let i = 0; i + 1 < points.length; i += stride) {
+      const seg = this.clipSegment(points[i], points[i + 1])
+      if (!seg) {
+        penX = penY = null
+        continue
+      }
+      const pa = this.project(seg[0])
+      const pb = this.project(seg[1])
+      if (!pa || !pb) {
+        penX = penY = null
+        continue
+      }
+      if (discrete) {
+        ctx.moveTo(pa.x, pa.y)
+        ctx.lineTo(pb.x, pb.y)
+      } else if (penX === pa.x && penY === pa.y) {
+        ctx.lineTo(pb.x, pb.y)
+      } else {
+        ctx.moveTo(pa.x, pa.y)
+        ctx.lineTo(pb.x, pb.y)
+      }
+      penX = pb.x
+      penY = pb.y
+    }
+    ctx.stroke()
+  }
+
+  /** Clip a world-space segment against the near plane; null if fully behind. */
+  private clipSegment(a: Vec3, b: Vec3): [CamPoint, CamPoint] | null {
+    const ca = this.toCam(a)
+    const cb = this.toCam(b)
+    if (ca.z > NEAR && cb.z > NEAR) return [ca, cb]
+    if (ca.z <= NEAR && cb.z <= NEAR) return null
+    const t = (NEAR - ca.z) / (cb.z - ca.z)
+    const c = { x: ca.x + (cb.x - ca.x) * t, y: ca.y + (cb.y - ca.y) * t, z: NEAR }
+    return ca.z > NEAR ? [ca, c] : [c, cb]
+  }
+
+  /** Fill a sphere of `worldRadius` world units projected at `center`. */
+  private fillDot(center: Vec3, worldRadius: number, style: string): void {
+    const c = this.toCam(center)
+    if (c.z <= NEAR) return
+    const p = this.project(c)
+    if (!p) return
+    const focal = this.height / 2 / this.projT
+    const r = Math.max(1, (worldRadius * focal) / c.z)
+    const ctx = this.ctx
+    ctx.fillStyle = style
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Frame draw
+  // ---------------------------------------------------------------------------
+
   render(): void {
+    if (this.disposed) return
     this.updateCamera()
-    this.renderer.render(this.scene, this.camera)
+    this.updateBasis()
+    this.aspect = this.width / this.height
+
+    const ctx = this.ctx
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    ctx.clearRect(0, 0, this.width, this.height)
+
+    if (this.mode === '3d') this.drawGrid()
+    if (this.options.showCoords) this.drawAxes()
+    if (this.options.showCircles) this.drawCircles()
+    if (this.options.showTrack) this.drawTrack()
+    if (this.options.showVectors) this.strokePath(this.armPoints, COLORS.arm)
+    if (this.options.showFinal) {
+      this.strokePath(this.finalPoints, COLORS.final)
+      if (this.currentTip) this.fillDot(this.currentTip, 4, COLORS.tip)
+    }
+  }
+
+  private drawTrack(): void {
+    const n = Math.min(this.trackPoints.length, this.trackCap)
+    if (n < 2) return
+    const pts: Vec3[] = new Array(n)
+    for (let i = 0; i < n; i++) {
+      const p = this.trackPoints[i]
+      pts[i] = { x: p.x, y: p.y, z: p.z }
+    }
+    const style = this.options.neon
+      ? `hsl(${Math.round(((((this.trackTime * 0.4) % 1) + 1) % 1) * 360)}, 85%, 62%)`
+      : COLORS.track
+    this.strokePath(pts, style)
+  }
+
+  private drawAxes(): void {
+    const L = 1e6
+    const xAxis = [
+      { x: -L, y: 0, z: 0 },
+      { x: L, y: 0, z: 0 }
+    ]
+    const yAxis = [
+      { x: 0, y: -L, z: 0 },
+      { x: 0, y: L, z: 0 }
+    ]
+    this.strokePath(xAxis, COLORS.axisX)
+    this.strokePath(yAxis, COLORS.axisY)
+    if (this.mode === '3d') {
+      const zAxis = [
+        { x: 0, y: 0, z: -L },
+        { x: 0, y: 0, z: L }
+      ]
+      this.strokePath(zAxis, COLORS.axisZ)
+    }
+  }
+
+  private drawCircles(): void {
+    for (let i = 0; i < this.circlePivots.length; i++) {
+      const r = this.circleRadii[i] ?? 0
+      if (r < 0.01) continue
+      const p = this.circlePivots[i]
+      const pts: Vec3[] = []
+      const SEGMENTS = 64
+      for (let s = 0; s <= SEGMENTS; s++) {
+        const a = (s / SEGMENTS) * Math.PI * 2
+        pts.push({ x: p.x + r * Math.cos(a), y: p.y + r * Math.sin(a), z: p.z })
+      }
+      this.strokePath(pts, COLORS.circle)
+    }
+  }
+
+  private drawGrid(): void {
+    const reach = this.reach
+    const step = reach * 0.2
+    const minor: Vec3[] = []
+    const center: Vec3[] = []
+    for (let i = 0; i <= 10; i++) {
+      const p = -reach + i * step
+      const isCenter = i === 5
+      if (isCenter) {
+        center.push({ x: p, y: -reach, z: 0 }, { x: p, y: reach, z: 0 })
+        center.push({ x: -reach, y: p, z: 0 }, { x: reach, y: p, z: 0 })
+      } else {
+        minor.push({ x: p, y: -reach, z: 0 }, { x: p, y: reach, z: 0 })
+        minor.push({ x: -reach, y: p, z: 0 }, { x: reach, y: p, z: 0 })
+      }
+    }
+    this.strokePath(minor, COLORS.gridMinor, true)
+    this.strokePath(center, COLORS.gridCenter, true)
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.renderer.dispose()
-    this.renderer.domElement.remove()
-    this.scene.traverse((o) => {
-      const obj = o as THREE.Mesh
-      if (obj.geometry) obj.geometry.dispose()
-      const mat = obj.material as THREE.Material | THREE.Material[] | undefined
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
-      else if (mat) mat.dispose()
-    })
+    this.canvasEl.remove()
   }
 }
 
