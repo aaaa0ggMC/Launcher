@@ -148,7 +148,7 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
   registerJobHandler + startJobByName  # 命名作业：前端 background.job --name <handler> 触发
       └→ process/background-tasks.ts
           ├→ 任务注册表 + 环形输出缓冲
-          ├→ /proc 轮询 CPU/内存/显存
+          ├→ 资源统计（pidusage 跨平台 CPU/内存，nvidia-smi GPU）
           └→ 广播 cockpit:bt ──→ BackgroundTasksDialog（全局面板：控制台/进度/停止）
 ```
 

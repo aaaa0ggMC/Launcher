@@ -137,6 +137,8 @@ pnpm format       # prettier --write .
 **提交前必须跑 `pnpm typecheck && pnpm lint`，0 errors 才算通过。**
 prettier 配置：单引号、无分号、printWidth 100、无尾逗号。
 
+**UI 改动必须参照 `DESIGN.md`**（界面排版规范，尤其「§3 尺寸底线」「§4 常见误区」「§6 检查清单」）——避免把界面设计得太紧（元素贴边、文字挤顶部、间距不足）。
+
 ## 8. 项目结构
 
 ```
@@ -230,7 +232,7 @@ ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 
 架构级设施（`src/main/process/background-tasks.ts`，与 logger 同级），**不绑定任何能力**。任何模块都能开一个跨页面存活的长跑作业，全局面板（`BackgroundTasksDialog.vue`）统一展示与交互。
 
 - 两类任务：
-  - **进程任务** `startProcessTask({ name, description, argv, cwd, env })` — 真实子进程，piped stdio 环形缓冲，`/proc` 轮询 CPU/内存/GPU 显存，支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
+  - **进程任务** `startProcessTask({ name, description, argv, cwd, env })` — 真实子进程，piped stdio 环形缓冲，资源统计（CPU/内存经跨平台的 `pidusage`，GPU 显存经 nvidia-smi，缺失时降级留空），支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
   - **作业任务** `startJobTask({ name, description, onCancel })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
 - **命名作业**：`registerJobHandler(name, handler)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
 - 广播：`cockpit:bt` 事件（`changed` 全量列表 / `output` **批量行** / `exit`）。**控制台输出是 100ms 批量合并推送**（攒一批行一次广播，500 行硬上限提前 flush，退出时立即 flush tail），不是逐行发——高频打日志的任务不会打爆 IPC。渲染端侧栏按钮徽标只计运行中任务（上限 `99+`）。
