@@ -1,0 +1,7 @@
+{
+  "id": "system",
+  "name": "theme.system",
+  "system": true,
+  "dark": false,
+  "colors": {}
+}

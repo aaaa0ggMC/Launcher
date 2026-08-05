@@ -6,14 +6,14 @@ import '@mdi/font/css/materialdesignicons.css'
 import 'vuetify/styles'
 import './styles/global.css'
 import App from './App.vue'
-import { dark, pureblack } from './styles/theme'
+import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 
 const vuetify = createVuetify({
   components,
   directives,
   theme: {
-    defaultTheme: 'dark',
-    themes: { dark, pureblack }
+    defaultTheme: DEFAULT_SCHEME_ID,
+    themes: buildThemeDefinitions()
   },
   defaults: {
     global: {

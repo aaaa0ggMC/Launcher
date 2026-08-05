@@ -19,8 +19,23 @@ export default {
           key: 'theme',
           label: '主题',
           icon: 'mdi-palette',
-          description: '深色 / 纯黑 / 跟随系统',
-          keywords: ['深色', '纯黑', '跟随系统', '明亮', 'dark', 'theme'],
+          description: '多套配色方案 / 跟随系统',
+          keywords: [
+            '深色',
+            '纯黑',
+            '亮色',
+            '月光',
+            '森林',
+            '极光',
+            '玫瑰',
+            '石板',
+            '羊皮纸',
+            '跟随系统',
+            '明亮',
+            'dark',
+            'theme',
+            'color scheme'
+          ],
           component: defineAsyncComponent(() => import('./items/ThemeSection.vue'))
         },
         {
@@ -44,8 +59,17 @@ export default {
           key: 'animations',
           label: '界面动画',
           icon: 'mdi-motion-play-outline',
-          description: '切换能力页面的过渡动画',
-          keywords: ['动画', '过渡', '切换', '淡入淡出', '滑动', 'transition'],
+          description: '现代动效总开关、切换能力页面的过渡动画',
+          keywords: [
+            '动画',
+            '过渡',
+            '切换',
+            '淡入淡出',
+            '滑动',
+            '现代动效',
+            'transition',
+            'motion'
+          ],
           component: defineAsyncComponent(() => import('./items/AnimationSection.vue'))
         },
         {
