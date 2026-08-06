@@ -42,6 +42,7 @@ import {
   setContinuousBaseVol,
   getChatTask,
   setChatPlayer,
+  chatResendPlaylist,
   clearContinuousPending
 } from './jobs'
 
@@ -467,6 +468,23 @@ const commands: CommandSpec[] = [
         st.control.pushLine(`发送目标已切换 → ${player}`)
       }
       return { ok: true, player }
+    }
+  },
+  {
+    name: 'aidj.chat-resend',
+    description: '将歌单重新发送到持续会话的连续播放器',
+    usage: 'aidj.chat-resend --task <id> --songs <json>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const songsJson = ctx.named.songs as string
+      if (!taskId || !songsJson) return { ok: false, error: '需要 --task 和 --songs 参数' }
+      let songs: unknown
+      try {
+        songs = JSON.parse(songsJson)
+      } catch {
+        return { ok: false, error: '--songs 不是合法 JSON' }
+      }
+      return chatResendPlaylist(taskId, songs as { name: string; path: string }[])
     }
   },
   {

@@ -124,6 +124,13 @@ async function send(): Promise<void> {
   await window.cockpit.command('aidj.chat', { task: props.task.id, text }).catch(() => {})
 }
 
+async function resendPlaylist(songs: { name: string; path: string }[]): Promise<void> {
+  if (!props.task?.id || !songs.length) return
+  await window.cockpit
+    .command('aidj.chat-resend', { task: props.task.id, songs: JSON.stringify(songs) })
+    .catch(() => {})
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
@@ -193,8 +200,22 @@ watch(
             <span class="text-caption text-medium-emphasis">{{ it.content }}</span>
           </div>
           <div v-else-if="it.kind === 'playlist'" class="d-flex flex-column align-start w-100">
-            <span class="text-caption text-medium-emphasis">推荐歌单</span>
-            <v-card variant="tonal" rounded="lg" class="playlist-card w-100">
+            <div class="d-flex align-center ga-2 w-100">
+              <span class="text-caption text-medium-emphasis">推荐歌单</span>
+              <v-spacer />
+              <v-btn
+                size="x-small"
+                variant="text"
+                color="primary"
+                class="text-caption"
+                density="compact"
+                @click="resendPlaylist(it.songs ?? [])"
+              >
+                <v-icon size="12" start>mdi-refresh</v-icon>
+                重新发送
+              </v-btn>
+            </div>
+            <v-card variant="tonal" rounded="lg" class="playlist-card w-100 mt-1">
               <div class="song-grid">
                 <div
                   v-for="(song, si) in it.songs"

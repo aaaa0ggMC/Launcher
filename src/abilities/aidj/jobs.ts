@@ -643,6 +643,16 @@ export function setChatPlayer(taskId: string, player: string): { ok: boolean; er
   return { ok: true }
 }
 
+/** Resend a playlist to the chat session's continuous player. */
+export function chatResendPlaylist(
+  chatTaskId: string,
+  songs: PlaylistEntry[]
+): { ok: boolean; error?: string; total?: number } {
+  const st = chatTasks.get(chatTaskId)
+  if (!st) return { ok: false, error: '持续会话未运行' }
+  return ensureContinuousPlayer(st.player, songs)
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Immediate lookup of a continuous task bound to `player`. */
