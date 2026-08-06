@@ -24,6 +24,7 @@ const inputText = ref('')
 const mode = ref<'immediate' | 'persistent'>('immediate')
 const thinking = ref(false)
 const persistentRunning = ref(false)
+const persistentTaskId = ref('')
 const sending = ref(false)
 const pendingText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
@@ -35,13 +36,20 @@ const sbTracks = ref(0)
 const sbMemory = ref(0)
 const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
 const sbRecordFreq = ref(false)
+const sbBackgrounds = ref(0)
 const memoryConfirm = ref(false)
+const playAllConfirm = ref(false)
+const pendingPlayAll = ref<{ name: string; path: string }[] | null>(null)
+const snackOpen = ref(false)
+const snackText = ref('')
+const snackColor = ref('success')
 const sbOrder = ref<Record<string, number>>({
   tokens: 1,
   tracks: 2,
   memory: 3,
   volbal: 4,
-  record_freq: 5
+  record_freq: 5,
+  backgrounds: 6
 })
 const availablePlayers = ref<string[]>([])
 const selectedPlayer = ref('')
@@ -109,6 +117,7 @@ let btUnsub: (() => void) | null = null
 onMounted(() => {
   pollStatus()
   pollPlayers()
+  refreshBackgroundCount()
   statusPollTimer = setInterval(pollStatus, 2000)
   setInterval(pollPlayers, 5000)
   listenBt()
@@ -132,32 +141,47 @@ onDeactivated(() => {
   }
 })
 
+function refreshBackgroundCount(): void {
+  window.cockpit
+    .btList()
+    .then((res) => {
+      const r = res as { ok?: boolean; tasks?: { status?: string }[] } | null
+      if (r?.ok && Array.isArray(r.tasks)) {
+        sbBackgrounds.value = r.tasks.filter((t) => t.status === 'running').length
+      }
+    })
+    .catch(() => {})
+}
+
 function listenBt(): void {
   if (btUnsub) return
   if (!window.cockpit?.on) return
   btUnsub = window.cockpit.on('cockpit:bt', (event: unknown) => {
     const ev = event as Record<string, unknown>
     if (ev?.type === 'output' && String(ev.id ?? '').startsWith('bt-')) {
-      const msgs = (ev.messages ?? []) as Record<string, unknown>[]
-      for (const msg of msgs) {
-        if (msg.data && typeof msg.data === 'object') {
-          handleBtData(msg.data as Record<string, unknown>)
+      if (persistentTaskId.value && ev.id === persistentTaskId.value) {
+        const msgs = (ev.messages ?? []) as Record<string, unknown>[]
+        for (const msg of msgs) {
+          if (msg.data && typeof msg.data === 'object') {
+            handleBtData(msg.data as Record<string, unknown>)
+          }
         }
       }
     }
     if (ev?.type === 'changed') {
       const tasks = (ev.tasks ?? []) as Record<string, unknown>[]
-      for (const task of tasks) {
-        if (
-          String(task.name ?? '').includes('aidj') ||
-          String(task.name ?? '').includes('persistent')
-        ) {
-          persistentRunning.value = task.status === 'running'
-        }
-      }
+      sbBackgrounds.value = tasks.filter((t) => t.status === 'running').length
+      const persistentTask = tasks.find(
+        (t) => t.id === persistentTaskId.value || t.name === 'aidj.persistent'
+      )
+      persistentRunning.value = persistentTask ? persistentTask.status === 'running' : false
     }
     if (ev?.type === 'exit') {
-      persistentRunning.value = false
+      if (ev.id === persistentTaskId.value) {
+        persistentRunning.value = false
+        persistentTaskId.value = ''
+      }
+      sbBackgrounds.value = Math.max(0, sbBackgrounds.value - 1)
     }
   })
 }
@@ -198,6 +222,7 @@ async function pollStatus(): Promise<void> {
           memory: 3,
           volbal: 4,
           record_freq: 5,
+          backgrounds: 6,
           ...(result.statusBar as Record<string, number>)
         }
       }
@@ -235,6 +260,12 @@ async function selectPlayer(name: string): Promise<void> {
   if (result?.ok) {
     selectedPlayer.value = name
   }
+}
+
+function shortPlayer(name: string): string {
+  const short = name.replace(/^org\.mpris\.MediaPlayer2\./, '')
+  if (short.length <= 10) return short
+  return short.slice(0, 5) + '…' + short.slice(-4)
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -342,9 +373,85 @@ async function stopSending(): Promise<void> {
 
 async function handlePlayAll(songs: { name: string; path: string }[]): Promise<void> {
   if (!songs.length) return
+  try {
+    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
+    const status = statusRes?.status as { player?: string } | undefined
+    const resolved = status?.player || ''
+    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
+
+    const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
+    const tasks = (list?.tasks ?? []) as { player: string }[]
+    const occupied = player ? tasks.some((t) => t.player === player) : false
+
+    if (occupied) {
+      pendingPlayAll.value = songs
+      playAllConfirm.value = true
+      return
+    }
+  } catch {
+    /* fall through to direct send */
+  }
+  doPlayAll(songs)
+}
+
+function doPlayAll(songs: { name: string; path: string }[]): void {
   const paths = songs.map((s) => s.path)
-  await window.cockpit.command('aidj.send', { path: paths })
+  window.cockpit.command('aidj.send', { path: paths })
   pollStatus()
+}
+
+function confirmPlayAll(): void {
+  playAllConfirm.value = false
+  if (pendingPlayAll.value) {
+    doPlayAll(pendingPlayAll.value)
+    pendingPlayAll.value = null
+  }
+}
+
+function showSnack(text: string, color = 'success'): void {
+  snackText.value = text
+  snackColor.value = color
+  snackOpen.value = true
+}
+
+async function handleContinuous(songs: { name: string; path: string }[]): Promise<void> {
+  if (!songs.length) return
+  try {
+    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
+    const status = statusRes?.status as { player?: string } | undefined
+    const resolved = status?.player || ''
+    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
+
+    const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
+    const tasks = (list?.tasks ?? []) as { taskId: string; player: string }[]
+    const existing = tasks.find((t) => t.player === player && player)
+
+    if (existing) {
+      const r = (await window.cockpit.command('aidj.continuous-enqueue', {
+        task: existing.taskId,
+        songs: JSON.stringify(songs.map((s) => ({ name: s.name, path: s.path })))
+      })) as Record<string, unknown>
+      if (r?.ok) {
+        showSnack(`已加入连续播放队列 (共 ${r.total ?? songs.length} 首)`)
+      } else {
+        showSnack(`加入队列失败: ${(r?.error as string) || '未知错误'}`, 'error')
+      }
+      return
+    }
+
+    const r = (await window.cockpit.btJob('aidj.continuous', {
+      songs: songs.map((s) => ({ name: s.name, path: s.path })),
+      player: player || '__auto__',
+      view: 'continuous'
+    })) as Record<string, unknown>
+    if (r?.ok && r.task) {
+      showSnack(`已启动连续播放后台任务 (${songs.length} 首)`)
+    } else {
+      showSnack(`启动连续播放失败: ${(r?.error as string) || '未知错误'}`, 'error')
+    }
+  } catch (e: unknown) {
+    showSnack(`推送到后台失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+  }
 }
 
 async function handlePlayOne(song: { path: string }): Promise<void> {
@@ -367,6 +474,8 @@ async function startPersistent(prompt: string): Promise<void> {
     })) as Record<string, unknown>
     if (result?.task || result?.ok) {
       persistentRunning.value = true
+      const task = result.task as { id?: string } | undefined
+      if (task?.id) persistentTaskId.value = task.id
       messages.value.push({
         role: 'system',
         content: `持久模式已启动 | 提示: "${prompt}"`,
@@ -412,6 +521,7 @@ async function stopPersistent(): Promise<void> {
   try {
     await window.cockpit.command('aidj.stop-persistent')
     persistentRunning.value = false
+    persistentTaskId.value = ''
     messages.value.push({
       role: 'system',
       content: '持久模式已停止',
@@ -548,7 +658,7 @@ function closeCtx(): void {
             v-model="selectedPlayer"
             :items="[
               { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
-              ...availablePlayers.map((p) => ({ title: p, value: p }))
+              ...availablePlayers.map((p) => ({ title: shortPlayer(p), value: p }))
             ]"
             density="compact"
             variant="outlined"
@@ -558,18 +668,6 @@ function closeCtx(): void {
             @update:model-value="selectPlayer"
           >
           </v-select>
-        </v-col>
-      </v-row>
-      <v-row v-if="persistentRunning" dense class="mt-1">
-        <v-col cols="auto">
-          <v-chip size="small" color="info" variant="flat" class="status-chip">
-            {{ t('aidj.mode_persistent') }}
-          </v-chip>
-        </v-col>
-        <v-col cols="auto">
-          <v-chip size="small" variant="tonal" class="status-chip">
-            {{ t('aidj.queue_length') }}: {{ playerStatus.track ? 1 : 0 }}
-          </v-chip>
         </v-col>
       </v-row>
     </div>
@@ -603,6 +701,7 @@ function closeCtx(): void {
           @play-one="handlePlayOne"
           @reorder="(songs: any) => handleReorder(idx, songs)"
           @context-menu="handleContextMenu"
+          @continuous="handleContinuous"
         />
       </TransitionGroup>
     </div>
@@ -669,6 +768,18 @@ function closeCtx(): void {
           >
             <span class="status-label">RecordFreq</span
             ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
+          </v-chip>
+
+          <v-chip
+            v-else-if="key === 'backgrounds'"
+            variant="flat"
+            size="small"
+            class="status-chip"
+            :class="{ 'is-on': sbBackgrounds > 0 }"
+            :title="'运行中的后台任务数量'"
+          >
+            <span class="status-label">Backgrounds</span
+            ><span class="status-value">{{ sbBackgrounds }}</span>
           </v-chip>
         </template>
       </div>
@@ -856,6 +967,32 @@ function closeCtx(): void {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-dialog v-model="playAllConfirm" width="440">
+      <v-card rounded="lg">
+        <v-card-title class="text-subtitle-1">
+          <v-icon start>mdi-alert-circle-outline</v-icon>
+          覆盖播放列表？
+        </v-card-title>
+        <v-card-text class="text-body-2">
+          该播放器上有一个连续播放后台任务正在推送歌曲。直接播放全部可能与之冲突（两个来源会争抢切歌），冲突需要你自行处理。
+          确认仍要播放全部吗？
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="playAllConfirm = false">
+            {{ t('aidj.cancel', '取消') }}
+          </v-btn>
+          <v-btn color="primary" @click="confirmPlayAll">
+            覆盖并播放
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="snackOpen" :timeout="2500" :color="snackColor" location="top">
+      {{ snackText }}
+    </v-snackbar>
 
     <Teleport to="body">
       <Transition name="ctx">

@@ -1,5 +1,9 @@
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, markRaw } from 'vue'
 import type { Ability } from '../types'
+import { registerBtView } from '../../main/ui/bt-views'
+import ContinuousView from './components/ContinuousView.vue'
+
+registerBtView('continuous', () => ({ component: markRaw(ContinuousView) }))
 
 export default {
   id: 'aidj',

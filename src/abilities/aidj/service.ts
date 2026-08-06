@@ -414,25 +414,25 @@ export class DBusManager {
       if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.playerProxy) return false
       if (!paths.length) return true
-      // Try TrackList.AddTrack for proper queuing (first file plays, rest are queued)
+      const iface = this.playerProxy.getInterface(
+        'org.mpris.MediaPlayer2.Player'
+      ) as unknown as PlayerInterface
+      if (paths.length === 1) {
+        // Single track: replace current and play immediately (OpenUri semantics)
+        await iface.OpenUri(`file://${paths[0]}`)
+        return true
+      }
+      // Multiple tracks: queue via TrackList.AddTrack, first becomes current, then play
       try {
         const tl = this.playerProxy.getInterface(
           'org.mpris.MediaPlayer2.TrackList'
         ) as unknown as TrackListInterface
-        for (const p of paths) {
-          await tl.AddTrack(`file://${p}`, '/', false)
+        for (let i = 0; i < paths.length; i++) {
+          await tl.AddTrack(`file://${paths[i]}`, '/', i === 0)
         }
-        // Start playing the first track
-        const iface = this.playerProxy.getInterface(
-          'org.mpris.MediaPlayer2.Player'
-        ) as unknown as PlayerInterface
         await iface.Play()
         return true
       } catch {
-        // Fall back to OpenUri (player-by-player, last one plays)
-        const iface = this.playerProxy.getInterface(
-          'org.mpris.MediaPlayer2.Player'
-        ) as unknown as PlayerInterface
         for (const p of paths) {
           await iface.OpenUri(`file://${p}`)
         }
@@ -486,6 +486,11 @@ export class DBusManager {
 
   getPlayerName(): string {
     return this._autoMode ? '__auto__' : this.playerName
+  }
+
+  /** The actually-bound MPRIS bus name (resolves auto mode to a concrete player). */
+  get resolvedPlayerName(): string {
+    return this.playerName || ''
   }
 
   async listPlayers(): Promise<string[]> {

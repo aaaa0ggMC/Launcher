@@ -14,6 +14,7 @@ const emit = defineEmits<{
   reorder: [songs: PlaylistEntry[]]
   playOne: [song: PlaylistEntry]
   contextMenu: [e: MouseEvent, content: string, isAi: boolean, songs: PlaylistEntry[]]
+  continuous: [songs: PlaylistEntry[]]
 }>()
 
 const covers = ref<Record<string, string>>({})
@@ -127,7 +128,7 @@ watch(() => props.message.playlist, loadCovers)
       class="mt-1 playlist-card w-100"
     >
       <v-card variant="tonal" rounded="lg" class="playlist-card-inner">
-        <v-card-actions class="px-4 pt-4 pb-2">
+        <v-card-actions class="px-4 pt-4 pb-2 d-flex flex-wrap ga-2">
           <v-btn
             variant="elevated"
             color="primary"
@@ -135,6 +136,14 @@ watch(() => props.message.playlist, loadCovers)
             @click="emit('playAll', message.playlist!)"
           >
             播放全部
+          </v-btn>
+          <v-btn
+            variant="elevated"
+            color="primary"
+            prepend-icon="mdi-send-clock-outline"
+            @click="emit('continuous', message.playlist!)"
+          >
+            推送到后台
           </v-btn>
         </v-card-actions>
 

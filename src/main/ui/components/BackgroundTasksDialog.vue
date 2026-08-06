@@ -484,7 +484,7 @@ onBeforeUnmount(() => {
               <div class="d-flex align-center ga-1">
                 <v-tooltip :text="t('bt.clear')" location="bottom">
                   <template #activator="{ props: tp }">
-                    <v-btn v-bind="tp" size="small" variant="flat" icon @click="clearConsole">
+                    <v-btn v-bind="tp" size="small" variant="text" icon @click="clearConsole">
                       <v-icon size="small">mdi-broom</v-icon>
                     </v-btn>
                   </template>
@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
                     <v-btn
                       v-bind="tp"
                       size="small"
-                      variant="flat"
+                      variant="text"
                       :loading="exporting"
                       icon
                       @click="exportConsole"
@@ -595,6 +595,21 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   overflow-y: auto;
   border-right: 1px solid rgba(var(--v-theme-surface-bright), 0.12);
+}
+/* Translucent task list: the v-list defaults to a solid surface which clashes
+   with the dialog's frosted chrome. Make items inherit the translucent look. */
+.bt-list :deep(.v-list) {
+  background: transparent;
+}
+.bt-list :deep(.v-list-item) {
+  background: rgba(var(--v-theme-surface), 0.28);
+  backdrop-filter: blur(8px);
+}
+.bt-list :deep(.v-list-item:hover) {
+  background: rgba(var(--v-theme-surface), 0.45);
+}
+.bt-list :deep(.v-list-item--active) {
+  background: rgba(var(--v-theme-primary), 0.18);
 }
 .bt-detail {
   flex: 1;

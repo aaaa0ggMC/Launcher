@@ -27,6 +27,12 @@ import { join } from 'path'
 import OpenAI from 'openai'
 import type { AidjConfig, SongMeta } from './types'
 import './jobs'
+import {
+  getContinuousTasks,
+  getContinuousTask,
+  switchContinuousPlayer,
+  enqueueContinuousSongs
+} from './jobs'
 
 const log = makeLogger('aidj')
 
@@ -592,6 +598,69 @@ const commands: CommandSpec[] = [
       if (!path) return { ok: false, error: '需要 --path 参数' }
       const url = await getCoverArt(path)
       return { ok: true, url }
+    }
+  },
+  {
+    name: 'aidj.continuous-list',
+    description: '列出所有运行中的连续播放任务',
+    run: async () => {
+      const tasks = getContinuousTasks().map((t) => ({
+        taskId: t.control.id,
+        player: t.playerKey,
+        current: t.current?.name ?? null,
+        next: t.queue[t.index]?.name ?? null,
+        played: t.index,
+        total: t.total
+      }))
+      const boundPlayers = tasks.map((t) => t.player).filter(Boolean)
+      return { ok: true, tasks, boundPlayers }
+    }
+  },
+  {
+    name: 'aidj.continuous-switch',
+    description: '切换连续播放任务的 MPRIS 播放器',
+    usage: 'aidj.continuous-switch --task <id> --player <name>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const player = ctx.named.player as string
+      if (!taskId || !player) return { ok: false, error: '需要 --task 和 --player 参数' }
+      const st = getContinuousTask(taskId)
+      if (!st) return { ok: false, error: '任务不存在或已结束' }
+      const taken = getContinuousTasks().some(
+        (t) => t.playerKey === player && t.control.id !== taskId
+      )
+      if (taken) return { ok: false, error: `播放器 ${player} 已被其他连续播放任务绑定` }
+      const ok = await st.dbus.switchToPlayer(player)
+      if (!ok) return { ok: false, error: `切换到 ${player} 失败` }
+      const r = switchContinuousPlayer(taskId, player)
+      if (!r.ok) return r
+      return {
+        ok: true,
+        taskId,
+        player,
+        current: st.current?.name ?? null,
+        next: st.queue[st.index]?.name ?? null
+      }
+    }
+  },
+  {
+    name: 'aidj.continuous-enqueue',
+    description: '向运行中的连续播放任务添加歌曲',
+    usage: 'aidj.continuous-enqueue --task <id> --songs <json>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const songsJson = ctx.named.songs as string
+      if (!taskId || !songsJson) return { ok: false, error: '需要 --task 和 --songs 参数' }
+      let songs: unknown
+      try {
+        songs = JSON.parse(songsJson)
+      } catch {
+        return { ok: false, error: '--songs 不是合法 JSON' }
+      }
+      const r = enqueueContinuousSongs(taskId, songs as { name: string; path: string }[])
+      return r.ok
+        ? { ok: true, total: r.total, queueLen: r.queueLen }
+        : { ok: false, error: r.error }
     }
   }
 ]

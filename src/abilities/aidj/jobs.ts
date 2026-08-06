@@ -1,4 +1,4 @@
-import { registerJobHandler } from '../../main/process/background-tasks'
+import { registerJobHandler, type JobControl } from '../../main/process/background-tasks'
 import { makeLogger } from '../../main/process/logger'
 import {
   loadAidjConfig,
@@ -10,10 +10,12 @@ import {
   setNcmBaseUrl,
   initDbusManager,
   setPersistentSession,
-  PersistentSession
+  PersistentSession,
+  DBusManager,
+  LoudnessCache
 } from './service'
 import OpenAI from 'openai'
-import type { SongMeta } from './types'
+import type { SongMeta, PlaylistEntry } from './types'
 
 const log = makeLogger('aidj-persistent')
 
@@ -132,5 +134,258 @@ registerJobHandler('aidj.persistent', async (control, args) => {
   }
 
   control.pushLine('持久模式已停止')
+  control.finish('exited')
+})
+
+// ---------------------------------------------------------------------------
+// Continuous player — pushes the given ordered song list to an MPRIS player,
+// monitoring DBus and sending the next track when the current one stops.
+// No AI generation. One task per MPRIS object. VolBal applied.
+// ---------------------------------------------------------------------------
+
+export interface ContinuousTaskState {
+  dbus: DBusManager
+  control: JobControl
+  queue: PlaylistEntry[]
+  current: PlaylistEntry | null
+  index: number
+  playerKey: string
+  total: number
+}
+
+const continuousTasks = new Map<string, ContinuousTaskState>()
+const playerBindings = new Map<string, string>()
+
+function pushContinuousState(st: ContinuousTaskState): void {
+  st.control.push({
+    data: {
+      type: 'state',
+      player: st.playerKey,
+      current: st.current?.name ?? null,
+      currentPath: st.current?.path ?? null,
+      next: st.queue[st.index]?.name ?? null,
+      played: st.index,
+      total: st.total,
+      queueLen: st.total - st.index
+    }
+  })
+}
+
+export function getContinuousTasks(): ContinuousTaskState[] {
+  return [...continuousTasks.values()]
+}
+
+export function getContinuousTask(taskId: string): ContinuousTaskState | undefined {
+  return continuousTasks.get(taskId)
+}
+
+export function boundContinuousPlayer(playerKey: string): string | undefined {
+  return playerBindings.get(playerKey)
+}
+
+export function switchContinuousPlayer(
+  taskId: string,
+  playerKey: string
+): { ok: boolean; error?: string } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在' }
+  if (playerBindings.get(playerKey) && playerBindings.get(playerKey) !== taskId) {
+    return { ok: false, error: `播放器 ${playerKey} 已被其他连续播放任务绑定` }
+  }
+  playerBindings.delete(st.playerKey)
+  playerBindings.set(playerKey, taskId)
+  st.playerKey = playerKey
+  return { ok: true }
+}
+
+export function enqueueContinuousSongs(
+  taskId: string,
+  songs: PlaylistEntry[]
+): { ok: boolean; error?: string; total?: number; queueLen?: number } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  if (!songs.length) return { ok: false, error: '没有要添加的歌曲' }
+  st.queue.push(...songs)
+  st.total = st.queue.length
+  pushContinuousState(st)
+  return { ok: true, total: st.total, queueLen: st.total - st.index }
+}
+
+registerJobHandler('aidj.continuous', async (control, args) => {
+  const songs = (args.songs ?? []) as PlaylistEntry[]
+  const playerArg = (args.player as string) || ''
+  if (!songs.length) {
+    control.pushLine('错误: 没有要播放的歌曲', 'stderr')
+    control.finish('error')
+    return
+  }
+
+  const config = await loadAidjConfig()
+  if (!config) {
+    control.pushLine('错误: AIDJ 配置未找到', 'stderr')
+    control.finish('error')
+    return
+  }
+
+  const target =
+    playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
+  const dbus = new DBusManager(target)
+  await dbus.connect()
+  if (!(await dbus.getStatus()).player) {
+    control.pushLine('错误: 无法连接 MPRIS 播放器', 'stderr')
+    control.finish('error')
+    return
+  }
+
+  const playerKey = dbus.resolvedPlayerName
+  if (!playerKey) {
+    control.pushLine('错误: 无法解析 MPRIS 播放器', 'stderr')
+    control.finish('error')
+    return
+  }
+  if (playerBindings.has(playerKey)) {
+    control.pushLine(`播放器 ${playerKey} 已有连续播放任务`, 'stderr')
+    control.finish('error')
+    return
+  }
+
+  const queue = [...songs]
+  const st: ContinuousTaskState = {
+    dbus,
+    control,
+    queue,
+    current: null,
+    index: 0,
+    playerKey,
+    total: queue.length
+  }
+  continuousTasks.set(control.id, st)
+  playerBindings.set(playerKey, control.id)
+
+  // Pin the manager to the resolved player (exit auto-detect) so the loop
+  // tracks ONE MPRIS object, not whichever happens to be playing.
+  await dbus.switchToPlayer(playerKey)
+
+  const ac = new AbortController()
+  const volCache = new LoudnessCache(
+    config.preferences.sound_adjust_method,
+    config.preferences.volume_curve
+  )
+  const volbalEnabled = config.preferences.dynamic_balance_volume
+  let sentFirst = false
+
+  const release = (): void => {
+    continuousTasks.delete(control.id)
+    playerBindings.delete(st.playerKey)
+    try {
+      dbus.disconnect()
+    } catch {
+      /* noop */
+    }
+  }
+
+  control.setCancel(() => {
+    ac.abort()
+    release()
+  })
+
+  control.pushLine(`连续播放已启动 → ${st.playerKey} (${st.total} 首)`)
+  control.push({ data: { type: 'state', message: 'started', player: st.playerKey, total: st.total } })
+
+  try {
+    const reconnectMinutes = config.preferences.reconnect_minutes ?? 0
+    let lastStateKey = ''
+    let lastSendAt = 0
+    let disconnectSince: number | null = null
+
+    while (!ac.signal.aborted) {
+      try {
+        const status = await dbus.getStatus()
+
+        // Bound player disappeared → reconnect per config, or exit.
+        if (!status.player) {
+          const now = Date.now()
+          if (disconnectSince === null) {
+            disconnectSince = now
+            control.pushLine(`播放器 ${st.playerKey} 已断开，尝试重连...`, 'stderr')
+          }
+          if (reconnectMinutes === 0) {
+            control.pushLine(`播放器 ${st.playerKey} 已断开，任务结束`, 'stderr')
+            control.finish('error')
+            break
+          }
+          if (reconnectMinutes > 0 && now - disconnectSince > reconnectMinutes * 60_000) {
+            control.pushLine(
+              `播放器 ${st.playerKey} 断开超过 ${reconnectMinutes} 分钟，任务结束`,
+              'stderr'
+            )
+            control.finish('error')
+            break
+          }
+          // reconnectMinutes < 0 → retry forever; > 0 → within the window
+          const rebound = await dbus.switchToPlayer(st.playerKey).catch(() => false)
+          if (rebound) {
+            disconnectSince = null
+            control.pushLine('播放器已恢复', 'stdout')
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+            continue
+          }
+        } else {
+          disconnectSince = null
+        }
+
+        // All songs played and player idle → job finished.
+        if (
+          st.index >= st.total &&
+          Date.now() - lastSendAt > 3000 &&
+          (status.status === 'Stopped' || status.status === 'Unknown')
+        ) {
+          break
+        }
+
+        if ((status.status === 'Stopped' || status.status === 'Unknown') && st.index < st.total) {
+          const track = st.queue[st.index]
+          st.index++
+          st.current = track
+          lastSendAt = Date.now()
+          if (volbalEnabled) {
+            if (!sentFirst) {
+              await dbus.setVolume(0.5)
+              await volCache.setAnchor(track.path, 0.5)
+              sentFirst = true
+            } else {
+              const v = await volCache.targetVolume(track.path)
+              if (v != null) await dbus.setVolume(v)
+            }
+            if (st.queue[st.index]) volCache.preAnalyze(st.queue[st.index].path)
+          }
+          await dbus.sendFiles([track.path])
+          control.push({
+            data: { type: 'now_playing', track: track.name, path: track.path }
+          })
+          control.pushLine(`▶ ${track.name} (${st.index}/${st.total})`)
+          pushContinuousState(st)
+        }
+
+        const stateKey = `${st.playerKey}|${st.current?.name ?? ''}|${st.index}/${st.total}`
+        if (stateKey !== lastStateKey) {
+          lastStateKey = stateKey
+          pushContinuousState(st)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      } catch (e) {
+        if (ac.signal.aborted) break
+        log.error('continuous loop error', { error: String(e) })
+        control.pushLine(`错误: ${String(e)}`, 'stderr')
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+      }
+    }
+  } finally {
+    release()
+  }
+
+  control.pushLine('连续播放已结束')
   control.finish('exited')
 })

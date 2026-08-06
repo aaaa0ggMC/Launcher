@@ -18,6 +18,7 @@ const recordFreq = ref(true)
 const metadataConcurrency = ref(8)
 const maxHistoryLength = ref(10)
 const contextMode = ref<'discard' | 'compact'>('discard')
+const reconnectMinutes = ref(0)
 const availableModels = ref<string[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref(false)
@@ -27,7 +28,8 @@ const statusBar = ref<Record<string, number>>({
   tracks: 2,
   memory: 3,
   volbal: 4,
-  record_freq: 5
+  record_freq: 5,
+  backgrounds: 6
 })
 
 onMounted(async () => {
@@ -52,6 +54,7 @@ onMounted(async () => {
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
   contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
+  reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
   statusBar.value = { ...((prefs.status_bar as Record<string, number>) || {}) }
   fetchModels()
@@ -96,6 +99,7 @@ watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
+watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
 watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true })
 </script>
@@ -316,6 +320,28 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
               type="number"
               min="2"
               max="100"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-2">连续播放</div>
+        <div class="text-caption text-medium-emphasis mb-2">
+          播放器断开时的处理：0 = 立即结束，大于 0 = 在 N 分钟内尝试重连，小于 0 = 永不停止重连
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="reconnectMinutes"
+              label="重连时长（分钟）"
+              type="number"
+              step="1"
               hide-details
               density="compact"
               variant="outlined"
