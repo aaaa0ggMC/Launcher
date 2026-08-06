@@ -193,10 +193,11 @@ onUnmounted(() => {
     <div class="d-flex ga-4 h-100">
       <!-- LEFT: main control + queue + volbal -->
       <div class="d-flex flex-column flex-grow-1 min-w-0 cv-main">
-        <!-- Row 1: [icon] 连续播放 [combo box] -->
+        <!-- Row 1: [icon] 连续播放 [combo box right-aligned] -->
         <div class="d-flex align-center ga-2 cv-header">
           <v-icon size="18" color="primary">mdi-send-clock-outline</v-icon>
           <span class="text-body-2 font-weight-medium flex-shrink-0">连续播放</span>
+          <v-spacer />
           <v-select
             :model-value="info?.player ?? null"
             :items="playerItems"
@@ -206,7 +207,7 @@ onUnmounted(() => {
             hide-details
             :loading="switching"
             placeholder="选择播放器"
-            class="cv-player-select flex-grow-1"
+            class="cv-player-select"
             :menu-props="{ contentClass: 'continuous-player-menu' }"
             @update:model-value="switchPlayer"
           >
@@ -220,7 +221,7 @@ onUnmounted(() => {
           </v-chip>
         </div>
 
-        <!-- Row 2: now playing / next / queue — wraps when tight -->
+        <!-- Row 2: now playing / next on the left, queue count right-aligned -->
         <div class="d-flex flex-wrap ga-2 align-center cv-status">
           <span class="d-flex align-center ga-1">
             <v-icon size="14" color="success">mdi-play</v-icon>
@@ -232,6 +233,7 @@ onUnmounted(() => {
             <span class="text-caption text-medium-emphasis flex-shrink-0">下一首</span>
             <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.next || '—' }}</span>
           </span>
+          <v-spacer />
           <span class="d-flex align-center ga-1">
             <v-icon size="14">mdi-queue-music</v-icon>
             <span class="text-caption text-medium-emphasis flex-shrink-0">队列</span>
@@ -308,10 +310,15 @@ onUnmounted(() => {
 .cv-main {
   gap: 2px;
   height: 100%;
+  min-width: 0;
+}
+.cv-header {
+  min-height: 32px;
 }
 .cv-player-select {
-  max-width: 260px;
-  min-width: 140px;
+  width: 200px;
+  max-width: 240px;
+  flex-shrink: 0;
 }
 .cv-player-select :deep(.v-field) {
   font-size: 0.78rem;

@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { PlaylistEntry } from '../types'
 
 /**
  * Shared song grid used by both the main chat playlist (with covers) and the
  * continuous queue (icon + name). Drag-to-reorder with a move animation.
+ *
+ * Drag extras for long queues:
+ *  - auto-scrolls the nearest scrollable ancestor while hovering its top/bottom
+ *    edge, so you can reach songs that are off-screen;
+ *  - the mouse wheel scrolls the same container during a drag.
  *
  * FUTURE: per-song right-click menu — attach a `contextmenu` handler on the
  * cell (and emit `contextMenu(e, song, index)`) without touching this file;
@@ -30,6 +35,12 @@ const emit = defineEmits<{
 
 const covers = ref<Record<string, string>>({})
 const dragIdx = ref(-1)
+const gridEl = ref<HTMLElement | null>(null)
+
+let scrollParent: HTMLElement | null = null
+let dragActive = false
+let autoScrollRaf = 0
+let lastClientY = 0
 
 async function loadCovers(): Promise<void> {
   if (!props.showCovers) return
@@ -48,29 +59,118 @@ async function loadCovers(): Promise<void> {
   }
 }
 
-function onDragStart(idx: number): void {
+/** Nearest ancestor that actually scrolls vertically (the queue container). */
+function findScrollable(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null
+  while (node) {
+    const oy = getComputedStyle(node).overflowY
+    if (oy === 'auto' || oy === 'scroll') return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function onDragStart(e: DragEvent, idx: number): void {
   dragIdx.value = idx
+  dragActive = true
+  lastClientY = e.clientY
+  scrollParent = findScrollable(gridEl.value)
+  window.addEventListener('wheel', onDragWheel, { passive: false })
 }
 
 function onDragOver(e: DragEvent): void {
   e.preventDefault()
+  lastClientY = e.clientY
+  if (!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollTick)
 }
 
-function onDrop(idx: number): void {
-  if (dragIdx.value < 0 || dragIdx.value === idx) return
+/** Mouse-wheel scrolls the queue container while a drag is in progress. */
+function onDragWheel(e: WheelEvent): void {
+  if (!scrollParent || !dragActive) return
+  e.preventDefault()
+  scrollParent.scrollTop += e.deltaY
+  lastClientY += e.deltaY
+}
+
+/** Slow auto-scroll near the container's top/bottom edge while dragging. */
+function autoScrollTick(): void {
+  autoScrollRaf = 0
+  if (!dragActive || !scrollParent) return
+  const rect = scrollParent.getBoundingClientRect()
+  const zone = 48
+  if (lastClientY < rect.top + zone) {
+    const speed = 1 + ((rect.top + zone - lastClientY) / zone) * 10
+    scrollParent.scrollTop -= speed
+  } else if (lastClientY > rect.bottom - zone) {
+    const speed = 1 + ((lastClientY - (rect.bottom - zone)) / zone) * 10
+    scrollParent.scrollTop += speed
+  }
+  if (dragActive) autoScrollRaf = requestAnimationFrame(autoScrollTick)
+}
+
+function performDrop(targetIdx: number): void {
+  const from = dragIdx.value
+  if (from < 0 || from === targetIdx) {
+    dragIdx.value = -1
+    return
+  }
   const copy = [...props.songs]
-  const [moved] = copy.splice(dragIdx.value, 1)
-  copy.splice(idx, 0, moved)
+  const [moved] = copy.splice(from, 1)
+  copy.splice(targetIdx, 0, moved)
   emit('reorder', copy)
   dragIdx.value = -1
 }
 
+function onDrop(e: DragEvent, idx: number): void {
+  e.preventDefault()
+  e.stopPropagation()
+  performDrop(idx)
+}
+
+/** Drop on the grid's empty space — insert at the cell whose mid-line the
+ *  pointer is above, otherwise append at the end. */
+function onGridDrop(e: DragEvent): void {
+  if (dragIdx.value < 0) return
+  e.preventDefault()
+  const cells = Array.from(gridEl.value?.children ?? []).filter((c): c is HTMLElement =>
+    c.classList.contains('song-card')
+  )
+  let target = cells.length
+  for (let i = 0; i < cells.length; i++) {
+    const r = cells[i].getBoundingClientRect()
+    if (e.clientY < r.top + r.height / 2) {
+      target = i
+      break
+    }
+  }
+  performDrop(target)
+}
+
+function cleanupDrag(): void {
+  dragActive = false
+  dragIdx.value = -1
+  if (autoScrollRaf) {
+    cancelAnimationFrame(autoScrollRaf)
+    autoScrollRaf = 0
+  }
+  window.removeEventListener('wheel', onDragWheel)
+  scrollParent = null
+}
+
 onMounted(loadCovers)
 watch(() => props.songs, loadCovers)
+onBeforeUnmount(cleanupDrag)
 </script>
 
 <template>
-  <TransitionGroup tag="div" name="song" class="song-grid">
+  <TransitionGroup
+    ref="gridEl"
+    tag="div"
+    name="song"
+    class="song-grid"
+    @dragover.prevent="onDragOver"
+    @drop.prevent="onGridDrop"
+  >
     <div
       v-for="(song, idx) in songs"
       :key="song.path"
@@ -80,9 +180,10 @@ watch(() => props.songs, loadCovers)
         'drag-over': dragIdx === idx,
         'is-current': highlightPath && song.path === highlightPath
       }"
-      @dragstart="onDragStart(idx)"
-      @dragover="onDragOver"
-      @drop="onDrop(idx)"
+      @dragstart="onDragStart($event, idx)"
+      @dragover.prevent
+      @drop="onDrop($event, idx)"
+      @dragend="cleanupDrag"
     >
       <span
         class="text-caption text-medium-emphasis flex-shrink-0"
@@ -116,8 +217,9 @@ watch(() => props.songs, loadCovers)
 <style scoped>
 .song-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
+  width: 100%;
 }
 .song-card {
   border-radius: 8px;
