@@ -22,6 +22,8 @@ export interface AidjConfig {
     max_history_length: number
     /** Continuous player: reconnect window in minutes. 0 = exit on disconnect, >0 = retry N min, <0 = never give up. */
     reconnect_minutes: number
+    /** AI API network retry: 0 = fail fast, >0 = retry within N minutes, <0 = retry forever. */
+    network_retry_minutes: number
     library_injects: {
       genre: boolean
       emotion: boolean

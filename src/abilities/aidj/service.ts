@@ -5,7 +5,7 @@ import { promisify } from 'util'
 import OpenAI from 'openai'
 import { makeLogger } from '../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../main/process/paths'
-import { readJson, writeJsonAtomic } from '../../main/process/util'
+import { readJson, writeJsonAtomic, writeTextFile } from '../../main/process/util'
 import type {
   AidjConfig,
   SongMeta,
@@ -19,6 +19,56 @@ import { AIDJ_DATA_DIR, METADATA_FILE, FREQ_FILE, PLAYLISTS_DIR, SEPARATOR } fro
 const log = makeLogger('aidj')
 const execFileAsync = promisify(execFile)
 const AIDJ_DIR = join(USER_CONFIG_DIR, AIDJ_DATA_DIR)
+
+/** True for transport-level failures (offline, refused, timeout) — never for HTTP errors like 401/404. */
+export function isNetworkError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return false
+  const msg = String(e instanceof Error ? e.message : e)
+  const s = String((e as { status?: unknown } | null)?.status)
+  if (s && s !== 'undefined' && !['502', '503', '504'].includes(s)) return false
+  return (
+    /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|socket|timeout/i.test(
+      msg
+    ) ||
+    s === '502' ||
+    s === '503' ||
+    s === '504'
+  )
+}
+
+/**
+ * Retry `fn` while it fails with a transport error, mirroring reconnect_minutes:
+ *   0 → fail fast; >0 → retry within N minutes; <0 → retry forever.
+ * AbortSignal aborts the wait loop. `onRetry` fires before each wait so callers
+ * can surface "retrying…" to the user.
+ */
+export async function withNetworkRetry<T>(
+  fn: (signal?: AbortSignal) => Promise<T>,
+  opts: {
+    retryMinutes: number
+    signal?: AbortSignal
+    onRetry?: (attempt: number, waitMs: number) => void
+  }
+): Promise<T> {
+  const { retryMinutes, signal } = opts
+  if (retryMinutes === 0) return fn(signal)
+  const deadline = retryMinutes > 0 ? Date.now() + retryMinutes * 60_000 : Infinity
+  let attempt = 0
+  for (;;) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    try {
+      return await fn(signal)
+    } catch (e) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      if (!isNetworkError(e)) throw e
+      attempt++
+      if (Date.now() >= deadline) throw e
+      const waitMs = Math.min(30_000, 2000 * attempt)
+      opts.onRetry?.(attempt, waitMs)
+      await new Promise((r) => setTimeout(r, waitMs))
+    }
+  }
+}
 
 export async function loadAidjConfig(): Promise<AidjConfig | null> {
   return readJson<AidjConfig>(abilityConfigPath('aidj'))
@@ -50,6 +100,56 @@ export function getFreqPath(): string {
 
 export function getPlaylistsDir(): string {
   return join(AIDJ_DIR, PLAYLISTS_DIR)
+}
+
+// ---------------------------------------------------------------------------
+// Play frequency recording (record_freq). A simple CSV of `name,times` sorted
+// descending, mirroring the reference AIDJ implementation. Recording is pushed
+// by the player itself: `aidj.send` (immediate play-all bumps every sent track)
+// and the continuous loop (each track bumped exactly when it starts playing).
+// ---------------------------------------------------------------------------
+
+let _freqCache: Map<string, number> | null = null
+
+export async function loadFrequency(): Promise<Map<string, number>> {
+  if (_freqCache) return _freqCache
+  const freq = new Map<string, number>()
+  try {
+    const raw = await readFile(getFreqPath(), 'utf-8')
+    for (const line of raw.split('\n').filter(Boolean)) {
+      const idx = line.lastIndexOf(',')
+      if (idx > 0) {
+        const name = line.slice(0, idx)
+        const times = Number(line.slice(idx + 1))
+        if (name && Number.isFinite(times)) freq.set(name, times)
+      }
+    }
+  } catch {
+    /* noop */
+  }
+  _freqCache = freq
+  return freq
+}
+
+export async function saveFrequency(freq: Map<string, number>): Promise<void> {
+  _freqCache = freq
+  await ensureAidjDir()
+  const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
+  const lines = ['name,times', ...sorted.map(([name, times]) => `${name},${times}`)]
+  await writeTextFile(getFreqPath(), lines.join('\n') + '\n')
+}
+
+/** Bump play count for the given song names, persisted when changed. */
+export async function bumpFrequency(names: string[]): Promise<void> {
+  if (!names.length) return
+  const freq = await loadFrequency()
+  let changed = false
+  for (const name of names) {
+    if (!name) continue
+    freq.set(name, (freq.get(name) ?? 0) + 1)
+    changed = true
+  }
+  if (changed) await saveFrequency(freq)
 }
 
 export function ensureAidjDir(): Promise<void> {
@@ -140,10 +240,9 @@ export function loadLibrary(): Promise<{
       const metadata = await loadMetadata()
       _libraryCache = { metadata, musicPaths }
       return _libraryCache
-    })()
-      .finally(() => {
-        _libraryLoading = null
-      })
+    })().finally(() => {
+      _libraryLoading = null
+    })
   }
   return _libraryLoading
 }
@@ -151,7 +250,6 @@ export function loadLibrary(): Promise<{
 export function invalidateLibrary(): void {
   _libraryCache = null
 }
-
 
 export async function appendMetadata(name: string, meta: SongMeta): Promise<void> {
   await ensureAidjDir()
@@ -947,7 +1045,8 @@ RULES:
   async nextStep(
     userRequest: string,
     onStream?: (text: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onRetry?: (attempt: number, waitMs: number) => void
   ): Promise<{ playlist: PlaylistEntry[]; intro: string }> {
     this.turnCount++
     const model = this.config.preferences.model
@@ -997,17 +1096,28 @@ Instruction: Check the Library in the first System message. If matches found, ou
     this.chatHistory.push({ role: 'user', content: fullReq, timestamp: Date.now() })
 
     try {
-      const stream = await this.client.chat.completions.create(
+      const stream = await withNetworkRetry(
+        async (sig) =>
+          this.client.chat.completions.create(
+            {
+              model,
+              messages: this.chatHistory.map((m) => ({
+                role: m.role as 'user' | 'assistant' | 'system',
+                content: m.content
+              })),
+              stream: true,
+              stream_options: { include_usage: true }
+            },
+            { timeout: 180_000, signal: sig }
+          ),
         {
-          model,
-          messages: this.chatHistory.map((m) => ({
-            role: m.role as 'user' | 'assistant' | 'system',
-            content: m.content
-          })),
-          stream: true,
-          stream_options: { include_usage: true }
-        },
-        { timeout: 180_000, signal }
+          retryMinutes: this.config.preferences.network_retry_minutes ?? 0,
+          signal,
+          onRetry: (attempt, waitMs) => {
+            if (isVerbose) log.warn('AI network retry', { attempt, waitMs })
+            onRetry?.(attempt, waitMs)
+          }
+        }
       )
 
       let fullContent = ''
@@ -1102,7 +1212,10 @@ export class PersistentSession {
     this._anchorValue = v
   }
 
-  private async fetchNextBatch(signal?: AbortSignal): Promise<PlaylistEntry[]> {
+  private async fetchNextBatch(
+    signal?: AbortSignal,
+    onRetry?: (attempt: number, waitMs: number) => void
+  ): Promise<PlaylistEntry[]> {
     if (this.working) return []
     this.working = true
     try {
@@ -1125,7 +1238,7 @@ export class PersistentSession {
       session.playedSongs = new Set(this.rollingHistory)
       session.turnCount = this.fetchCount
 
-      const { playlist, intro } = await session.nextStep(fullPrompt, undefined, signal)
+      const { playlist, intro } = await session.nextStep(fullPrompt, undefined, signal, onRetry)
       this.chatHistory = session.chatHistory
       this.lastIntro = intro || ''
 
@@ -1149,8 +1262,11 @@ export class PersistentSession {
     return this.buffer.length < 2 && !this.working
   }
 
-  async fetchBatch(signal?: AbortSignal): Promise<void> {
-    const batch = await this.fetchNextBatch(signal)
+  async fetchBatch(
+    signal?: AbortSignal,
+    onRetry?: (attempt: number, waitMs: number) => void
+  ): Promise<void> {
+    const batch = await this.fetchNextBatch(signal, onRetry)
     if (batch.length > 0) this.buffer.push(batch)
   }
 
@@ -1257,8 +1373,10 @@ export async function getCoverArt(filepath: string): Promise<string | null> {
   if (_coverCache.has(filepath)) return _coverCache.get(filepath) ?? null
   try {
     const { stdout } = await execFileAsync('ffprobe', [
-      '-v', 'quiet',
-      '-print_format', 'json',
+      '-v',
+      'quiet',
+      '-print_format',
+      'json',
       '-show_streams',
       filepath
     ])
@@ -1270,14 +1388,11 @@ export async function getCoverArt(filepath: string): Promise<string | null> {
       _coverCache.set(filepath, '')
       return null
     }
-    const { stdout: raw } = await execFileAsync('ffmpeg', [
-      '-i', filepath,
-      '-an',
-      '-vcodec', 'png',
-      '-f', 'image2pipe',
-      '-vframes', '1',
-      'pipe:1'
-    ], { maxBuffer: 10 * 1024 * 1024, encoding: 'buffer' } as { encoding: 'buffer' })
+    const { stdout: raw } = await execFileAsync(
+      'ffmpeg',
+      ['-i', filepath, '-an', '-vcodec', 'png', '-f', 'image2pipe', '-vframes', '1', 'pipe:1'],
+      { maxBuffer: 10 * 1024 * 1024, encoding: 'buffer' } as { encoding: 'buffer' }
+    )
     const b64 = (raw as unknown as Buffer).toString('base64')
     const url = `data:image/png;base64,${b64}`
     _coverCache.set(filepath, url)

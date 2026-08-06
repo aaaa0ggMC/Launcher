@@ -53,6 +53,7 @@ const sbOrder = ref<Record<string, number>>({
 const availablePlayers = ref<string[]>([])
 const selectedPlayer = ref('')
 const autoMode = ref(true)
+const netState = ref<'ok' | 'bad' | 'checking'>('checking')
 
 function formatTokens(n: number): string {
   if (n >= 1000) {
@@ -112,14 +113,17 @@ async function clearMemory(): Promise<void> {
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 let playersPollTimer: ReturnType<typeof setInterval> | null = null
+let netPollTimer: ReturnType<typeof setInterval> | null = null
 let btUnsub: (() => void) | null = null
 
 onMounted(() => {
   pollStatus()
   pollPlayers()
+  pollNetwork()
   refreshBackgroundCount()
   statusPollTimer = setInterval(pollStatus, 2000)
   playersPollTimer = setInterval(pollPlayers, 5000)
+  netPollTimer = setInterval(pollNetwork, 15000)
   listenBt()
 })
 
@@ -129,6 +133,9 @@ onActivated(() => {
   }
   if (!playersPollTimer) {
     playersPollTimer = setInterval(pollPlayers, 5000)
+  }
+  if (!netPollTimer) {
+    netPollTimer = setInterval(pollNetwork, 15000)
   }
   listenBt()
 })
@@ -142,11 +149,25 @@ onDeactivated(() => {
     clearInterval(playersPollTimer)
     playersPollTimer = null
   }
+  if (netPollTimer) {
+    clearInterval(netPollTimer)
+    netPollTimer = null
+  }
   if (btUnsub) {
     btUnsub()
     btUnsub = null
   }
 })
+
+async function pollNetwork(): Promise<void> {
+  netState.value = 'checking'
+  try {
+    const r = (await window.cockpit.command('aidj.network-test')) as { ok?: boolean }
+    netState.value = r?.ok ? 'ok' : 'bad'
+  } catch {
+    netState.value = 'bad'
+  }
+}
 
 function refreshBackgroundCount(): void {
   window.cockpit
@@ -296,14 +317,25 @@ async function sendMessage(): Promise<void> {
     sending.value = true
     let charTimer: ReturnType<typeof setInterval> | null = null
     charTimer = setInterval(async () => {
-      if (!sending.value) { if (charTimer) clearInterval(charTimer); return }
+      if (!sending.value) {
+        if (charTimer) clearInterval(charTimer)
+        return
+      }
       try {
         const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
-        if (r?.ok && typeof r.chars === 'number') {
+        if (r?.ok) {
           const msg = messages.value[placeholderIdx]
-          if (msg) msg.chars = r.chars as number
+          if (!msg) return
+          if (typeof r.chars === 'number') msg.chars = r.chars as number
+          if (r.retrying === true) {
+            msg.content = `⚠️ 网络不可用，正在重试… (第 ${String(r.retryAttempt ?? 0)} 次)`
+          } else if (msg.content !== '...') {
+            msg.content = '...'
+          }
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }, 200)
     try {
       const result = (await window.cockpit.command('aidj.generate', {
@@ -569,6 +601,26 @@ function handleContextMenu(
           >
             {{ playerStatus.status }}
           </v-chip>
+          <v-chip
+            size="small"
+            variant="flat"
+            :color="netState === 'ok' ? 'success' : netState === 'checking' ? 'secondary' : 'error'"
+            class="ml-2 status-chip flex-shrink-0"
+            :title="netState === 'ok' ? 'AI API 已连接' : 'AI API 无法连接'"
+          >
+            <span class="d-flex align-center ga-1">
+              <v-icon size="12">
+                {{
+                  netState === 'ok'
+                    ? 'mdi-wifi-check'
+                    : netState === 'checking'
+                      ? 'mdi-wifi-sync'
+                      : 'mdi-wifi-off'
+                }}
+              </v-icon>
+              <span>{{ netState === 'ok' ? 'API' : netState === 'checking' ? '…' : '离线' }}</span>
+            </span>
+          </v-chip>
         </v-col>
         <v-col cols="auto" class="player-select-col">
           <v-select
@@ -595,11 +647,7 @@ function handleContextMenu(
       ref="chatContainer"
       class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
     >
-      <TransitionGroup
-        name="msg"
-        tag="div"
-        class="d-flex flex-column ga-3 flex-grow-1"
-      >
+      <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
         <div
           v-if="messages.length === 0"
           key="empty"
@@ -874,9 +922,7 @@ function handleContextMenu(
           <v-btn variant="text" @click="playAllConfirm = false">
             {{ t('aidj.cancel', '取消') }}
           </v-btn>
-          <v-btn color="primary" @click="confirmPlayAll">
-            覆盖并播放
-          </v-btn>
+          <v-btn color="primary" @click="confirmPlayAll"> 覆盖并播放 </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1041,4 +1087,3 @@ function handleContextMenu(
   transform: translateX(-20px);
 }
 </style>
-

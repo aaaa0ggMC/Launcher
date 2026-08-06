@@ -125,7 +125,9 @@ watch(
   background: rgba(var(--v-theme-primary), 0.15);
 }
 .ctx-enter-active {
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
 }
 .ctx-leave-active {
   transition: opacity 0.1s ease;

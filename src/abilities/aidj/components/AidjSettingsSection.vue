@@ -19,6 +19,7 @@ const metadataConcurrency = ref(8)
 const maxHistoryLength = ref(10)
 const contextMode = ref<'discard' | 'compact'>('discard')
 const reconnectMinutes = ref(0)
+const networkRetryMinutes = ref(0)
 const availableModels = ref<string[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref(false)
@@ -55,6 +56,7 @@ onMounted(async () => {
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
   contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
+  networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
   statusBar.value = { ...((prefs.status_bar as Record<string, number>) || {}) }
   fetchModels()
@@ -100,6 +102,7 @@ watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
 watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
+watch(networkRetryMinutes, (v) => update('preferences.network_retry_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
 watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true })
 </script>
@@ -340,6 +343,29 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
             <v-text-field
               v-model.number="reconnectMinutes"
               label="重连时长（分钟）"
+              type="number"
+              step="1"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-2">网络重试</div>
+        <div class="text-caption text-medium-emphasis mb-2">
+          AI API 请求失败（断网）时的重试：0 = 立即报错，大于 0 = 在 N 分钟内重试，小于 0 =
+          永不停止重试
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="networkRetryMinutes"
+              label="网络重试时长（分钟）"
               type="number"
               step="1"
               hide-details

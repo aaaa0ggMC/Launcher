@@ -20,7 +20,8 @@ import {
   PersistentSession,
   listAvailablePlayers,
   switchPlayer,
-  getCoverArt
+  getCoverArt,
+  bumpFrequency
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -32,6 +33,7 @@ import {
   getContinuousTask,
   switchContinuousPlayer,
   enqueueContinuousSongs,
+  reorderContinuousQueue,
   getChatTask,
   clearContinuousPending
 } from './jobs'
@@ -45,6 +47,8 @@ let _musicPaths: Map<string, string> | null = null
 let _config: AidjConfig | null = null
 let _currentAbort: AbortController | null = null
 let _streamingChars = 0
+let _retrying = false
+let _retryAttempt = 0
 
 export function getCurrentAbortSignal(): AbortSignal | null {
   return _currentAbort?.signal ?? null
@@ -54,6 +58,8 @@ export function abortCurrentRequest(): void {
   _currentAbort?.abort()
   _currentAbort = null
   _streamingChars = 0
+  _retrying = false
+  _retryAttempt = 0
 }
 
 /** Load config (cached) + shared library (metadata + paths). Does NOT sync/AI — lightweight. */
@@ -139,11 +145,20 @@ const commands: CommandSpec[] = [
       const { session } = await ensureInit()
       _currentAbort = new AbortController()
       _streamingChars = 0
+      _retrying = false
+      _retryAttempt = 0
       try {
         const { playlist, intro } = await session.nextStep(
           prompt,
-          (full: string) => { _streamingChars = full.length },
-          _currentAbort.signal
+          (full: string) => {
+            _streamingChars = full.length
+          },
+          _currentAbort.signal,
+          (attempt) => {
+            _retrying = true
+            _retryAttempt = attempt
+            _streamingChars = 0
+          }
         )
         const enriched = playlist.map((s) => ({
           ...s,
@@ -158,6 +173,8 @@ const commands: CommandSpec[] = [
       } finally {
         _currentAbort = null
         _streamingChars = 0
+        _retrying = false
+        _retryAttempt = 0
       }
     }
   },
@@ -252,6 +269,15 @@ const commands: CommandSpec[] = [
       const pathArray = Array.isArray(paths) ? paths : paths ? [paths] : []
       if (pathArray.length === 0) return { ok: false, error: '未指定文件路径' }
       await dbus.sendFiles(pathArray)
+      // record_freq — immediate mode bumps every sent track.
+      if (!_config) _config = await loadAidjConfig()
+      if (_config?.preferences.record_freq) {
+        const lib = await loadLibrary()
+        const pathToName = new Map<string, string>()
+        for (const [name, p] of lib.musicPaths) pathToName.set(p, name)
+        const names = pathArray.map((p) => pathToName.get(p) ?? '').filter(Boolean)
+        await bumpFrequency(names)
+      }
       return { ok: true }
     }
   },
@@ -464,10 +490,39 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.network-test',
+    description: '测试 AI API 连通性',
+    run: async () => {
+      if (!_config) {
+        _config = await loadAidjConfig()
+      }
+      if (!_config) return { ok: false, error: '配置未加载' }
+      try {
+        const url = _config.ai_settings.base_url.replace(/\/+$/, '') + '/models'
+        const controller = new AbortController()
+        const t = setTimeout(() => controller.abort(), 5000)
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${_config.secrets.api_key}` },
+          signal: controller.signal
+        })
+        clearTimeout(t)
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+        return { ok: true, latency: 'ok' }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    }
+  },
+  {
     name: 'aidj.stream-status',
     description: '获取当前流式生成的字符数',
     run: async () => {
-      return { ok: true, chars: _streamingChars }
+      return {
+        ok: true,
+        chars: _streamingChars,
+        retrying: _retrying,
+        retryAttempt: _retryAttempt
+      }
     }
   },
   {
@@ -603,9 +658,12 @@ const commands: CommandSpec[] = [
         taskId: t.control.id,
         player: t.playerKey,
         current: t.current?.name ?? null,
+        currentPath: t.current?.path ?? null,
         next: t.queue[t.index]?.name ?? null,
         played: t.index,
-        total: t.total
+        total: t.total,
+        queue: t.queue.slice(t.index).map((s) => ({ name: s.name, path: s.path })),
+        volbal: t.volbal
       }))
       const boundPlayers = tasks.map((t) => t.player).filter(Boolean)
       return { ok: true, tasks, boundPlayers }
@@ -636,6 +694,24 @@ const commands: CommandSpec[] = [
         current: st.current?.name ?? null,
         next: st.queue[st.index]?.name ?? null
       }
+    }
+  },
+  {
+    name: 'aidj.continuous-reorder',
+    description: '调整连续播放队列顺序',
+    usage: 'aidj.continuous-reorder --task <id> --songs <json>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const songsJson = ctx.named.songs as string
+      if (!taskId || !songsJson) return { ok: false, error: '需要 --task 和 --songs 参数' }
+      let songs: unknown
+      try {
+        songs = JSON.parse(songsJson)
+      } catch {
+        return { ok: false, error: '--songs 不是合法 JSON' }
+      }
+      const r = reorderContinuousQueue(taskId, songs as { name: string; path: string }[])
+      return r.ok ? { ok: true } : { ok: false, error: r.error }
     }
   },
   {

@@ -15,10 +15,11 @@ import {
   setPersistentSession,
   PersistentSession,
   DBusManager,
-  LoudnessCache
+  LoudnessCache,
+  bumpFrequency
 } from './service'
 import OpenAI from 'openai'
-import type { SongMeta, PlaylistEntry, ChatMessage } from './types'
+import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
 
 const log = makeLogger('aidj-persistent')
 
@@ -101,7 +102,12 @@ registerJobHandler('aidj.persistent', async (control, args) => {
       if (await session.needsNextBatch()) {
         control.pushLine('AI 思考中...', 'stderr')
         control.push({ data: { type: 'status', message: 'thinking' } })
-        await session.fetchBatch()
+        await session.fetchBatch(undefined, (attempt, waitMs) => {
+          control.pushLine(
+            `网络不可用，第 ${attempt} 次重试中… (${Math.round(waitMs / 1000)}s)`,
+            'stderr'
+          )
+        })
         control.push({ data: { type: 'status', message: 'idle' } })
       }
 
@@ -155,6 +161,16 @@ export interface ContinuousTaskState {
   index: number
   playerKey: string
   total: number
+  /** Real-time VolBal telemetry pushed to the continuous view. */
+  volbal: {
+    enabled: boolean
+    method: string
+    curve: number
+    anchor: number | null
+    baseVolume: number
+    targetVolume: number | null
+    currentLoudness: { peak_db: number; rms_db: number; integrated_lufs: number | null } | null
+  } | null
 }
 
 const continuousTasks = new Map<string, ContinuousTaskState>()
@@ -170,7 +186,9 @@ function pushContinuousState(st: ContinuousTaskState): void {
       next: st.queue[st.index]?.name ?? null,
       played: st.index,
       total: st.total,
-      queueLen: st.total - st.index
+      queueLen: st.total - st.index,
+      queue: st.queue.slice(st.index).map((s) => ({ name: s.name, path: s.path })),
+      volbal: st.volbal
     }
   })
 }
@@ -213,6 +231,21 @@ export function enqueueContinuousSongs(
   st.total = st.queue.length
   pushContinuousState(st)
   return { ok: true, total: st.total, queueLen: st.total - st.index }
+}
+
+/** Reorder the pending queue by replacing it with the given new order. */
+export function reorderContinuousQueue(
+  taskId: string,
+  songs: PlaylistEntry[]
+): { ok: boolean; error?: string } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  if (!songs.length || !Array.isArray(songs)) return { ok: false, error: '队列为空' }
+  const pending = st.queue.slice(st.index)
+  if (songs.length !== pending.length) return { ok: false, error: '队列长度不匹配' }
+  st.queue.splice(st.index, pending.length, ...songs)
+  pushContinuousState(st)
+  return { ok: true }
 }
 
 registerJobHandler('aidj.continuous', async (control, args) => {
@@ -261,7 +294,8 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     current: null,
     index: 0,
     playerKey,
-    total: queue.length
+    total: queue.length,
+    volbal: null
   }
   continuousTasks.set(control.id, st)
   playerBindings.set(playerKey, control.id)
@@ -276,6 +310,7 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     config.preferences.volume_curve
   )
   const volbalEnabled = config.preferences.dynamic_balance_volume
+  const recordFreq = config.preferences.record_freq
   let sentFirst = false
 
   const release = (): void => {
@@ -294,7 +329,9 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   })
 
   control.pushLine(`连续播放已启动 → ${st.playerKey} (${st.total} 首)`)
-  control.push({ data: { type: 'state', message: 'started', player: st.playerKey, total: st.total } })
+  control.push({
+    data: { type: 'state', message: 'started', player: st.playerKey, total: st.total }
+  })
 
   try {
     const reconnectMinutes = config.preferences.reconnect_minutes ?? 0
@@ -353,16 +390,42 @@ registerJobHandler('aidj.continuous', async (control, args) => {
           st.index++
           st.current = track
           lastSendAt = Date.now()
+          let targetVol: number | null = null
+          let loudness: LoudnessInfo | null = null
           if (volbalEnabled) {
             if (!sentFirst) {
               await dbus.setVolume(0.5)
               await volCache.setAnchor(track.path, 0.5)
               sentFirst = true
+              targetVol = 0.5
             } else {
               const v = await volCache.targetVolume(track.path)
-              if (v != null) await dbus.setVolume(v)
+              if (v != null) {
+                await dbus.setVolume(v)
+                targetVol = v
+              }
+            }
+            const li = await volCache.get(track.path)
+            if (li) {
+              loudness = {
+                peak_db: li.peak_db,
+                rms_db: li.rms_db,
+                integrated_lufs: li.integrated_lufs
+              }
             }
             if (st.queue[st.index]) volCache.preAnalyze(st.queue[st.index].path)
+          }
+          if (recordFreq) {
+            await bumpFrequency([track.name])
+          }
+          st.volbal = {
+            enabled: volbalEnabled,
+            method: config.preferences.sound_adjust_method,
+            curve: config.preferences.volume_curve,
+            anchor: volCache.anchorVal,
+            baseVolume: volCache.baseVolume,
+            targetVolume: targetVol,
+            currentLoudness: loudness
           }
           await dbus.sendFiles([track.path])
           control.push({
@@ -494,7 +557,14 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const player =
     playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
 
-  const session = new PersistentSession(client, lib.metadata, lib.musicPaths, config, null, initialPrompt)
+  const session = new PersistentSession(
+    client,
+    lib.metadata,
+    lib.musicPaths,
+    config,
+    null,
+    initialPrompt
+  )
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
   }
@@ -525,13 +595,24 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const REFILL = 8
   const FETCH_TIMEOUT = 180_000
   let fetchAc = new AbortController()
+  let lastRetryNote = 0
 
   const fetchWithTimeout = async (): Promise<void> => {
     fetchAc.abort()
     fetchAc = new AbortController()
     const t = setTimeout(() => fetchAc.abort(), FETCH_TIMEOUT)
     try {
-      await session.fetchBatch(fetchAc.signal)
+      await session.fetchBatch(fetchAc.signal, (attempt, waitMs) => {
+        const now = Date.now()
+        if (now - lastRetryNote > 5000) {
+          lastRetryNote = now
+          control.pushLine(
+            `网络不可用，第 ${attempt} 次重试中… (${Math.round(waitMs / 1000)}s)`,
+            'stderr'
+          )
+          control.push({ data: { type: 'system', content: `网络不可用，重试中… (${attempt})` } })
+        }
+      })
     } finally {
       clearTimeout(t)
     }
@@ -561,7 +642,9 @@ registerJobHandler('aidj.chat', async (control, args) => {
             if (r.ok) {
               control.pushLine(`推送 ${batch.length} 首到连续播放`)
             } else {
-              control.push({ data: { type: 'system', content: `推送歌单失败: ${r.error ?? '未知错误'}` } })
+              control.push({
+                data: { type: 'system', content: `推送歌单失败: ${r.error ?? '未知错误'}` }
+              })
               control.pushLine(`推送歌单失败: ${r.error ?? ''}`, 'stderr')
               break
             }

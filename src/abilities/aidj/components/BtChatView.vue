@@ -68,7 +68,10 @@ const items = computed<ChatItem[]>(() => {
     if (t === 'user' || t === 'assistant' || t === 'system') {
       out.push({ kind: t, content: String((d as Record<string, unknown>).content ?? '') })
     } else if (t === 'playlist') {
-      out.push({ kind: 'playlist', songs: (d as Record<string, unknown>).songs as { name: string; path: string }[] })
+      out.push({
+        kind: 'playlist',
+        songs: (d as Record<string, unknown>).songs as { name: string; path: string }[]
+      })
     }
   }
   return out
@@ -78,9 +81,7 @@ async function send(): Promise<void> {
   const text = inputText.value.trim()
   if (!text || !props.task?.id) return
   inputText.value = ''
-  await window.cockpit
-    .command('aidj.chat', { task: props.task.id, text })
-    .catch(() => {})
+  await window.cockpit.command('aidj.chat', { task: props.task.id, text }).catch(() => {})
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -106,13 +107,7 @@ watch(
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
       <span class="text-body-2 font-weight-medium">持续模式</span>
       <v-spacer />
-      <v-chip
-        v-if="thinking"
-        size="small"
-        variant="flat"
-        color="primary"
-        class="thinking-chip"
-      >
+      <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
         <v-progress-circular indeterminate size="12" width="2" />
         <span class="ml-1">AI DJ</span>
       </v-chip>
@@ -153,7 +148,10 @@ watch(
                   :key="si"
                   class="d-flex align-center ga-2 px-2 py-1 song-cell"
                 >
-                  <span class="text-caption text-medium-emphasis" style="width: 2ch; text-align: right">
+                  <span
+                    class="text-caption text-medium-emphasis"
+                    style="width: 2ch; text-align: right"
+                  >
                     {{ si + 1 }}
                   </span>
                   <v-icon size="16">mdi-music</v-icon>

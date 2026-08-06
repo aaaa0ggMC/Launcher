@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import type { ChatMessage, PlaylistEntry, SongMeta } from '../types'
+import { computed } from 'vue'
+import type { ChatMessage, PlaylistEntry } from '../types'
 import { renderMarkdown } from '../../../shared/markdown'
+import SongGrid from './SongGrid.vue'
 
 defineOptions({ name: 'AidjChatMessage' })
 
@@ -16,9 +17,6 @@ const emit = defineEmits<{
   contextMenu: [e: MouseEvent, content: string, isAi: boolean, songs: PlaylistEntry[]]
   continuous: [songs: PlaylistEntry[]]
 }>()
-
-const covers = ref<Record<string, string>>({})
-const dragIdx = ref(-1)
 
 const renderedContent = computed(() => {
   if (isThinking(props.message) || isUser(props.message)) return ''
@@ -35,13 +33,6 @@ function isThinking(msg: ChatMessage): boolean {
   return msg.role === 'assistant' && msg.content === '...'
 }
 
-function metaVal(meta: SongMeta | null | undefined, field: keyof SongMeta): string {
-  if (!meta) return ''
-  const v = meta[field]
-  if (!v) return ''
-  return Array.isArray(v) ? v.join(', ') : String(v)
-}
-
 function roleIcon(msg: ChatMessage): string {
   if (isUser(msg)) return 'mdi-account'
   if (isSystem(msg)) return 'mdi-information-outline'
@@ -53,45 +44,6 @@ function roleLabel(msg: ChatMessage): string {
   if (isSystem(msg)) return 'System'
   return 'AI DJ'
 }
-
-async function loadCovers(): Promise<void> {
-  if (!props.message.playlist) return
-  for (const song of props.message.playlist) {
-    if (covers.value[song.path]) continue
-    try {
-      const r = (await window.cockpit.command('aidj.get-cover', {
-        path: song.path
-      })) as Record<string, unknown>
-      if (r?.ok && r.url) {
-        covers.value[song.path] = r.url as string
-      }
-    } catch {
-      /* noop */
-    }
-  }
-}
-
-function onDragStart(idx: number): void {
-  dragIdx.value = idx
-}
-
-function onDragOver(e: DragEvent): void {
-  e.preventDefault()
-}
-
-function onDrop(idx: number): void {
-  if (dragIdx.value < 0 || dragIdx.value === idx) return
-  const list = props.message.playlist
-  if (!list) return
-  const copy = [...list]
-  const [moved] = copy.splice(dragIdx.value, 1)
-  copy.splice(idx, 0, moved)
-  emit('reorder', copy)
-  dragIdx.value = -1
-}
-
-onMounted(loadCovers)
-watch(() => props.message.playlist, loadCovers)
 </script>
 
 <template>
@@ -107,8 +59,22 @@ watch(() => props.message.playlist, loadCovers)
     <div
       v-if="message.content"
       class="msg-bubble pa-3"
-      :class="isUser(message) ? 'msg-bubble-user' : isThinking(message) ? 'msg-bubble-thinking' : 'msg-bubble-ai'"
-      @contextmenu="emit('contextMenu', $event, message.content, !isUser(message) && !isSystem(message), message.playlist || [])"
+      :class="
+        isUser(message)
+          ? 'msg-bubble-user'
+          : isThinking(message)
+            ? 'msg-bubble-thinking'
+            : 'msg-bubble-ai'
+      "
+      @contextmenu="
+        emit(
+          'contextMenu',
+          $event,
+          message.content,
+          !isUser(message) && !isSystem(message),
+          message.playlist || []
+        )
+      "
     >
       <div v-if="isThinking(message)" class="d-flex align-center ga-2 text-body-2">
         <v-progress-circular indeterminate size="16" width="2" />
@@ -123,10 +89,7 @@ watch(() => props.message.playlist, loadCovers)
       <div v-else class="text-body-2" style="white-space: pre-wrap">{{ message.content }}</div>
     </div>
 
-    <div
-      v-if="message.playlist && message.playlist.length > 0"
-      class="mt-1 playlist-card w-100"
-    >
+    <div v-if="message.playlist && message.playlist.length > 0" class="mt-1 playlist-card w-100">
       <v-card variant="tonal" rounded="lg" class="playlist-card-inner">
         <v-card-actions class="px-4 pt-4 pb-2 d-flex flex-wrap ga-2">
           <v-btn
@@ -149,49 +112,12 @@ watch(() => props.message.playlist, loadCovers)
 
         <v-divider class="mx-4" />
 
-        <TransitionGroup tag="div" name="song" class="song-grid">
-          <div
-            v-for="(song, idx) in message.playlist"
-            :key="song.path"
-            draggable="true"
-            class="song-card d-flex align-center ga-2 px-3 py-2"
-            :class="{ 'drag-over': dragIdx === idx }"
-            @dragstart="onDragStart(idx)"
-            @dragover="onDragOver"
-            @drop="onDrop(idx)"
-          >
-            <span class="text-caption text-medium-emphasis flex-shrink-0" style="width: 2ch; text-align: right">
-              {{ idx + 1 }}
-            </span>
-
-            <div
-              class="cover-wrap d-flex align-center justify-center flex-shrink-0"
-              @click.stop="emit('playOne', song)"
-            >
-              <img
-                v-if="covers[song.path]"
-                :src="covers[song.path]"
-                class="cover-img"
-                alt=""
-              />
-              <v-icon v-else icon="mdi-music" class="cover-fallback" />
-              <div class="cover-overlay d-flex align-center justify-center">
-                <v-icon icon="mdi-play-circle" size="20" class="cover-play-icon" />
-              </div>
-            </div>
-
-            <div class="d-flex flex-column flex-grow-1 min-w-0">
-              <span class="text-body-2 song-name">{{ song.name }}</span>
-              <span class="text-caption text-medium-emphasis">
-                {{ metaVal(song.meta, 'language') || '—' }}
-              </span>
-            </div>
-
-            <v-icon size="14" class="drag-handle text-medium-emphasis flex-shrink-0">
-              mdi-drag
-            </v-icon>
-          </div>
-        </TransitionGroup>
+        <SongGrid
+          :songs="message.playlist"
+          show-covers
+          @reorder="emit('reorder', $event)"
+          @play-one="emit('playOne', $event)"
+        />
       </v-card>
     </div>
   </div>
@@ -228,81 +154,19 @@ watch(() => props.message.playlist, loadCovers)
   animation: thinking-pulse 1.2s ease-in-out infinite;
 }
 @keyframes thinking-pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .playlist-card {
   min-width: 0;
 }
 .playlist-card-inner {
   overflow: hidden;
-}
-.song-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
-  padding: 10px;
-}
-.song-card {
-  border-radius: 8px;
-  cursor: grab;
-  user-select: none;
-  transition: background 0.15s;
-  min-width: 0;
-}
-  .song-card:active {
-  cursor: grabbing;
-}
-.song-card:hover {
-  background: rgba(var(--v-theme-surface-variant), 0.3);
-}
-.song-card.drag-over {
-  background: rgba(var(--v-theme-primary), 0.12);
-}
-.song-move {
-  transition: transform 0.25s ease;
-}
-.cover-wrap {
-  position: relative;
-  width: 6ch;
-  height: 6ch;
-  border-radius: 6px;
-  overflow: hidden;
-  background: rgba(var(--v-theme-surface-variant), 0.4);
-  flex-shrink: 0;
-  cursor: pointer;
-}
-.cover-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.cover-fallback {
-  font-size: 2.4ch;
-  opacity: 0.5;
-}
-.cover-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.cover-wrap:hover .cover-overlay {
-  opacity: 1;
-}
-.cover-play-icon {
-  color: #fff;
-}
-.song-name {
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.drag-handle {
-  cursor: grab;
 }
 .msg-markdown p {
   margin: 0 0 0.4em;
