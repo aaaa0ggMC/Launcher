@@ -150,10 +150,21 @@ async function onReorder(songs: PlaylistEntry[]): Promise<void> {
 async function cycleVolbal(): Promise<void> {
   if (!props.task?.id) return
   const v = info.value?.volbal
-  const nextEnabled = !(v?.enabled ?? false)
-  let nextMethod = v?.method ?? 'lufs'
-  if (nextEnabled && nextMethod === 'lufs') nextMethod = 'linear'
-  if (!nextEnabled) nextMethod = 'lufs'
+  const enabled = v?.enabled ?? false
+  const method = v?.method ?? 'lufs'
+  // Cycle: off → lufs → linear → off
+  let nextEnabled: boolean
+  let nextMethod: string
+  if (!enabled) {
+    nextEnabled = true
+    nextMethod = 'lufs'
+  } else if (method === 'lufs') {
+    nextEnabled = true
+    nextMethod = 'linear'
+  } else {
+    nextEnabled = false
+    nextMethod = 'lufs'
+  }
   await window.cockpit.command('aidj.continuous-volbal', {
     task: props.task.id,
     enabled: nextEnabled,

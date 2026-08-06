@@ -802,7 +802,14 @@ export class LoudnessCache {
     this._baseVol = baseVol
     const info = await this.get(filepath)
     const val = this.loudnessKey(info)
-    if (val != null) this._anchorVal = val
+    if (val != null) {
+      this._anchorVal = val
+    } else if (info) {
+      // Analysis succeeded but produced no usable key (e.g. LUFS unavailable and
+      // RMS also missing) — fall back to a typical value so later tracks still
+      // get relative adjustment instead of pinning everything at baseVol.
+      this._anchorVal = -14
+    }
     return baseVol
   }
 

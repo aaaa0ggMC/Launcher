@@ -222,15 +222,51 @@ export function setContinuousVolbal(
   const st = continuousTasks.get(taskId)
   if (!st) return { ok: false, error: '任务不存在或已结束' }
   st.volbalEnabled = enabled
-  if (method) {
+  if (method && method !== st.method) {
     st.method = method
     // Rebuild the cache with the new measuring method; anchor resets on next track.
     st.volCache = new LoudnessCache(method, st.curve)
     st.sentFirst = false
   }
-  if (st.volbal) st.volbal.enabled = enabled
+  // Keep the telemetry object in sync even before the first track is sent, so
+  // the view always sees the live method/enabled (not a stale/null volbal).
+  if (!st.volbal) {
+    st.volbal = {
+      enabled: st.volbalEnabled,
+      method: st.method,
+      curve: st.curve,
+      anchor: null,
+      baseVolume: 0.5,
+      targetVolume: null,
+      currentLoudness: null
+    }
+  } else {
+    st.volbal.enabled = enabled
+    st.volbal.method = st.method
+  }
+  // Re-apply to the CURRENT track immediately (not just on the next one) so a
+  // live volbal toggle takes effect right away.
+  applyCurrentVolume(st).catch(() => {})
   pushContinuousState(st)
   return { ok: true }
+}
+
+/** Re-apply volbal to the currently playing track (anchor if none yet). */
+async function applyCurrentVolume(st: ContinuousTaskState): Promise<void> {
+  const track = st.current
+  if (!track) return
+  if (!st.volbalEnabled) {
+    await st.dbus.setVolume(0.5)
+    return
+  }
+  if (st.volCache.anchorVal == null) {
+    await st.dbus.setVolume(0.5)
+    await st.volCache.setAnchor(track.path, 0.5)
+    st.sentFirst = true
+  } else {
+    const v = await st.volCache.targetVolume(track.path)
+    if (v != null) await st.dbus.setVolume(v)
+  }
 }
 
 export function setContinuousRecordFreq(
