@@ -518,12 +518,25 @@ registerJobHandler('aidj.continuous', async (control, args) => {
                 st.sentFirst = true
                 targetVol = 0.5
               }
+              log.info('volbal first-track', {
+                track: track.name,
+                method: st.method,
+                anchor,
+                volSet: anchor != null
+              })
             } else {
               const v = await st.volCache.targetVolume(track.path)
               if (v != null) {
                 await dbus.setVolume(v)
                 targetVol = v
               }
+              log.info('volbal adjust', {
+                track: track.name,
+                method: st.method,
+                anchorVal: st.volCache.anchorVal,
+                target: v,
+                volSet: v != null
+              })
             }
             const li = await st.volCache.get(track.path)
             if (li) {
@@ -532,6 +545,8 @@ registerJobHandler('aidj.continuous', async (control, args) => {
                 rms_db: li.rms_db,
                 integrated_lufs: li.integrated_lufs
               }
+            } else {
+              log.warn('volbal no-loudness', { track: track.name })
             }
             if (st.queue[st.index]) st.volCache.preAnalyze(st.queue[st.index].path)
           }

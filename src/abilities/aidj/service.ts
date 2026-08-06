@@ -590,12 +590,19 @@ export class DBusManager {
       if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.propsProxy) return false
       const props = this.propsProxy as unknown as PropertiesInterface
-      await props.Set('org.mpris.MediaPlayer2.Player', 'Volume', {
-        signature: 'd',
-        value: Math.max(0, Math.min(1, vol))
-      })
+      // dbus-next's Properties.Set requires an actual Variant instance — a plain
+      // {signature, value} object throws "Expected a Variant() argument", which
+      // previously made every setVolume silently fail (caught → false), so the
+      // volume never changed.
+      const { Variant } = await import('dbus-next')
+      await props.Set(
+        'org.mpris.MediaPlayer2.Player',
+        'Volume',
+        new Variant('d', Math.max(0, Math.min(1, vol)))
+      )
       return true
-    } catch {
+    } catch (e) {
+      log.warn('setVolume failed', { vol, error: String(e) })
       return false
     }
   }
@@ -606,7 +613,8 @@ export class DBusManager {
       if (!this.propsProxy) return null
       const props = this.propsProxy as unknown as PropertiesInterface
       const v = await props.Get('org.mpris.MediaPlayer2.Player', 'Volume')
-      return v.value as number
+      const val = unwrapVariant(v?.value)
+      return typeof val === 'number' ? val : null
     } catch {
       return null
     }
