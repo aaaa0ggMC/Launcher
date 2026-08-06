@@ -3,8 +3,7 @@ import { makeLogger } from '../../main/process/logger'
 import {
   loadAidjConfig,
   ensureAidjDir,
-  scanMusicFiles,
-  loadMetadata,
+  loadLibrary,
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
@@ -43,8 +42,9 @@ registerJobHandler('aidj.persistent', async (control, args) => {
     baseURL: config.ai_settings.base_url
   })
 
-  const musicPaths = await scanMusicFiles(config.music_folders)
-  let metadata: Map<string, SongMeta> = await loadMetadata()
+  const lib = await loadLibrary()
+  const musicPaths = lib.musicPaths
+  let metadata: Map<string, SongMeta> = lib.metadata
   const missing = await findMissingSongs(musicPaths, metadata)
   if (missing.size > 0) {
     control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)

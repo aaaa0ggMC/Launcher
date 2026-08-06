@@ -4,8 +4,8 @@ import {
   loadAidjConfig,
   saveAidjConfig,
   ensureAidjDir,
-  scanMusicFiles,
-  loadMetadata,
+  loadLibrary,
+  invalidateLibrary,
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
@@ -54,7 +54,7 @@ export function abortCurrentRequest(): void {
   _streamingChars = 0
 }
 
-/** Load config (cached) + scan music paths + read metadata. Does NOT sync/AI — lightweight. */
+/** Load config (cached) + shared library (metadata + paths). Does NOT sync/AI — lightweight. */
 async function ensureLibraryLoaded(): Promise<AidjConfig | null> {
   let config = _config
   if (!config) {
@@ -62,11 +62,10 @@ async function ensureLibraryLoaded(): Promise<AidjConfig | null> {
     if (!config) return null
     _config = config
   }
-  if (!_musicPaths) {
-    _musicPaths = await scanMusicFiles(config.music_folders)
-  }
-  if (!_metadata) {
-    _metadata = (await loadMetadata()) as Map<string, SongMeta>
+  if (!_musicPaths || !_metadata) {
+    const lib = await loadLibrary()
+    _metadata = lib.metadata
+    _musicPaths = lib.musicPaths
   }
   return config
 }
@@ -103,12 +102,10 @@ async function ensureInit(): Promise<{
   let session = _session
   if (!session) {
     await ensureAidjDir()
-    const cfg = await ensureLibraryLoaded()
-    const paths = cfg
-      ? await scanMusicFiles(cfg.music_folders)
-      : new Map<string, string>()
+    const lib = await loadLibrary()
+    const paths = lib.musicPaths
+    const metadata = lib.metadata
     _musicPaths = paths
-    const metadata = (await loadMetadata()) as Map<string, SongMeta>
     _metadata = metadata
     log.info(`metadata loaded: ${metadata.size} songs`)
     const missing = await findMissingSongs(paths, metadata)
@@ -355,18 +352,11 @@ const commands: CommandSpec[] = [
     description: '同步新歌曲元数据',
     run: async () => {
       const { client, config } = await ensureInit()
-      let metadata = _metadata
-      let musicPaths = _musicPaths
-      if (!metadata) {
-        musicPaths = await scanMusicFiles(config.music_folders)
-        _musicPaths = musicPaths
-        metadata = (await loadMetadata()) as Map<string, SongMeta>
-        _metadata = metadata
-      }
-      if (!musicPaths) {
-        musicPaths = await scanMusicFiles(config.music_folders)
-        _musicPaths = musicPaths
-      }
+      const lib = await loadLibrary()
+      _metadata = lib.metadata
+      _musicPaths = lib.musicPaths
+      const musicPaths = lib.musicPaths
+      const metadata = lib.metadata
       const missing = await findMissingSongs(musicPaths, metadata)
       if (missing.size === 0) return { ok: true, synced: 0, message: '无新歌曲需要同步' }
       const synced = await syncMetadata(
@@ -433,19 +423,18 @@ const commands: CommandSpec[] = [
       if (!prompt) return { ok: false, error: '需要初始提示词' }
       const anchor = ctx.named.anchor !== undefined ? Number(ctx.named.anchor) : null
       const { client, config, dbus } = await ensureInit()
-      let metadata = _metadata
-      let musicPaths = _musicPaths
-      if (!metadata) {
-        musicPaths = await scanMusicFiles(config.music_folders)
-        _musicPaths = musicPaths
-        metadata = (await loadMetadata()) as Map<string, SongMeta>
-        _metadata = metadata
-      }
-      if (!musicPaths) {
-        musicPaths = await scanMusicFiles(config.music_folders)
-        _musicPaths = musicPaths
-      }
-      const ps = new PersistentSession(client, metadata, musicPaths, config, dbus, prompt, anchor)
+      const lib = await loadLibrary()
+      _metadata = lib.metadata
+      _musicPaths = lib.musicPaths
+      const ps = new PersistentSession(
+        client,
+        lib.metadata,
+        lib.musicPaths,
+        config,
+        dbus,
+        prompt,
+        anchor
+      )
       setPersistentSession(ps)
       return { ok: true, message: '持久模式已启动' }
     }
@@ -556,6 +545,7 @@ const commands: CommandSpec[] = [
       _session = null
       _metadata = null
       _musicPaths = null
+      invalidateLibrary()
       const oldDbus = getDbusManager()
       if (oldDbus) oldDbus.disconnect()
       setDbusManager(null as unknown as DBusManager)

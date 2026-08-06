@@ -112,6 +112,7 @@ async function clearMemory(): Promise<void> {
 }
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
+let playersPollTimer: ReturnType<typeof setInterval> | null = null
 let btUnsub: (() => void) | null = null
 
 onMounted(() => {
@@ -119,13 +120,16 @@ onMounted(() => {
   pollPlayers()
   refreshBackgroundCount()
   statusPollTimer = setInterval(pollStatus, 2000)
-  setInterval(pollPlayers, 5000)
+  playersPollTimer = setInterval(pollPlayers, 5000)
   listenBt()
 })
 
 onActivated(() => {
   if (!statusPollTimer) {
     statusPollTimer = setInterval(pollStatus, 2000)
+  }
+  if (!playersPollTimer) {
+    playersPollTimer = setInterval(pollPlayers, 5000)
   }
   listenBt()
 })
@@ -134,6 +138,10 @@ onDeactivated(() => {
   if (statusPollTimer) {
     clearInterval(statusPollTimer)
     statusPollTimer = null
+  }
+  if (playersPollTimer) {
+    clearInterval(playersPollTimer)
+    playersPollTimer = null
   }
   if (btUnsub) {
     btUnsub()

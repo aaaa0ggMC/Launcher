@@ -110,6 +110,49 @@ export async function loadMetadata(): Promise<Map<string, SongMeta>> {
   return map
 }
 
+// ---------------------------------------------------------------------------
+// Shared library cache — metadata + music paths are near-constant; every
+// session/job (main page, persistent, chat, ...) should reuse ONE copy instead
+// of scanning + re-reading per session. syncMetadata mutates the cached map in
+// place, so newly-synced entries are visible to all consumers. `aidj.reload`
+// invalidates it to force a rescan.
+// ---------------------------------------------------------------------------
+
+let _libraryCache: {
+  metadata: Map<string, SongMeta>
+  musicPaths: Map<string, string>
+} | null = null
+let _libraryLoading: Promise<{
+  metadata: Map<string, SongMeta>
+  musicPaths: Map<string, string>
+}> | null = null
+
+export function loadLibrary(): Promise<{
+  metadata: Map<string, SongMeta>
+  musicPaths: Map<string, string>
+}> {
+  if (_libraryCache) return Promise.resolve(_libraryCache)
+  if (!_libraryLoading) {
+    _libraryLoading = (async () => {
+      const config = await loadAidjConfig()
+      const folders = config?.music_folders ?? []
+      const musicPaths = await scanMusicFiles(folders)
+      const metadata = await loadMetadata()
+      _libraryCache = { metadata, musicPaths }
+      return _libraryCache
+    })()
+      .finally(() => {
+        _libraryLoading = null
+      })
+  }
+  return _libraryLoading
+}
+
+export function invalidateLibrary(): void {
+  _libraryCache = null
+}
+
+
 export async function appendMetadata(name: string, meta: SongMeta): Promise<void> {
   await ensureAidjDir()
   const line = JSON.stringify({ name, metadata: meta }) + '\n'
