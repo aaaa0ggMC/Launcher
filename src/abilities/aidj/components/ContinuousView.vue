@@ -42,6 +42,7 @@ const takenByOthers = ref<string[]>([])
 const switching = ref(false)
 const reordering = ref(false)
 const volumeMenu = ref(false)
+const memoryConfirm = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 function shortPlayer(name: string): string {
@@ -184,6 +185,7 @@ async function toggleRecordFreq(): Promise<void> {
 
 async function clearMemory(): Promise<void> {
   if (!props.task?.id) return
+  memoryConfirm.value = false
   await window.cockpit.command('aidj.continuous-clear-memory', { task: props.task.id })
   await refresh()
 }
@@ -301,7 +303,7 @@ onUnmounted(() => {
           size="small"
           class="status-chip clickable"
           :title="'点击重置已播记忆（从头重播）'"
-          @click="clearMemory"
+          @click="memoryConfirm = true"
         >
           <span class="status-label">Memory</span
           ><span class="status-value">{{ info?.played ?? 0 }}</span>
@@ -354,6 +356,23 @@ onUnmounted(() => {
         </v-menu>
       </div>
     </div>
+
+    <v-dialog v-model="memoryConfirm" width="420">
+      <v-card rounded="lg">
+        <v-card-title class="text-subtitle-1">
+          <v-icon start>mdi-delete-sweep</v-icon>
+          重置已播记忆
+        </v-card-title>
+        <v-card-text class="text-body-2">
+          确定要重置该会话的已播记忆吗？队列将从头（第 1 首）重新播放。
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="memoryConfirm = false">取消</v-btn>
+          <v-btn color="primary" @click="clearMemory">重置</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
