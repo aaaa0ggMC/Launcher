@@ -19,7 +19,8 @@ import {
   setPersistentSession,
   PersistentSession,
   listAvailablePlayers,
-  switchPlayer
+  switchPlayer,
+  getCoverArt
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -34,6 +35,35 @@ let _session: DJSession | null = null
 let _metadata: Map<string, SongMeta> | null = null
 let _musicPaths: Map<string, string> | null = null
 let _config: AidjConfig | null = null
+let _currentAbort: AbortController | null = null
+let _streamingChars = 0
+
+export function getCurrentAbortSignal(): AbortSignal | null {
+  return _currentAbort?.signal ?? null
+}
+
+export function abortCurrentRequest(): void {
+  _currentAbort?.abort()
+  _currentAbort = null
+  _streamingChars = 0
+}
+
+/** Load config (cached) + scan music paths + read metadata. Does NOT sync/AI — lightweight. */
+async function ensureLibraryLoaded(): Promise<AidjConfig | null> {
+  let config = _config
+  if (!config) {
+    config = await loadAidjConfig()
+    if (!config) return null
+    _config = config
+  }
+  if (!_musicPaths) {
+    _musicPaths = await scanMusicFiles(config.music_folders)
+  }
+  if (!_metadata) {
+    _metadata = (await loadMetadata()) as Map<string, SongMeta>
+  }
+  return config
+}
 
 async function ensureInit(): Promise<{
   client: OpenAI
@@ -67,12 +97,15 @@ async function ensureInit(): Promise<{
   let session = _session
   if (!session) {
     await ensureAidjDir()
-    const musicPaths = await scanMusicFiles(config.music_folders)
-    _musicPaths = musicPaths
+    const cfg = await ensureLibraryLoaded()
+    const paths = cfg
+      ? await scanMusicFiles(cfg.music_folders)
+      : new Map<string, string>()
+    _musicPaths = paths
     const metadata = (await loadMetadata()) as Map<string, SongMeta>
     _metadata = metadata
     log.info(`metadata loaded: ${metadata.size} songs`)
-    const missing = await findMissingSongs(musicPaths, metadata)
+    const missing = await findMissingSongs(paths, metadata)
     if (missing.size > 0) {
       log.info(`Found ${missing.size} new songs, syncing metadata...`)
       const synced = await syncMetadata(
@@ -84,7 +117,7 @@ async function ensureInit(): Promise<{
       )
       _metadata = synced
     }
-    session = new DJSession(client, _metadata, musicPaths, config)
+    session = new DJSession(client, _metadata, paths, config)
     _session = session
   }
 
@@ -99,16 +132,27 @@ const commands: CommandSpec[] = [
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
       const { session } = await ensureInit()
-      const { playlist, intro } = await session.nextStep(prompt)
-      const enriched = playlist.map((s) => ({
-        ...s,
-        meta: session.metadata.get(s.name) || null
-      }))
-      return {
-        ok: true,
-        intro,
-        playlist: enriched,
-        tokens: { prompt: session.promptTokens, completion: session.completionTokens }
+      _currentAbort = new AbortController()
+      _streamingChars = 0
+      try {
+        const { playlist, intro } = await session.nextStep(
+          prompt,
+          (full: string) => { _streamingChars = full.length },
+          _currentAbort.signal
+        )
+        const enriched = playlist.map((s) => ({
+          ...s,
+          meta: session.metadata.get(s.name) || null
+        }))
+        return {
+          ok: true,
+          intro,
+          playlist: enriched,
+          tokens: { prompt: session.promptTokens, completion: session.completionTokens }
+        }
+      } finally {
+        _currentAbort = null
+        _streamingChars = 0
       }
     }
   },
@@ -157,21 +201,17 @@ const commands: CommandSpec[] = [
     description: '获取播放器状态',
     run: async () => {
       if (!_config) _config = await loadAidjConfig()
-      let dbus = getDbusManager()
-      if (!dbus && _config) dbus = await initDbusManager(_config)
-      if (!dbus) {
-        return { ok: true, status: { status: 'Unknown', track: '', volume: null, player: '' } }
-      }
-      const status = await dbus.getStatus()
-      if (status.status === 'Unknown' && !status.player) {
-        dbus.disconnect()
-        if (_config) dbus = await initDbusManager(_config)
-        return { ok: true, status: await dbus.getStatus() }
-      }
-      return {
+      await ensureLibraryLoaded()
+      const session = _session
+      const librarySize = session
+        ? [...session.metadata.keys()].filter((k) => session.musicPaths.has(k)).length
+        : _metadata && _musicPaths
+          ? [..._metadata.keys()].filter((k) => _musicPaths!.has(k)).length
+          : 0
+      const base = {
         ok: true,
-        status,
-        tracks: _session?.playedSongs.size ?? 0,
+        tracks: librarySize,
+        memory: _session?.playedSongs.size ?? 0,
         volbal: {
           enabled: _config?.preferences.dynamic_balance_volume ?? false,
           method: _config?.preferences.sound_adjust_method ?? 'lufs'
@@ -179,6 +219,21 @@ const commands: CommandSpec[] = [
         recordFreq: _config?.preferences.record_freq ?? false,
         statusBar: _config?.preferences.status_bar
       }
+      let dbus = getDbusManager()
+      if (!dbus && _config) dbus = await initDbusManager(_config)
+      if (!dbus) {
+        return {
+          ...base,
+          status: { status: 'Unknown', track: '', volume: null, player: '' }
+        }
+      }
+      const status = await dbus.getStatus()
+      if (status.status === 'Unknown' && !status.player) {
+        dbus.disconnect()
+        if (_config) dbus = await initDbusManager(_config)
+        return { ...base, status: await dbus.getStatus() }
+      }
+      return { ...base, status }
     }
   },
   {
@@ -401,6 +456,21 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.abort',
+    description: '中止当前 AI 请求',
+    run: async () => {
+      abortCurrentRequest()
+      return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.stream-status',
+    description: '获取当前流式生成的字符数',
+    run: async () => {
+      return { ok: true, chars: _streamingChars }
+    }
+  },
+  {
     name: 'aidj.get-config',
     description: '获取当前 AIDJ 配置',
     run: async () => {
@@ -511,6 +581,17 @@ const commands: CommandSpec[] = [
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器名称' }
       const ok = await switchPlayer(name)
       return ok ? { ok: true, player: name } : { ok: false, error: `切换到 ${name} 失败` }
+    }
+  },
+  {
+    name: 'aidj.get-cover',
+    description: '获取歌曲封面（base64 data URL）',
+    usage: 'aidj.get-cover --path <filepath>',
+    run: async (ctx) => {
+      const path = ctx.named.path as string
+      if (!path) return { ok: false, error: '需要 --path 参数' }
+      const url = await getCoverArt(path)
+      return { ok: true, url }
     }
   }
 ]

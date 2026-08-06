@@ -240,6 +240,9 @@ interface PlayerInterface {
   Stop: () => Promise<void>
   OpenUri: (uri: string) => Promise<void>
 }
+interface TrackListInterface {
+  AddTrack: (uri: string, afterTrack: string, setAsCurrent: boolean) => Promise<void>
+}
 interface DBusDaemon {
   ListNames: () => Promise<string[]>
 }
@@ -410,13 +413,31 @@ export class DBusManager {
     try {
       if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.playerProxy) return false
-      const iface = this.playerProxy.getInterface(
-        'org.mpris.MediaPlayer2.Player'
-      ) as unknown as PlayerInterface
-      for (const p of paths) {
-        await iface.OpenUri(`file://${p}`)
+      if (!paths.length) return true
+      // Try TrackList.AddTrack for proper queuing (first file plays, rest are queued)
+      try {
+        const tl = this.playerProxy.getInterface(
+          'org.mpris.MediaPlayer2.TrackList'
+        ) as unknown as TrackListInterface
+        for (const p of paths) {
+          await tl.AddTrack(`file://${p}`, '/', false)
+        }
+        // Start playing the first track
+        const iface = this.playerProxy.getInterface(
+          'org.mpris.MediaPlayer2.Player'
+        ) as unknown as PlayerInterface
+        await iface.Play()
+        return true
+      } catch {
+        // Fall back to OpenUri (player-by-player, last one plays)
+        const iface = this.playerProxy.getInterface(
+          'org.mpris.MediaPlayer2.Player'
+        ) as unknown as PlayerInterface
+        for (const p of paths) {
+          await iface.OpenUri(`file://${p}`)
+        }
+        return true
       }
-      return true
     } catch (e) {
       log.warn('sendFiles failed', { error: String(e) })
       return false
@@ -795,15 +816,82 @@ export class DJSession {
     return { playlist, intro: introText }
   }
 
+  /** Compact old conversation messages into a summary via the AI. Never includes the library prompt. */
+  private async compactConversation(messages: ChatMessage[]): Promise<string> {
+    if (!messages.length) return ''
+    const isVerbose = this.config.preferences.verbose
+    try {
+      const instruction = `You are a context compactor for an AI music DJ chat session.
+Your ONLY job is to summarize the conversation history.
+RULES:
+- DO NOT mention any specific song names, track titles, or library keys.
+- Instead, summarize what the user has talked about and the general types, genres, and moods of music they have listened to or requested.
+- Keep the summary concise (at most 200 words), written in the same language as the conversation.
+- Output ONLY the summary text. No preamble, no markdown, no song lists.`
+      const resp = await this.client.chat.completions.create(
+        {
+          model: this.config.preferences.model,
+          messages: [
+            { role: 'system', content: instruction },
+            ...messages.map((m) => ({
+              role: m.role as 'user' | 'assistant' | 'system',
+              content: m.content
+            }))
+          ],
+          max_tokens: 400,
+          temperature: 0.3
+        },
+        { timeout: 30_000 }
+      )
+      const content = resp.choices?.[0]?.message?.content?.trim() || ''
+      if (isVerbose) log.info(`compacted ${messages.length} messages into summary`)
+      return content
+    } catch (e) {
+      log.warn('compactConversation failed', { error: String(e) })
+      return ''
+    }
+  }
+
+  /**
+   * Keep the chat history balanced. The library/system prompt (index 0) is always kept and
+   * never sent for compaction.
+   * - discard: drop the oldest messages, keep [0] + last (max-1).
+   * - compact: send all conversation messages (except index 0) to the AI for a summary.
+   */
+  private async manageContext(): Promise<void> {
+    const max = Math.max(2, this.config.preferences.max_history_length || 10)
+    if (this.chatHistory.length <= max) return
+    const mode = this.config.preferences.context_mode || 'discard'
+    const keep = this.chatHistory[0]
+
+    if (mode === 'compact') {
+      const toCompact = this.chatHistory.slice(1)
+      if (toCompact.length > 0) {
+        const summary = await this.compactConversation(toCompact)
+        if (summary) {
+          this.chatHistory = [
+            keep,
+            { role: 'system', content: `[Context Summary] ${summary}`, timestamp: Date.now() }
+          ]
+          return
+        }
+      }
+    }
+    this.chatHistory = [keep, ...this.chatHistory.slice(-(max - 1))]
+  }
+
   async nextStep(
     userRequest: string,
-    onStream?: (text: string) => void
+    onStream?: (text: string) => void,
+    signal?: AbortSignal
   ): Promise<{ playlist: PlaylistEntry[]; intro: string }> {
     this.turnCount++
     const model = this.config.preferences.model
     const isVerbose = this.config.preferences.verbose
 
     if (isVerbose) log.info(`Thinking with ${model}...`)
+
+    await this.manageContext()
 
     const basePrompt = `### ROLE DEFINITION
 You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
@@ -855,7 +943,7 @@ Instruction: Check the Library in the first System message. If matches found, ou
           stream: true,
           stream_options: { include_usage: true }
         },
-        { timeout: 180_000 }
+        { timeout: 180_000, signal }
       )
 
       let fullContent = ''
@@ -881,6 +969,10 @@ Instruction: Check the Library in the first System message. If matches found, ou
       this.chatHistory.push({ role: 'assistant', content: cleanContent, timestamp: Date.now() })
       return this.parseRawPlaylist(cleanContent, 'AI')
     } catch (e) {
+      if (signal?.aborted) {
+        this.chatHistory.pop()
+        return { playlist: [], intro: '' }
+      }
       const errMsg = String(e)
       log.error('AI API error', { error: errMsg })
       this.chatHistory.pop()
@@ -947,10 +1039,6 @@ export class PersistentSession {
     if (this.working) return []
     this.working = true
     try {
-      if (this.chatHistory.length > 10) {
-        this.chatHistory = [this.chatHistory[0], ...this.chatHistory.slice(-9)]
-      }
-
       let phaseInstruction: string
       if (this.fetchCount === 0) {
         phaseInstruction = `### PHASE 1: INITIAL REQUEST\nUser Goal: '${this.initialPrompt}'\nTarget: At least 8 tracks matching this mood.`
@@ -968,7 +1056,7 @@ export class PersistentSession {
       const session = new DJSession(this.client, this.metadata, this.musicPaths, this.config)
       session.chatHistory = this.chatHistory.map((m) => ({ ...m }))
       session.playedSongs = new Set(this.rollingHistory)
-      session.turnCount = this.fetchCount + 1
+      session.turnCount = this.fetchCount
 
       const { playlist } = await session.nextStep(fullPrompt)
       this.chatHistory = session.chatHistory
@@ -1093,4 +1181,41 @@ export async function listAvailablePlayers(): Promise<string[]> {
 export async function switchPlayer(playerName: string): Promise<boolean> {
   if (!_dbusManager) return false
   return _dbusManager.switchToPlayer(playerName)
+}
+
+const _coverCache = new Map<string, string>()
+
+export async function getCoverArt(filepath: string): Promise<string | null> {
+  if (_coverCache.has(filepath)) return _coverCache.get(filepath) ?? null
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_streams',
+      filepath
+    ])
+    const data = JSON.parse(stdout)
+    const coverStream = (data.streams ?? []).find(
+      (s: Record<string, unknown>) => (s as Record<string, unknown>).codec_type === 'video'
+    )
+    if (!coverStream) {
+      _coverCache.set(filepath, '')
+      return null
+    }
+    const { stdout: raw } = await execFileAsync('ffmpeg', [
+      '-i', filepath,
+      '-an',
+      '-vcodec', 'png',
+      '-f', 'image2pipe',
+      '-vframes', '1',
+      'pipe:1'
+    ], { maxBuffer: 10 * 1024 * 1024, encoding: 'buffer' } as { encoding: 'buffer' })
+    const b64 = (raw as unknown as Buffer).toString('base64')
+    const url = `data:image/png;base64,${b64}`
+    _coverCache.set(filepath, url)
+    return url
+  } catch {
+    _coverCache.set(filepath, '')
+    return null
+  }
 }

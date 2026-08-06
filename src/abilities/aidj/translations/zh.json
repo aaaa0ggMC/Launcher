@@ -25,6 +25,8 @@
   "aidj.prev.desc": "上一首",
   "aidj.toggle.desc": "播放/暂停",
   "aidj.stop.desc": "停止播放",
+  "aidj.stop": "停止",
+  "aidj.stop_sending": "停止",
   "aidj.status.desc": "获取播放器状态",
   "aidj.send.desc": "发送歌单到播放器",
   "aidj.volume.desc": "获取或设置音量",
@@ -43,5 +45,9 @@
   "aidj.list-players.desc": "列出所有可用的 MPRIS 播放器",
   "aidj.select-player.desc": "切换到指定播放器",
   "aidj.mpris_players": "MPRIS 播放器",
-  "aidj.current_active": "当前激活"
+  "aidj.current_active": "当前激活",
+  "aidj.clear_memory_title": "清空已播记忆",
+  "aidj.clear_memory_text": "确定要清空已播放歌曲的记忆吗？AI 将不再回避这些歌曲。",
+  "aidj.cancel": "取消",
+  "aidj.clear": "清空"
 }

@@ -25,6 +25,8 @@
   "aidj.prev.desc": "Previous track",
   "aidj.toggle.desc": "Play/Pause",
   "aidj.stop.desc": "Stop playback",
+  "aidj.stop": "Stop",
+  "aidj.stop_sending": "Stop",
   "aidj.status.desc": "Get player status",
   "aidj.send.desc": "Send playlist to player",
   "aidj.volume.desc": "Get or set volume",
@@ -43,5 +45,9 @@
   "aidj.list-players.desc": "List all available MPRIS players",
   "aidj.select-player.desc": "Switch to a specific player",
   "aidj.mpris_players": "MPRIS Players",
-  "aidj.current_active": "Current Active"
+  "aidj.current_active": "Current Active",
+  "aidj.clear_memory_title": "Clear Played Memory",
+  "aidj.clear_memory_text": "Clear the memory of played songs? AI will no longer avoid these songs.",
+  "aidj.cancel": "Cancel",
+  "aidj.clear": "Clear"
 }

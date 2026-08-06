@@ -16,11 +16,19 @@ const volumeCurve = ref(3.0)
 const verbose = ref(false)
 const recordFreq = ref(true)
 const metadataConcurrency = ref(8)
+const maxHistoryLength = ref(10)
+const contextMode = ref<'discard' | 'compact'>('discard')
 const availableModels = ref<string[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref(false)
 const libraryInjects = ref<Record<string, boolean>>({})
-const statusBar = ref<Record<string, number>>({ tokens: 1, tracks: 2, volbal: 3, record_freq: 4 })
+const statusBar = ref<Record<string, number>>({
+  tokens: 1,
+  tracks: 2,
+  memory: 3,
+  volbal: 4,
+  record_freq: 5
+})
 
 onMounted(async () => {
   const r = (await window.cockpit.command('aidj.get-config')) as Record<string, unknown>
@@ -42,6 +50,8 @@ onMounted(async () => {
   verbose.value = (prefs.verbose as boolean) ?? false
   recordFreq.value = (prefs.record_freq as boolean) ?? true
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
+  maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
+  contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
   statusBar.value = { ...((prefs.status_bar as Record<string, number>) || {}) }
   fetchModels()
@@ -84,6 +94,8 @@ watch(volumeCurve, (v) => update('preferences.volume_curve', v))
 watch(verbose, (v) => update('preferences.verbose', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
+watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
+watch(contextMode, (v) => update('preferences.context_mode', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
 watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true })
 </script>
@@ -268,6 +280,42 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
               type="number"
               min="1"
               max="16"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-2">上下文管理</div>
+        <div class="text-caption text-medium-emphasis mb-2">
+          即时与持久模式共用：会话历史超过上限时处理最旧消息（库提示词始终保留）；界面仍展示全部消息
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-select
+              v-model="contextMode"
+              :items="[
+                { title: 'Discard（丢弃最旧）', value: 'discard' },
+                { title: 'Compact（压缩为摘要）', value: 'compact' }
+              ]"
+              label="处理方式"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="maxHistoryLength"
+              label="历史消息上限"
+              type="number"
+              min="2"
+              max="100"
               hide-details
               density="compact"
               variant="outlined"

@@ -16,6 +16,10 @@ export interface AidjConfig {
     sound_adjust_method: 'lufs' | 'linear'
     volume_curve: number
     metadata_concurrency: number
+    /** Context management mode: discard drops oldest messages, compact summarizes them. */
+    context_mode: 'discard' | 'compact'
+    /** Max messages kept in the chat history (library prompt is always kept). */
+    max_history_length: number
     library_injects: {
       genre: boolean
       emotion: boolean
@@ -27,6 +31,7 @@ export interface AidjConfig {
     status_bar: {
       tokens: number
       tracks: number
+      memory: number
       volbal: number
       record_freq: number
     }
@@ -57,6 +62,7 @@ export interface ChatMessage {
   content: string
   playlist?: PlaylistEntry[]
   timestamp: number
+  chars?: number
 }
 
 export interface PlayerStatus {

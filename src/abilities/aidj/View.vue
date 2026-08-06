@@ -23,19 +23,24 @@ const inputText = ref('')
 const mode = ref<'immediate' | 'persistent'>('immediate')
 const thinking = ref(false)
 const persistentRunning = ref(false)
+const sending = ref(false)
+const pendingText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 const expanded = ref(false)
 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
 const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
 const sbTracks = ref(0)
+const sbMemory = ref(0)
 const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
 const sbRecordFreq = ref(false)
+const memoryConfirm = ref(false)
 const sbOrder = ref<Record<string, number>>({
   tokens: 1,
   tracks: 2,
-  volbal: 3,
-  record_freq: 4
+  memory: 3,
+  volbal: 4,
+  record_freq: 5
 })
 const availablePlayers = ref<string[]>([])
 const selectedPlayer = ref('')
@@ -43,7 +48,7 @@ const autoMode = ref(true)
 
 function formatTokens(n: number): string {
   if (n >= 1000) {
-    return n.toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
+    return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
   }
   return n.toLocaleString()
 }
@@ -86,6 +91,17 @@ async function toggleRecordFreq(): Promise<void> {
   sbRecordFreq.value = next
   await pollStatus()
 }
+
+async function clearMemory(): Promise<void> {
+  memoryConfirm.value = false
+  try {
+    await window.cockpit.command('aidj.refresh')
+    sbMemory.value = 0
+  } catch {
+    /* noop */
+  }
+}
+
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 let btUnsub: (() => void) | null = null
 
@@ -171,9 +187,19 @@ async function pollStatus(): Promise<void> {
     }
     if (result?.ok) {
       if (typeof result.tracks === 'number') sbTracks.value = result.tracks
+      if (typeof result.memory === 'number') sbMemory.value = result.memory
       if (result.volbal) sbVolbal.value = result.volbal as { enabled: boolean; method: string }
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
-      if (result.statusBar) sbOrder.value = result.statusBar as Record<string, number>
+      if (result.statusBar) {
+        sbOrder.value = {
+          tokens: 1,
+          tracks: 2,
+          memory: 3,
+          volbal: 4,
+          record_freq: 5,
+          ...(result.statusBar as Record<string, number>)
+        }
+      }
     }
   } catch {
     /* noop */
@@ -211,7 +237,7 @@ async function selectPlayer(name: string): Promise<void> {
 }
 
 function onKeydown(e: KeyboardEvent): void {
-  if (e.shiftKey && e.key === 'Enter' && !thinking.value) {
+  if (e.shiftKey && e.key === 'Enter' && !sending.value && !thinking.value) {
     e.preventDefault()
     sendMessage()
   }
@@ -219,14 +245,32 @@ function onKeydown(e: KeyboardEvent): void {
 
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
-  if (!text || thinking.value) return
+  if (!text || sending.value || thinking.value) return
 
+  pendingText.value = text
   inputText.value = ''
   messages.value.push({ role: 'user', content: text, timestamp: Date.now() })
+  const placeholderIdx = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    content: '...',
+    timestamp: Date.now()
+  })
   scrollToBottom()
 
   if (mode.value === 'immediate') {
-    thinking.value = true
+    sending.value = true
+    let charTimer: ReturnType<typeof setInterval> | null = null
+    charTimer = setInterval(async () => {
+      if (!sending.value) { if (charTimer) clearInterval(charTimer); return }
+      try {
+        const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
+        if (r?.ok && typeof r.chars === 'number') {
+          const msg = messages.value[placeholderIdx]
+          if (msg) msg.chars = r.chars as number
+        }
+      } catch { /* noop */ }
+    }, 200)
     try {
       const result = (await window.cockpit.command('aidj.generate', {
         prompt: text
@@ -236,18 +280,18 @@ async function sendMessage(): Promise<void> {
           lastTokens.value = result.tokens as { prompt: number; completion: number }
         const pl = result.playlist as { name: string; path: string }[] | undefined
         if (pl && pl.length > 0) {
-          messages.value.push({
+          messages.value[placeholderIdx] = {
             role: 'assistant',
             content: (result.intro as string) || '推荐歌单',
             playlist: pl as ChatMessage['playlist'],
             timestamp: Date.now()
-          })
+          }
         } else if (result.intro) {
-          messages.value.push({
+          messages.value[placeholderIdx] = {
             role: 'assistant',
             content: result.intro as string,
             timestamp: Date.now()
-          })
+          }
           messages.value.push({
             role: 'system',
             content: '💬 AI 未生成歌曲列表（库中可能没有匹配的歌曲）',
@@ -255,28 +299,62 @@ async function sendMessage(): Promise<void> {
           })
         }
       } else {
-        messages.value.push({
+        messages.value[placeholderIdx] = {
           role: 'assistant',
           content: `错误: ${(result?.error as string) || '请求失败'}`,
           timestamp: Date.now()
-        })
+        }
       }
     } catch (e: unknown) {
-      messages.value.push({
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      messages.value[placeholderIdx] = {
         role: 'assistant',
         content: `错误: ${e instanceof Error ? e.message : String(e)}`,
         timestamp: Date.now()
-      })
+      }
     } finally {
-      thinking.value = false
+      if (charTimer) clearInterval(charTimer)
+      sending.value = false
       scrollToBottom()
     }
   } else {
     if (!persistentRunning.value) {
+      messages.value.pop()
+      messages.value.pop()
       await startPersistent(text)
     } else {
+      messages.value.pop()
+      messages.value.pop()
       await sendToPersistent(text)
     }
+  }
+}
+
+async function stopSending(): Promise<void> {
+  await window.cockpit.command('aidj.abort')
+  sending.value = false
+  inputText.value = pendingText.value
+  pendingText.value = ''
+  messages.value.splice(-2)
+  scrollToBottom()
+}
+
+async function handlePlayAll(songs: { name: string; path: string }[]): Promise<void> {
+  if (!songs.length) return
+  const paths = songs.map((s) => s.path)
+  await window.cockpit.command('aidj.send', { path: paths })
+  pollStatus()
+}
+
+async function handlePlayOne(song: { path: string }): Promise<void> {
+  await window.cockpit.command('aidj.send', { path: [song.path] })
+  pollStatus()
+}
+
+function handleReorder(msgIdx: number, songs: { name: string; path: string }[]): void {
+  const msg = messages.value[msgIdx]
+  if (msg) {
+    msg.playlist = songs
   }
 }
 
@@ -413,18 +491,32 @@ function scrollToBottom(): void {
 
     <div
       ref="chatContainer"
-      class="chat-area flex-grow-1 overflow-y-auto px-4 py-3 d-flex flex-column ga-3"
+      class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
     >
-      <div
-        v-if="messages.length === 0"
-        class="empty-state flex-grow-1 d-flex flex-column align-center justify-center text-center text-medium-emphasis"
+      <TransitionGroup
+        name="msg"
+        tag="div"
+        class="d-flex flex-column ga-3 flex-grow-1"
       >
-        <v-icon size="64" class="mb-4">mdi-chat-processing-outline</v-icon>
-        <div class="text-h6">{{ t('aidj.heading') }}</div>
-        <div class="text-body-2 mt-1">{{ t('aidj.input_placeholder') }}</div>
-      </div>
+        <div
+          v-if="messages.length === 0"
+          key="empty"
+          class="empty-state flex-grow-1 d-flex flex-column align-center justify-center text-center text-medium-emphasis"
+        >
+          <v-icon size="64" class="mb-4">mdi-chat-processing-outline</v-icon>
+          <div class="text-h6">{{ t('aidj.heading') }}</div>
+          <div class="text-body-2 mt-1">{{ t('aidj.input_placeholder') }}</div>
+        </div>
 
-      <ChatMessageVue v-for="(msg, idx) in messages" :key="idx" :message="msg" />
+        <ChatMessageVue
+          v-for="(msg, idx) in messages"
+          :key="msg.timestamp"
+          :message="msg"
+          @play-all="handlePlayAll"
+          @play-one="handlePlayOne"
+          @reorder="(songs: any) => handleReorder(idx, songs)"
+        />
+      </TransitionGroup>
     </div>
 
     <v-divider />
@@ -451,6 +543,18 @@ function scrollToBottom(): void {
           >
             <span class="status-label">Tracks</span
             ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
+          </v-chip>
+
+          <v-chip
+            v-else-if="key === 'memory'"
+            variant="flat"
+            size="small"
+            class="status-chip clickable is-on"
+            @click="memoryConfirm = true"
+            :title="'点击清空已播记忆'"
+          >
+            <span class="status-label">Memory</span
+            ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
           </v-chip>
 
           <v-chip
@@ -482,7 +586,7 @@ function scrollToBottom(): void {
       </div>
 
       <template v-if="!expanded">
-        <div class="input-bar d-flex ga-2 align-start px-4 pb-3">
+        <div class="input-bar d-flex ga-2 align-center px-4 pb-3">
           <v-btn-toggle
             v-model="mode"
             mandatory
@@ -526,7 +630,17 @@ function scrollToBottom(): void {
           </div>
 
           <v-btn
-            :loading="thinking"
+            v-if="sending"
+            color="error"
+            variant="elevated"
+            class="flex-shrink-0"
+            @click="stopSending"
+          >
+            <v-icon start>mdi-stop</v-icon>
+            {{ t('aidj.stop') }}
+          </v-btn>
+          <v-btn
+            v-else
             :disabled="
               !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
             "
@@ -574,7 +688,17 @@ function scrollToBottom(): void {
           <v-spacer />
 
           <v-btn
-            :loading="thinking"
+            v-if="sending"
+            color="error"
+            variant="elevated"
+            class="flex-shrink-0"
+            @click="stopSending"
+          >
+            <v-icon start>mdi-stop</v-icon>
+            {{ t('aidj.stop') }}
+          </v-btn>
+          <v-btn
+            v-else
             :disabled="
               !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
             "
@@ -623,6 +747,27 @@ function scrollToBottom(): void {
         </div>
       </template>
     </div>
+
+    <v-dialog v-model="memoryConfirm" width="420">
+      <v-card rounded="lg">
+        <v-card-title class="text-subtitle-1">
+          <v-icon start>mdi-delete-sweep</v-icon>
+          {{ t('aidj.clear_memory_title', '清空已播记忆') }}
+        </v-card-title>
+        <v-card-text class="text-body-2">
+          {{ t('aidj.clear_memory_text', '确定要清空已播放歌曲的记忆吗？AI 将不再回避这些歌曲。') }}
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="memoryConfirm = false">
+            {{ t('aidj.cancel', '取消') }}
+          </v-btn>
+          <v-btn color="error" @click="clearMemory">
+            {{ t('aidj.clear', '清空') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -729,9 +874,11 @@ function scrollToBottom(): void {
 }
 .input-bar > .v-btn {
   flex: 0 0 auto;
+  height: 36px;
 }
 .input-bar > .v-btn-toggle {
   flex: 0 0 auto;
+  height: 36px;
 }
 .player-select-col {
   min-width: 200px;
@@ -745,5 +892,20 @@ function scrollToBottom(): void {
 }
 .player-select :deep(.v-select__selection) {
   font-size: 0.8rem;
+}
+
+.msg-enter-active {
+  transition: all 0.3s ease-out;
+}
+.msg-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.msg-leave-active {
+  transition: all 0.2s ease-in;
+}
+.msg-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
 }
 </style>
