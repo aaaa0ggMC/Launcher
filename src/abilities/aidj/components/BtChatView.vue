@@ -200,9 +200,8 @@ watch(
             <span class="text-caption text-medium-emphasis">{{ it.content }}</span>
           </div>
           <div v-else-if="it.kind === 'playlist'" class="d-flex flex-column align-start w-100">
-            <div class="d-flex align-center ga-2 w-100">
-              <span class="text-caption text-medium-emphasis">推荐歌单</span>
-              <v-spacer />
+            <div class="d-flex align-start ga-2 w-100">
+              <span class="text-caption text-medium-emphasis flex-grow-1">推荐歌单</span>
               <v-btn
                 size="x-small"
                 variant="text"
