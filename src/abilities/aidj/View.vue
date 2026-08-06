@@ -37,6 +37,9 @@ const sbOrder = ref<Record<string, number>>({
   volbal: 3,
   record_freq: 4
 })
+const availablePlayers = ref<string[]>([])
+const selectedPlayer = ref('')
+const autoMode = ref(true)
 
 function formatTokens(n: number): string {
   if (n >= 1000) {
@@ -88,7 +91,9 @@ let btUnsub: (() => void) | null = null
 
 onMounted(() => {
   pollStatus()
+  pollPlayers()
   statusPollTimer = setInterval(pollStatus, 2000)
+  setInterval(pollPlayers, 5000)
   listenBt()
 })
 
@@ -172,6 +177,36 @@ async function pollStatus(): Promise<void> {
     }
   } catch {
     /* noop */
+  }
+}
+
+async function pollPlayers(): Promise<void> {
+  try {
+    const result = (await window.cockpit.command('aidj.list-players')) as Record<string, unknown>
+    if (result?.ok && Array.isArray(result.players)) {
+      availablePlayers.value = result.players as string[]
+      autoMode.value = result.auto === true
+      if (autoMode.value) {
+        selectedPlayer.value = '__auto__'
+      } else {
+        const current = result.current as string
+        if (current) {
+          selectedPlayer.value = current
+        }
+      }
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+async function selectPlayer(name: string): Promise<void> {
+  if (!name) return
+  const result = (await window.cockpit.command('aidj.select-player', {
+    name
+  })) as Record<string, unknown>
+  if (result?.ok) {
+    selectedPlayer.value = name
   }
 }
 
@@ -342,6 +377,22 @@ function scrollToBottom(): void {
           >
             {{ playerStatus.status }}
           </v-chip>
+        </v-col>
+        <v-col cols="auto" class="player-select-col">
+          <v-select
+            v-model="selectedPlayer"
+            :items="[
+              { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
+              ...availablePlayers.map((p) => ({ title: p, value: p }))
+            ]"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="player-select"
+            :placeholder="t('aidj.select_player', '选择播放器')"
+            @update:model-value="selectPlayer"
+          >
+          </v-select>
         </v-col>
       </v-row>
       <v-row v-if="persistentRunning" dense class="mt-1">
@@ -681,5 +732,18 @@ function scrollToBottom(): void {
 }
 .input-bar > .v-btn-toggle {
   flex: 0 0 auto;
+}
+.player-select-col {
+  min-width: 200px;
+  max-width: 280px;
+}
+.player-select {
+  min-width: 160px;
+}
+.player-select :deep(.v-field) {
+  font-size: 0.8rem;
+}
+.player-select :deep(.v-select__selection) {
+  font-size: 0.8rem;
 }
 </style>

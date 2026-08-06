@@ -17,7 +17,9 @@ import {
   setDbusManager,
   getPersistentSession,
   setPersistentSession,
-  PersistentSession
+  PersistentSession,
+  listAvailablePlayers,
+  switchPlayer
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -487,6 +489,28 @@ const commands: CommandSpec[] = [
         librarySize: session.metadata.size,
         pathsSize: session.musicPaths.size
       }
+    }
+  },
+  {
+    name: 'aidj.list-players',
+    description: '列出所有可用的 MPRIS 播放器',
+    run: async () => {
+      const players = await listAvailablePlayers()
+      const dbus = getDbusManager()
+      const current = dbus?.getPlayerName() || ''
+      const auto = dbus ? dbus.autoMode : true
+      return { ok: true, players, current, auto }
+    }
+  },
+  {
+    name: 'aidj.select-player',
+    description: '切换到指定播放器',
+    usage: 'aidj.select-player --name <player>',
+    run: async (ctx) => {
+      const name = ctx.named.name as string
+      if (!name) return { ok: false, error: '需要 --name 参数指定播放器名称' }
+      const ok = await switchPlayer(name)
+      return ok ? { ok: true, player: name } : { ok: false, error: `切换到 ${name} 失败` }
     }
   }
 ]

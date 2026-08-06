@@ -38,5 +38,10 @@
   "aidj.analyse.desc": "Metadata distribution analysis",
   "aidj.chat.desc": "Send message to persistent session",
   "aidj.start-persistent.desc": "Start persistent mode",
-  "aidj.stop-persistent.desc": "Stop persistent mode"
+  "aidj.stop-persistent.desc": "Stop persistent mode",
+  "aidj.select_player": "Select Player",
+  "aidj.list-players.desc": "List all available MPRIS players",
+  "aidj.select-player.desc": "Switch to a specific player",
+  "aidj.mpris_players": "MPRIS Players",
+  "aidj.current_active": "Current Active"
 }

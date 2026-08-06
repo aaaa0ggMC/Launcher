@@ -38,5 +38,10 @@
   "aidj.analyse.desc": "元数据分布分析",
   "aidj.chat.desc": "发送消息到持久模式会话",
   "aidj.start-persistent.desc": "启动持久模式",
-  "aidj.stop-persistent.desc": "停止持久模式"
+  "aidj.stop-persistent.desc": "停止持久模式",
+  "aidj.select_player": "选择播放器",
+  "aidj.list-players.desc": "列出所有可用的 MPRIS 播放器",
+  "aidj.select-player.desc": "切换到指定播放器",
+  "aidj.mpris_players": "MPRIS 播放器",
+  "aidj.current_active": "当前激活"
 }

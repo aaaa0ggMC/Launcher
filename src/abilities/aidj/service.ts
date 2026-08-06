@@ -257,21 +257,28 @@ export class DBusManager {
   private propsProxy: Record<string, unknown> | null = null
   private playerName: string = ''
   private preferredTarget: string
+  private _autoMode = true
 
   constructor(preferredTarget = 'vlc') {
     this.preferredTarget = preferredTarget
+  }
+
+  get autoMode(): boolean {
+    return this._autoMode
   }
 
   async connect(): Promise<boolean> {
     try {
       const dbus = await import('dbus-next')
       this.bus = dbus.sessionBus()
-      const players = await this.listPlayers()
-      const target = this.resolvePlayer(players)
-      if (!target) return false
-      this.playerName = target
-      this.playerProxy = await this.bus.getProxyObject(target, '/org/mpris/MediaPlayer2')
-      this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
+      if (!this._autoMode) {
+        const players = await this.listPlayers()
+        const target = this.resolvePlayer(players)
+        if (!target) return false
+        this.playerName = target
+        this.playerProxy = await this.bus.getProxyObject(target, '/org/mpris/MediaPlayer2')
+        this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
+      }
       return true
     } catch (e) {
       log.warn('dbus connect failed', { error: String(e) })
@@ -279,18 +286,44 @@ export class DBusManager {
     }
   }
 
-  private async listPlayers(): Promise<string[]> {
+  private async autoDetectPlayer(): Promise<string | null> {
     try {
-      const dbus = await import('dbus-next')
-      const bus = dbus.sessionBus()
-      const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
-      const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
-      const names: string[] = await iface.ListNames()
-      bus.disconnect()
-      return names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
-    } catch (e) {
-      log.warn('listPlayers failed', { error: String(e) })
-      return []
+      const players = await this.listPlayers()
+      if (!players.length) return null
+      for (const name of players) {
+        try {
+          const obj = await this.bus!.getProxyObject(name, '/org/mpris/MediaPlayer2')
+          const props = obj.getInterface(
+            'org.freedesktop.DBus.Properties'
+          ) as unknown as PropertiesInterface
+          const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus')
+          if (statusV.value === 'Playing') return name
+        } catch {
+          /* skip */
+        }
+      }
+      const preferred = players.find((p) =>
+        p.toLowerCase().includes(this.preferredTarget.toLowerCase())
+      )
+      if (preferred) return preferred
+      return players[0]
+    } catch {
+      return null
+    }
+  }
+
+  private async ensureBound(): Promise<boolean> {
+    if (!this._autoMode && this.propsProxy) return true
+    const target = await this.autoDetectPlayer()
+    if (!target) return false
+    if (this.playerName === target && this.propsProxy) return true
+    try {
+      this.playerName = target
+      this.playerProxy = await this.bus!.getProxyObject(target, '/org/mpris/MediaPlayer2')
+      this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -307,7 +340,19 @@ export class DBusManager {
 
   async getStatus(): Promise<PlayerStatus> {
     try {
-      if (!this.propsProxy) {
+      if (this._autoMode) {
+        const target = await this.autoDetectPlayer()
+        if (!target) return { status: 'Unknown', track: '', volume: null, player: '' }
+        if (target !== this.playerName || !this.propsProxy) {
+          try {
+            this.playerName = target
+            this.playerProxy = await this.bus!.getProxyObject(target, '/org/mpris/MediaPlayer2')
+            this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
+          } catch {
+            return { status: 'Unknown', track: '', volume: null, player: '' }
+          }
+        }
+      } else if (!this.propsProxy) {
         log.warn('getStatus: propsProxy is null')
         return { status: 'Unknown', track: '', volume: null, player: '' }
       }
@@ -338,6 +383,7 @@ export class DBusManager {
 
   async control(command: string): Promise<boolean> {
     try {
+      if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.playerProxy) return false
       const iface = this.playerProxy.getInterface(
         'org.mpris.MediaPlayer2.Player'
@@ -362,6 +408,7 @@ export class DBusManager {
 
   async sendFiles(paths: string[]): Promise<boolean> {
     try {
+      if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.playerProxy) return false
       const iface = this.playerProxy.getInterface(
         'org.mpris.MediaPlayer2.Player'
@@ -378,6 +425,7 @@ export class DBusManager {
 
   async setVolume(vol: number): Promise<boolean> {
     try {
+      if (this._autoMode && !(await this.ensureBound())) return false
       if (!this.propsProxy) return false
       const props = this.propsProxy as unknown as PropertiesInterface
       await props.Set('org.mpris.MediaPlayer2.Player', 'Volume', {
@@ -392,6 +440,7 @@ export class DBusManager {
 
   async getVolume(): Promise<number | null> {
     try {
+      if (this._autoMode && !(await this.ensureBound())) return null
       if (!this.propsProxy) return null
       const props = this.propsProxy as unknown as PropertiesInterface
       const v = await props.Get('org.mpris.MediaPlayer2.Player', 'Volume')
@@ -411,6 +460,51 @@ export class DBusManager {
       this.bus = null
       this.playerProxy = null
       this.propsProxy = null
+    }
+  }
+
+  getPlayerName(): string {
+    return this._autoMode ? '__auto__' : this.playerName
+  }
+
+  async listPlayers(): Promise<string[]> {
+    try {
+      const dbus = await import('dbus-next')
+      const bus = dbus.sessionBus()
+      const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
+      const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
+      const names: string[] = await iface.ListNames()
+      bus.disconnect()
+      return names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
+    } catch (e) {
+      log.warn('listPlayers failed', { error: String(e) })
+      return []
+    }
+  }
+
+  async switchToPlayer(playerName: string): Promise<boolean> {
+    try {
+      if (!playerName || playerName === '__auto__') {
+        this._autoMode = true
+        this.playerName = ''
+        this.playerProxy = null
+        this.propsProxy = null
+        log.info('switched to auto mode')
+        return true
+      }
+      this._autoMode = false
+      if (this.playerName === playerName && this.propsProxy) return true
+      const dbus = await import('dbus-next')
+      const bus = this.bus || dbus.sessionBus()
+      this.playerName = playerName
+      this.playerProxy = await bus.getProxyObject(playerName, '/org/mpris/MediaPlayer2')
+      this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
+      if (!this.bus) this.bus = bus
+      log.info('switched to player', { player: playerName })
+      return true
+    } catch (e) {
+      log.warn('switchToPlayer failed', { player: playerName, error: String(e) })
+      return false
     }
   }
 }
@@ -976,4 +1070,27 @@ export async function initDbusManager(config: AidjConfig): Promise<DBusManager> 
   await dbus.connect()
   setDbusManager(dbus)
   return dbus
+}
+
+export async function listAvailablePlayers(): Promise<string[]> {
+  if (_dbusManager) {
+    return _dbusManager.listPlayers()
+  }
+  try {
+    const dbus = await import('dbus-next')
+    const bus = dbus.sessionBus()
+    const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
+    const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
+    const names: string[] = await iface.ListNames()
+    bus.disconnect()
+    return names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
+  } catch (e) {
+    log.warn('listAvailablePlayers failed', { error: String(e) })
+    return []
+  }
+}
+
+export async function switchPlayer(playerName: string): Promise<boolean> {
+  if (!_dbusManager) return false
+  return _dbusManager.switchToPlayer(playerName)
 }
