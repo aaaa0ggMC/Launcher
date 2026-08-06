@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
 import SongGrid from './SongGrid.vue'
 import type { PlaylistEntry } from '../types'
@@ -38,6 +38,7 @@ const info = ref<{
   recordFreq: boolean
 } | null>(null)
 const volume = ref<number | null>(null)
+const tmpVolume = ref(50)
 const takenByOthers = ref<string[]>([])
 const switching = ref(false)
 const reordering = ref(false)
@@ -190,13 +191,39 @@ async function clearMemory(): Promise<void> {
   await refresh()
 }
 
-async function setVolume(v: number | null): Promise<void> {
-  if (!props.task?.id) return
-  volumeMenu.value = false
-  if (v == null) return
-  await window.cockpit.command('aidj.continuous-volume', { task: props.task.id, set: v })
-  volume.value = v
+// -- Volume slider: live on drag, commit + rebase on release -----------------
+let volumeDebounce: ReturnType<typeof setTimeout> | null = null
+
+function onVolumeChanging(pct: number): void {
+  tmpVolume.value = pct
+  if (volumeDebounce) clearTimeout(volumeDebounce)
+  const v = pct / 100
+  volumeDebounce = setTimeout(() => {
+    if (!props.task?.id) return
+    window.cockpit
+      .command('aidj.continuous-volume', { task: props.task.id, set: v })
+      .catch(() => {})
+  }, 50)
 }
+
+async function commitVolume(pct: number): Promise<void> {
+  if (volumeDebounce) {
+    clearTimeout(volumeDebounce)
+    volumeDebounce = null
+  }
+  if (!props.task?.id) return
+  const v = pct / 100
+  await window.cockpit.command('aidj.continuous-volume', { task: props.task.id, set: v })
+  // Recalibrate the anchor: the user's chosen level becomes the new volbal
+  // base — subsequent songs balance around this comfortable level.
+  await window.cockpit.command('aidj.continuous-rebase', { task: props.task.id, base: v })
+  volume.value = v
+  volumeMenu.value = false
+}
+
+watch(volumeMenu, (open) => {
+  if (open) tmpVolume.value = Math.round((volume.value ?? 0.5) * 100)
+})
 
 function volbalLabel(): string {
   const v = info.value?.volbal
@@ -211,6 +238,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (volumeDebounce) clearTimeout(volumeDebounce)
 })
 </script>
 
@@ -341,15 +369,18 @@ onUnmounted(() => {
           </template>
           <v-card width="220" rounded="lg">
             <v-card-text class="pa-3">
-              <div class="text-caption text-medium-emphasis mb-1">音量</div>
+              <div class="text-caption text-medium-emphasis mb-1">
+                音量（松手后重新校准响度基准）
+              </div>
               <v-slider
-                :model-value="volume != null ? Math.round(volume * 100) : 0"
+                :model-value="tmpVolume"
                 :min="0"
                 :max="100"
                 :step="1"
                 color="primary"
                 thumb-label
-                @update:model-value="setVolume(($event as number) / 100)"
+                @update:model-value="onVolumeChanging($event as number)"
+                @end="commitVolume(tmpVolume)"
               />
             </v-card-text>
           </v-card>

@@ -834,6 +834,13 @@ export class LoudnessCache {
     this._baseVol = baseVol
   }
 
+  /** Change only the base volume (the "50% reference"), keeping the current
+   *  anchor unchanged. Used when the user manually adjusts volume and wants
+   *  that level to become the center of the balance curve. */
+  setBaseVol(base: number): void {
+    this._baseVol = base
+  }
+
   /** Target volume for `filepath`, or null when it can't be measured (skip). */
   async targetVolume(filepath: string): Promise<number | null> {
     if (this._anchorVal == null) return null

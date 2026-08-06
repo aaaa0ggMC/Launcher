@@ -314,6 +314,22 @@ export async function setContinuousVolume(
   return ok ? { ok: true } : { ok: false, error: '设置音量失败' }
 }
 
+/** Set the volbal BASE volume (the "50% reference") so the user's preferred
+ *  listening level becomes the center of the balance curve. Subsequent songs
+ *  adjust relative to this new base (custom anchor). */
+export function setContinuousBaseVol(
+  taskId: string,
+  base: number
+): { ok: boolean; error?: string; base?: number } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  const clamped = Math.max(0.05, Math.min(1, base))
+  st.volCache.setBaseVol(clamped)
+  if (st.volbal) st.volbal.baseVolume = st.volCache.baseVolume
+  pushContinuousState(st)
+  return { ok: true, base: clamped }
+}
+
 export function boundContinuousPlayer(playerKey: string): string | undefined {
   return playerBindings.get(playerKey)
 }

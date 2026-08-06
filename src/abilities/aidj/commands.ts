@@ -39,6 +39,7 @@ import {
   clearContinuousMemory,
   getContinuousVolume,
   setContinuousVolume,
+  setContinuousBaseVol,
   getChatTask,
   setChatPlayer,
   clearContinuousPending
@@ -817,6 +818,19 @@ const commands: CommandSpec[] = [
       }
       const volume = await getContinuousVolume(taskId)
       return { ok: true, volume }
+    }
+  },
+  {
+    name: 'aidj.continuous-rebase',
+    description: '将当前音量设为响度平衡的新基准（自定义 anchor）',
+    usage: 'aidj.continuous-rebase --task <id> --base <0-1>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const base = Number(ctx.named.base)
+      if (!taskId || isNaN(base) || base < 0 || base > 1) {
+        return { ok: false, error: '需要 --task 和 --base (0-1) 参数' }
+      }
+      return setContinuousBaseVol(taskId, base)
     }
   }
 ]
