@@ -35,10 +35,13 @@ const info = ref<{
   total: number
   queue: PlaylistEntry[]
   volbal: VolbalInfo | null
+  recordFreq: boolean
 } | null>(null)
+const volume = ref<number | null>(null)
 const takenByOthers = ref<string[]>([])
 const switching = ref(false)
 const reordering = ref(false)
+const volumeMenu = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 function shortPlayer(name: string): string {
@@ -73,6 +76,7 @@ async function refresh(): Promise<void> {
         total: number
         queue: { name: string; path: string }[]
         volbal: VolbalInfo | null
+        recordFreq: boolean
       }[]
     } | null
     if (pl?.ok && Array.isArray(pl.players)) players.value = pl.players
@@ -87,13 +91,20 @@ async function refresh(): Promise<void> {
             played: myTask.played,
             total: myTask.total,
             queue: myTask.queue ?? [],
-            volbal: myTask.volbal ?? null
+            volbal: myTask.volbal ?? null,
+            recordFreq: myTask.recordFreq ?? false
           }
         : null
       takenByOthers.value = list.tasks
         .filter((t) => t.taskId !== props.task?.id)
         .map((t) => t.player)
         .filter(Boolean)
+      if (myTask) {
+        const vr = (await window.cockpit
+          .command('aidj.continuous-volume', { task: myTask.taskId })
+          .catch(() => null)) as { ok?: boolean; volume?: number | null } | null
+        if (vr?.ok && typeof vr.volume === 'number') volume.value = vr.volume
+      }
     }
   } catch {
     /* noop */
@@ -132,28 +143,52 @@ async function onReorder(songs: PlaylistEntry[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// VolBal panel helpers
+// Status bar actions — live switches on THIS running task (no restart).
+// Mirrors the main chat's status bar, plus a special volume state.
 // ---------------------------------------------------------------------------
-function volbalUnit(): string {
+
+async function cycleVolbal(): Promise<void> {
+  if (!props.task?.id) return
   const v = info.value?.volbal
-  if (!v) return 'LUFS'
-  return v.method === 'lufs' ? 'LUFS' : 'dB'
+  const nextEnabled = !(v?.enabled ?? false)
+  let nextMethod = v?.method ?? 'lufs'
+  if (nextEnabled && nextMethod === 'lufs') nextMethod = 'linear'
+  if (!nextEnabled) nextMethod = 'lufs'
+  await window.cockpit.command('aidj.continuous-volbal', {
+    task: props.task.id,
+    enabled: nextEnabled,
+    method: nextMethod
+  })
+  await refresh()
 }
 
-function volbalCurrentLabel(): string {
-  const v = info.value?.volbal
-  const li = v?.currentLoudness
-  if (!li) return '—'
-  if (v?.method === 'lufs' && li.integrated_lufs != null) {
-    return `${li.integrated_lufs.toFixed(1)} LUFS`
-  }
-  return `${li.rms_db.toFixed(1)} dB`
+async function toggleRecordFreq(): Promise<void> {
+  if (!props.task?.id) return
+  await window.cockpit.command('aidj.continuous-recordfreq', {
+    task: props.task.id,
+    enabled: !(info.value?.recordFreq ?? false)
+  })
+  await refresh()
 }
 
-function volbalTargetLabel(): string {
+async function clearMemory(): Promise<void> {
+  if (!props.task?.id) return
+  await window.cockpit.command('aidj.continuous-clear-memory', { task: props.task.id })
+  await refresh()
+}
+
+async function setVolume(v: number | null): Promise<void> {
+  if (!props.task?.id) return
+  volumeMenu.value = false
+  if (v == null) return
+  await window.cockpit.command('aidj.continuous-volume', { task: props.task.id, set: v })
+  volume.value = v
+}
+
+function volbalLabel(): string {
   const v = info.value?.volbal
-  if (!v || v.targetVolume == null) return '—'
-  return `${Math.round(v.targetVolume * 100)}%`
+  if (!v?.enabled) return 'off'
+  return v.method
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +254,8 @@ onUnmounted(() => {
 
       <v-divider class="my-2" />
 
-      <!-- Queue grid (3/4 vertical) — shared SongGrid with covers, reorder with animation -->
+      <!-- Queue grid — shared SongGrid with covers, reorder with animation.
+           Fills all remaining width; scrolls internally when too many songs. -->
       <div class="cv-queue">
         <SongGrid
           :songs="info?.queue ?? []"
@@ -229,38 +265,82 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- VolBal status (1/4) — verbose-style telemetry -->
-      <div class="cv-volbal">
-        <div class="d-flex align-center ga-2 mb-1">
-          <v-icon size="14" color="primary">mdi-format-color-marker</v-icon>
-          <span class="text-caption font-weight-medium">VolBal</span>
-          <v-chip
-            size="x-small"
-            variant="flat"
-            :color="info?.volbal?.enabled ? 'success' : 'default'"
-          >
-            {{ info?.volbal?.enabled ? 'ON' : 'OFF' }}
-          </v-chip>
-          <span class="text-caption text-medium-emphasis">
-            {{ info?.volbal?.method ?? 'lufs' }} · curve {{ info?.volbal?.curve ?? 3 }}
-          </span>
-          <v-spacer />
-          <span class="text-caption text-medium-emphasis">
-            Anchor {{ info?.volbal?.anchor != null ? info.volbal.anchor.toFixed(1) : '—' }}
-            {{ volbalUnit() }} · Base {{ Math.round((info?.volbal?.baseVolume ?? 0.5) * 100) }}%
-          </span>
-        </div>
-        <div class="d-flex flex-wrap ga-2 align-center">
-          <v-chip size="x-small" variant="flat" color="primary-container">
-            当前 {{ volbalCurrentLabel() }}
-          </v-chip>
-          <v-chip size="x-small" variant="flat" color="success-container">
-            目标音量 {{ volbalTargetLabel() }}
-          </v-chip>
-          <span class="text-caption text-medium-emphasis cv-ellipsis">
-            {{ info?.current || '—' }}
-          </span>
-        </div>
+      <!-- Status bar — mirrors the main chat's status bar: clickable chips that
+           switch live settings on THIS task. Volume is the special extra state. -->
+      <div class="cv-statusbar d-flex flex-wrap ga-2 align-center mt-2">
+        <span class="cv-status-label">
+          <v-icon size="13" color="primary">mdi-tune</v-icon>
+          <span class="ml-1">会话设置</span>
+        </span>
+
+        <v-chip
+          variant="flat"
+          size="small"
+          class="status-chip clickable"
+          :class="{ 'is-on': info?.volbal?.enabled }"
+          :title="info?.volbal?.enabled ? '点击关闭响度平衡' : '点击开启响度平衡 (lufs)'"
+          @click="cycleVolbal"
+        >
+          <span class="status-label">Volbal</span
+          ><span class="status-value">{{ volbalLabel() }}</span>
+        </v-chip>
+
+        <v-chip
+          variant="flat"
+          size="small"
+          class="status-chip clickable"
+          :title="'点击重置已播记忆（从头重播）'"
+          @click="clearMemory"
+        >
+          <span class="status-label">Memory</span
+          ><span class="status-value">{{ info?.played ?? 0 }}</span>
+        </v-chip>
+
+        <v-chip
+          variant="flat"
+          size="small"
+          class="status-chip clickable"
+          :class="{ 'is-on': info?.recordFreq }"
+          :title="info?.recordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
+          @click="toggleRecordFreq"
+        >
+          <span class="status-label">RecordFreq</span
+          ><span class="status-value">{{ info?.recordFreq ? 'on' : 'off' }}</span>
+        </v-chip>
+
+        <v-spacer />
+
+        <v-menu v-model="volumeMenu" :close-on-content-click="false" offset="6">
+          <template #activator="{ props: mp }">
+            <v-chip
+              v-bind="mp"
+              variant="flat"
+              size="small"
+              class="status-chip clickable"
+              :prepend-icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
+              :title="'点击调整音量'"
+            >
+              <span class="status-label">Vol</span
+              ><span class="status-value"
+                >{{ volume != null ? Math.round(volume * 100) : '—' }}%</span
+              >
+            </v-chip>
+          </template>
+          <v-card width="220" rounded="lg">
+            <v-card-text class="pa-3">
+              <div class="text-caption text-medium-emphasis mb-1">音量</div>
+              <v-slider
+                :model-value="volume != null ? Math.round(volume * 100) : 0"
+                :min="0"
+                :max="100"
+                :step="1"
+                color="primary"
+                thumb-label
+                @update:model-value="setVolume(($event as number) / 100)"
+              />
+            </v-card-text>
+          </v-card>
+        </v-menu>
       </div>
     </div>
   </div>
@@ -298,12 +378,14 @@ onUnmounted(() => {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Queue takes 3/4 of the remaining vertical space and scrolls internally —
-   too many songs never push the page, they get a scrollbar here. */
+/* Queue fills all remaining height, scrolls internally when too many songs.
+   overflow-x hidden kills the horizontal scrollbar; the song grid truncates
+   long names so columns never outgrow the container. */
 .cv-queue {
-  flex: 3 1 0;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
 }
 .cv-queue::-webkit-scrollbar {
@@ -313,21 +395,41 @@ onUnmounted(() => {
   background: rgba(var(--v-theme-on-surface-variant), 0.45);
   border-radius: 3px;
 }
-.cv-volbal {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
+.cv-statusbar {
+  flex-shrink: 0;
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.22);
   border-radius: 10px;
   padding: 6px 10px;
   background: rgba(var(--v-theme-surface-variant), 0.28);
 }
-.cv-volbal::-webkit-scrollbar {
-  width: 6px;
+.cv-status-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  color: rgba(var(--v-theme-on-surface-variant), 0.85);
+  margin-right: 2px;
 }
-.cv-volbal::-webkit-scrollbar-thumb {
-  background: rgba(var(--v-theme-on-surface-variant), 0.45);
-  border-radius: 3px;
+.status-chip {
+  padding-block: 4px;
+  min-height: 24px;
+}
+.status-chip.clickable {
+  cursor: pointer;
+}
+.status-chip.clickable:hover {
+  filter: brightness(1.15);
+}
+.status-chip.is-on {
+  background: rgba(var(--v-theme-success-container), 0.9);
+  color: rgb(var(--v-theme-on-success-container));
+}
+.status-chip .status-label {
+  opacity: 0.6;
+  margin-right: 5px;
+}
+.status-chip .status-value {
+  font-family: monospace;
+  font-weight: 600;
 }
 </style>
 

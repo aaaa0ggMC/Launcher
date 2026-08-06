@@ -241,6 +241,7 @@ onBeforeUnmount(cleanupDrag)
   background: rgba(var(--v-theme-primary-container), 0.45);
 }
 .song-name {
+  display: block;
   line-height: 1.3;
   overflow: hidden;
   white-space: nowrap;

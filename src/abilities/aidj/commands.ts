@@ -34,6 +34,11 @@ import {
   switchContinuousPlayer,
   enqueueContinuousSongs,
   reorderContinuousQueue,
+  setContinuousVolbal,
+  setContinuousRecordFreq,
+  clearContinuousMemory,
+  getContinuousVolume,
+  setContinuousVolume,
   getChatTask,
   clearContinuousPending
 } from './jobs'
@@ -663,7 +668,8 @@ const commands: CommandSpec[] = [
         played: t.index,
         total: t.total,
         queue: t.queue.slice(t.index).map((s) => ({ name: s.name, path: s.path })),
-        volbal: t.volbal
+        volbal: t.volbal,
+        recordFreq: t.recordFreq
       }))
       const boundPlayers = tasks.map((t) => t.player).filter(Boolean)
       return { ok: true, tasks, boundPlayers }
@@ -732,6 +738,65 @@ const commands: CommandSpec[] = [
       return r.ok
         ? { ok: true, total: r.total, queueLen: r.queueLen }
         : { ok: false, error: r.error }
+    }
+  },
+  {
+    name: 'aidj.continuous-volbal',
+    description: '切换连续播放任务的响度平衡开关/方法',
+    usage: 'aidj.continuous-volbal --task <id> --enabled <true|false> [--method <lufs|linear>]',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      const enabled = String(ctx.named.enabled ?? '') !== 'false'
+      const method = ctx.named.method as string | undefined
+      const r = setContinuousVolbal(taskId, enabled, method)
+      // persist to the global config so a restart keeps the choice
+      if (r.ok && _config) {
+        _config.preferences.dynamic_balance_volume = enabled
+        if (method) _config.preferences.sound_adjust_method = method as 'lufs' | 'linear'
+      }
+      return r.ok ? { ok: true } : { ok: false, error: r.error }
+    }
+  },
+  {
+    name: 'aidj.continuous-recordfreq',
+    description: '切换连续播放任务的播放频率记录',
+    usage: 'aidj.continuous-recordfreq --task <id> --enabled <true|false>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      const enabled = String(ctx.named.enabled ?? '') !== 'false'
+      const r = setContinuousRecordFreq(taskId, enabled)
+      if (r.ok && _config) _config.preferences.record_freq = enabled
+      return r.ok ? { ok: true } : { ok: false, error: r.error }
+    }
+  },
+  {
+    name: 'aidj.continuous-clear-memory',
+    description: '重置连续播放队列的已播记忆（从头重播）',
+    usage: 'aidj.continuous-clear-memory --task <id>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      const r = clearContinuousMemory(taskId)
+      return r.ok ? { ok: true } : { ok: false, error: r.error }
+    }
+  },
+  {
+    name: 'aidj.continuous-volume',
+    description: '获取或设置连续播放任务的音量',
+    usage: 'aidj.continuous-volume --task <id> [--set <0-1>]',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      if (ctx.named.set !== undefined) {
+        const vol = Number(ctx.named.set)
+        if (isNaN(vol) || vol < 0 || vol > 1) return { ok: false, error: '音量需在 0-1 之间' }
+        const r = await setContinuousVolume(taskId, vol)
+        return r.ok ? { ok: true, volume: vol } : { ok: false, error: r.error }
+      }
+      const volume = await getContinuousVolume(taskId)
+      return { ok: true, volume }
     }
   }
 ]

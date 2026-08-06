@@ -161,6 +161,13 @@ export interface ContinuousTaskState {
   index: number
   playerKey: string
   total: number
+  /** Live session switches — toggled from the view without restarting the task. */
+  volbalEnabled: boolean
+  recordFreq: boolean
+  method: string
+  curve: number
+  sentFirst: boolean
+  volCache: LoudnessCache
   /** Real-time VolBal telemetry pushed to the continuous view. */
   volbal: {
     enabled: boolean
@@ -188,7 +195,8 @@ function pushContinuousState(st: ContinuousTaskState): void {
       total: st.total,
       queueLen: st.total - st.index,
       queue: st.queue.slice(st.index).map((s) => ({ name: s.name, path: s.path })),
-      volbal: st.volbal
+      volbal: st.volbal,
+      recordFreq: st.recordFreq
     }
   })
 }
@@ -199,6 +207,67 @@ export function getContinuousTasks(): ContinuousTaskState[] {
 
 export function getContinuousTask(taskId: string): ContinuousTaskState | undefined {
   return continuousTasks.get(taskId)
+}
+
+// ---------------------------------------------------------------------------
+// Live session switches — these mutate the RUNNING task (no restart needed).
+// The view's bottom status bar maps directly onto them.
+// ---------------------------------------------------------------------------
+
+export function setContinuousVolbal(
+  taskId: string,
+  enabled: boolean,
+  method?: string
+): { ok: boolean; error?: string } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  st.volbalEnabled = enabled
+  if (method) {
+    st.method = method
+    // Rebuild the cache with the new measuring method; anchor resets on next track.
+    st.volCache = new LoudnessCache(method, st.curve)
+    st.sentFirst = false
+  }
+  if (st.volbal) st.volbal.enabled = enabled
+  pushContinuousState(st)
+  return { ok: true }
+}
+
+export function setContinuousRecordFreq(
+  taskId: string,
+  enabled: boolean
+): { ok: boolean; error?: string } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  st.recordFreq = enabled
+  return { ok: true }
+}
+
+/** Reset the played-memory: rewind the queue to its start (replays from 1). */
+export function clearContinuousMemory(taskId: string): { ok: boolean; error?: string } {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  st.index = 0
+  st.current = null
+  st.sentFirst = false
+  pushContinuousState(st)
+  return { ok: true }
+}
+
+export async function getContinuousVolume(taskId: string): Promise<number | null> {
+  const st = continuousTasks.get(taskId)
+  if (!st) return null
+  return st.dbus.getVolume()
+}
+
+export async function setContinuousVolume(
+  taskId: string,
+  vol: number
+): Promise<{ ok: boolean; error?: string }> {
+  const st = continuousTasks.get(taskId)
+  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  const ok = await st.dbus.setVolume(Math.max(0, Math.min(1, vol)))
+  return ok ? { ok: true } : { ok: false, error: '设置音量失败' }
 }
 
 export function boundContinuousPlayer(playerKey: string): string | undefined {
@@ -295,6 +364,15 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     index: 0,
     playerKey,
     total: queue.length,
+    volbalEnabled: config.preferences.dynamic_balance_volume,
+    recordFreq: config.preferences.record_freq,
+    method: config.preferences.sound_adjust_method,
+    curve: config.preferences.volume_curve,
+    sentFirst: false,
+    volCache: new LoudnessCache(
+      config.preferences.sound_adjust_method,
+      config.preferences.volume_curve
+    ),
     volbal: null
   }
   continuousTasks.set(control.id, st)
@@ -305,13 +383,6 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   await dbus.switchToPlayer(playerKey)
 
   const ac = new AbortController()
-  const volCache = new LoudnessCache(
-    config.preferences.sound_adjust_method,
-    config.preferences.volume_curve
-  )
-  const volbalEnabled = config.preferences.dynamic_balance_volume
-  const recordFreq = config.preferences.record_freq
-  let sentFirst = false
 
   const release = (): void => {
     continuousTasks.delete(control.id)
@@ -392,20 +463,20 @@ registerJobHandler('aidj.continuous', async (control, args) => {
           lastSendAt = Date.now()
           let targetVol: number | null = null
           let loudness: LoudnessInfo | null = null
-          if (volbalEnabled) {
-            if (!sentFirst) {
+          if (st.volbalEnabled) {
+            if (!st.sentFirst) {
               await dbus.setVolume(0.5)
-              await volCache.setAnchor(track.path, 0.5)
-              sentFirst = true
+              await st.volCache.setAnchor(track.path, 0.5)
+              st.sentFirst = true
               targetVol = 0.5
             } else {
-              const v = await volCache.targetVolume(track.path)
+              const v = await st.volCache.targetVolume(track.path)
               if (v != null) {
                 await dbus.setVolume(v)
                 targetVol = v
               }
             }
-            const li = await volCache.get(track.path)
+            const li = await st.volCache.get(track.path)
             if (li) {
               loudness = {
                 peak_db: li.peak_db,
@@ -413,17 +484,17 @@ registerJobHandler('aidj.continuous', async (control, args) => {
                 integrated_lufs: li.integrated_lufs
               }
             }
-            if (st.queue[st.index]) volCache.preAnalyze(st.queue[st.index].path)
+            if (st.queue[st.index]) st.volCache.preAnalyze(st.queue[st.index].path)
           }
-          if (recordFreq) {
+          if (st.recordFreq) {
             await bumpFrequency([track.name])
           }
           st.volbal = {
-            enabled: volbalEnabled,
-            method: config.preferences.sound_adjust_method,
-            curve: config.preferences.volume_curve,
-            anchor: volCache.anchorVal,
-            baseVolume: volCache.baseVolume,
+            enabled: st.volbalEnabled,
+            method: st.method,
+            curve: st.curve,
+            anchor: st.volCache.anchorVal,
+            baseVolume: st.volCache.baseVolume,
             targetVolume: targetVol,
             currentLoudness: loudness
           }
