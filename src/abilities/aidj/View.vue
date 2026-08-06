@@ -10,6 +10,7 @@ import {
   nextTick
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
+import { renderMarkdown } from '../../shared/markdown'
 import type { ChatMessage, PlayerStatus } from './types'
 import ChatMessageVue from './components/ChatMessage.vue'
 
@@ -429,6 +430,92 @@ function scrollToBottom(): void {
     }
   })
 }
+
+const ctxMenu = ref(false)
+const ctxPos = ref({ x: 0, y: 0 })
+const ctxTarget = ref('')
+const ctxIsAi = ref(false)
+const ctxSongs = ref<{ name: string }[]>([])
+const ctxEl = ref<HTMLElement | null>(null)
+let ctxCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function handleContextMenu(
+  e: MouseEvent,
+  content: string,
+  isAi: boolean,
+  songs: { name: string }[]
+): void {
+  e.preventDefault()
+  e.stopPropagation()
+  ctxTarget.value = content
+  ctxIsAi.value = isAi
+  ctxSongs.value = songs
+  const pos = { x: e.clientX + 8, y: e.clientY + 8 }
+  if (ctxMenu.value) {
+    ctxMenu.value = false
+    if (ctxCloseTimer) clearTimeout(ctxCloseTimer)
+    ctxCloseTimer = setTimeout(() => showCtx(pos), 120)
+  } else {
+    showCtx(pos)
+  }
+}
+
+function showCtx(pos: { x: number; y: number }): void {
+  ctxPos.value = pos
+  ctxMenu.value = true
+  nextTick(() => {
+    const el = ctxEl.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const margin = 8
+    const x = Math.min(ctxPos.value.x, window.innerWidth - rect.width - margin)
+    const y = Math.min(ctxPos.value.y, window.innerHeight - rect.height - margin)
+    ctxPos.value = { x: Math.max(margin, x), y: Math.max(margin, y) }
+  })
+  document.addEventListener('click', closeCtx)
+  document.addEventListener('keydown', onCtxKey)
+}
+
+function onCtxKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closeCtx()
+}
+
+function copyToClipboard(text: string): void {
+  navigator.clipboard.writeText(text)
+  closeCtx()
+}
+
+function withSongs(text: string): string {
+  const songs = ctxSongs.value
+  if (!songs.length) return text
+  const list = songs.map((s, i) => `${i + 1}. ${s.name}`).join('\n')
+  return `${text}\n\n${list}`
+}
+
+function copyRendered(): void {
+  const html = renderMarkdown(ctxTarget.value)
+  copyToClipboard(withSongs(stripHtml(html) || ctxTarget.value))
+}
+
+function copyRaw(): void {
+  copyToClipboard(withSongs(ctxTarget.value))
+}
+
+function stripHtml(html: string): string {
+  const el = document.createElement('div')
+  el.innerHTML = html
+  return el.textContent || ''
+}
+
+function closeCtx(): void {
+  ctxMenu.value = false
+  if (ctxCloseTimer) {
+    clearTimeout(ctxCloseTimer)
+    ctxCloseTimer = null
+  }
+  document.removeEventListener('click', closeCtx)
+  document.removeEventListener('keydown', onCtxKey)
+}
 </script>
 
 <template>
@@ -515,6 +602,7 @@ function scrollToBottom(): void {
           @play-all="handlePlayAll"
           @play-one="handlePlayOne"
           @reorder="(songs: any) => handleReorder(idx, songs)"
+          @context-menu="handleContextMenu"
         />
       </TransitionGroup>
     </div>
@@ -768,6 +856,27 @@ function scrollToBottom(): void {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <Teleport to="body">
+      <Transition name="ctx">
+        <div
+          v-if="ctxMenu"
+          ref="ctxEl"
+          class="aidj-ctx-menu"
+          :style="{ left: ctxPos.x + 'px', top: ctxPos.y + 'px' }"
+          @click.stop
+        >
+          <button class="aidj-ctx-item" @click="copyRendered">
+            <v-icon icon="mdi-content-copy" size="14" />
+            <span>复制</span>
+          </button>
+          <button v-if="ctxIsAi" class="aidj-ctx-item" @click="copyRaw">
+            <v-icon icon="mdi-code-tags" size="14" />
+            <span>CopyRaw</span>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -907,5 +1016,52 @@ function scrollToBottom(): void {
 .msg-leave-to {
   opacity: 0;
   transform: translateX(-20px);
+}
+</style>
+
+<style>
+.aidj-ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 110px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.aidj-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.aidj-ctx-item:hover {
+  background: rgba(var(--v-theme-primary), 0.15);
+}
+.ctx-enter-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.ctx-leave-active {
+  transition: opacity 0.1s ease;
+}
+.ctx-enter-from {
+  opacity: 0;
+  transform: scale(0.92) translateY(-4px);
+}
+.ctx-enter-to {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+.ctx-leave-to {
+  opacity: 0;
 }
 </style>

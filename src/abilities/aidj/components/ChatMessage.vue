@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import type { ChatMessage, PlaylistEntry, SongMeta } from '../types'
+import { renderMarkdown } from '../../../shared/markdown'
 
 defineOptions({ name: 'AidjChatMessage' })
 
@@ -12,10 +13,16 @@ const emit = defineEmits<{
   playAll: [songs: PlaylistEntry[]]
   reorder: [songs: PlaylistEntry[]]
   playOne: [song: PlaylistEntry]
+  contextMenu: [e: MouseEvent, content: string, isAi: boolean, songs: PlaylistEntry[]]
 }>()
 
 const covers = ref<Record<string, string>>({})
 const dragIdx = ref(-1)
+
+const renderedContent = computed(() => {
+  if (isThinking(props.message) || isUser(props.message)) return ''
+  return renderMarkdown(props.message.content)
+})
 
 function isUser(msg: ChatMessage): boolean {
   return msg.role === 'user'
@@ -100,12 +107,18 @@ watch(() => props.message.playlist, loadCovers)
       v-if="message.content"
       class="msg-bubble pa-3"
       :class="isUser(message) ? 'msg-bubble-user' : isThinking(message) ? 'msg-bubble-thinking' : 'msg-bubble-ai'"
+      @contextmenu="emit('contextMenu', $event, message.content, !isUser(message) && !isSystem(message), message.playlist || [])"
     >
       <div v-if="isThinking(message)" class="d-flex align-center ga-2 text-body-2">
         <v-progress-circular indeterminate size="16" width="2" />
         <span class="thinking-text">思考中</span>
         <span class="text-caption text-medium-emphasis">{{ message.chars ?? 0 }} 字符</span>
       </div>
+      <div
+        v-else-if="!isUser(message) && !isSystem(message)"
+        class="text-body-2 msg-markdown"
+        v-html="renderedContent"
+      />
       <div v-else class="text-body-2" style="white-space: pre-wrap">{{ message.content }}</div>
     </div>
 
@@ -182,6 +195,7 @@ watch(() => props.message.playlist, loadCovers)
   line-height: 1;
 }
 .msg-bubble {
+  position: relative;
   border-radius: 12px;
   max-width: 85%;
   word-break: break-word;
@@ -280,5 +294,40 @@ watch(() => props.message.playlist, loadCovers)
 }
 .drag-handle {
   cursor: grab;
+}
+.msg-markdown p {
+  margin: 0 0 0.4em;
+}
+.msg-markdown p:last-child {
+  margin-bottom: 0;
+}
+.msg-markdown code {
+  background: rgba(0, 0, 0, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.msg-markdown pre {
+  background: rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.msg-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.msg-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  opacity: 0.85;
+}
+.msg-markdown ul {
+  margin: 0.2em 0;
+  padding-left: 1.2em;
+}
+.msg-markdown strong {
+  font-weight: 600;
 }
 </style>
