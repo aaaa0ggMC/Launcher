@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, type CSSProperties } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
 import GameIcon from '../../../main/ui/components/GameIcon.vue'
 import SongGrid from './SongGrid.vue'
@@ -133,49 +133,6 @@ async function onReorder(songs: PlaylistEntry[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Fit-to-container: the whole view scales down (never scrolls) so it always
-// fits the bounded detail area. Natural size is measured with the transform
-// reset to none; when it fits we leave flex layout alone.
-// ---------------------------------------------------------------------------
-const rootEl = ref<HTMLElement | null>(null)
-const scaleEl = ref<HTMLElement | null>(null)
-const scale = ref(1)
-const natSize = ref({ w: 0, h: 0 })
-let ro: ResizeObserver | null = null
-let fitRaf = 0
-
-const scaleStyle = computed<CSSProperties>(() => {
-  if (scale.value >= 1 || !natSize.value.w) return {}
-  return {
-    transform: `scale(${scale.value})`,
-    transformOrigin: 'top left',
-    width: `${natSize.value.w * scale.value}px`,
-    height: `${natSize.value.h * scale.value}px`
-  }
-})
-
-function applyFit(): void {
-  const root = rootEl.value
-  const sc = scaleEl.value
-  if (!root || !sc) return
-  cancelAnimationFrame(fitRaf)
-  fitRaf = requestAnimationFrame(() => {
-    sc.style.transform = 'none'
-    sc.style.width = 'auto'
-    sc.style.height = 'auto'
-    void nextTick(() => {
-      const natW = sc.offsetWidth
-      const natH = sc.offsetHeight
-      if (!natW || !natH) return
-      natSize.value = { w: natW, h: natH }
-      const rw = root.clientWidth
-      const rh = root.clientHeight
-      scale.value = Math.min(1, rw / natW, rh / natH)
-    })
-  })
-}
-
-// ---------------------------------------------------------------------------
 // Dice placeholder (right column). Cycles dice.svg → dice-02.svg → dice-06.svg.
 // Respects the modern-motion master switch (html.motion-off freezes the roll).
 // ---------------------------------------------------------------------------
@@ -223,127 +180,119 @@ function volbalTargetLabel(): string {
 onMounted(() => {
   refresh()
   timer = setInterval(refresh, 2000)
-  ro = new ResizeObserver(applyFit)
-  if (rootEl.value) ro.observe(rootEl.value)
-  applyFit()
   diceTimer = setInterval(diceTick, 650)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   if (diceTimer) clearInterval(diceTimer)
-  ro?.disconnect()
-  cancelAnimationFrame(fitRaf)
 })
 </script>
 
 <template>
-  <div ref="rootEl" class="cv-root">
-    <div ref="scaleEl" class="cv-scale" :style="scaleStyle">
-      <div class="d-flex ga-4">
-        <!-- LEFT: main control + queue + volbal -->
-        <div class="d-flex flex-column flex-grow-1 min-w-0 cv-main">
-          <!-- Row 1: [icon] 连续播放 [combo box] -->
-          <div class="d-flex align-center ga-2 cv-header">
-            <v-icon size="18" color="primary">mdi-send-clock-outline</v-icon>
-            <span class="text-body-2 font-weight-medium flex-shrink-0">连续播放</span>
-            <v-select
-              :model-value="info?.player ?? null"
-              :items="playerItems"
-              :item-props="(item: any) => ({ disabled: item.raw?.disabled })"
-              density="compact"
-              variant="outlined"
-              hide-details
-              :loading="switching"
-              placeholder="选择播放器"
-              class="cv-player-select flex-grow-1"
-              :menu-props="{ contentClass: 'continuous-player-menu' }"
-              @update:model-value="switchPlayer"
-            >
-              <template #append-item>
-                <v-divider />
-                <div class="text-caption text-medium-emphasis pa-2">
-                  已被其他任务绑定的播放器置灰
-                </div>
-              </template>
-            </v-select>
-            <v-chip size="small" variant="flat" color="primary" class="flex-shrink-0">
-              {{ info?.played ?? 0 }} / {{ info?.total ?? 0 }}
-            </v-chip>
-          </div>
-
-          <!-- Row 2: now playing / next / queue — wraps when tight -->
-          <div class="d-flex flex-wrap ga-2 align-center cv-status">
-            <span class="d-flex align-center ga-1">
-              <v-icon size="14" color="success">mdi-play</v-icon>
-              <span class="text-caption text-medium-emphasis flex-shrink-0">正在播放</span>
-              <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.current || '—' }}</span>
-            </span>
-            <span class="d-flex align-center ga-1">
-              <v-icon size="14" color="info">mdi-skip-next</v-icon>
-              <span class="text-caption text-medium-emphasis flex-shrink-0">下一首</span>
-              <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.next || '—' }}</span>
-            </span>
-            <span class="d-flex align-center ga-1">
-              <v-icon size="14">mdi-queue-music</v-icon>
-              <span class="text-caption text-medium-emphasis flex-shrink-0">队列</span>
-              <span class="text-body-2">{{ (info?.total ?? 0) - (info?.played ?? 0) }} 首待播</span>
-            </span>
-          </div>
-
-          <v-divider class="my-2" />
-
-          <!-- Queue grid (3/4 vertical) — shared SongGrid, reorder with animation -->
-          <div class="cv-queue flex-grow-1 min-h-0">
-            <SongGrid
-              :songs="info?.queue ?? []"
-              :highlight-path="info?.currentPath ?? ''"
-              @reorder="onReorder"
-            />
-          </div>
-
-          <!-- VolBal status (1/4) — verbose-style telemetry -->
-          <div class="cv-volbal mt-2">
-            <div class="d-flex align-center ga-2 mb-1">
-              <v-icon size="14" color="primary">mdi-format-color-marker</v-icon>
-              <span class="text-caption font-weight-medium">VolBal</span>
-              <v-chip
-                size="x-small"
-                variant="flat"
-                :color="info?.volbal?.enabled ? 'success' : 'default'"
-              >
-                {{ info?.volbal?.enabled ? 'ON' : 'OFF' }}
-              </v-chip>
-              <span class="text-caption text-medium-emphasis">
-                {{ info?.volbal?.method ?? 'lufs' }} · curve {{ info?.volbal?.curve ?? 3 }}
-              </span>
-              <v-spacer />
-              <span class="text-caption text-medium-emphasis">
-                Anchor {{ info?.volbal?.anchor != null ? info.volbal.anchor.toFixed(1) : '—' }}
-                {{ volbalUnit() }} · Base {{ Math.round((info?.volbal?.baseVolume ?? 0.5) * 100) }}%
-              </span>
-            </div>
-            <div class="d-flex flex-wrap ga-2 align-center">
-              <v-chip size="x-small" variant="flat" color="primary-container">
-                当前 {{ volbalCurrentLabel() }}
-              </v-chip>
-              <v-chip size="x-small" variant="flat" color="success-container">
-                目标音量 {{ volbalTargetLabel() }}
-              </v-chip>
-              <span class="text-caption text-medium-emphasis cv-ellipsis">
-                {{ info?.current || '—' }}
-              </span>
-            </div>
-          </div>
+  <div class="cv-root">
+    <div class="d-flex ga-4 h-100">
+      <!-- LEFT: main control + queue + volbal -->
+      <div class="d-flex flex-column flex-grow-1 min-w-0 cv-main">
+        <!-- Row 1: [icon] 连续播放 [combo box] -->
+        <div class="d-flex align-center ga-2 cv-header">
+          <v-icon size="18" color="primary">mdi-send-clock-outline</v-icon>
+          <span class="text-body-2 font-weight-medium flex-shrink-0">连续播放</span>
+          <v-select
+            :model-value="info?.player ?? null"
+            :items="playerItems"
+            :item-props="(item: any) => ({ disabled: item.raw?.disabled })"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :loading="switching"
+            placeholder="选择播放器"
+            class="cv-player-select flex-grow-1"
+            :menu-props="{ contentClass: 'continuous-player-menu' }"
+            @update:model-value="switchPlayer"
+          >
+            <template #append-item>
+              <v-divider />
+              <div class="text-caption text-medium-emphasis pa-2">已被其他任务绑定的播放器置灰</div>
+            </template>
+          </v-select>
+          <v-chip size="small" variant="flat" color="primary" class="flex-shrink-0">
+            {{ info?.played ?? 0 }} / {{ info?.total ?? 0 }}
+          </v-chip>
         </div>
 
-        <!-- RIGHT: dice animation placeholder -->
-        <div class="cv-side flex-shrink-0 d-flex align-center justify-center">
-          <div class="cv-dice">
-            <div :key="diceFace" class="cv-dice-face">
-              <GameIcon :name="diceFace" :size="72" />
-            </div>
-            <div class="text-caption text-medium-emphasis text-center mt-2">占位</div>
+        <!-- Row 2: now playing / next / queue — wraps when tight -->
+        <div class="d-flex flex-wrap ga-2 align-center cv-status">
+          <span class="d-flex align-center ga-1">
+            <v-icon size="14" color="success">mdi-play</v-icon>
+            <span class="text-caption text-medium-emphasis flex-shrink-0">正在播放</span>
+            <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.current || '—' }}</span>
+          </span>
+          <span class="d-flex align-center ga-1">
+            <v-icon size="14" color="info">mdi-skip-next</v-icon>
+            <span class="text-caption text-medium-emphasis flex-shrink-0">下一首</span>
+            <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.next || '—' }}</span>
+          </span>
+          <span class="d-flex align-center ga-1">
+            <v-icon size="14">mdi-queue-music</v-icon>
+            <span class="text-caption text-medium-emphasis flex-shrink-0">队列</span>
+            <span class="text-body-2">{{ (info?.total ?? 0) - (info?.played ?? 0) }} 首待播</span>
+          </span>
+        </div>
+
+        <v-divider class="my-2" />
+
+        <!-- Queue grid (3/4 vertical) — shared SongGrid with covers, reorder with animation -->
+        <div class="cv-queue">
+          <SongGrid
+            :songs="info?.queue ?? []"
+            :highlight-path="info?.currentPath ?? ''"
+            show-covers
+            @reorder="onReorder"
+          />
+        </div>
+
+        <!-- VolBal status (1/4) — verbose-style telemetry -->
+        <div class="cv-volbal">
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="14" color="primary">mdi-format-color-marker</v-icon>
+            <span class="text-caption font-weight-medium">VolBal</span>
+            <v-chip
+              size="x-small"
+              variant="flat"
+              :color="info?.volbal?.enabled ? 'success' : 'default'"
+            >
+              {{ info?.volbal?.enabled ? 'ON' : 'OFF' }}
+            </v-chip>
+            <span class="text-caption text-medium-emphasis">
+              {{ info?.volbal?.method ?? 'lufs' }} · curve {{ info?.volbal?.curve ?? 3 }}
+            </span>
+            <v-spacer />
+            <span class="text-caption text-medium-emphasis">
+              Anchor {{ info?.volbal?.anchor != null ? info.volbal.anchor.toFixed(1) : '—' }}
+              {{ volbalUnit() }} · Base {{ Math.round((info?.volbal?.baseVolume ?? 0.5) * 100) }}%
+            </span>
           </div>
+          <div class="d-flex flex-wrap ga-2 align-center">
+            <v-chip size="x-small" variant="flat" color="primary-container">
+              当前 {{ volbalCurrentLabel() }}
+            </v-chip>
+            <v-chip size="x-small" variant="flat" color="success-container">
+              目标音量 {{ volbalTargetLabel() }}
+            </v-chip>
+            <span class="text-caption text-medium-emphasis cv-ellipsis">
+              {{ info?.current || '—' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: dice animation placeholder -->
+      <div class="cv-side flex-shrink-0 d-flex align-center justify-center">
+        <div class="cv-dice">
+          <div :key="diceFace" class="cv-dice-face">
+            <GameIcon :name="diceFace" :size="72" />
+          </div>
+          <div class="text-caption text-medium-emphasis text-center mt-2">占位</div>
         </div>
       </div>
     </div>
@@ -354,14 +303,11 @@ onUnmounted(() => {
 .cv-root {
   height: 100%;
   overflow: hidden;
-  position: relative;
   padding: 12px 16px;
-}
-.cv-scale {
-  will-change: transform;
 }
 .cv-main {
   gap: 2px;
+  height: 100%;
 }
 .cv-player-select {
   max-width: 260px;
@@ -380,14 +326,36 @@ onUnmounted(() => {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* Queue takes 3/4 of the remaining vertical space and scrolls internally —
+   too many songs never push the page, they get a scrollbar here. */
 .cv-queue {
+  flex: 3 1 0;
   min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.cv-queue::-webkit-scrollbar {
+  width: 6px;
+}
+.cv-queue::-webkit-scrollbar-thumb {
+  background: rgba(var(--v-theme-on-surface-variant), 0.45);
+  border-radius: 3px;
 }
 .cv-volbal {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.22);
   border-radius: 10px;
   padding: 6px 10px;
   background: rgba(var(--v-theme-surface-variant), 0.28);
+}
+.cv-volbal::-webkit-scrollbar {
+  width: 6px;
+}
+.cv-volbal::-webkit-scrollbar-thumb {
+  background: rgba(var(--v-theme-on-surface-variant), 0.45);
+  border-radius: 3px;
 }
 .cv-side {
   width: 130px;

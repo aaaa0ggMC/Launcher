@@ -146,8 +146,8 @@ watch(() => props.songs, loadCovers)
 }
 .cover-wrap {
   position: relative;
-  width: 5ch;
-  height: 5ch;
+  width: 6ch;
+  height: 6ch;
   border-radius: 6px;
   overflow: hidden;
   background: rgba(var(--v-theme-surface-variant), 0.4);
