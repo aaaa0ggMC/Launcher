@@ -757,10 +757,13 @@ export class LoudnessCache {
 
       // peak_db: prefer the ebur128 true peak, else volumedetect max.
       const peakDb = truePeak ?? maxDb
-      if (peakDb == null && meanDb == null) return null
+      // Require at least one USABLE loudness value (RMS or LUFS). A missing
+      // measurement is never fabricated into 0 dB — that would read as "full
+      // scale" and blow the volume up when compared to a negative anchor.
+      if (integratedLufs == null && meanDb == null) return null
       return {
-        peak_db: peakDb ?? 0,
-        rms_db: meanDb ?? 0,
+        peak_db: peakDb,
+        rms_db: meanDb,
         integrated_lufs: integratedLufs
       }
     } catch {
@@ -789,8 +792,13 @@ export class LoudnessCache {
     return info.rms_db
   }
 
-  computeVolume(songVal: number | null): number {
-    if (this._anchorVal == null || songVal == null) return this._baseVol
+  /**
+   * Compute the target MPRIS volume for `songVal`. Returns null when there is
+   * no anchor or no usable measurement — callers must SKIP (leave the volume
+   * untouched) rather than apply a bogus value.
+   */
+  computeVolume(songVal: number | null): number | null {
+    if (this._anchorVal == null || songVal == null) return null
     const dbDiff = this._anchorVal - songVal
     const gain = 10 ** (dbDiff / 20)
     const anchorAmp = this._baseVol ** this.curve
@@ -799,19 +807,18 @@ export class LoudnessCache {
     return Math.max(0.05, Math.min(1.0, compensated))
   }
 
-  async setAnchor(filepath: string, baseVol = 0.5): Promise<number> {
+  /**
+   * Establish the loudness anchor from `filepath`. Returns the anchor value on
+   * success, or null when the file can't be measured — in which case the caller
+   * must skip (no anchor is set, so later tracks keep retrying).
+   */
+  async setAnchor(filepath: string, baseVol = 0.5): Promise<number | null> {
     this._baseVol = baseVol
     const info = await this.get(filepath)
     const val = this.loudnessKey(info)
-    if (val != null) {
-      this._anchorVal = val
-    } else if (info) {
-      // Analysis succeeded but produced no usable key (e.g. LUFS unavailable and
-      // RMS also missing) — fall back to a typical value so later tracks still
-      // get relative adjustment instead of pinning everything at baseVol.
-      this._anchorVal = -14
-    }
-    return baseVol
+    if (val == null) return null
+    this._anchorVal = val
+    return val
   }
 
   setAnchorValue(val: number, baseVol = 0.5): void {
@@ -819,8 +826,9 @@ export class LoudnessCache {
     this._baseVol = baseVol
   }
 
-  async targetVolume(filepath: string): Promise<number> {
-    if (this._anchorVal == null) return this._baseVol
+  /** Target volume for `filepath`, or null when it can't be measured (skip). */
+  async targetVolume(filepath: string): Promise<number | null> {
+    if (this._anchorVal == null) return null
     const info = await this.get(filepath)
     const songVal = this.loudnessKey(info)
     return this.computeVolume(songVal)
@@ -1296,9 +1304,13 @@ export class PersistentSession {
     if (!this.config.preferences.dynamic_balance_volume || !this.dbus) return
     const isFirst = this.fetchCount === 1 && this._anchorValue == null
     if (isFirst) {
-      await this.dbus.setVolume(0.5)
-      await this.volCache.setAnchor(track.path, 0.5)
-      this._anchorValue = this.volCache.anchorVal
+      // Establish the anchor from this track. If it can't be measured, skip
+      // (leave volume untouched); the next track retries. Never guess a value.
+      const anchor = await this.volCache.setAnchor(track.path, 0.5)
+      if (anchor != null) {
+        await this.dbus.setVolume(0.5)
+        this._anchorValue = anchor
+      }
     } else {
       const targetVol = await this.volCache.targetVolume(track.path)
       if (targetVol != null) {

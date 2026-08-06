@@ -78,8 +78,8 @@ export interface PlayerStatus {
 }
 
 export interface LoudnessInfo {
-  peak_db: number
-  rms_db: number
+  peak_db: number | null
+  rms_db: number | null
   integrated_lufs: number | null
 }
 

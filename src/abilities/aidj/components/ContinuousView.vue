@@ -19,8 +19,8 @@ interface VolbalInfo {
   baseVolume: number
   targetVolume: number | null
   currentLoudness: {
-    peak_db: number
-    rms_db: number
+    peak_db: number | null
+    rms_db: number | null
     integrated_lufs: number | null
   } | null
 }

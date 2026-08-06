@@ -176,7 +176,11 @@ export interface ContinuousTaskState {
     anchor: number | null
     baseVolume: number
     targetVolume: number | null
-    currentLoudness: { peak_db: number; rms_db: number; integrated_lufs: number | null } | null
+    currentLoudness: {
+      peak_db: number | null
+      rms_db: number | null
+      integrated_lufs: number | null
+    } | null
   } | null
 }
 
@@ -260,9 +264,13 @@ async function applyCurrentVolume(st: ContinuousTaskState): Promise<void> {
     return
   }
   if (st.volCache.anchorVal == null) {
-    await st.dbus.setVolume(0.5)
-    await st.volCache.setAnchor(track.path, 0.5)
-    st.sentFirst = true
+    // No anchor yet — establish it from the current track. If the file can't be
+    // measured, skip entirely (keep the volume untouched) instead of guessing.
+    const anchor = await st.volCache.setAnchor(track.path, 0.5)
+    if (anchor != null) {
+      await st.dbus.setVolume(0.5)
+      st.sentFirst = true
+    }
   } else {
     const v = await st.volCache.targetVolume(track.path)
     if (v != null) await st.dbus.setVolume(v)
@@ -501,10 +509,15 @@ registerJobHandler('aidj.continuous', async (control, args) => {
           let loudness: LoudnessInfo | null = null
           if (st.volbalEnabled) {
             if (!st.sentFirst) {
-              await dbus.setVolume(0.5)
-              await st.volCache.setAnchor(track.path, 0.5)
-              st.sentFirst = true
-              targetVol = 0.5
+              // Establish the anchor from this track. If the file can't be
+              // measured, skip (leave volume untouched); the next track tries
+              // again — no guessing, no fabricated 0 dB.
+              const anchor = await st.volCache.setAnchor(track.path, 0.5)
+              if (anchor != null) {
+                await dbus.setVolume(0.5)
+                st.sentFirst = true
+                targetVol = 0.5
+              }
             } else {
               const v = await st.volCache.targetVolume(track.path)
               if (v != null) {
