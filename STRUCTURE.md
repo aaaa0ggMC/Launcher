@@ -52,10 +52,18 @@ src/
       background-tasks.ts   # 后台任务框架（进程/作业任务、资源统计、stdin/信号、广播）
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/
-      App.vue               # 侧栏 + app-bar + keep-alive 宿主（provide cockpit:* 上下文）
+      App.vue               # 侧栏 + 搜索/快速启动 + app-bar + keep-alive 宿主（provide cockpit:* 上下文）
       main.ts               # Vuetify 初始化 + renderer 日志转发
+      color_schemes/        # 主题配色注册表：*.json + index.ts（buildThemeDefinitions / resolveSchemeId）
+      animations.ts         # 页面切换过渡注册表（PAGE_TRANSITIONS）
       components/           # GameIcon / AbilityIcon / BackgroundLayer / FuseLayer / TransformerModal / BackgroundTasksDialog / UiNode / LoadingBar
-      styles/               # theme.ts (Material tokens) + global.css
+      components/BackgroundTaskViews/   # BtLogView（控制台）/ BtResponseView（结构化响应）
+      bt-views.ts           # 后台任务 View 注册表（log 内置 / 能力可注册自定义）
+      entry-actions.ts      # 应用快速启动右键动作注入（registerEntryActionProvider）
+      icon.ts               # 统一图标语法解析（parseIcon / fileIconUrl）
+      transformer.ts        # 应用输出 transformer 运行时
+      styles/               # global.css（主题配色由 color_schemes/ 提供）
+      composables/          # search.ts（统一打分搜索）/ download.ts / format.ts / useLoading.ts
       translations/         # 框架层翻译 + 语言列表
       i18n.ts               # 合并各模块翻译的 translate/translateTemplate/localize
   abilities/
@@ -77,7 +85,7 @@ src/
   shared/
     types.ts                # 仅框架契约：AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt* (后台任务)
 ~/.config/LinuxCockpit/
-  config.json               # 全局外壳配置（theme / uiScale / window / runtime）
+  config.json               # 全局外壳配置（theme / uiScale / animations / window / runtime）
   abilities.yaml            # 侧栏清单（abilities 列表，不包含能力专属配置）
   <ability-id>/
     config.json             # 各能力独立配置（镜像源列表、搜索目录等）
@@ -166,7 +174,21 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 
 翻译按模块拆分（框架层 + 每个能力 + 每个背景的 `translations/{zh,en-US}.json`），运行期合并为一张表；渲染端 `ui/i18n.ts` 用 `import.meta.glob` 合并，主进程 `process/i18n.ts` 用 filesystem glob 合并。回退链：当前语言 → zh → fallback → key。
 
-### 3.7 接口调试流（playground）
+### 3.7 主题流
+
+```
+config.json 的 theme（id） ─→ color_schemes/index.ts
+    ├→ resolveSchemeId(configured, systemPrefersDark)  # 未知 id 回落 dark；system 跟随系统亮暗
+    └→ buildThemeDefinitions() ─→ Vuetify theme map（main.ts 启动 / App.vue 实时切换）
+    App.vue applyTheme():
+        ├→ 现代动效开 → View Transitions API 左上角波纹扩散揭示（global.css ::view-transition-*）
+        └→ 现代动效关 → 即时切换（<html> 加 motion-off 全局关闭所有 CSS 过渡）
+```
+
+- 配色方案是独立 JSON（`src/main/ui/color_schemes/*.json`），新增 = 加一个 JSON + 翻译键，无需改代码。
+- 渲染端画布类（如 `ft`）读取 `--v-theme-*` CSS 变量跟随主题，不硬编码 hex。
+
+### 3.8 接口调试流（playground）
 
 Provider Playground（`abilities/playground/`）——模板驱动 API 请求调试，全部内聚在一个文件夹：
 
@@ -188,20 +210,21 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ---
 
-## 4. Abilities（当前 10 个）
+## 4. Abilities（当前 11 个 + 2 个纯后端）
 
-| id                    | 介绍                                                                                                                                                                                                      |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dashboard` 总览      | GridStack 卡片总览：主机 / CPU / 内存 / GPU / NVIDIA 电源管理 / 磁盘 / 容器，后台轮询实时刷新；命令 `system.stats` / `hardware.*` / `docker.*` / `dashboard.*`                                            |
-| `apps` 应用           | 应用注册表（apps.json）：搜索目录扫描、条目 CRUD、多语言、风险分级、聚类操作按钮；命令 `apps.*` / `launch.*`；服务 registry / launcher / scanner / security                                               |
-| `mirror` 软件源       | Arch 镜像源管理：`[MIRROR]` 格式解析、行级 toggle（pkexec 原子写）、测速                                                                                                                                  |
-| `autostart` 启动项    | `~/.config/autostart` 自启动项启用/禁用（Hidden=true）                                                                                                                                                    |
-| `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                |
-| `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                         |
-| `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url` |
-| `ft` 傅里叶变换       | three.js 天体/傅里叶可视化：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机                                                                                                                                |
-| `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                        |
-| `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 缩放 / 窗口 / 动画 / 语言 / 启动 / 关于）                                                                                                           |
+| id                    | 介绍                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dashboard` 总览      | GridStack 卡片总览：主机 / CPU / 内存 / GPU / NVIDIA 电源管理 / 磁盘 / 容器，后台轮询实时刷新；命令 `system.stats` / `hardware.*` / `docker.*` / `dashboard.*`                                                      |
+| `apps` 应用           | 应用注册表（apps.json）：搜索目录扫描、条目 CRUD、多语言、风险分级、聚类操作按钮；命令 `apps.*` / `launch.*`；服务 registry / launcher / scanner / security                                                         |
+| `mirror` 软件源       | Arch 镜像源管理：`[MIRROR]` 格式解析、行级 toggle（pkexec 原子写）、测速                                                                                                                                            |
+| `autostart` 启动项    | `~/.config/autostart` 自启动项启用/禁用（Hidden=true）                                                                                                                                                              |
+| `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                          |
+| `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                                   |
+| `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url`           |
+| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等 |
+| `ft` 傅里叶变换       | Canvas2D 天体/傅里叶可视化（无 GPU 依赖，规避 radeonsi 崩溃）：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机，画布配色跟随当前主题                                                                                 |
+| `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                                  |
+| `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 界面缩放 / 窗口 / 界面动画 / 语言 / 启动 / 关于）                                                                                                             |
 
 另有纯后端能力（无页面）：`display`（壁纸列出/应用、显示输出查询）与 `background`（后台任务命令 `background.*`，由全局面板驱动）。
 
@@ -217,12 +240,12 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ## 6. 配置
 
-| 文件                                       | 作用                                                   |
-| ------------------------------------------ | ------------------------------------------------------ |
-| `~/.config/LinuxCockpit/config.json`      | 全局外壳：theme / uiScale / window.* / runtime.*       |
-| `~/.config/LinuxCockpit/abilities.yaml`   | 侧栏清单（abilities 列表，不包含能力专属配置）           |
-| `~/.config/LinuxCockpit/<ability-id>/config.json` | 各能力独立配置（镜像列表、搜索目录等）          |
-| `~/Apps/apps.json`                        | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖） |
+| 文件                                              | 作用                                                            |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| `~/.config/LinuxCockpit/config.json`              | 全局外壳：theme / uiScale / animations.* / window.* / runtime.* |
+| `~/.config/LinuxCockpit/abilities.yaml`           | 侧栏清单（abilities 列表，不包含能力专属配置）                  |
+| `~/.config/LinuxCockpit/<ability-id>/config.json` | 各能力独立配置（镜像列表、搜索目录等）                          |
+| `~/Apps/apps.json`                                | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖）          |
 
 ## 7. 开发 / 构建
 

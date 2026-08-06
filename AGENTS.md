@@ -24,6 +24,9 @@ Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的
 - `systemctl` — systemd 服务
 - `plasma-apply-wallpaperimage` / `kscreen-doctor` — 壁纸 / 显示输出 (KDE)
 - `konsole` — 终端启动 (可在 `~/.config/LinuxCockpit/config.json` 改)
+- `ffprobe` (ffmpeg) — AIDJ 响度分析（动态音量平衡）
+- MPRIS 兼容播放器（`vlc` / `mpv` 等）+ 会话 DBus — AIDJ 播放控制
+- OpenAI 兼容 API 端点 + [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 服务 — AIDJ 元数据同步 / 歌单生成
 
 ## 2. 安装依赖
 
@@ -33,7 +36,7 @@ pnpm install
 
 ### 2.1 git submodule — 图标库
 
-侧栏/应用图标使用 [game-icon-pack](https://github.com/Nieobie/game-icon-pack) (CC0)。
+应用图标（`default/<name>`）与侧栏图标的兜底都依赖 [game-icon-pack](https://github.com/Nieobie/game-icon-pack) (CC0)。
 它以 git submodule 挂在 `src/main/ui/assets/game-icon-pack`，克隆后必须初始化，否则图标无法解析：
 
 ```bash
@@ -95,10 +98,25 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 
 ```jsonc
 {
-  "theme": "dark", // dark | pureblack | system
+  "theme": "dark", // 配色方案: dark | light | pureblack | moonlight | forest | aurora | rosy | sepia | slate | system
   "language": "zh",
   "uiScale": 1.1, // 界面缩放 (0.8–1.8, webFrame.setZoomFactor)
-  "window": { "width": 1280, "height": 800 },
+  "animations": {
+    "modernMotion": true, // 现代动效总开关（关 → 所有动效关闭，主题即时切换）
+    "enabled": true, // 页面切换动画开关
+    "pageTransition": "fade" // fade | slide | slide-up | zoom | flip
+  },
+  "window": {
+    "width": 1280,
+    "height": 800,
+    "frameless": true, // 无边框窗口
+    "rounded": true, // 圆角（frameless 时生效）
+    "background": "transparent", // transparent | image | wallpaper
+    "backgroundImage": "", // background=image 时的图片路径
+    "backgroundOpacity": 1, // 背景图片不透明度
+    "fuseAlpha": 0.85, // Fuse 蒙层不透明度 (0–1)
+    "fuseBlur": 28 // 背景模糊 (px)
+  },
   "runtime": {
     "terminal": ["konsole", "--hold", "-e"], // terminal:true 的条目用这个
     "confirmBeforeLaunch": true
@@ -106,9 +124,11 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 }
 ```
 
+`theme` 的取值来自 `src/main/ui/color_schemes/*.json`（见 §9「主题」）；未知 id 自动回落 `dark`，不会弄坏 UI。
+
 ### ~/.config/LinuxCockpit/abilities.yaml — 侧栏清单
 
-控制侧栏顺序和启用状态。各能力的专属配置已移出 yaml，独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`。
+控制侧栏顺序和启用状态。各能力的专属配置已移出 yaml，独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`（如 AIDJ 的 `aidj/config.json` 存曲库路径、API 密钥、模型与播放偏好）。
 
 ### ~/Apps/apps.json — 应用注册表
 
@@ -155,11 +175,17 @@ src/
       background-tasks.ts  # 后台任务框架 (进程/作业任务, 资源统计, stdin/信号)
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/               # 渲染 UI 框架
-      App.vue         # 侧栏 + app-bar + keep-alive 宿主 (provide cockpit:* 上下文)
-      main.ts         # Vuetify 初始化
-      components/     # 共享组件 (GameIcon, AbilityIcon, LoadingBar, ...)
-      styles/         # theme.ts + global.css
-      composables/    # format.ts / useLoading.ts
+      App.vue         # 侧栏 + 搜索/快速启动 + app-bar + keep-alive 宿主 (provide cockpit:* 上下文)
+      main.ts         # Vuetify 初始化 + renderer 日志转发
+      color_schemes/  # 主题配色注册表: *.json + index.ts (buildThemeDefinitions/resolveSchemeId)
+      animations.ts   # 页面切换过渡注册表 (PAGE_TRANSITIONS)
+      components/     # GameIcon / AbilityIcon / BackgroundLayer / FuseLayer / TransformerModal / BackgroundTasksDialog / UiNode / LoadingBar
+      components/BackgroundTaskViews/  # BtLogView (控制台) / BtResponseView (结构化响应)
+      entry-actions.ts # 应用快速启动右键动作注入 (registerEntryActionProvider)
+      icon.ts          # 统一图标语法解析 (parseIcon / fileIconUrl)
+      transformer.ts   # 应用输出 transformer 运行时
+      styles/          # global.css (主题配色由 color_schemes/ 提供)
+      composables/     # search.ts (统一打分搜索) / download.ts / format.ts / useLoading.ts
       translations/   # 框架层翻译: zh.json / en-US.json / index.json
       i18n.ts         # translate/translateTemplate/localize/useI18n (合并各模块翻译)
   abilities/          # 所有能力 (自包含)
@@ -188,7 +214,7 @@ src/
     components/BackgroundTaskViews/  # BtLogView (控制台) / BtResponseView (结构化响应)
     composables/      # download.ts (本地下载经主进程命令) / format.ts / useLoading.ts
 ~/.config/LinuxCockpit/
-  config.json           # 全局外壳配置（theme / uiScale / window / runtime）
+  config.json           # 全局外壳配置（theme / uiScale / animations / window / runtime）
   abilities.yaml        # 侧栏清单（abilities 列表，不包含能力专属配置）
   <ability-id>/
     config.json         # 各能力独立配置（镜像源列表、搜索目录等）
@@ -212,9 +238,22 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 
 ### 图标
 
-侧栏图标使用 game-icon-pack SVG 系列，存放在 `src/main/ui/assets/icons/`。
-通过 `GameIcon.vue` 组件渲染 (`fill="currentColor"` 跟随主题色)。
-ability 的 icon 字段用 `gi:<name>` 前缀指定 SVG，其余格式按 emoji 处理。
+图标统一走 `AbilityIcon.vue` → `parseIcon`（`src/main/ui/icon.ts`）解析，来源优先级：
+
+- `gi:<name>` — 侧栏 curated SVG（`src/main/ui/assets/icons/<name>.svg`，随仓库内建）
+- `default/<name>[/padding]` — game-icon-pack SVG（`assets/game-icon-pack/svg/`），通过 `GameIcon.vue` 渲染 (`fill="currentColor"` 跟随主题色)
+- `emoji/<emoji>` / 裸 emoji / `auto` — emoji 兜底
+- `file/<path>` / 绝对路径 — 本地图片（经 `cockpit-icon://` 协议）
+
+ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时回落 game-icon-pack，再不行才用 emoji。
+
+### 主题 / 配色方案
+
+- 每个配色方案是一个独立 JSON（`src/main/ui/color_schemes/*.json`），`color_schemes/index.ts` glob 注册并构建 Vuetify `ThemeDefinition`（`buildThemeDefinitions`）。
+- 内置 10 个：`dark` / `light` / `pureblack` / `moonlight` / `forest` / `aurora` / `rosy` / `sepia` / `slate` + `system`（跟随系统亮暗）。
+- `config.json` 的 `theme` 存方案 id；未知 id 一律回落 `DEFAULT_SCHEME_ID`（`dark`），不会弄坏 UI。
+- 主题切换：开启「现代动效」时用 View Transitions API 做左上角扩散的波纹揭示，关闭则即时切换（见 `App.vue` 的 `applyTheme`）。`<html>` 加 `motion-off` 类可全局关闭所有 CSS 过渡。
+- ft 等画布类渲染端的配色跟随当前主题（读取 `--v-theme-*` CSS 变量），不是硬编码 hex。
 
 ### 镜像源 toggle 安全性
 
@@ -309,6 +348,16 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 - **异步任务 view**：`pg-task` 完成后 `push({ data: TransformResult[] })` → `cockpit:bt` → 面板按 `view: 'response'` 渲染（`BtResponseView.vue`，文本/图片/音频/视频 + 长文本折叠）。前端在 `btJob` 返回后从环形缓冲 `btOutput` 回填一次，覆盖"任务瞬间完成、结果早于 IPC 返回"的竞态。
 - **本地下载**：远程媒体/文本下载走 `playground.download-url` 命令（主进程 `fetch` 绕开渲染端 CORS），前端用 `src/main/ui/composables/download.ts` 的 `downloadUrlToLocal` / `downloadTextToLocal`（先弹原生保存对话框）。
 - **持久化**：模板/全局变量/已填值/历史/上次打开的模板/右侧面板折叠态都在 localStorage（`useLocalStorage.ts`）；配置导出导入走 `playground.export` / `playground.import`。
+
+### 写一个外部服务能力（AI DJ 参考）
+
+`src/abilities/aidj/` 是「接外部服务」能力的参考实现——AI 歌单生成 + 本地播放器控制。要点：
+
+- **配置**：`aidj/config.json`（`~/.config/LinuxCockpit/aidj/config.json`）存曲库目录、OpenAI 兼容端点与 API 密钥、模型、播放偏好；`loadAidjConfig` / `saveAidjConfig` 读写，设置页经 `AidjSettingsSection.vue` 注入。
+- **命令**：`aidj.generate`（AI 生成歌单）、`aidj.search` / `aidj.sync` / `aidj.analyse`（曲库检索/元数据同步/分布分析）、`aidj.next/prev/toggle/stop/volume/send`（MPRIS 播放控制）、`aidj.start-persistent` / `aidj.chat`（持久模式）。
+- **后台作业**：`jobs.ts` 注册 `aidj.persistent` 命名作业——在后台跑 AI DJ 自动轮播（`await` 即 yield），通过 `pushLine` / `push({ data: { type: 'now_playing' | 'status' } })` 输出，面板「停止」→ abort 并断开 DBus。
+- **元数据同步**：新歌经 NeteaseCloudMusicApi 拉歌词 → LLM 提取 `language/emotion/genre/loudness/review` → 写入 `aidj/music_metadata.jsonl`。
+- **音量平衡**：`LoudnessCache` 用 `ffprobe` 测响度（LUFS/RMS），按曲目动态调音量。
 
 ## 10. 国际化 (i18n)
 

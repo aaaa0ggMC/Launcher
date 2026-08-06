@@ -15,9 +15,11 @@
 - NVIDIA GPU 信息与电源管理切换
 - 自启动项管理
 - 自定义仪表盘（gridstack 布局持久化，可锁定布局以便选中复制）
-- 侧栏能力动态加载（`~/.config/LinuxCockpit/abilities.yaml` 驱动）+ 可配置页面切换动画（淡入/滑动/上滑/缩放/翻转）
-- 傅里叶变换可视化（three.js）：预设 / 矢量表编辑 / JSON 导入导出 / 2D·3D 相机
+- 侧栏能力动态加载（`~/.config/LinuxCockpit/abilities.yaml` 驱动）+ 侧栏搜索（应用按名称/别名/标签快速启动，右键上下文菜单可执行注入动作）
+- 主题 / 配色方案：9 套内置配色 + 跟随系统（JSON 注册表，可扩展），开启「现代动效」时主题切换带波纹揭示动画，页面切换过渡可选（淡入/滑动/上滑/缩放/翻转）
+- 傅里叶变换可视化（Canvas2D，无 GPU 依赖）：预设 / 矢量表编辑 / JSON 导入导出 / 2D·3D 相机，画布配色跟随当前主题
 - 接口调试（playground）：模板驱动 API 请求 + 变量插值（字符串/数字区间/选择/多行/默认值）+ 响应变换（文本/图片/音频/视频/脚本/异步任务），配置本地持久化
+- AI DJ（aidj）：OpenAI 兼容端点生成歌单、本地曲库元数据同步（NeteaseCloudMusicApi + LLM）、MPRIS 播放器控制、响度平衡与持久轮播模式
 - 日志系统：winston 轮转日志（自动写入 + 归档）+ 日志查看器（逐行虚拟滚动、级别过滤、实时尾随、导出当前会话）
 - 后台任务框架：任意能力可注册长跑作业（进程 / 抽象作业），全局面板实时查看控制台、资源占用（CPU/内存/显存）、stdin 输入与 Ctrl+C 信号控制，退出时提示仍在运行的任务
 - 国际化 / 多语言支持（中文 + English，应用条目可配 `zh` / `en_US`）
@@ -40,6 +42,9 @@
 - `flatpak` —— 包计数
 - `plasma-apply-wallpaperimage` / `kscreen-doctor` —— 壁纸 / 显示输出（KDE Plasma）
 - `konsole` —— 终端启动（可在 `~/.config/LinuxCockpit/config.json` 的 `runtime.terminal` 改）
+- `ffprobe` (ffmpeg) —— AI DJ 响度分析（动态音量平衡）
+- MPRIS 兼容播放器（`vlc` / `mpv` 等）+ 会话 DBus —— AI DJ 播放控制
+- OpenAI 兼容 API 端点 + [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 服务 —— AI DJ 元数据同步 / 歌单生成
 
 ## 开发
 
@@ -111,15 +116,16 @@ registerJobHandler('download-batch', async (control, args) => {
 
 **Linux / 发行版特定（需按平台改写 service）**
 
-| 能力                   | 当前实现                                                                           | 适配其它平台                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `mirror`               | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写                             | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变                     |
-| `systemd`              | `systemctl --user`                                                                 | 换成 launchd / OpenRC / 服务管理器                                  |
-| `dashboard`            | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi` | 换成对应平台的采集实现（`system.ts` / `gpu.ts`）                    |
-| `autostart`            | `~/.config/autostart` (XDG)                                                        | macOS LaunchAgents / Windows 启动项目录                             |
-| `display`              | `plasma-apply-wallpaperimage` / `kscreen-doctor`                                   | 对应 DE / OS 的壁纸与输出工具                                       |
-| `background/wallpaper` | 解析 KDE plasma 配置                                                               | 对应 DE 的壁纸读取                                                  |
-| `scripts/`             | `pkexec` + shell helper                                                            | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services） |
+| 能力                   | 当前实现                                                                           | 适配其它平台                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `mirror`               | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写                             | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变                           |
+| `systemd`              | `systemctl --user`                                                                 | 换成 launchd / OpenRC / 服务管理器                                        |
+| `dashboard`            | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi` | 换成对应平台的采集实现（`system.ts` / `gpu.ts`）                          |
+| `autostart`            | `~/.config/autostart` (XDG)                                                        | macOS LaunchAgents / Windows 启动项目录                                   |
+| `display`              | `plasma-apply-wallpaperimage` / `kscreen-doctor`                                   | 对应 DE / OS 的壁纸与输出工具                                             |
+| `background/wallpaper` | 解析 KDE plasma 配置                                                               | 对应 DE 的壁纸读取                                                        |
+| `aidj`                 | MPRIS DBus 播放控制 + OpenAI 歌单/元数据 + `ffprobe` 响度平衡                      | 播放器控制换对应平台（macOS AppleScript / Windows COM），其余逻辑平台无关 |
+| `scripts/`             | `pkexec` + shell helper                                                            | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services）       |
 
 `src/main/process/paths.ts` 集中了所有系统路径，适配时优先改这里；`scripts/` 按平台替换即可。改一个能力 = 只动那个文件夹，不影响其它能力与框架。
 
