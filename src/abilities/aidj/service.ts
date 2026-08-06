@@ -725,59 +725,60 @@ export class LoudnessCache {
   }
 
   async analyzeLoudness(filepath: string): Promise<LoudnessInfo | null> {
+    // ffprobe's -show_streams almost never includes max_peak/max_rms side data
+    // (so the old code read 0 dB for every file → all songs "identical"). Use
+    // ffmpeg -af filter graphs and parse their stderr instead:
+    //   ebur128      → integrated LUFS (Summary block) + true peak
+    //   volumedetect → mean/max dB (RMS + peak fallback)
+    // -vn drops cover-art video streams, which would otherwise be picked as the
+    // output stream (volumedetect then measures nothing); -af maps the audio
+    // stream automatically (unlike -filter_complex + -map, which errors on
+    // files with attached-pic video streams).
     try {
-      const { stdout } = await execFileAsync('ffprobe', [
-        '-v',
-        'quiet',
-        '-print_format',
-        'json',
-        '-show_streams',
-        '-of',
-        'json',
-        filepath
+      const [lufsOut, volOut] = await Promise.all([
+        this.runFfmpeg(filepath, ['-af', 'ebur128=peak=true', '-f', 'null', '-']),
+        this.runFfmpeg(filepath, ['-af', 'volumedetect', '-f', 'null', '-'])
       ])
-      const data = JSON.parse(stdout)
-      const stream = data.streams?.[0]
-      if (!stream) return null
 
-      const peakDb = 20 * Math.log10(Math.max(stream.max_peak ?? 1, 1e-10))
-      const rmsDb = 20 * Math.log10(Math.max(stream.max_rms ?? 1, 1e-10))
+      // ebur128 prints per-0.1s progress lines then a "Summary:" block whose
+      // "I:" is the FINAL integrated loudness. Match only inside the summary,
+      // otherwise the first progress line's starting value (-70) is picked up.
+      const summary = lufsOut.slice(lufsOut.lastIndexOf('Summary:'))
+      const lufsMatch = summary.match(/I:\s+(-?\d+(?:\.\d+)?)\s+LUFS/)
+      const peakMatch = summary.match(/Peak:\s+(-?\d+(?:\.\d+)?)\s+dBFS/)
+      const integratedLufs = lufsMatch ? Number(lufsMatch[1]) : null
+      const truePeak = peakMatch ? Number(peakMatch[1]) : null
 
-      let integratedLufs: number | null = null
-      try {
-        const { stdout: lufsOut } = await execFileAsync(
-          'ffprobe',
-          [
-            '-v',
-            'quiet',
-            '-print_format',
-            'json',
-            '-show_frames',
-            '-read_intervals',
-            '%+3',
-            '-f',
-            'lavfi',
-            `amovie=${filepath},ebur128=metadata=1`,
-            filepath
-          ],
-          { timeout: 10000 }
-        )
-        const lufsData = JSON.parse(lufsOut)
-        const frames = lufsData.frames ?? []
-        for (const f of frames) {
-          if (f?.pts_time && f?.lavfi?.ebur128?.integrated) {
-            integratedLufs = f.lavfi.ebur128.integrated
-            break
-          }
-        }
-      } catch {
-        /* noop */
+      // volumedetect stderr: "mean_volume: -16.4 dB" / "max_volume: -2.1 dB"
+      const meanMatch = volOut.match(/mean_volume:\s+(-?\d+(?:\.\d+)?)\s+dB/)
+      const maxMatch = volOut.match(/max_volume:\s+(-?\d+(?:\.\d+)?)\s+dB/)
+      const meanDb = meanMatch ? Number(meanMatch[1]) : null
+      const maxDb = maxMatch ? Number(maxMatch[1]) : null
+
+      // peak_db: prefer the ebur128 true peak, else volumedetect max.
+      const peakDb = truePeak ?? maxDb
+      if (peakDb == null && meanDb == null) return null
+      return {
+        peak_db: peakDb ?? 0,
+        rms_db: meanDb ?? 0,
+        integrated_lufs: integratedLufs
       }
-
-      return { peak_db: peakDb, rms_db: rmsDb, integrated_lufs: integratedLufs }
     } catch {
       return null
     }
+  }
+
+  /** Run ffmpeg and return combined stderr (filter graphs report there). */
+  private async runFfmpeg(filepath: string, args: string[]): Promise<string> {
+    const { stderr } = await execFileAsync(
+      'ffmpeg',
+      ['-hide_banner', '-nostats', '-vn', '-i', filepath, ...args],
+      {
+        timeout: 60_000,
+        maxBuffer: 8 * 1024 * 1024
+      }
+    )
+    return stderr || ''
   }
 
   loudnessKey(info: LoudnessInfo | null): number | null {
