@@ -413,7 +413,7 @@ export class DBusManager {
       }
       const volV = await props.Get('org.mpris.MediaPlayer2.Player', 'Volume')
       const vol = volV.value as number
-      const track = (meta?.['xesam:title'] as string) || ''
+      const track = this.resolveTrackName(meta)
       log.info('getStatus ok', { status, track, player: this.playerName })
       return {
         status: status as PlayerStatus['status'],
@@ -529,6 +529,22 @@ export class DBusManager {
 
   getPlayerName(): string {
     return this._autoMode ? '__auto__' : this.playerName
+  }
+
+  /**
+   * Resolve a human-friendly track label from MPRIS Metadata. Some players
+   * (VLC, mpv) leave `xesam:title` empty and only expose `xesam:url`; fall back
+   * to the file name without extension so the UI never shows a bare "—".
+   */
+  resolveTrackName(meta: Record<string, unknown>): string {
+    const title = String(meta?.['xesam:title'] ?? '').trim()
+    if (title) return title
+    const url = String(meta?.['xesam:url'] ?? '').trim()
+    if (!url) return ''
+    const clean = url.replace(/^file:\/\//, '')
+    const name = clean.split('/').pop() || clean
+    const ext = name.lastIndexOf('.')
+    return ext > 0 ? name.slice(0, ext) : name
   }
 
   /** The actually-bound MPRIS bus name (resolves auto mode to a concrete player). */

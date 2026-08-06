@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
+import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
 
 defineOptions({ name: 'AidjBtChatView' })
@@ -134,10 +135,10 @@ watch(
           <div v-else-if="it.kind === 'assistant'" class="d-flex flex-column align-start">
             <span class="text-caption text-medium-emphasis">AI DJ</span>
             <div
-              class="chat-bubble chat-bubble-ai pa-3 text-body-2"
+              class="chat-bubble chat-bubble-ai pa-3 text-body-2 msg-markdown"
               @contextmenu="it.content && openCtx($event, it.content, true)"
             >
-              {{ it.content }}
+              <div v-html="renderMarkdown(it.content || '')" />
             </div>
           </div>
           <div v-else-if="it.kind === 'system'" class="d-flex justify-center">
@@ -250,5 +251,49 @@ watch(
   align-items: center;
   padding-block: 4px;
   min-height: 24px;
+}
+.msg-markdown p {
+  margin: 0 0 0.4em;
+}
+.msg-markdown p:last-child {
+  margin-bottom: 0;
+}
+.msg-markdown code {
+  background: rgba(0, 0, 0, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.msg-markdown pre {
+  background: rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.msg-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.msg-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  opacity: 0.85;
+}
+.msg-markdown ul {
+  margin: 0.2em 0;
+  padding-left: 1.2em;
+}
+.msg-markdown strong {
+  font-weight: 600;
+}
+.msg-markdown table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+.msg-markdown th,
+.msg-markdown td {
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.5);
+  padding: 4px 8px;
 }
 </style>

@@ -553,8 +553,8 @@ function handleContextMenu(
           <v-icon start>mdi-disc-player</v-icon>
           <span class="text-body-2 font-weight-medium ml-1">{{ t('aidj.now_playing') }}</span>
         </v-col>
-        <v-col>
-          <span class="text-body-2">{{ playerStatus.track || '—' }}</span>
+        <v-col class="min-w-0 d-flex align-center">
+          <span class="text-body-2 track-name text-truncate">{{ playerStatus.track || '—' }}</span>
           <v-chip
             size="small"
             variant="flat"
@@ -565,7 +565,7 @@ function handleContextMenu(
                   ? 'warning'
                   : 'secondary'
             "
-            class="ml-2 status-chip"
+            class="ml-2 status-chip flex-shrink-0"
           >
             {{ playerStatus.status }}
           </v-chip>
@@ -915,7 +915,7 @@ function handleContextMenu(
 }
 .input-overlay {
   flex-shrink: 0;
-  background: rgb(var(--v-theme-surface));
+  background: transparent;
   border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
 }
 .aidj-status-bar {
@@ -1008,6 +1008,13 @@ function handleContextMenu(
 .player-select-col {
   min-width: 200px;
   max-width: 280px;
+}
+.track-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .player-select {
   min-width: 160px;
