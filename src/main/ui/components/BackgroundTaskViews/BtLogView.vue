@@ -161,6 +161,7 @@ function onCtrlD(): void {
         flat
         hide-details
         clearable
+        @click:clear="inputText = ''"
         class="flex-grow-1"
         @keydown.enter.prevent="onEnter"
         @keydown.ctrl.c.prevent="onCtrlC"

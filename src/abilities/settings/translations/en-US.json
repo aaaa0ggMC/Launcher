@@ -27,6 +27,7 @@
   "window.title": "Window",
   "window.frameless": "Frameless window",
   "window.rounded": "Rounded window",
+  "window.radius": "Corner radius",
   "window.background": "Background",
   "window.bgSelect": "Background",
   "window.imgPath": "Image path",

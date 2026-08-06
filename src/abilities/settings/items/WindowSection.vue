@@ -19,6 +19,7 @@ const bgItems = computed(() =>
 
 const frameless = ref(true)
 const rounded = ref(true)
+const radius = ref(12)
 const background = ref('transparent')
 const backgroundImage = ref('')
 const backgroundOpacity = ref(1)
@@ -30,6 +31,8 @@ onMounted(async () => {
   const win = (cfg?.window as Record<string, unknown> | undefined) ?? {}
   frameless.value = win.frameless !== false
   rounded.value = win.rounded !== false
+  const r = Number(win.radius)
+  radius.value = Number.isFinite(r) && r >= 0 ? r : 12
   background.value = (win.background as string) ?? 'transparent'
   backgroundImage.value = (win.backgroundImage as string) ?? ''
   const bop = Number(win.backgroundOpacity)
@@ -54,6 +57,10 @@ async function setRounded(v: boolean | null): Promise<void> {
   await window.cockpit.setConfig({
     window: { ...(config.value.window as Record<string, unknown> | undefined), rounded: val }
   })
+}
+
+async function commitRadius(): Promise<void> {
+  await saveWindow({ radius: radius.value })
 }
 
 function saveWindow(patch: Record<string, unknown>): Promise<unknown> {
@@ -120,6 +127,23 @@ async function commitFuseBlur(): Promise<void> {
         class="mt-1"
         @update:model-value="setRounded"
       />
+
+      <template v-if="rounded">
+        <div class="d-flex align-center justify-space-between mt-3 mb-1">
+          <span class="text-body-2">{{ translate(uiLang, 'window.radius') }}</span>
+          <span class="text-caption on-surface-variant font-family-mono">{{ radius }}px</span>
+        </div>
+        <v-slider
+          v-model="radius"
+          :min="0"
+          :max="40"
+          :step="1"
+          color="primary"
+          thumb-label
+          hide-details
+          @end="commitRadius"
+        />
+      </template>
 
       <v-divider class="my-3" />
 

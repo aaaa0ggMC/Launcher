@@ -1031,7 +1031,8 @@ Instruction: Check the Library in the first System message. If matches found, ou
 
 export class PersistentSession {
   config: AidjConfig
-  dbus: DBusManager
+  /** Optional — null for chat-only sessions that never touch a player. */
+  dbus: DBusManager | null
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
   chatHistory: ChatMessage[]
@@ -1040,6 +1041,8 @@ export class PersistentSession {
   buffer: PlaylistEntry[][]
   fetchCount: number
   working: boolean
+  /** DJ commentary (intro) of the most recent batch — shown by chat views. */
+  lastIntro = ''
   private client: OpenAI
   private volCache: LoudnessCache
   private initialPrompt: string
@@ -1050,7 +1053,7 @@ export class PersistentSession {
     metadata: Map<string, SongMeta>,
     musicPaths: Map<string, string>,
     config: AidjConfig,
-    dbus: DBusManager,
+    dbus: DBusManager | null,
     initialPrompt: string,
     anchorValue?: number | null
   ) {
@@ -1083,7 +1086,7 @@ export class PersistentSession {
     this._anchorValue = v
   }
 
-  private async fetchNextBatch(): Promise<PlaylistEntry[]> {
+  private async fetchNextBatch(signal?: AbortSignal): Promise<PlaylistEntry[]> {
     if (this.working) return []
     this.working = true
     try {
@@ -1106,8 +1109,9 @@ export class PersistentSession {
       session.playedSongs = new Set(this.rollingHistory)
       session.turnCount = this.fetchCount
 
-      const { playlist } = await session.nextStep(fullPrompt)
+      const { playlist, intro } = await session.nextStep(fullPrompt, undefined, signal)
       this.chatHistory = session.chatHistory
+      this.lastIntro = intro || ''
 
       if (playlist.length > 0) {
         for (const s of playlist) {
@@ -1129,8 +1133,8 @@ export class PersistentSession {
     return this.buffer.length < 2 && !this.working
   }
 
-  async fetchBatch(): Promise<void> {
-    const batch = await this.fetchNextBatch()
+  async fetchBatch(signal?: AbortSignal): Promise<void> {
+    const batch = await this.fetchNextBatch(signal)
     if (batch.length > 0) this.buffer.push(batch)
   }
 
@@ -1149,7 +1153,7 @@ export class PersistentSession {
   }
 
   async adjustVolume(track: PlaylistEntry): Promise<void> {
-    if (!this.config.preferences.dynamic_balance_volume) return
+    if (!this.config.preferences.dynamic_balance_volume || !this.dbus) return
     const isFirst = this.fetchCount === 1 && this._anchorValue == null
     if (isFirst) {
       await this.dbus.setVolume(0.5)
@@ -1177,7 +1181,7 @@ export class PersistentSession {
   }
 
   stop(): void {
-    this.dbus.disconnect()
+    this.dbus?.disconnect()
   }
 }
 

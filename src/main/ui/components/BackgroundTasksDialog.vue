@@ -381,6 +381,7 @@ onBeforeUnmount(() => {
               flat
               hide-details
               clearable
+              @click:clear="searchText = ''"
               rounded="lg"
               class="flex-grow-1"
             />

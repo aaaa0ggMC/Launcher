@@ -31,7 +31,9 @@ import {
   getContinuousTasks,
   getContinuousTask,
   switchContinuousPlayer,
-  enqueueContinuousSongs
+  enqueueContinuousSongs,
+  getChatTask,
+  clearContinuousPending
 } from './jobs'
 
 const log = makeLogger('aidj')
@@ -399,18 +401,21 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.chat',
-    description: '发送消息到持久模式会话',
-    usage: 'aidj.chat --text <message>',
+    description: '发送消息到持续会话',
+    usage: 'aidj.chat --task <id> --text <message>',
     run: async (ctx) => {
+      const taskId = ctx.named.task as string
       const text = (ctx.named.text as string) || ctx.positional.join(' ')
-      if (!text) return { ok: false, error: '需要消息内容' }
-      const ps = getPersistentSession()
-      if (!ps) return { ok: false, error: '持久模式未运行' }
-      ps.injectUserMessage(text)
+      if (!taskId || !text) return { ok: false, error: '需要 --task 和 --text 参数' }
+      const st = getChatTask(taskId)
+      if (!st) return { ok: false, error: '持续会话未运行' }
       if (text.startsWith('/discard_follows')) {
-        ps.discardFollows()
+        st.session.discardFollows()
+        clearContinuousPending(st.player)
         return { ok: true, effect: 'discard_follows' }
       }
+      st.session.injectUserMessage(text)
+      st.control.push({ data: { type: 'user', content: text } })
       return { ok: true, effect: 'injected' }
     }
   },

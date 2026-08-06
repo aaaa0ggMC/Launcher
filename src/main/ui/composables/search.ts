@@ -20,7 +20,7 @@ export interface SearchField {
 
 /** Split a raw query into lowercase tokens. */
 export function tokenize(query: string): string[] {
-  return query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return (query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)
 }
 
 /**

@@ -27,6 +27,7 @@
   "window.title": "窗口",
   "window.frameless": "无边框窗口",
   "window.rounded": "圆角窗口",
+  "window.radius": "圆角半径",
   "window.background": "背景",
   "window.bgSelect": "背景",
   "window.imgPath": "图片路径",

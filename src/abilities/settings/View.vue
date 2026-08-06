@@ -142,6 +142,7 @@ defineExpose({ toMarkdown })
         flat
         hide-details
         clearable
+        @click:clear="query = ''"
         rounded="lg"
         class="settings-search"
       />

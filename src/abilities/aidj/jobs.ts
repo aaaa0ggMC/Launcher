@@ -1,4 +1,8 @@
-import { registerJobHandler, type JobControl } from '../../main/process/background-tasks'
+import {
+  registerJobHandler,
+  type JobControl,
+  startJobByName
+} from '../../main/process/background-tasks'
 import { makeLogger } from '../../main/process/logger'
 import {
   loadAidjConfig,
@@ -14,7 +18,7 @@ import {
   LoudnessCache
 } from './service'
 import OpenAI from 'openai'
-import type { SongMeta, PlaylistEntry } from './types'
+import type { SongMeta, PlaylistEntry, ChatMessage } from './types'
 
 const log = makeLogger('aidj-persistent')
 
@@ -387,5 +391,195 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   }
 
   control.pushLine('连续播放已结束')
+  control.finish('exited')
+})
+
+// ---------------------------------------------------------------------------
+// Persistent AI-DJ chat task — generates batches and pushes them to a
+// continuous player (create if none, enqueue if exists). The chat view lives
+// in the bt dialog; the task itself does NOT own a dbus player (song switching
+// is handled by aidj.continuous). User messages are injected via aidj.chat.
+// ---------------------------------------------------------------------------
+
+export interface ChatTaskState {
+  session: PersistentSession
+  player: string
+  control: JobControl
+}
+
+const chatTasks = new Map<string, ChatTaskState>()
+
+export function getChatTask(taskId: string): ChatTaskState | undefined {
+  return chatTasks.get(taskId)
+}
+
+export function getChatTasks(): ChatTaskState[] {
+  return [...chatTasks.values()]
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Immediate lookup of a continuous task bound to `player`. */
+function findContinuousByPlayer(player: string): ContinuousTaskState | undefined {
+  return [...continuousTasks.values()].find((s) => s.playerKey === player)
+}
+
+/** Push a playlist to the player: enqueue to an existing continuous task, else create one. */
+function ensureContinuousPlayer(
+  player: string,
+  songs: PlaylistEntry[]
+): { ok: boolean; taskId?: string; queueLen?: number; error?: string } {
+  if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
+  const existing = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  if (existing) {
+    const r = enqueueContinuousSongs(existing.control.id, songs)
+    return r.ok ? { ok: true, taskId: existing.control.id, queueLen: r.queueLen } : r
+  }
+  const task = startJobByName('aidj.continuous', { songs, player, view: 'continuous' })
+  if (!task) return { ok: false, error: '创建连续播放任务失败' }
+  return { ok: true, taskId: task.id, queueLen: songs.length }
+}
+
+/** /discard_follows: drop queued-but-unplayed songs; keep the current track playing. */
+export function clearContinuousPending(player: string): void {
+  const st = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  if (!st) return
+  st.queue = st.current ? [st.current] : []
+  st.index = st.queue.length
+  st.total = st.queue.length
+  pushContinuousState(st)
+}
+
+registerJobHandler('aidj.chat', async (control, args) => {
+  const initialPrompt = (args.prompt as string) || ''
+  const history = (args.history ?? []) as ChatMessage[]
+  const playerArg = (args.player as string) || ''
+  if (!initialPrompt) {
+    control.pushLine('错误: 需要初始提示词', 'stderr')
+    control.finish('error')
+    return
+  }
+
+  const config = await loadAidjConfig()
+  if (!config) {
+    control.pushLine('错误: AIDJ 配置未找到', 'stderr')
+    control.finish('error')
+    return
+  }
+
+  setNcmBaseUrl(config.ncm_base_url)
+  await ensureAidjDir()
+
+  const lib = await loadLibrary()
+  const missing = await findMissingSongs(lib.musicPaths, lib.metadata)
+  if (missing.size > 0) {
+    control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)
+    const syncClient = new OpenAI({
+      apiKey: config.secrets.api_key,
+      baseURL: config.ai_settings.base_url
+    })
+    await syncMetadata(
+      syncClient,
+      missing,
+      lib.metadata,
+      config.ai_settings.metadata_model,
+      config.preferences.metadata_concurrency
+    )
+  }
+
+  const client = new OpenAI({
+    apiKey: config.secrets.api_key,
+    baseURL: config.ai_settings.base_url
+  })
+  const player =
+    playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
+
+  const session = new PersistentSession(client, lib.metadata, lib.musicPaths, config, null, initialPrompt)
+  if (Array.isArray(history) && history.length) {
+    session.chatHistory = history.map((m) => ({ ...m }))
+  }
+
+  const ac = new AbortController()
+  const st: ChatTaskState = { session, player, control }
+  chatTasks.set(control.id, st)
+  control.setCancel(() => {
+    ac.abort()
+    chatTasks.delete(control.id)
+    session.stop()
+  })
+
+  // Replay seeded history into the view.
+  for (const m of session.chatHistory) {
+    control.push({
+      data: {
+        type: m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant',
+        content: m.content,
+        history: true
+      }
+    })
+  }
+
+  control.push({ data: { type: 'state', message: 'started', player, prompt: initialPrompt } })
+  control.pushLine(`持续会话已启动 → ${player}`)
+
+  const REFILL = 8
+  const FETCH_TIMEOUT = 180_000
+  let fetchAc = new AbortController()
+
+  const fetchWithTimeout = async (): Promise<void> => {
+    fetchAc.abort()
+    fetchAc = new AbortController()
+    const t = setTimeout(() => fetchAc.abort(), FETCH_TIMEOUT)
+    try {
+      await session.fetchBatch(fetchAc.signal)
+    } finally {
+      clearTimeout(t)
+    }
+  }
+
+  try {
+    while (!ac.signal.aborted) {
+      try {
+        const cont = findContinuousByPlayer(player)
+        const queueLen = cont ? cont.total - cont.index : 0
+
+        if (queueLen < REFILL && !session.working) {
+          control.push({ data: { type: 'thinking' } })
+          try {
+            await fetchWithTimeout()
+          } finally {
+            control.push({ data: { type: 'idle' } })
+          }
+
+          const batch = session.buffer.shift()
+          if (batch && batch.length) {
+            if (session.lastIntro) {
+              control.push({ data: { type: 'assistant', content: session.lastIntro } })
+            }
+            control.push({ data: { type: 'playlist', songs: batch } })
+            const r = ensureContinuousPlayer(player, batch)
+            if (r.ok) {
+              control.pushLine(`推送 ${batch.length} 首到连续播放`)
+            } else {
+              control.push({ data: { type: 'system', content: `推送歌单失败: ${r.error ?? '未知错误'}` } })
+              control.pushLine(`推送歌单失败: ${r.error ?? ''}`, 'stderr')
+              break
+            }
+          }
+        }
+
+        await sleep(1000)
+      } catch (e) {
+        if (ac.signal.aborted) break
+        log.error('chat loop error', { error: String(e) })
+        control.pushLine(`错误: ${String(e)}`, 'stderr')
+        await sleep(5000)
+      }
+    }
+  } finally {
+    chatTasks.delete(control.id)
+  }
+
+  control.pushLine('持续会话已结束')
   control.finish('exited')
 })

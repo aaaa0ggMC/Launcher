@@ -10,9 +10,9 @@ import {
   nextTick
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
-import { renderMarkdown } from '../../shared/markdown'
 import type { ChatMessage, PlayerStatus } from './types'
 import ChatMessageVue from './components/ChatMessage.vue'
+import ContextMenu from './components/ContextMenu.vue'
 
 defineOptions({ name: 'cockpit-aidj' })
 
@@ -23,7 +23,6 @@ const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const mode = ref<'immediate' | 'persistent'>('immediate')
 const thinking = ref(false)
-const persistentRunning = ref(false)
 const persistentTaskId = ref('')
 const sending = ref(false)
 const pendingText = ref('')
@@ -179,14 +178,9 @@ function listenBt(): void {
     if (ev?.type === 'changed') {
       const tasks = (ev.tasks ?? []) as Record<string, unknown>[]
       sbBackgrounds.value = tasks.filter((t) => t.status === 'running').length
-      const persistentTask = tasks.find(
-        (t) => t.id === persistentTaskId.value || t.name === 'aidj.persistent'
-      )
-      persistentRunning.value = persistentTask ? persistentTask.status === 'running' : false
     }
     if (ev?.type === 'exit') {
       if (ev.id === persistentTaskId.value) {
-        persistentRunning.value = false
         persistentTaskId.value = ''
       }
       sbBackgrounds.value = Math.max(0, sbBackgrounds.value - 1)
@@ -358,15 +352,10 @@ async function sendMessage(): Promise<void> {
       scrollToBottom()
     }
   } else {
-    if (!persistentRunning.value) {
-      messages.value.pop()
-      messages.value.pop()
-      await startPersistent(text)
-    } else {
-      messages.value.pop()
-      messages.value.pop()
-      await sendToPersistent(text)
-    }
+    // persistent mode → start a background chat session, then return to immediate
+    messages.value.pop()
+    messages.value.pop()
+    await startPersistentChat(text)
   }
 }
 
@@ -474,70 +463,44 @@ function handleReorder(msgIdx: number, songs: { name: string; path: string }[]):
   }
 }
 
-async function startPersistent(prompt: string): Promise<void> {
-  thinking.value = true
+/** Persistent mode: start a background chat session with the current conversation copied in. */
+async function startPersistentChat(prompt: string): Promise<void> {
   try {
-    const result = (await window.cockpit.btJob('aidj.persistent', {
-      prompt
+    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
+    const status = statusRes?.status as { player?: string } | undefined
+    const resolved = status?.player || ''
+    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
+
+    const history: ChatMessage[] = [
+      ...messages.value.map((m) => ({
+        role: m.role,
+        content: m.content,
+        playlist: m.playlist,
+        timestamp: m.timestamp
+      })),
+      { role: 'user', content: prompt, timestamp: Date.now() }
+    ]
+
+    const result = (await window.cockpit.btJob('aidj.chat', {
+      prompt,
+      history: history.map((h) => ({
+        role: h.role,
+        content: h.content,
+        timestamp: h.timestamp
+      })),
+      player: player || '__auto__',
+      view: 'chat'
     })) as Record<string, unknown>
     if (result?.task || result?.ok) {
-      persistentRunning.value = true
       const task = result.task as { id?: string } | undefined
       if (task?.id) persistentTaskId.value = task.id
-      messages.value.push({
-        role: 'system',
-        content: `持久模式已启动 | 提示: "${prompt}"`,
-        timestamp: Date.now()
-      })
+      mode.value = 'immediate'
+      showSnack('已在后台启动持续会话，可打开后台面板继续对话')
+    } else {
+      showSnack(`启动持续会话失败: ${(result?.error as string) || '未知错误'}`, 'error')
     }
   } catch (e: unknown) {
-    messages.value.push({
-      role: 'system',
-      content: `启动持久模式失败: ${e instanceof Error ? e.message : String(e)}`,
-      timestamp: Date.now()
-    })
-  } finally {
-    thinking.value = false
-    scrollToBottom()
-  }
-}
-
-async function sendToPersistent(text: string): Promise<void> {
-  try {
-    if (text.startsWith('/discard_follows')) {
-      await window.cockpit.command('aidj.chat', { text })
-      messages.value.push({
-        role: 'system',
-        content: '✅ 已丢弃后续待播歌曲',
-        timestamp: Date.now()
-      })
-      scrollToBottom()
-      return
-    }
-    await window.cockpit.command('aidj.chat', { text })
-  } catch (e: unknown) {
-    messages.value.push({
-      role: 'system',
-      content: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
-      timestamp: Date.now()
-    })
-    scrollToBottom()
-  }
-}
-
-async function stopPersistent(): Promise<void> {
-  try {
-    await window.cockpit.command('aidj.stop-persistent')
-    persistentRunning.value = false
-    persistentTaskId.value = ''
-    messages.value.push({
-      role: 'system',
-      content: '持久模式已停止',
-      timestamp: Date.now()
-    })
-    scrollToBottom()
-  } catch {
-    // stop errors are non-fatal
+    showSnack(`启动持续会话失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
   }
 }
 
@@ -554,7 +517,6 @@ const ctxPos = ref({ x: 0, y: 0 })
 const ctxTarget = ref('')
 const ctxIsAi = ref(false)
 const ctxSongs = ref<{ name: string }[]>([])
-const ctxEl = ref<HTMLElement | null>(null)
 let ctxCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleContextMenu(
@@ -572,67 +534,14 @@ function handleContextMenu(
   if (ctxMenu.value) {
     ctxMenu.value = false
     if (ctxCloseTimer) clearTimeout(ctxCloseTimer)
-    ctxCloseTimer = setTimeout(() => showCtx(pos), 120)
+    ctxCloseTimer = setTimeout(() => {
+      ctxPos.value = pos
+      ctxMenu.value = true
+    }, 120)
   } else {
-    showCtx(pos)
+    ctxPos.value = pos
+    ctxMenu.value = true
   }
-}
-
-function showCtx(pos: { x: number; y: number }): void {
-  ctxPos.value = pos
-  ctxMenu.value = true
-  nextTick(() => {
-    const el = ctxEl.value
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const margin = 8
-    const x = Math.min(ctxPos.value.x, window.innerWidth - rect.width - margin)
-    const y = Math.min(ctxPos.value.y, window.innerHeight - rect.height - margin)
-    ctxPos.value = { x: Math.max(margin, x), y: Math.max(margin, y) }
-  })
-  document.addEventListener('click', closeCtx)
-  document.addEventListener('keydown', onCtxKey)
-}
-
-function onCtxKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') closeCtx()
-}
-
-function copyToClipboard(text: string): void {
-  navigator.clipboard.writeText(text)
-  closeCtx()
-}
-
-function withSongs(text: string): string {
-  const songs = ctxSongs.value
-  if (!songs.length) return text
-  const list = songs.map((s, i) => `${i + 1}. ${s.name}`).join('\n')
-  return `${text}\n\n${list}`
-}
-
-function copyRendered(): void {
-  const html = renderMarkdown(ctxTarget.value)
-  copyToClipboard(withSongs(stripHtml(html) || ctxTarget.value))
-}
-
-function copyRaw(): void {
-  copyToClipboard(withSongs(ctxTarget.value))
-}
-
-function stripHtml(html: string): string {
-  const el = document.createElement('div')
-  el.innerHTML = html
-  return el.textContent || ''
-}
-
-function closeCtx(): void {
-  ctxMenu.value = false
-  if (ctxCloseTimer) {
-    clearTimeout(ctxCloseTimer)
-    ctxCloseTimer = null
-  }
-  document.removeEventListener('click', closeCtx)
-  document.removeEventListener('keydown', onCtxKey)
 }
 </script>
 
@@ -803,10 +712,10 @@ function closeCtx(): void {
             class="mode-toggle flex-shrink-0"
             style="white-space: nowrap"
           >
-            <v-btn value="immediate" :disabled="persistentRunning" class="px-3">
+            <v-btn value="immediate" class="px-3">
               {{ t('aidj.mode_immediate') }}
             </v-btn>
-            <v-btn value="persistent" :disabled="persistentRunning" class="px-3">
+            <v-btn value="persistent" class="px-3">
               {{ t('aidj.mode_persistent') }}
             </v-btn>
           </v-btn-toggle>
@@ -819,7 +728,7 @@ function closeCtx(): void {
               auto-grow
               no-resize
               :placeholder="t('aidj.input_placeholder')"
-              :disabled="thinking || (mode === 'persistent' && !persistentRunning)"
+              :disabled="thinking"
               hide-details
               variant="outlined"
               class="input-textarea"
@@ -848,9 +757,7 @@ function closeCtx(): void {
           </v-btn>
           <v-btn
             v-else
-            :disabled="
-              !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
-            "
+            :disabled="!inputText.trim()"
             color="primary"
             variant="elevated"
             class="flex-shrink-0"
@@ -858,17 +765,6 @@ function closeCtx(): void {
           >
             <v-icon start>mdi-send</v-icon>
             {{ t('aidj.send') }}
-          </v-btn>
-
-          <v-btn
-            v-if="persistentRunning"
-            color="error"
-            variant="text"
-            class="flex-shrink-0"
-            @click="stopPersistent"
-          >
-            <v-icon start>mdi-stop</v-icon>
-            {{ t('aidj.stop') }}
           </v-btn>
         </div>
       </template>
@@ -884,10 +780,10 @@ function closeCtx(): void {
             class="mode-toggle flex-shrink-0"
             style="white-space: nowrap"
           >
-            <v-btn value="immediate" :disabled="persistentRunning" class="px-3">
+            <v-btn value="immediate" class="px-3">
               {{ t('aidj.mode_immediate') }}
             </v-btn>
-            <v-btn value="persistent" :disabled="persistentRunning" class="px-3">
+            <v-btn value="persistent" class="px-3">
               {{ t('aidj.mode_persistent') }}
             </v-btn>
           </v-btn-toggle>
@@ -906,9 +802,7 @@ function closeCtx(): void {
           </v-btn>
           <v-btn
             v-else
-            :disabled="
-              !inputText.trim() || (mode === 'persistent' && !persistentRunning && thinking)
-            "
+            :disabled="!inputText.trim()"
             color="primary"
             variant="elevated"
             class="flex-shrink-0"
@@ -916,17 +810,6 @@ function closeCtx(): void {
           >
             <v-icon start>mdi-send</v-icon>
             {{ t('aidj.send') }}
-          </v-btn>
-
-          <v-btn
-            v-if="persistentRunning"
-            color="error"
-            variant="text"
-            class="flex-shrink-0"
-            @click="stopPersistent"
-          >
-            <v-icon start>mdi-stop</v-icon>
-            {{ t('aidj.stop') }}
           </v-btn>
 
           <v-btn
@@ -945,7 +828,7 @@ function closeCtx(): void {
             :auto-grow="false"
             rows="8"
             :placeholder="t('aidj.input_placeholder')"
-            :disabled="thinking || (mode === 'persistent' && !persistentRunning)"
+            :disabled="thinking"
             hide-details
             variant="outlined"
             class="h-100 input-textarea"
@@ -1002,26 +885,14 @@ function closeCtx(): void {
       {{ snackText }}
     </v-snackbar>
 
-    <Teleport to="body">
-      <Transition name="ctx">
-        <div
-          v-if="ctxMenu"
-          ref="ctxEl"
-          class="aidj-ctx-menu"
-          :style="{ left: ctxPos.x + 'px', top: ctxPos.y + 'px' }"
-          @click.stop
-        >
-          <button class="aidj-ctx-item" @click="copyRendered">
-            <v-icon icon="mdi-content-copy" size="14" />
-            <span>复制</span>
-          </button>
-          <button v-if="ctxIsAi" class="aidj-ctx-item" @click="copyRaw">
-            <v-icon icon="mdi-code-tags" size="14" />
-            <span>CopyRaw</span>
-          </button>
-        </div>
-      </Transition>
-    </Teleport>
+    <ContextMenu
+      v-model="ctxMenu"
+      :x="ctxPos.x"
+      :y="ctxPos.y"
+      :content="ctxTarget"
+      :is-ai="ctxIsAi"
+      :songs="ctxSongs"
+    />
   </div>
 </template>
 
@@ -1164,49 +1035,3 @@ function closeCtx(): void {
 }
 </style>
 
-<style>
-.aidj-ctx-menu {
-  position: fixed;
-  z-index: 3000;
-  min-width: 110px;
-  padding: 4px;
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-.aidj-ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: rgb(var(--v-theme-on-surface));
-  font-size: 0.8rem;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-}
-.aidj-ctx-item:hover {
-  background: rgba(var(--v-theme-primary), 0.15);
-}
-.ctx-enter-active {
-  transition: opacity 0.12s ease, transform 0.12s ease;
-}
-.ctx-leave-active {
-  transition: opacity 0.1s ease;
-}
-.ctx-enter-from {
-  opacity: 0;
-  transform: scale(0.92) translateY(-4px);
-}
-.ctx-enter-to {
-  opacity: 1;
-  transform: scale(1) translateY(0);
-}
-.ctx-leave-to {
-  opacity: 0;
-}
-</style>

@@ -2,8 +2,10 @@ import { defineAsyncComponent, markRaw } from 'vue'
 import type { Ability } from '../types'
 import { registerBtView } from '../../main/ui/bt-views'
 import ContinuousView from './components/ContinuousView.vue'
+import BtChatView from './components/BtChatView.vue'
 
 registerBtView('continuous', () => ({ component: markRaw(ContinuousView) }))
+registerBtView('chat', () => ({ component: markRaw(BtChatView) }))
 
 export default {
   id: 'aidj',

@@ -78,6 +78,12 @@ const windowRounded = computed(
     !isMaximized.value
 )
 
+/** Window corner radius (px) — mirrors window.radius config; default 12. */
+const windowRadius = computed(
+  () =>
+    (runtimeConfig.value.window as { radius?: number } | undefined)?.radius ?? 12
+)
+
 /** Current active language from config. */
 const lang = computed(() => (runtimeConfig.value.language as string) ?? 'zh')
 provide('cockpit:lang', lang)
@@ -326,6 +332,18 @@ function applyMotionClass(): void {
   else document.documentElement.classList.add('motion-off')
 }
 
+function applyWindowRounded(): void {
+  // Teleported overlays (v-dialog scrim) live on <body>, outside .win-rounded's
+  // clip-path, so their full-screen colored scrim paints over the transparent
+  // window corners → square corners on light backgrounds. Mirror the flag on
+  // <body> so global.css can clip every overlay scrim to the same radius.
+  // The radius itself is exposed as a CSS variable so window + scrim always
+  // agree, and both follow the configured window.radius.
+  document.documentElement.style.setProperty('--win-radius', `${windowRadius.value}px`)
+  if (windowRounded.value) document.body.classList.add('win-rounded-body')
+  else document.body.classList.remove('win-rounded-body')
+}
+
 /**
  * Apply the resolved scheme id. When 「现代动效」is on, the color swap is
  * wrapped in the View Transitions API and revealed with an accelerating
@@ -358,6 +376,7 @@ function onConfigChanged(cfg: Record<string, unknown> | null): void {
   runtimeConfig.value = cfg ?? {}
   applyTheme()
   applyMotionClass()
+  applyWindowRounded()
   applyUiScale()
   resolveBackgroundImage()
 }
@@ -761,6 +780,7 @@ onBeforeUnmount(() => {
           flat
           hide-details
           clearable
+          @click:clear="searchText = ''"
           rounded="lg"
           @input="scheduleSearchApps"
         />

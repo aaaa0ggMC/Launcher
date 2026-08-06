@@ -439,5 +439,13 @@ html.motion-off *::after {
  * drawer, which overflow:hidden would let escape), so all four corners round
  * uniformly and no scrollbar corner leaks into the bottom-right radius. */
 .win-rounded {
-  clip-path: inset(0 round 12px);
+  clip-path: inset(0 round var(--win-radius, 12px));
+}
+
+/* Teleported overlay scrims (v-dialog etc.) live on <body>, outside the
+ * .win-rounded clip-path, so their full-screen colored scrim painted over the
+ * transparent window corners. Mirror the flag on <body> and clip the scrim to
+ * the same radius so rounded windows keep their corners on any background. */
+body.win-rounded-body .v-overlay__scrim {
+  clip-path: inset(0 round var(--win-radius, 12px));
 }
