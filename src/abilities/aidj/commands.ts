@@ -40,6 +40,7 @@ import {
   getContinuousVolume,
   setContinuousVolume,
   getChatTask,
+  setChatPlayer,
   clearContinuousPending
 } from './jobs'
 
@@ -448,6 +449,23 @@ const commands: CommandSpec[] = [
       st.session.injectUserMessage(text)
       st.control.push({ data: { type: 'user', content: text } })
       return { ok: true, effect: 'injected' }
+    }
+  },
+  {
+    name: 'aidj.chat-player',
+    description: '切换持续会话的发送目标播放器',
+    usage: 'aidj.chat-player --task <id> --player <name>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const player = ctx.named.player as string
+      if (!taskId || !player) return { ok: false, error: '需要 --task 和 --player 参数' }
+      const r = setChatPlayer(taskId, player)
+      if (!r.ok) return { ok: false, error: r.error }
+      const st = getChatTask(taskId)
+      if (st) {
+        st.control.pushLine(`发送目标已切换 → ${player}`)
+      }
+      return { ok: true, player }
     }
   },
   {

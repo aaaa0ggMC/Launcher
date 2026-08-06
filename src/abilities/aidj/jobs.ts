@@ -551,6 +551,18 @@ export function getChatTasks(): ChatTaskState[] {
   return [...chatTasks.values()]
 }
 
+/** Live-switch the player a chat session pushes songs to. */
+export function setChatPlayer(taskId: string, player: string): { ok: boolean; error?: string } {
+  const st = chatTasks.get(taskId)
+  if (!st) return { ok: false, error: '持续会话未运行' }
+  if (!player || player === '__auto__') {
+    st.player = '__auto__'
+  } else {
+    st.player = player
+  }
+  return { ok: true }
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Immediate lookup of a continuous task bound to `player`. */
@@ -692,7 +704,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   try {
     while (!ac.signal.aborted) {
       try {
-        const cont = findContinuousByPlayer(player)
+        const cont = findContinuousByPlayer(st.player)
         const queueLen = cont ? cont.total - cont.index : 0
 
         if (queueLen < REFILL && !session.working) {
@@ -709,7 +721,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
               control.push({ data: { type: 'assistant', content: session.lastIntro } })
             }
             control.push({ data: { type: 'playlist', songs: batch } })
-            const r = ensureContinuousPlayer(player, batch)
+            const r = ensureContinuousPlayer(st.player, batch)
             if (r.ok) {
               control.pushLine(`推送 ${batch.length} 首到连续播放`)
             } else {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
@@ -19,6 +19,46 @@ interface ChatItem {
 
 const inputText = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
+
+// -- send target (player) ------------------------------------------------
+const players = ref<string[]>([])
+const targetPlayer = ref('')
+let playersTimer: ReturnType<typeof setInterval> | null = null
+
+function shortPlayer(name: string): string {
+  const short = name.replace(/^org\.mpris\.MediaPlayer2\./, '')
+  if (short.length <= 10) return short
+  return short.slice(0, 5) + '…' + short.slice(-4)
+}
+
+async function pollPlayers(): Promise<void> {
+  try {
+    const r = (await window.cockpit.command('aidj.list-players').catch(() => null)) as {
+      ok?: boolean
+      players?: string[]
+    } | null
+    if (r?.ok && Array.isArray(r.players)) {
+      players.value = r.players
+      if (!targetPlayer.value) targetPlayer.value = '__auto__'
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+async function selectTarget(name: string): Promise<void> {
+  if (!props.task?.id || !name) return
+  targetPlayer.value = name
+  await window.cockpit.command('aidj.chat-player', { task: props.task.id, player: name })
+}
+
+onMounted(() => {
+  pollPlayers()
+  playersTimer = setInterval(pollPlayers, 5000)
+})
+onUnmounted(() => {
+  if (playersTimer) clearInterval(playersTimer)
+})
 
 const ctxMenu = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
@@ -107,6 +147,19 @@ watch(
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
       <span class="text-body-2 font-weight-medium">持续模式</span>
       <v-spacer />
+      <v-select
+        :model-value="targetPlayer"
+        :items="[
+          { title: '当前激活', value: '__auto__' },
+          ...players.map((p) => ({ title: shortPlayer(p), value: p }))
+        ]"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="chat-player-select"
+        :placeholder="'发送目标'"
+        @update:model-value="selectTarget"
+      />
       <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
         <v-progress-circular indeterminate size="12" width="2" />
         <span class="ml-1">AI DJ</span>
@@ -210,6 +263,18 @@ watch(
 .chat-scroll {
   min-height: 0;
   scroll-behavior: smooth;
+}
+.chat-player-select {
+  width: 160px;
+  max-width: 200px;
+  flex-shrink: 0;
+}
+.chat-player-select :deep(.v-field) {
+  font-size: 0.78rem;
+  min-height: 28px;
+}
+.chat-player-select :deep(.v-select__selection) {
+  font-size: 0.78rem;
 }
 .chat-bubble {
   border-radius: 12px;
