@@ -1372,22 +1372,46 @@ export async function initDbusManager(config: AidjConfig): Promise<DBusManager> 
   return dbus
 }
 
-export async function listAvailablePlayers(): Promise<string[]> {
+// ---------------------------------------------------------------------------
+// Shared player-list cache — every view (main page, continuous, chat) polls
+// aidj.list-players every few seconds, and each listPlayers() call spins up a
+// fresh session bus just to ListNames. Cache the result across all consumers
+// for a short TTL so we scan the bus once and everyone else reuses it. The
+// list changes slowly (players start/stop), so 2s staleness is imperceptible
+// while cutting dozens of bus round-trips.
+// ---------------------------------------------------------------------------
+let _playersCache: { list: string[]; at: number } | null = null
+const PLAYERS_TTL = 2000
+
+/** List MPRIS players, cached for PLAYERS_TTL across all callers. */
+export async function listAvailablePlayers(force = false): Promise<string[]> {
+  if (!force && _playersCache && Date.now() - _playersCache.at < PLAYERS_TTL) {
+    return _playersCache.list
+  }
+  let list: string[]
   if (_dbusManager) {
-    return _dbusManager.listPlayers()
+    list = await _dbusManager.listPlayers()
+  } else {
+    try {
+      const dbus = await import('dbus-next')
+      const bus = dbus.sessionBus()
+      const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
+      const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
+      const names: string[] = await iface.ListNames()
+      bus.disconnect()
+      list = names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
+    } catch (e) {
+      log.warn('listAvailablePlayers failed', { error: String(e) })
+      list = []
+    }
   }
-  try {
-    const dbus = await import('dbus-next')
-    const bus = dbus.sessionBus()
-    const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
-    const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
-    const names: string[] = await iface.ListNames()
-    bus.disconnect()
-    return names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
-  } catch (e) {
-    log.warn('listAvailablePlayers failed', { error: String(e) })
-    return []
-  }
+  _playersCache = { list, at: Date.now() }
+  return list
+}
+
+/** Invalidate the player-list cache (e.g. after a player switch). */
+export function invalidatePlayersCache(): void {
+  _playersCache = null
 }
 
 export async function switchPlayer(playerName: string): Promise<boolean> {

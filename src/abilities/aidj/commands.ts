@@ -643,8 +643,10 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.list-players',
     description: '列出所有可用的 MPRIS 播放器',
-    run: async () => {
-      const players = await listAvailablePlayers()
+    usage: 'aidj.list-players [--force true]',
+    run: async (ctx) => {
+      const force = String(ctx.named.force ?? '') === 'true'
+      const players = await listAvailablePlayers(force)
       const dbus = getDbusManager()
       const current = dbus?.getPlayerName() || ''
       const auto = dbus ? dbus.autoMode : true
