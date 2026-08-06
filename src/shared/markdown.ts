@@ -5,10 +5,7 @@
  */
 
 export function renderMarkdown(text: string): string {
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
   html = html
     .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, _lang: string, code: string) => {
@@ -47,17 +44,20 @@ export function renderMarkdown(text: string): string {
   )
 
   // Lists: - item or 1. item
-  html = html.replace(/^( *)((?:-|\d+\.) .+(\n\1 (?:-|\d+\.) .+)*)/gm, (_match, _indent, content) => {
-    const items = content
-      .split('\n')
-      .map((line: string) => {
-        const m = line.match(/^( *)(?:-|\d+\.)\s+(.+)/)
-        return m ? `<li>${m[2]}</li>` : ''
-      })
-      .filter(Boolean)
-      .join('')
-    return `<ul>${items}</ul>`
-  })
+  html = html.replace(
+    /^( *)((?:-|\d+\.) .+(\n\1 (?:-|\d+\.) .+)*)/gm,
+    (_match, _indent, content) => {
+      const items = content
+        .split('\n')
+        .map((line: string) => {
+          const m = line.match(/^( *)(?:-|\d+\.)\s+(.+)/)
+          return m ? `<li>${m[2]}</li>` : ''
+        })
+        .filter(Boolean)
+        .join('')
+      return `<ul>${items}</ul>`
+    }
+  )
 
   // Headers
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')

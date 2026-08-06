@@ -205,7 +205,7 @@ onBeforeUnmount(cleanupDrag)
       </div>
       <v-icon v-else size="16" class="flex-shrink-0">mdi-music</v-icon>
 
-      <div class="d-flex flex-column flex-grow-1 min-w-0">
+      <div class="d-flex flex-column flex-grow-1 min-w-0 song-name-wrap">
         <span class="text-body-2 song-name text-truncate">{{ song.name }}</span>
       </div>
 
@@ -227,6 +227,7 @@ onBeforeUnmount(cleanupDrag)
   user-select: none;
   transition: background 0.15s;
   min-width: 0;
+  overflow: hidden;
 }
 .song-card:active {
   cursor: grabbing;
@@ -239,6 +240,11 @@ onBeforeUnmount(cleanupDrag)
 }
 .song-card.is-current {
   background: rgba(var(--v-theme-primary-container), 0.45);
+}
+/* Flex item that holds the song name — must be allowed to shrink below its
+   content so long titles ellipsize instead of widening the grid cell. */
+.song-name-wrap {
+  min-width: 0;
 }
 .song-name {
   display: block;

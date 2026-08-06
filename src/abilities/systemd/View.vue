@@ -93,6 +93,7 @@ defineExpose({ toMarkdown })
           variant="solo-filled"
           hide-details
           clearable
+          @click:clear="filter = ''"
         />
       </v-col>
       <v-col cols="12" sm="7" class="d-flex align-center">

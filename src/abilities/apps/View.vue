@@ -581,6 +581,7 @@ defineExpose({ toMarkdown })
           variant="solo-filled"
           hide-details
           clearable
+          @click:clear="searchText = ''"
         />
       </v-col>
       <v-col cols="12" sm="8">

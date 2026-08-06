@@ -80,8 +80,7 @@ const windowRounded = computed(
 
 /** Window corner radius (px) — mirrors window.radius config; default 12. */
 const windowRadius = computed(
-  () =>
-    (runtimeConfig.value.window as { radius?: number } | undefined)?.radius ?? 12
+  () => (runtimeConfig.value.window as { radius?: number } | undefined)?.radius ?? 12
 )
 
 /** Current active language from config. */

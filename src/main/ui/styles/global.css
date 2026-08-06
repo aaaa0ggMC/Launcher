@@ -230,10 +230,8 @@ pre,
 html.motion-off *,
 html.motion-off *::before,
 html.motion-off *::after {
-  transition:
-    none !important;
-  animation:
-    none !important;
+  transition: none !important;
+  animation: none !important;
 }
 
 /* Card action rows get consistent breathing room. */
@@ -245,6 +243,13 @@ html.motion-off *::after {
 .v-dialog .v-card-actions {
   padding-block: 16px;
   gap: 8px;
+}
+
+/* Utility: allow a flex/grid item to shrink below its content (needed so long
+   nowrap text truncates instead of widening the cell). Vuetify ships no
+   min-w-0 class, so define it here — used by chat rows and song grids. */
+.min-w-0 {
+  min-width: 0 !important;
 }
 
 /* ---------------------------------------------------------------------------
