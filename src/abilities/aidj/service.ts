@@ -1113,8 +1113,6 @@ RULES:
 
     if (isVerbose) log.info(`Thinking with ${model}...`)
 
-    const updated = await this.manageContext()
-
     const basePrompt = `### ROLE DEFINITION
 You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
 Your goal is not just to list songs, but to **curate an experience**.
@@ -1139,12 +1137,16 @@ ${SEPARATOR}
 [Part 2: The Payload]
 (Content: Exact song keys from the Library. One key per line. NO numbering. NO markdown bullets. NO extra text.)`
 
+    // Inject the library/system prompt at the FRONT before manageContext runs,
+    // so manageContext's `keep = chatHistory[0]` always preserves it.
     if (this.turnCount === 1) {
       const libraryStr = this.formatLibrary()
       const systemContent = `${basePrompt}\n\n### CURRENT MUSIC LIBRARY (Exact Keys Only):\n${libraryStr}`
-      this.chatHistory.push({ role: 'system', content: systemContent, timestamp: Date.now() })
+      this.chatHistory.unshift({ role: 'system', content: systemContent, timestamp: Date.now() })
       if (isVerbose) log.info('Library injected once')
     }
+
+    const updated = await this.manageContext()
 
     const forbiddenList = this.playedSongs.size > 0 ? [...this.playedSongs].join(', ') : 'None'
     const fullReq = `User Request: "${userRequest}"
