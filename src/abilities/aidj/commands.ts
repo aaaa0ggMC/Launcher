@@ -464,6 +464,7 @@ const commands: CommandSpec[] = [
       const session = _session
       if (session) {
         session.refresh(true)
+        _sessionId = ''
         return { ok: true, message: '已清除历史记录和已播歌曲' }
       }
       return { ok: false, error: 'DJSession 未初始化' }

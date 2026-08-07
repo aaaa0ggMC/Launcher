@@ -1307,6 +1307,10 @@ export class PersistentSession {
         signal,
         onRetry
       )
+      if (signal?.aborted) {
+        this.lastIntro = ''
+        return []
+      }
       this.chatHistory = session.chatHistory
       this.lastIntro = intro || ''
       this.promptTokens += session.promptTokens
