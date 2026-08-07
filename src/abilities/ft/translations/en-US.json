@@ -36,7 +36,7 @@
   "ft.edit.loadFileTitle": "Select vectors JSON file",
   "ft.edit.addRow": "Add vector",
   "ft.edit.removeRow": "Remove this vector",
-  "ft.edit.axisHint": "T_θ / T_φ = the two rotation periods (T_θ polar about X, T_φ azimuth about Z, 0 = off); θ₀ / φ₀ = each rotation's initial phase (deg)",
+  "ft.edit.axisHint": "T_θ / T_φ = the two rotation periods (T_θ about X, T_φ about Z, 0 = off); θ₀ / φ₀ = the vector's initial position on the sphere (polar/azimuth, deg, always applied)",
   "ft.edit.loadFailed": "Load failed",
   "ft.edit.export": "Export vectors",
   "ft.edit.exportTitle": "Export vectors JSON",

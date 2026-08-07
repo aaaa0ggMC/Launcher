@@ -36,7 +36,7 @@
   "ft.edit.loadFileTitle": "选择矢量 JSON 文件",
   "ft.edit.addRow": "添加矢量",
   "ft.edit.removeRow": "删除该矢量",
-  "ft.edit.axisHint": "T_θ / T_φ = 两个旋转周期（T_θ 极向绕 X，T_φ 方位绕 Z，0 = 不转）；θ₀ / φ₀ = 各自的初始相位（度）",
+  "ft.edit.axisHint": "T_θ / T_φ = 两个旋转周期（T_θ 绕 X 改变纬度，T_φ 绕 Z 改变经度，0 = 不转）；θ₀ / φ₀ = 向量在球面上的初始位置（极角/方位角，度，始终生效）",
   "ft.edit.loadFailed": "加载失败",
   "ft.edit.export": "导出矢量",
   "ft.edit.exportTitle": "导出矢量 JSON",

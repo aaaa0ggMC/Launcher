@@ -141,8 +141,6 @@ interface FtVectorLike {
   x: number
   y: number
   z?: number
-  orot?: number
-  orotX?: number
   secperRound: number
   secperRoundX?: number
 }
@@ -453,14 +451,13 @@ function toMarkdown(): string {
     const az = v.secperRound ? `T_φ: ${v.secperRound}s/${t('ft.mdPerRound')}` : ''
     const pol = v.secperRoundX ? `T_θ: ${v.secperRoundX}s/${t('ft.mdPerRound')}` : ''
     const periods = [az, pol].filter(Boolean).join(' · ') || t('ft.mdStatic')
-    const phases = [
-      v.orotX ? `θ₀: ${Number(v.orotX.toFixed(1))}°` : '',
-      v.orot ? `φ₀: ${Number(v.orot.toFixed(1))}°` : ''
-    ]
-      .filter(Boolean)
-      .join(' · ')
-    const suffix = [periods, phases].filter(Boolean).join(' · ')
-    lines.push(`- **${i + 1}** — x: \`${x}\`, y: \`${y}\`${z} · ${suffix}`)
+    // θ₀/φ₀ = initial position on the sphere; show only when genuinely 3D
+    const zz = v.z ?? 0
+    const len = Math.hypot(v.x, v.y, zz)
+    const theta0 = len > 0 ? Math.acos(Math.min(1, Math.max(-1, zz / len))) * (180 / Math.PI) : 90
+    const phi0 = (Math.atan2(v.y, v.x) * 180) / Math.PI
+    const pos = zz ? ` · θ₀: ${Number(theta0.toFixed(1))}° φ₀: ${Number(phi0.toFixed(1))}°` : ''
+    lines.push(`- **${i + 1}** — x: \`${x}\`, y: \`${y}\`${z} · ${periods}${pos}`)
   })
   return lines.join('\n')
 }

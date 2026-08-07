@@ -118,21 +118,16 @@ function randomVectors(): FtVector[] {
     const len = 24 + Math.random() * 90
     const phase = Math.random() * 2 * Math.PI
     const period = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 2.6)
-    v.push({
-      x: len * Math.cos(phase),
-      y: len * Math.sin(phase),
-      secperRound: period,
-      orot: Math.random() * 360 - 180
-    })
+    v.push({ x: len * Math.cos(phase), y: len * Math.sin(phase), secperRound: period })
   }
   return v
 }
 
 /**
- * Random 3D vectors for 3D mode: directions are uniform on the sphere, and
- * roughly half the vectors also get a polar period (`secperRoundX`), so the
- * double-period rotation sweeps a true 3D region instead of a flat scribble.
- * Both initial phases (θ₀ and φ₀) are randomized.
+ * Random 3D vectors for 3D mode: directions are uniform on the sphere (i.e.
+ * θ₀ and φ₀ are randomized), and roughly half the vectors also get a polar
+ * period (`secperRoundX`), so the double-period rotation sweeps a true 3D
+ * region instead of a flat scribble.
  */
 function randomVectors3d(): FtVector[] {
   const v: FtVector[] = []
@@ -145,9 +140,7 @@ function randomVectors3d(): FtVector[] {
       x: len * Math.sin(inc) * Math.cos(az),
       y: len * Math.sin(inc) * Math.sin(az),
       z: len * Math.cos(inc),
-      secperRound: (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 2.6),
-      orot: Math.random() * 360 - 180,
-      orotX: Math.random() * 360 - 180
+      secperRound: (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 2.6)
     }
     if (Math.random() < 0.55) {
       vec.secperRoundX = (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 2)
@@ -202,17 +195,38 @@ export function loadFtPreset(name: string, mode: '2d' | '3d' = '2d'): FtPreset |
   return preset
 }
 
-/** Normalize one raw vector from a JSON file into a valid FtVector. */
+/**
+ * Normalize one raw vector from a JSON file into a valid FtVector. Legacy
+ * `orot`/`orotX` (initial phase fields, superseded by the θ₀/φ₀ position model)
+ * are baked into the initial direction `(x, y, z)` so old files keep their
+ * starting orientation.
+ */
 function normalizeVector(raw: unknown): FtVector {
   const v = (raw ?? {}) as Record<string, unknown>
-  const vec: FtVector = {
-    x: Number(v.x ?? 0),
-    y: Number(v.y ?? 0),
-    secperRound: Number(v.secperRound ?? 1)
+  let x = Number(v.x ?? 0)
+  let y = Number(v.y ?? 0)
+  let z = v.z !== undefined ? Number(v.z) : 0
+  const orot = v.orot !== undefined ? Number(v.orot) : 0
+  const orotX = v.orotX !== undefined ? Number(v.orotX) : 0
+  // bake legacy phases into the position: R_z(orot) · R_x(orotX) · (x,y,z)
+  if (orotX) {
+    const a = (orotX * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const ny = y * c - z * s
+    z = y * s + z * c
+    y = ny
   }
-  if (v.z !== undefined) vec.z = Number(v.z)
-  if (v.orot !== undefined) vec.orot = Number(v.orot)
-  if (v.orotX !== undefined) vec.orotX = Number(v.orotX)
+  if (orot) {
+    const a = (orot * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const nx = x * c - y * s
+    y = x * s + y * c
+    x = nx
+  }
+  const vec: FtVector = { x, y, secperRound: Number(v.secperRound ?? 1) }
+  if (z) vec.z = z
   if (v.secperRoundX !== undefined) vec.secperRoundX = Number(v.secperRoundX)
   return vec
 }
@@ -221,7 +235,8 @@ function normalizeVector(raw: unknown): FtVector {
  * Load vectors from a JSON file. Accepted shapes:
  *   - `{ "vectors": [...], "runSpeed": 1, "verticesLimit": 4096 }`
  *   - a bare `[...]` array of vectors
- * Each vector: `{ x, y, secperRound, orot?, z?, secperRoundX?, orotX? }`.
+ * Each vector: `{ x, y, secperRound, z?, secperRoundX? }` (legacy `orot`/`orotX`
+ * phases are accepted and baked into the direction).
  */
 export async function loadFtFile(path: string): Promise<{
   ok: boolean

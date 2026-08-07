@@ -16,16 +16,16 @@ export interface FtChain {
 /**
  * Rotate a vector to its orientation at sim-time `t` (double-period, nested):
  *
- *   v(t) = R_z(2π·t/T_φ + orot) · R_x(2π·t/T_θ + orotX) · v0
+ *   v(t) = R_z(2π·t/T_φ) · R_x(2π·t/T_θ) · v0
  *
- *   - T_θ = `secperRoundX`, θ₀ = `orotX` — polar rotation about X (changes the
- *     spherical polar angle); 0 period = no polar rotation.
- *   - T_φ = `secperRound`, φ₀ = `orot` — azimuth rotation about Z (classic
- *     epicycle); 0 period = no azimuth rotation.
+ *   - T_θ = `secperRoundX` — rotation about X (changes latitude); 0 = static.
+ *   - T_φ = `secperRound` — rotation about Z (longitude, classic epicycle);
+ *     0 = static.
  *
- * Default `T_θ = 0` makes `R_x` the identity, so a vector reduces to the
- * classic 2D epicycle `(x cosα − y sinα, x sinα + y cosα, z)` with
- * `α = 2π·t/T_φ + orot` — fully backward compatible.
+ * `v0 = (x, y, z)` is the vector's INITIAL position on the sphere — any point
+ * reachable by the two angles θ₀/φ₀, so the start is always honoured even when
+ * a period is 0. Default `T_θ = 0` reproduces the classic 2D XY-plane epicycle
+ * exactly: `(x cosα − y sinα, x sinα + y cosα, z)` with `α = 2π·t/T_φ`.
  */
 export function rotateVector(v: FtVector, t: number): FtPoint {
   const x0 = v.x
@@ -35,9 +35,9 @@ export function rotateVector(v: FtVector, t: number): FtPoint {
   let y = y0
   let z = z0
 
-  // polar: rotate about X by 2π·t/T_θ + orotX
+  // polar: rotate about X by 2π·t/T_θ
   if (v.secperRoundX) {
-    const a = (2 * Math.PI * t) / v.secperRoundX + ((v.orotX ?? 0) * Math.PI) / 180
+    const a = (2 * Math.PI * t) / v.secperRoundX
     const c = Math.cos(a)
     const s = Math.sin(a)
     const ny = y * c - z * s
@@ -45,9 +45,9 @@ export function rotateVector(v: FtVector, t: number): FtPoint {
     y = ny
   }
 
-  // azimuth: rotate about Z by 2π·t/T_φ + orot
+  // azimuth: rotate about Z by 2π·t/T_φ
   if (v.secperRound) {
-    const a = (2 * Math.PI * t) / v.secperRound + ((v.orot ?? 0) * Math.PI) / 180
+    const a = (2 * Math.PI * t) / v.secperRound
     const c = Math.cos(a)
     const s = Math.sin(a)
     const nx = x * c - y * s

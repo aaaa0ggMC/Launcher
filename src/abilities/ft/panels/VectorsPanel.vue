@@ -13,32 +13,42 @@ const apply = inject('ft:applyVectors') as (
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
-/** One editable row. Length/periods/phases are edited as text; the base angle
- *  (direction of (x, y) at t = 0) is captured once so editing |v| keeps it. */
+/**
+ * One editable row. |v| is the true 3D magnitude; θ₀ (polar from +Z) and φ₀
+ * (azimuth) are the vector's initial position on the sphere — edited as
+ * degrees. Together they describe ANY point on the sphere and are always
+ * honoured (the direction is rebuilt directly from them).
+ */
 interface EditableRow {
   len: string
-  angle: number
+  /** θ₀ polar angle from +Z, degrees (90 = XY plane) */
+  theta0: string
+  /** φ₀ azimuth in the XY plane, degrees */
+  phi0: string
   /** azimuth (Z) period — the classic epicycle period */
   period: string
   /** polar (X) period — second, independent period of the double rotation */
   periodX: string
-  /** initial azimuth phase (φ₀) */
-  phase: string
-  /** initial polar phase (θ₀) */
-  phaseX: string
-  z?: number
 }
 
 function toDraft(vectors: FtVector[]): EditableRow[] {
-  return vectors.map((v) => ({
-    len: round(Math.hypot(v.x, v.y)),
-    angle: Math.atan2(v.y, v.x),
-    period: v.secperRound === 0 ? '0' : round(v.secperRound),
-    periodX: round(v.secperRoundX ?? 0),
-    phase: round(v.orot ?? 0),
-    phaseX: round(v.orotX ?? 0),
-    z: v.z
-  }))
+  return vectors.map((v) => {
+    const z = v.z ?? 0
+    const len = Math.hypot(v.x, v.y, z)
+    const theta0 = len > 0 ? (Math.acos(clamp01(z / len)) * 180) / Math.PI : 90
+    const phi0 = (Math.atan2(v.y, v.x) * 180) / Math.PI
+    return {
+      len: round(len),
+      theta0: round(theta0),
+      phi0: round(phi0),
+      period: v.secperRound === 0 ? '0' : round(v.secperRound),
+      periodX: round(v.secperRoundX ?? 0)
+    }
+  })
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(-1, n))
 }
 
 function round(n: number): string {
@@ -61,7 +71,7 @@ watch(
 )
 
 function addRow(): void {
-  draft.value.push({ len: '50', angle: 0, period: '1', periodX: '0', phase: '0', phaseX: '0' })
+  draft.value.push({ len: '50', theta0: '90', phi0: '0', period: '1', periodX: '0' })
 }
 
 function removeRow(i: number): void {
@@ -72,29 +82,28 @@ function buildVectors(): FtVector[] {
   return draft.value
     .map((r) => {
       const len = Number(r.len)
+      const theta = (Number(r.theta0) * Math.PI) / 180
+      const phi = (Number(r.phi0) * Math.PI) / 180
       const period = Number(r.period)
       const periodX = Number(r.periodX)
-      const phase = Number(r.phase)
-      const phaseX = Number(r.phaseX)
       if (
         !Number.isFinite(len) ||
+        !Number.isFinite(theta) ||
+        !Number.isFinite(phi) ||
         !Number.isFinite(period) ||
-        !Number.isFinite(periodX) ||
-        !Number.isFinite(phase) ||
-        !Number.isFinite(phaseX)
+        !Number.isFinite(periodX)
       ) {
         return null
       }
-      const vec: FtVector = {
-        x: len * Math.cos(r.angle),
-        y: len * Math.sin(r.angle),
-        secperRound: period,
-        orot: phase
-      }
-      if (r.z !== undefined) vec.z = r.z
-      // only persist non-default fields so legacy 2D files stay untouched
+      // direction directly from the two spherical angles — reaches any sphere point
+      const x = len * Math.sin(theta) * Math.cos(phi)
+      const y = len * Math.sin(theta) * Math.sin(phi)
+      const z = len * Math.cos(theta)
+      const vec: FtVector = { x, y, secperRound: period }
+      // only persist a meaningful z so legacy 2D files stay untouched (θ₀ = 90 → z = 0)
+      if (Math.abs(z) > 1e-9) vec.z = z
+      // only persist a non-default period so legacy 2D files stay untouched
       if (periodX) vec.secperRoundX = periodX
-      if (phaseX) vec.orotX = phaseX
       return vec
     })
     .filter((v): v is FtVector => v !== null)
@@ -197,8 +206,8 @@ async function exportVectors(): Promise<void> {
             <input v-model="r.len" class="vec-input" inputmode="decimal" spellcheck="false" />
             <input v-model="r.periodX" class="vec-input" inputmode="decimal" spellcheck="false" />
             <input v-model="r.period" class="vec-input" inputmode="decimal" spellcheck="false" />
-            <input v-model="r.phaseX" class="vec-input" inputmode="decimal" spellcheck="false" />
-            <input v-model="r.phase" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.theta0" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.phi0" class="vec-input" inputmode="decimal" spellcheck="false" />
             <v-btn
               icon
               size="x-small"
