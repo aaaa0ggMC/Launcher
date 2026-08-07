@@ -82,13 +82,15 @@ function rawToChatHistory(raw: RawHistoryMessage[]): ChatMessage[] {
 }
 
 function rawToRollingHistory(raw: RawHistoryMessage[]): string[] {
-  const out: string[] = []
+  const seen = new Set<string>()
   for (const m of raw) {
     if (m.playlist) {
-      for (const s of m.playlist) out.push(s.name)
+      for (const s of m.playlist) {
+        if (!seen.has(s.name) && seen.size < 100) seen.add(s.name)
+      }
     }
   }
-  return out.slice(0, 100)
+  return [...seen]
 }
 
 /** Return the raw line index (exclusive) that keeps `keepUiMessages` user/assistant messages. */
@@ -608,7 +610,9 @@ const commands: CommandSpec[] = [
 
       st.session.chatHistory = rawToChatHistory(kept)
       st.session.rollingHistory = rawToRollingHistory(kept)
-      st.session.fetchCount = Math.max(0, st.session.rollingHistory.length >= 8 ? 1 : 0)
+      st.session.fetchCount = kept.filter((m) => m.type === 'both').length
+      st.session.promptTokens = 0
+      st.session.completionTokens = 0
 
       st.control.push({ data: { type: 'clear_history' } })
       for (const m of st.session.chatHistory) {
@@ -649,6 +653,9 @@ const commands: CommandSpec[] = [
         ...rawToChatHistory(kept).filter((m) => m.role !== 'system')
       ]
       _session.playedSongs = new Set(rawToRollingHistory(kept))
+      _session.turnCount = kept.filter((m) => m.type === 'both').length
+      _session.promptTokens = 0
+      _session.completionTokens = 0
       return { ok: true, kept }
     }
   },

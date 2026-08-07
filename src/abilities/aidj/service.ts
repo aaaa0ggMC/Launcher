@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir, appendFile } from 'fs/promises'
+import { readFile, readdir, mkdir, appendFile, writeFile, rename } from 'fs/promises'
 import { join, extname } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -1532,7 +1532,27 @@ export async function getCoverArt(filepath: string): Promise<string | null> {
 //
 // The system prompt (library injection) is NEVER stored here — it is always
 // rebuilt from the current library when replaying context.
+//
+// All history.jsonl mutations are serialized via a per-session promise chain
+// so an append during a truncateTail cannot lose data.
 // ---------------------------------------------------------------------------
+const historyLocks = new Map<string, Promise<void>>()
+
+async function withHistoryLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = historyLocks.get(sessionId) ?? Promise.resolve()
+  let resolve!: () => void
+  const tail = new Promise<void>((r) => (resolve = r))
+  const tailPromise = prev.then(() => tail)
+  historyLocks.set(sessionId, tailPromise)
+  await prev
+  try {
+    return await fn()
+  } finally {
+    resolve()
+    if (historyLocks.get(sessionId) === tailPromise) historyLocks.delete(sessionId)
+  }
+}
+
 export class SessionManager {
   static sessionsDir(): string {
     return SESSIONS_DIR
@@ -1568,20 +1588,24 @@ export class SessionManager {
   }
 
   static async appendMessage(sessionId: string, msg: RawHistoryMessage): Promise<void> {
-    await this.ensureIndex()
-    const line = JSON.stringify(msg) + '\n'
-    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
-    await appendFile(p, line, 'utf-8')
-    await this.touchSession(sessionId)
+    return withHistoryLock(sessionId, async () => {
+      await this.ensureIndex()
+      const line = JSON.stringify(msg) + '\n'
+      const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+      await appendFile(p, line, 'utf-8')
+      await this.touchSession(sessionId)
+    })
   }
 
   static async appendMessages(sessionId: string, msgs: RawHistoryMessage[]): Promise<void> {
     if (!msgs.length) return
-    await this.ensureIndex()
-    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
-    const data = msgs.map((m) => JSON.stringify(m)).join('\n') + '\n'
-    await appendFile(p, data, 'utf-8')
-    await this.touchSession(sessionId)
+    return withHistoryLock(sessionId, async () => {
+      await this.ensureIndex()
+      const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+      const data = msgs.map((m) => JSON.stringify(m)).join('\n') + '\n'
+      await appendFile(p, data, 'utf-8')
+      await this.touchSession(sessionId)
+    })
   }
 
   /** Read all raw history lines for a session. */
@@ -1604,20 +1628,24 @@ export class SessionManager {
     }
   }
 
-  /** Truncate the last `n` lines from history.jsonl (revert support). */
+  /** Truncate the last `n` lines from history.jsonl (revert support). Atomic write under lock. */
   static async truncateTail(sessionId: string, n: number): Promise<void> {
     if (n <= 0) return
-    const all = await this.readRawHistory(sessionId)
-    const keep = Math.max(0, all.length - n)
-    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
-    await writeTextFile(
-      p,
-      all
-        .slice(0, keep)
-        .map((m) => JSON.stringify(m))
-        .join('\n')
-    )
-    await this.touchSession(sessionId)
+    await withHistoryLock(sessionId, async () => {
+      const all = await this.readRawHistory(sessionId)
+      const keep = Math.max(0, all.length - n)
+      const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+      await mkdir(SESSIONS_DIR, { recursive: true })
+      const tmp = `${p}.tmp-${process.pid}`
+      const text =
+        all
+          .slice(0, keep)
+          .map((m) => JSON.stringify(m))
+          .join('\n') + (keep > 0 ? '\n' : '')
+      await writeFile(tmp, text, 'utf-8')
+      await rename(tmp, p)
+      await this.touchSession(sessionId)
+    })
   }
 
   static async listSessions(): Promise<SessionMeta[]> {

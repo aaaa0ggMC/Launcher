@@ -594,10 +594,11 @@ async function doRevert(): Promise<void> {
   for (let i = 0; i <= idx && i < messages.value.length; i++) {
     if (messages.value[i].role === 'user' || messages.value[i].role === 'assistant') keep++
   }
-  messages.value.splice(idx)
+  const removed = messages.value.splice(idx)
   try {
     await window.cockpit.command('aidj.revert', { keep })
   } catch (e) {
+    messages.value.splice(idx, 0, ...removed)
     showSnack(`回退失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
     return
   }
