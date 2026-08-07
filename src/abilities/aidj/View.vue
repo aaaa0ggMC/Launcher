@@ -29,6 +29,11 @@ const pendingText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 const expanded = ref(false)
 
+let msgSeq = 0
+function makeUid(): number {
+  return ++msgSeq
+}
+
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
 const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
 const sbTracks = ref(0)
@@ -214,14 +219,16 @@ function handleBtData(data: Record<string, unknown>): void {
     messages.value.push({
       role: 'assistant',
       content: `▶ 播放: ${String(data.track ?? '')}`,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      uid: makeUid()
     })
     scrollToBottom()
   } else if (data.type === 'status' && data.message === 'started') {
     messages.value.push({
       role: 'system',
       content: `持久模式已启动 | 提示: ${String(data.prompt ?? '')}`,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      uid: makeUid()
     })
     scrollToBottom()
   }
@@ -304,12 +311,13 @@ async function sendMessage(): Promise<void> {
 
   pendingText.value = text
   inputText.value = ''
-  messages.value.push({ role: 'user', content: text, timestamp: Date.now() })
+  messages.value.push({ role: 'user', content: text, timestamp: Date.now(), uid: makeUid() })
   const placeholderIdx = messages.value.length
   messages.value.push({
     role: 'assistant',
     content: '...',
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    uid: makeUid()
   })
   scrollToBottom()
 
@@ -345,30 +353,35 @@ async function sendMessage(): Promise<void> {
         if (result.tokens)
           lastTokens.value = result.tokens as { prompt: number; completion: number }
         const pl = result.playlist as { name: string; path: string }[] | undefined
+        const placeholderUid = messages.value[placeholderIdx]?.uid
         if (pl && pl.length > 0) {
           messages.value[placeholderIdx] = {
             role: 'assistant',
             content: (result.intro as string) || '推荐歌单',
             playlist: pl as ChatMessage['playlist'],
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            uid: placeholderUid ?? makeUid()
           }
         } else if (result.intro) {
           messages.value[placeholderIdx] = {
             role: 'assistant',
             content: result.intro as string,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            uid: placeholderUid ?? makeUid()
           }
           messages.value.push({
             role: 'system',
             content: '💬 AI 未生成歌曲列表（库中可能没有匹配的歌曲）',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            uid: makeUid()
           })
         }
       } else {
         messages.value[placeholderIdx] = {
           role: 'assistant',
           content: `错误: ${(result?.error as string) || '请求失败'}`,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          uid: messages.value[placeholderIdx]?.uid ?? makeUid()
         }
       }
     } catch (e: unknown) {
@@ -376,7 +389,8 @@ async function sendMessage(): Promise<void> {
       messages.value[placeholderIdx] = {
         role: 'assistant',
         content: `错误: ${e instanceof Error ? e.message : String(e)}`,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        uid: messages.value[placeholderIdx]?.uid ?? makeUid()
       }
     } finally {
       if (charTimer) clearInterval(charTimer)
@@ -589,9 +603,9 @@ async function doRevert(): Promise<void> {
   const idx = ctxMsgIndex.value
   if (idx < 0) return
   ctxMenu.value = false
-  // Count user/assistant messages up to the clicked one (skip now_playing pseudo-messages).
+  // Count user/assistant messages BEFORE the clicked one (skip now_playing pseudo-messages).
   let keep = 0
-  for (let i = 0; i <= idx && i < messages.value.length; i++) {
+  for (let i = 0; i < idx && i < messages.value.length; i++) {
     const m = messages.value[i]
     if (
       (m.role === 'user' || m.role === 'assistant') &&
@@ -696,7 +710,7 @@ async function doRevert(): Promise<void> {
 
         <ChatMessageVue
           v-for="(msg, idx) in messages"
-          :key="msg.timestamp"
+          :key="msg.uid ?? msg.timestamp"
           :message="msg"
           :index="idx"
           @play-all="handlePlayAll"

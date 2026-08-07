@@ -68,6 +68,8 @@ export interface ChatMessage {
   playlist?: PlaylistEntry[]
   timestamp: number
   chars?: number
+  /** Monotonic unique id for Vue key stability (timestamps can collide). */
+  uid?: number
 }
 
 /** Raw history.jsonl entry. type: user=UI only, model=AI only, both=display+AI, updated=compact/drop marker. */

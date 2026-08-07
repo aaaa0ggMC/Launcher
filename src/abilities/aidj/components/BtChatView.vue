@@ -45,9 +45,9 @@ async function doRevert(): Promise<void> {
   const idx = ctxMsgIndex.value
   if (idx < 0 || !props.task?.id) return
   ctxMenu.value = false
-  // Count user/assistant items up to the clicked one.
+  // Count user/assistant items BEFORE the clicked one.
   let keep = 0
-  for (let i = 0; i <= idx && i < items.value.length; i++) {
+  for (let i = 0; i < idx && i < items.value.length; i++) {
     if (items.value[i].kind === 'user' || items.value[i].kind === 'assistant') keep++
   }
   await window.cockpit.command('aidj.chat-revert', { task: props.task.id, keep }).catch(() => {})
