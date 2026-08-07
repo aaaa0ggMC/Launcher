@@ -1394,7 +1394,7 @@ export class PersistentSession {
         content,
         ts: Date.now(),
         type: 'user'
-      })
+      }).catch((e) => log.warn('persist user message failed', { error: String(e) }))
     }
   }
 
@@ -1570,19 +1570,22 @@ export class SessionManager {
     initialPrompt?: string
   }): Promise<string> {
     await this.ensureIndex()
-    const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const now = Date.now()
+    const suffix = opts.type === 'chat' ? ' [持续]' : ' [生成]'
     const meta: SessionMeta = {
       id,
-      title: opts.title,
+      title: `${opts.title}${suffix}`.slice(0, 60),
       type: opts.type,
       initialPrompt: opts.initialPrompt,
       created_at: now,
       updated_at: now
     }
-    idx.sessions.push(meta)
-    await writeJsonAtomic(SESSIONS_INDEX, idx)
+    await withHistoryLock('__index__', async () => {
+      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      idx.sessions.push(meta)
+      await writeJsonAtomic(SESSIONS_INDEX, idx)
+    })
     await mkdir(join(SESSIONS_DIR, id), { recursive: true })
     return id
   }
@@ -1659,11 +1662,13 @@ export class SessionManager {
   }
 
   static async touchSession(sessionId: string): Promise<void> {
-    const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
-    const s = idx.sessions.find((x) => x.id === sessionId)
-    if (s) {
-      s.updated_at = Date.now()
-      await writeJsonAtomic(SESSIONS_INDEX, idx)
-    }
+    await withHistoryLock('__index__', async () => {
+      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const s = idx.sessions.find((x) => x.id === sessionId)
+      if (s) {
+        s.updated_at = Date.now()
+        await writeJsonAtomic(SESSIONS_INDEX, idx)
+      }
+    })
   }
 }

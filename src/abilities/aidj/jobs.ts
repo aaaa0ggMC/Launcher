@@ -83,6 +83,11 @@ registerJobHandler('aidj.persistent', async (control, args) => {
     initialPrompt,
     anchorValue
   )
+  const sessionId = await SessionManager.createSession({
+    title: initialPrompt.slice(0, 40),
+    type: 'chat'
+  })
+  session.sessionId = sessionId
   setPersistentSession(session)
 
   const ac = new AbortController()
@@ -747,12 +752,18 @@ registerJobHandler('aidj.chat', async (control, args) => {
   session.sessionId = sessionId
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
-    // Persist the seeded history as raw lines (user messages only).
+    // Persist seeded history as raw lines (user → type='user', assistant → type='both' with playlist).
     await SessionManager.appendMessages(
       sessionId,
       history
-        .filter((m) => m.role === 'user')
-        .map((m) => ({ role: 'user', content: m.content, ts: m.timestamp, type: 'user' }))
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          ts: m.timestamp,
+          type: m.role === 'assistant' ? 'both' : 'user',
+          playlist: m.playlist
+        }))
     )
   }
   if (Array.isArray(rollingHistoryArg) && rollingHistoryArg.length) {
@@ -798,6 +809,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const FETCH_TIMEOUT = 180_000
   let fetchAc = new AbortController()
   let lastErrorShown = ''
+  let lastIntroShown = ''
 
   const fetchWithTimeout = async (): Promise<void> => {
     fetchAc.abort()
@@ -865,10 +877,15 @@ registerJobHandler('aidj.chat', async (control, args) => {
               control.pushLine(`推送歌单失败: ${r.error ?? ''}`, 'stderr')
               break
             }
-          } else if (session.lastIntro && session.lastIntro.startsWith('⚠️')) {
-            if (session.lastIntro !== lastErrorShown) {
-              lastErrorShown = session.lastIntro
-              control.push({ data: { type: 'system', content: session.lastIntro } })
+          } else if (session.lastIntro) {
+            if (session.lastIntro.startsWith('⚠️')) {
+              if (session.lastIntro !== lastErrorShown) {
+                lastErrorShown = session.lastIntro
+                control.push({ data: { type: 'system', content: session.lastIntro } })
+              }
+            } else if (session.lastIntro !== lastIntroShown) {
+              lastIntroShown = session.lastIntro
+              control.push({ data: { type: 'assistant', content: session.lastIntro } })
             }
           }
         }

@@ -72,7 +72,9 @@ let _sessionId = ''
 // ---------------------------------------------------------------------------
 function rawToChatHistory(raw: RawHistoryMessage[]): ChatMessage[] {
   return raw
-    .filter((m) => m.type === 'user' || m.type === 'both' || m.type === 'updated')
+    .filter(
+      (m) => m.type === 'user' || m.type === 'both' || (m.type === 'updated' && m.content !== '')
+    )
     .map((m) => ({
       role: m.type === 'both' ? 'assistant' : m.type === 'updated' ? 'system' : 'user',
       content: m.content,
@@ -230,19 +232,21 @@ const commands: CommandSpec[] = [
             _streamingChars = 0
           }
         )
-        if (!_sessionId) {
-          _sessionId = await SessionManager.createSession({
-            title: prompt.slice(0, 40),
-            type: 'generate'
-          })
+        if (!_currentAbort?.signal.aborted) {
+          if (!_sessionId) {
+            _sessionId = await SessionManager.createSession({
+              title: prompt.slice(0, 40),
+              type: 'generate'
+            })
+          }
+          const rawMsgs: RawHistoryMessage[] = []
+          if (updated) rawMsgs.push(updated)
+          rawMsgs.push(
+            { role: 'user', content: prompt, ts: Date.now(), type: 'user' },
+            { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
+          )
+          await SessionManager.appendMessages(_sessionId, rawMsgs)
         }
-        const rawMsgs: RawHistoryMessage[] = []
-        if (updated) rawMsgs.push(updated)
-        rawMsgs.push(
-          { role: 'user', content: prompt, ts: Date.now(), type: 'user' },
-          { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
-        )
-        await SessionManager.appendMessages(_sessionId, rawMsgs)
         const enriched = playlist.map((s) => ({
           ...s,
           meta: session.metadata.get(s.name) || null
@@ -613,6 +617,9 @@ const commands: CommandSpec[] = [
       st.session.fetchCount = kept.filter((m) => m.type === 'both').length
       st.session.promptTokens = 0
       st.session.completionTokens = 0
+      st.session.buffer = []
+      st.session.currentQueue = []
+      st.session.lastIntro = ''
 
       st.control.push({ data: { type: 'clear_history' } })
       for (const m of st.session.chatHistory) {
@@ -647,13 +654,11 @@ const commands: CommandSpec[] = [
       await SessionManager.truncateTail(_sessionId, raw.length - keepLines)
       const kept = raw.slice(0, keepLines)
 
-      const sysPrompt = _session.chatHistory[0]
-      _session.chatHistory = [
-        sysPrompt,
-        ...rawToChatHistory(kept).filter((m) => m.role !== 'system')
-      ]
+      const sysPrompt = _session.chatHistory[0]?.role === 'system' ? _session.chatHistory[0] : null
+      const rebuilt = rawToChatHistory(kept).filter((m) => m.role !== 'system')
+      _session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       _session.playedSongs = new Set(rawToRollingHistory(kept))
-      _session.turnCount = kept.filter((m) => m.type === 'both').length
+      _session.turnCount = Math.max(1, kept.filter((m) => m.type === 'both').length)
       _session.promptTokens = 0
       _session.completionTokens = 0
       return { ok: true, kept }
@@ -822,6 +827,7 @@ const commands: CommandSpec[] = [
       _session = null
       _metadata = null
       _musicPaths = null
+      _sessionId = ''
       invalidateLibrary()
       const oldDbus = getDbusManager()
       if (oldDbus) oldDbus.disconnect()

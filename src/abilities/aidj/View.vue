@@ -589,10 +589,16 @@ async function doRevert(): Promise<void> {
   const idx = ctxMsgIndex.value
   if (idx < 0) return
   ctxMenu.value = false
-  // Count user/assistant messages up to the clicked one.
+  // Count user/assistant messages up to the clicked one (skip now_playing pseudo-messages).
   let keep = 0
   for (let i = 0; i <= idx && i < messages.value.length; i++) {
-    if (messages.value[i].role === 'user' || messages.value[i].role === 'assistant') keep++
+    const m = messages.value[i]
+    if (
+      (m.role === 'user' || m.role === 'assistant') &&
+      !(m.role === 'assistant' && m.content.startsWith('▶ 播放'))
+    ) {
+      keep++
+    }
   }
   const removed = messages.value.splice(idx)
   try {
