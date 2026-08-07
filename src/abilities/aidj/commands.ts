@@ -57,6 +57,9 @@ let _currentAbort: AbortController | null = null
 let _streamingChars = 0
 let _retrying = false
 let _retryAttempt = 0
+let _retryWaitMs = 0
+let _retryStart = 0
+let _retryLastError = ''
 
 export function getCurrentAbortSignal(): AbortSignal | null {
   return _currentAbort?.signal ?? null
@@ -68,6 +71,9 @@ export function abortCurrentRequest(): void {
   _streamingChars = 0
   _retrying = false
   _retryAttempt = 0
+  _retryWaitMs = 0
+  _retryStart = 0
+  _retryLastError = ''
 }
 
 /** Load config (cached) + shared library (metadata + paths). Does NOT sync/AI — lightweight. */
@@ -155,16 +161,26 @@ const commands: CommandSpec[] = [
       _streamingChars = 0
       _retrying = false
       _retryAttempt = 0
+      _retryWaitMs = 0
+      _retryStart = 0
+      _retryLastError = ''
       try {
         const { playlist, intro } = await session.nextStep(
           prompt,
           (full: string) => {
+            if (_retrying) {
+              _retrying = false
+              _retryLastError = ''
+            }
             _streamingChars = full.length
           },
           _currentAbort.signal,
-          (attempt) => {
+          (attempt, waitMs, err) => {
             _retrying = true
             _retryAttempt = attempt
+            _retryWaitMs = waitMs
+            _retryStart = _retryStart || Date.now()
+            _retryLastError = err ? String(err instanceof Error ? err.message : err) : ''
             _streamingChars = 0
           }
         )
@@ -172,6 +188,9 @@ const commands: CommandSpec[] = [
           ...s,
           meta: session.metadata.get(s.name) || null
         }))
+        if (intro.startsWith('⚠️')) {
+          return { ok: false, error: intro.replace(/^⚠️\s*/, '') }
+        }
         return {
           ok: true,
           intro,
@@ -183,6 +202,9 @@ const commands: CommandSpec[] = [
         _streamingChars = 0
         _retrying = false
         _retryAttempt = 0
+        _retryWaitMs = 0
+        _retryStart = 0
+        _retryLastError = ''
       }
     }
   },
@@ -488,6 +510,21 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.chat-clear-memory',
+    description: '清空持续会话的已播记忆',
+    usage: 'aidj.chat-clear-memory --task <id>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      const st = getChatTask(taskId)
+      if (!st) return { ok: false, error: '持续会话未运行' }
+      st.session.clearMemory()
+      st.control.push({ data: { type: 'chat_status', promptTokens: st.session.promptTokens, completionTokens: st.session.completionTokens, memory: 0 } })
+      st.control.pushLine('已播记忆已清空')
+      return { ok: true }
+    }
+  },
+  {
     name: 'aidj.start-persistent',
     description: '启动持久模式',
     usage: 'aidj.start-persistent --prompt <text> [--anchor <value>]',
@@ -563,7 +600,10 @@ const commands: CommandSpec[] = [
         ok: true,
         chars: _streamingChars,
         retrying: _retrying,
-        retryAttempt: _retryAttempt
+        retryAttempt: _retryAttempt,
+        retryWaitMs: _retryWaitMs,
+        retryElapsed: _retryStart ? Date.now() - _retryStart : 0,
+        retryLastError: _retryLastError
       }
     }
   },

@@ -328,9 +328,9 @@ async function sendMessage(): Promise<void> {
           if (!msg) return
           if (typeof r.chars === 'number') msg.chars = r.chars as number
           if (r.retrying === true) {
-            msg.content = `⚠️ 网络不可用，正在重试… (第 ${String(r.retryAttempt ?? 0)} 次)`
-          } else if (msg.content !== '...') {
-            msg.content = '...'
+            const elapsed = Math.round(((r.retryElapsed as number) ?? 0) / 1000)
+            const err = (r.retryLastError as string) || ''
+            msg.content = `重试中(${String(r.retryAttempt ?? 0)}: 已经${elapsed}s)${err ? `\n⚠️ ${err}` : ''}`
           }
         }
       } catch {
@@ -503,11 +503,22 @@ async function startPersistentChat(prompt: string): Promise<void> {
     const resolved = status?.player || ''
     const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
 
+    const rollingHistory: string[] = []
+    for (const m of messages.value) {
+      if (m.playlist && m.playlist.length > 0) {
+        for (const s of m.playlist) {
+          rollingHistory.push(s.name)
+        }
+      }
+    }
+
     const history: ChatMessage[] = [
       ...messages.value.map((m) => ({
         role: m.role,
         content: m.content,
-        playlist: m.playlist,
+        playlist: m.playlist
+          ? JSON.parse(JSON.stringify(m.playlist))
+          : undefined,
         timestamp: m.timestamp
       })),
       { role: 'user', content: prompt, timestamp: Date.now() }
@@ -515,11 +526,8 @@ async function startPersistentChat(prompt: string): Promise<void> {
 
     const result = (await window.cockpit.btJob('aidj.chat', {
       prompt,
-      history: history.map((h) => ({
-        role: h.role,
-        content: h.content,
-        timestamp: h.timestamp
-      })),
+      history: JSON.parse(JSON.stringify(history)),
+      rollingHistory,
       player: player || '__auto__',
       view: 'chat'
     })) as Record<string, unknown>

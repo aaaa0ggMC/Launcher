@@ -187,7 +187,7 @@ onBeforeUnmount(cleanupDrag)
     >
       <span
         class="text-caption text-medium-emphasis flex-shrink-0"
-        style="width: 2ch; text-align: right"
+        style="min-width: 3ch; text-align: right"
       >
         {{ idx + 1 }}
       </span>

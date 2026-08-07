@@ -689,6 +689,7 @@ export function clearContinuousPending(player: string): void {
 registerJobHandler('aidj.chat', async (control, args) => {
   const initialPrompt = (args.prompt as string) || ''
   const history = (args.history ?? []) as ChatMessage[]
+  const rollingHistoryArg = (args.rollingHistory ?? []) as string[]
   const playerArg = (args.player as string) || ''
   if (!initialPrompt) {
     control.pushLine('错误: 需要初始提示词', 'stderr')
@@ -741,6 +742,9 @@ registerJobHandler('aidj.chat', async (control, args) => {
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
   }
+  if (Array.isArray(rollingHistoryArg) && rollingHistoryArg.length) {
+    session.rollingHistory = rollingHistoryArg.slice(0, 100)
+  }
 
   const ac = new AbortController()
   const st: ChatTaskState = { session, player, control }
@@ -753,38 +757,53 @@ registerJobHandler('aidj.chat', async (control, args) => {
 
   // Replay seeded history into the view.
   for (const m of session.chatHistory) {
+    const t = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
     control.push({
       data: {
-        type: m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant',
+        type: t,
         content: m.content,
         history: true
       }
     })
+    if (m.playlist && m.playlist.length > 0) {
+      control.push({ data: { type: 'playlist', songs: m.playlist, history: true } })
+    }
   }
 
   control.push({ data: { type: 'state', message: 'started', player, prompt: initialPrompt } })
   control.pushLine(`持续会话已启动 → ${player}`)
+  control.push({
+    data: {
+      type: 'chat_status',
+      promptTokens: 0,
+      completionTokens: 0,
+      memory: session.rollingHistory.length
+    }
+  })
 
   const REFILL = 8
   const FETCH_TIMEOUT = 180_000
   let fetchAc = new AbortController()
-  let lastRetryNote = 0
+  let lastErrorShown = ''
 
   const fetchWithTimeout = async (): Promise<void> => {
     fetchAc.abort()
     fetchAc = new AbortController()
     const t = setTimeout(() => fetchAc.abort(), FETCH_TIMEOUT)
+    let retryStart = 0
     try {
-      await session.fetchBatch(fetchAc.signal, (attempt, waitMs) => {
-        const now = Date.now()
-        if (now - lastRetryNote > 5000) {
-          lastRetryNote = now
-          control.pushLine(
-            `网络不可用，第 ${attempt} 次重试中… (${Math.round(waitMs / 1000)}s)`,
-            'stderr'
-          )
-          control.push({ data: { type: 'system', content: `网络不可用，重试中… (${attempt})` } })
-        }
+      await session.fetchBatch(AbortSignal.any([ac.signal, fetchAc.signal]), (attempt, _waitMs, err) => {
+        retryStart = retryStart || Date.now()
+        const elapsed = Math.round((Date.now() - retryStart) / 1000)
+        const errMsg = err ? String(err instanceof Error ? err.message : err) : ''
+        control.push({
+          data: {
+            type: 'retry',
+            attempt,
+            elapsed,
+            content: `重试中(${attempt}: 已经${elapsed}s)${errMsg ? `\n⚠️ ${errMsg}` : ''}`
+          }
+        })
       })
     } finally {
       clearTimeout(t)
@@ -803,6 +822,15 @@ registerJobHandler('aidj.chat', async (control, args) => {
             await fetchWithTimeout()
           } finally {
             control.push({ data: { type: 'idle' } })
+            control.push({ data: { type: 'retry_clear' } })
+            control.push({
+              data: {
+                type: 'chat_status',
+                promptTokens: session.promptTokens,
+                completionTokens: session.completionTokens,
+memory: session.rollingHistory.length
+              }
+            })
           }
 
           const batch = session.buffer.shift()
@@ -821,6 +849,11 @@ registerJobHandler('aidj.chat', async (control, args) => {
               control.pushLine(`推送歌单失败: ${r.error ?? ''}`, 'stderr')
               break
             }
+          } else if (session.lastIntro && session.lastIntro.startsWith('⚠️')) {
+            if (session.lastIntro !== lastErrorShown) {
+              lastErrorShown = session.lastIntro
+              control.push({ data: { type: 'system', content: session.lastIntro } })
+            }
           }
         }
 
@@ -828,6 +861,11 @@ registerJobHandler('aidj.chat', async (control, args) => {
       } catch (e) {
         if (ac.signal.aborted) break
         log.error('chat loop error', { error: String(e) })
+        const errMsg = `⚠️ API 错误: ${String(e)}`
+        if (errMsg !== lastErrorShown) {
+          lastErrorShown = errMsg
+          control.push({ data: { type: 'system', content: errMsg } })
+        }
         control.pushLine(`错误: ${String(e)}`, 'stderr')
         await sleep(5000)
       }

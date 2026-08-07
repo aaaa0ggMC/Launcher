@@ -12,13 +12,34 @@ const props = defineProps<{
 }>()
 
 interface ChatItem {
-  kind: 'user' | 'assistant' | 'system' | 'playlist'
+  kind: 'user' | 'assistant' | 'system' | 'playlist' | 'retry'
   content?: string
   songs?: { name: string; path: string }[]
+  history?: boolean
 }
 
 const inputText = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
+
+// -- status bar -----------------------------------------------------------
+const chatStatus = ref({ promptTokens: 0, completionTokens: 0, memory: 0 })
+const memoryConfirm = ref(false)
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
+  return n.toLocaleString()
+}
+
+async function clearMemory(): Promise<void> {
+  memoryConfirm.value = false
+  if (!props.task?.id) return
+  try {
+    await window.cockpit.command('aidj.chat-clear-memory', { task: props.task.id })
+    chatStatus.value.memory = 0
+  } catch {
+    /* noop */
+  }
+}
 
 // -- send target (player) ------------------------------------------------
 const players = ref<string[]>([])
@@ -110,8 +131,20 @@ const items = computed<ChatItem[]>(() => {
     } else if (t === 'playlist') {
       out.push({
         kind: 'playlist',
-        songs: (d as Record<string, unknown>).songs as { name: string; path: string }[]
+        songs: (d as Record<string, unknown>).songs as { name: string; path: string }[],
+        history: (d as Record<string, unknown>).history === true
       })
+    } else if (t === 'retry') {
+      const content = String((d as Record<string, unknown>).content ?? '')
+      if (out.length > 0 && out[out.length - 1].kind === 'retry') {
+        out[out.length - 1].content = content
+      } else {
+        out.push({ kind: 'retry', content })
+      }
+    } else if (t === 'retry_clear') {
+      if (out.length > 0 && out[out.length - 1].kind === 'retry') {
+        out.pop()
+      }
     }
   }
   return out
@@ -145,6 +178,26 @@ watch(
       if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight
     })
   }
+)
+
+watch(
+  () => props.messages,
+  (msgs) => {
+    if (!msgs) return
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const d = msgs[i].data
+      if (d && typeof d === 'object' && (d as Record<string, unknown>).type === 'chat_status') {
+        const data = d as Record<string, unknown>
+        chatStatus.value = {
+          promptTokens: (data.promptTokens as number) ?? 0,
+          completionTokens: (data.completionTokens as number) ?? 0,
+          memory: (data.memory as number) ?? 0
+        }
+        break
+      }
+    }
+  },
+  { deep: true }
 )
 </script>
 
@@ -199,10 +252,19 @@ watch(
           <div v-else-if="it.kind === 'system'" class="d-flex justify-center">
             <span class="text-caption text-medium-emphasis">{{ it.content }}</span>
           </div>
+          <div v-else-if="it.kind === 'retry'" class="d-flex justify-center">
+            <span class="text-caption text-warning">
+              <v-icon size="12" class="mr-1">mdi-loading mdi-spin</v-icon>
+              {{ it.content }}
+            </span>
+          </div>
           <div v-else-if="it.kind === 'playlist'" class="d-flex flex-column align-start w-100">
             <div class="d-flex align-start ga-2 w-100">
-              <span class="text-caption text-medium-emphasis flex-grow-1">推荐歌单</span>
+              <span class="text-caption text-medium-emphasis flex-grow-1">
+                {{ it.history ? '主界面歌单' : '推荐歌单' }}
+              </span>
               <v-btn
+                v-if="!it.history"
                 size="x-small"
                 variant="text"
                 color="primary"
@@ -223,7 +285,7 @@ watch(
                 >
                   <span
                     class="text-caption text-medium-emphasis"
-                    style="width: 2ch; text-align: right"
+                    style="min-width: 3ch; text-align: right"
                   >
                     {{ si + 1 }}
                   </span>
@@ -239,6 +301,27 @@ watch(
           AI 正在生成首个歌单…
         </div>
       </div>
+    </div>
+
+    <div class="aidj-status-bar">
+      <v-chip variant="flat" size="small" class="status-chip">
+        <span class="status-label">Prompt</span
+        ><span class="status-value">{{ formatTokens(chatStatus.promptTokens) }}</span>
+      </v-chip>
+      <v-chip variant="flat" size="small" class="status-chip">
+        <span class="status-label">Completion</span
+        ><span class="status-value">{{ formatTokens(chatStatus.completionTokens) }}</span>
+      </v-chip>
+      <v-chip
+        variant="flat"
+        size="small"
+        class="status-chip clickable"
+        :title="'点击清空已播记忆'"
+        @click="memoryConfirm = true"
+      >
+        <span class="status-label">Memory</span
+        ><span class="status-value">{{ chatStatus.memory.toLocaleString() }}</span>
+      </v-chip>
     </div>
 
     <v-divider />
@@ -276,6 +359,20 @@ watch(
       :content="ctxTarget"
       :is-ai="ctxIsAi"
     />
+
+    <v-dialog v-model="memoryConfirm" max-width="400">
+      <v-card>
+        <v-card-title class="text-body-1 font-weight-medium">清空已播记忆</v-card-title>
+        <v-card-text class="text-body-2">
+          清空后 AI 将不再记住已推荐过的歌曲，可能重复推荐。
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-0 ga-2">
+          <v-spacer />
+          <v-btn variant="text" @click="memoryConfirm = false">取消</v-btn>
+          <v-btn variant="tonal" color="primary" @click="clearMemory">确认清空</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -334,6 +431,34 @@ watch(
   align-items: center;
   padding-block: 4px;
   min-height: 24px;
+}
+.status-chip {
+  padding-block: 4px;
+  min-height: 24px;
+  flex-shrink: 0;
+}
+.status-chip.clickable {
+  cursor: pointer;
+}
+.status-chip.clickable:hover {
+  opacity: 0.8;
+}
+.status-label {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  margin-right: 4px;
+}
+.status-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.aidj-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  flex-shrink: 0;
 }
 .msg-markdown p {
   margin: 0 0 0.4em;

@@ -20,19 +20,18 @@ const log = makeLogger('aidj')
 const execFileAsync = promisify(execFile)
 const AIDJ_DIR = join(USER_CONFIG_DIR, AIDJ_DATA_DIR)
 
-/** True for transport-level failures (offline, refused, timeout) — never for HTTP errors like 401/404. */
+/** True for transport-level failures (offline, refused, timeout) and transient server errors (500-504). */
 export function isNetworkError(e: unknown): boolean {
   if (e instanceof DOMException && e.name === 'AbortError') return false
   const msg = String(e instanceof Error ? e.message : e)
-  const s = String((e as { status?: unknown } | null)?.status)
-  if (s && s !== 'undefined' && !['502', '503', '504'].includes(s)) return false
-  return (
-    /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|socket|timeout/i.test(
-      msg
-    ) ||
-    s === '502' ||
-    s === '503' ||
-    s === '504'
+  const status = (e as { status?: unknown } | null)?.status
+  if (status != null) {
+    const s = String(status)
+    if (s === '500' || s === '502' || s === '503' || s === '504') return true
+    return false
+  }
+  return /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|socket|timeout/i.test(
+    msg
   )
 }
 
@@ -47,7 +46,7 @@ export async function withNetworkRetry<T>(
   opts: {
     retryMinutes: number
     signal?: AbortSignal
-    onRetry?: (attempt: number, waitMs: number) => void
+    onRetry?: (attempt: number, waitMs: number, error: unknown) => void
   }
 ): Promise<T> {
   const { retryMinutes, signal } = opts
@@ -56,15 +55,24 @@ export async function withNetworkRetry<T>(
   let attempt = 0
   for (;;) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    if (Date.now() >= deadline) throw new Error('重试超时')
+
+    const attemptAc = new AbortController()
+    const attemptTimer = setTimeout(() => attemptAc.abort(), 30_000)
     try {
-      return await fn(signal)
+      const combined = signal
+        ? AbortSignal.any([signal, attemptAc.signal])
+        : attemptAc.signal
+      return await fn(combined)
     } catch (e) {
+      clearTimeout(attemptTimer)
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      if (!isNetworkError(e)) throw e
+      const isTimeout = attemptAc.signal.aborted && !signal?.aborted
+      if (!isNetworkError(e) && !isTimeout) throw e
       attempt++
+      const waitMs = Math.min(2000, 1000 * attempt)
+      opts.onRetry?.(attempt, waitMs, isTimeout ? new Error('API 请求超时') : e)
       if (Date.now() >= deadline) throw e
-      const waitMs = Math.min(30_000, 2000 * attempt)
-      opts.onRetry?.(attempt, waitMs)
       await new Promise((r) => setTimeout(r, waitMs))
     }
   }
@@ -1077,7 +1085,7 @@ RULES:
     userRequest: string,
     onStream?: (text: string) => void,
     signal?: AbortSignal,
-    onRetry?: (attempt: number, waitMs: number) => void
+    onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
   ): Promise<{ playlist: PlaylistEntry[]; intro: string }> {
     this.turnCount++
     const model = this.config.preferences.model
@@ -1144,9 +1152,9 @@ Instruction: Check the Library in the first System message. If matches found, ou
         {
           retryMinutes: this.config.preferences.network_retry_minutes ?? 0,
           signal,
-          onRetry: (attempt, waitMs) => {
-            if (isVerbose) log.warn('AI network retry', { attempt, waitMs })
-            onRetry?.(attempt, waitMs)
+          onRetry: (attempt, waitMs, err) => {
+            if (isVerbose) log.warn('AI network retry', { attempt, waitMs, error: String(err) })
+            onRetry?.(attempt, waitMs, err)
           }
         }
       )
@@ -1200,6 +1208,8 @@ export class PersistentSession {
   working: boolean
   /** DJ commentary (intro) of the most recent batch — shown by chat views. */
   lastIntro = ''
+  promptTokens = 0
+  completionTokens = 0
   private client: OpenAI
   private volCache: LoudnessCache
   private initialPrompt: string
@@ -1222,7 +1232,7 @@ export class PersistentSession {
     this.initialPrompt = initialPrompt
     this._anchorValue = anchorValue ?? null
     this.chatHistory = []
-    this.rollingHistory = [...metadata.keys()].slice(0, 100)
+    this.rollingHistory = []
     this.currentQueue = []
     this.buffer = []
     this.fetchCount = 0
@@ -1245,7 +1255,7 @@ export class PersistentSession {
 
   private async fetchNextBatch(
     signal?: AbortSignal,
-    onRetry?: (attempt: number, waitMs: number) => void
+    onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
   ): Promise<PlaylistEntry[]> {
     if (this.working) return []
     this.working = true
@@ -1272,6 +1282,8 @@ export class PersistentSession {
       const { playlist, intro } = await session.nextStep(fullPrompt, undefined, signal, onRetry)
       this.chatHistory = session.chatHistory
       this.lastIntro = intro || ''
+      this.promptTokens += session.promptTokens
+      this.completionTokens += session.completionTokens
 
       if (playlist.length > 0) {
         for (const s of playlist) {
@@ -1295,7 +1307,7 @@ export class PersistentSession {
 
   async fetchBatch(
     signal?: AbortSignal,
-    onRetry?: (attempt: number, waitMs: number) => void
+    onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
   ): Promise<void> {
     const batch = await this.fetchNextBatch(signal, onRetry)
     if (batch.length > 0) this.buffer.push(batch)
@@ -1339,6 +1351,11 @@ export class PersistentSession {
 
   injectUserMessage(content: string): void {
     this.chatHistory.push({ role: 'user', content, timestamp: Date.now() })
+  }
+
+  clearMemory(): void {
+    this.rollingHistory = []
+    this.fetchCount = 0
   }
 
   discardFollows(): void {
