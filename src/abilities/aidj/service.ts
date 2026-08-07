@@ -1332,6 +1332,7 @@ export class PersistentSession {
       return playlist
     } catch (e) {
       log.error('fetch batch failed', { error: String(e) })
+      this.lastIntro = ''
       return []
     } finally {
       this.working = false
@@ -1560,8 +1561,6 @@ export class SessionManager {
 
   static async ensureIndex(): Promise<void> {
     await mkdir(SESSIONS_DIR, { recursive: true })
-    const idx = await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)
-    if (!idx) await writeJsonAtomic(SESSIONS_INDEX, { sessions: [] })
   }
 
   static async createSession(opts: {

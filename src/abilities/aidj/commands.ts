@@ -85,14 +85,15 @@ function rawToChatHistory(raw: RawHistoryMessage[]): ChatMessage[] {
 
 function rawToRollingHistory(raw: RawHistoryMessage[]): string[] {
   const seen = new Set<string>()
-  for (const m of raw) {
+  for (let i = raw.length - 1; i >= 0 && seen.size < 100; i--) {
+    const m = raw[i]
     if (m.playlist) {
       for (const s of m.playlist) {
         if (!seen.has(s.name) && seen.size < 100) seen.add(s.name)
       }
     }
   }
-  return [...seen]
+  return [...seen].reverse()
 }
 
 /** Return the raw line index (exclusive) that keeps `keepUiMessages` user/assistant messages. */
@@ -612,9 +613,16 @@ const commands: CommandSpec[] = [
       await SessionManager.truncateTail(sid, raw.length - keepLines)
       const kept = raw.slice(0, keepLines)
 
-      st.session.chatHistory = rawToChatHistory(kept)
+      st.abortFetch?.()
+      clearContinuousPending(st.player)
+
+      const sysPrompt =
+        st.session.chatHistory[0]?.role === 'system' ? st.session.chatHistory[0] : null
+      const rebuilt = rawToChatHistory(kept)
+      const bothCount = kept.filter((m) => m.type === 'both').length
+      st.session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       st.session.rollingHistory = rawToRollingHistory(kept)
-      st.session.fetchCount = kept.filter((m) => m.type === 'both').length
+      st.session.fetchCount = sysPrompt ? Math.max(1, bothCount) : 0
       st.session.promptTokens = 0
       st.session.completionTokens = 0
       st.session.buffer = []
@@ -656,9 +664,10 @@ const commands: CommandSpec[] = [
 
       const sysPrompt = _session.chatHistory[0]?.role === 'system' ? _session.chatHistory[0] : null
       const rebuilt = rawToChatHistory(kept).filter((m) => m.role !== 'system')
+      const bothCount = kept.filter((m) => m.type === 'both').length
       _session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       _session.playedSongs = new Set(rawToRollingHistory(kept))
-      _session.turnCount = Math.max(1, kept.filter((m) => m.type === 'both').length)
+      _session.turnCount = sysPrompt ? Math.max(1, bothCount) : 0
       _session.promptTokens = 0
       _session.completionTokens = 0
       return { ok: true, kept }

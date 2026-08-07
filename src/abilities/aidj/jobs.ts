@@ -625,6 +625,7 @@ export interface ChatTaskState {
   session: PersistentSession
   player: string
   control: JobControl
+  abortFetch?: () => void
 }
 
 const chatTasks = new Map<string, ChatTaskState>()
@@ -808,6 +809,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const REFILL = 8
   const FETCH_TIMEOUT = 180_000
   let fetchAc = new AbortController()
+  st.abortFetch = () => fetchAc.abort()
   let lastErrorShown = ''
   let lastIntroShown = ''
 
@@ -864,7 +866,15 @@ registerJobHandler('aidj.chat', async (control, args) => {
           const batch = session.buffer.shift()
           if (batch && batch.length) {
             if (session.lastIntro) {
-              control.push({ data: { type: 'assistant', content: session.lastIntro } })
+              if (session.lastIntro.startsWith('⚠️')) {
+                if (session.lastIntro !== lastErrorShown) {
+                  lastErrorShown = session.lastIntro
+                  control.push({ data: { type: 'system', content: session.lastIntro } })
+                }
+              } else if (session.lastIntro !== lastIntroShown) {
+                lastIntroShown = session.lastIntro
+                control.push({ data: { type: 'assistant', content: session.lastIntro } })
+              }
             }
             control.push({ data: { type: 'playlist', songs: batch } })
             const r = ensureContinuousPlayer(st.player, batch)
