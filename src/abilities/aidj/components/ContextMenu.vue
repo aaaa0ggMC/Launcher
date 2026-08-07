@@ -11,9 +11,10 @@ const props = defineProps<{
   content: string
   isAi: boolean
   songs?: { name: string }[]
+  canRevert?: boolean
 }>()
 
-const emit = defineEmits<{ 'update:modelValue': [v: boolean] }>()
+const emit = defineEmits<{ 'update:modelValue': [v: boolean]; revert: [] }>()
 
 const pos = ref({ x: props.x, y: props.y })
 const el = ref<HTMLElement | null>(null)
@@ -47,6 +48,11 @@ function copyRendered(): void {
 function copyRaw(): void {
   navigator.clipboard.writeText(withSongs(props.content))
   close()
+}
+
+function doRevert(): void {
+  close()
+  emit('revert')
 }
 
 watch(
@@ -90,6 +96,10 @@ watch(
         <button v-if="isAi" class="aidj-ctx-item" @click="copyRaw">
           <v-icon icon="mdi-code-tags" size="14" />
           <span>CopyRaw</span>
+        </button>
+        <button v-if="canRevert" class="aidj-ctx-item" @click="doRevert">
+          <v-icon icon="mdi-undo" size="14" />
+          <span>回退到此处</span>
         </button>
       </div>
     </Transition>

@@ -41,6 +41,18 @@ async function clearMemory(): Promise<void> {
   }
 }
 
+async function doRevert(): Promise<void> {
+  const idx = ctxMsgIndex.value
+  if (idx < 0 || !props.task?.id) return
+  ctxMenu.value = false
+  // Count user/assistant items up to the clicked one.
+  let keep = 0
+  for (let i = 0; i <= idx && i < items.value.length; i++) {
+    if (items.value[i].kind === 'user' || items.value[i].kind === 'assistant') keep++
+  }
+  await window.cockpit.command('aidj.chat-revert', { task: props.task.id, keep }).catch(() => {})
+}
+
 // -- send target (player) ------------------------------------------------
 const players = ref<string[]>([])
 const targetPlayer = ref('')
@@ -85,13 +97,15 @@ const ctxMenu = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxTarget = ref('')
 const ctxIsAi = ref(false)
+const ctxMsgIndex = ref(-1)
 let ctxCloseTimer: ReturnType<typeof setTimeout> | null = null
 
-function openCtx(e: MouseEvent, content: string, isAi: boolean): void {
+function openCtx(e: MouseEvent, content: string, isAi: boolean, index: number): void {
   e.preventDefault()
   e.stopPropagation()
   ctxTarget.value = content
   ctxIsAi.value = isAi
+  ctxMsgIndex.value = index
   const pos = { x: e.clientX + 8, y: e.clientY + 8 }
   if (ctxMenu.value) {
     ctxMenu.value = false
@@ -126,6 +140,10 @@ const items = computed<ChatItem[]>(() => {
     if (!d || typeof d !== 'object') continue
     const t = (d as Record<string, unknown>).type as string | undefined
     if (t === 'thinking' || t === 'idle') continue
+    if (t === 'clear_history') {
+      out.length = 0
+      continue
+    }
     if (t === 'user' || t === 'assistant' || t === 'system') {
       out.push({ kind: t, content: String((d as Record<string, unknown>).content ?? '') })
     } else if (t === 'playlist') {
@@ -235,7 +253,7 @@ watch(
             <span class="text-caption text-medium-emphasis">You</span>
             <div
               class="chat-bubble chat-bubble-user pa-3 text-body-2"
-              @contextmenu="it.content && openCtx($event, it.content, false)"
+              @contextmenu="it.content && openCtx($event, it.content, false, i)"
             >
               {{ it.content }}
             </div>
@@ -244,7 +262,7 @@ watch(
             <span class="text-caption text-medium-emphasis">AI DJ</span>
             <div
               class="chat-bubble chat-bubble-ai pa-3 text-body-2 msg-markdown"
-              @contextmenu="it.content && openCtx($event, it.content, true)"
+              @contextmenu="it.content && openCtx($event, it.content, true, i)"
             >
               <div v-html="renderMarkdown(it.content || '')" />
             </div>
@@ -358,6 +376,8 @@ watch(
       :y="ctxPos.y"
       :content="ctxTarget"
       :is-ai="ctxIsAi"
+      :can-revert="ctxMsgIndex >= 0"
+      @revert="doRevert"
     />
 
     <v-dialog v-model="memoryConfirm" max-width="400">

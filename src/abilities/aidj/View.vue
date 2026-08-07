@@ -516,9 +516,7 @@ async function startPersistentChat(prompt: string): Promise<void> {
       ...messages.value.map((m) => ({
         role: m.role,
         content: m.content,
-        playlist: m.playlist
-          ? JSON.parse(JSON.stringify(m.playlist))
-          : undefined,
+        playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
         timestamp: m.timestamp
       })),
       { role: 'user', content: prompt, timestamp: Date.now() }
@@ -557,19 +555,22 @@ const ctxPos = ref({ x: 0, y: 0 })
 const ctxTarget = ref('')
 const ctxIsAi = ref(false)
 const ctxSongs = ref<{ name: string }[]>([])
+const ctxMsgIndex = ref(-1)
 let ctxCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleContextMenu(
   e: MouseEvent,
   content: string,
   isAi: boolean,
-  songs: { name: string }[]
+  songs: { name: string }[],
+  msgIndex: number
 ): void {
   e.preventDefault()
   e.stopPropagation()
   ctxTarget.value = content
   ctxIsAi.value = isAi
   ctxSongs.value = songs
+  ctxMsgIndex.value = msgIndex
   const pos = { x: e.clientX + 8, y: e.clientY + 8 }
   if (ctxMenu.value) {
     ctxMenu.value = false
@@ -582,6 +583,26 @@ function handleContextMenu(
     ctxPos.value = pos
     ctxMenu.value = true
   }
+}
+
+async function doRevert(): Promise<void> {
+  const idx = ctxMsgIndex.value
+  if (idx < 0) return
+  ctxMenu.value = false
+  // Count user/assistant messages up to the clicked one.
+  let keep = 0
+  for (let i = 0; i <= idx && i < messages.value.length; i++) {
+    if (messages.value[i].role === 'user' || messages.value[i].role === 'assistant') keep++
+  }
+  messages.value.splice(idx)
+  try {
+    await window.cockpit.command('aidj.revert', { keep })
+  } catch (e) {
+    showSnack(`回退失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    return
+  }
+  showSnack(`已回退到第 ${keep} 条消息`)
+  scrollToBottom()
 }
 </script>
 
@@ -670,6 +691,7 @@ function handleContextMenu(
           v-for="(msg, idx) in messages"
           :key="msg.timestamp"
           :message="msg"
+          :index="idx"
           @play-all="handlePlayAll"
           @play-one="handlePlayOne"
           @reorder="(songs: any) => handleReorder(idx, songs)"
@@ -946,6 +968,8 @@ function handleContextMenu(
       :content="ctxTarget"
       :is-ai="ctxIsAi"
       :songs="ctxSongs"
+      :can-revert="ctxMsgIndex >= 0"
+      @revert="doRevert"
     />
   </div>
 </template>

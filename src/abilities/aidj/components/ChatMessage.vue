@@ -8,13 +8,20 @@ defineOptions({ name: 'AidjChatMessage' })
 
 const props = defineProps<{
   message: ChatMessage
+  index?: number
 }>()
 
 const emit = defineEmits<{
   playAll: [songs: PlaylistEntry[]]
   reorder: [songs: PlaylistEntry[]]
   playOne: [song: PlaylistEntry]
-  contextMenu: [e: MouseEvent, content: string, isAi: boolean, songs: PlaylistEntry[]]
+  contextMenu: [
+    e: MouseEvent,
+    content: string,
+    isAi: boolean,
+    songs: PlaylistEntry[],
+    index: number
+  ]
   continuous: [songs: PlaylistEntry[]]
 }>()
 
@@ -72,7 +79,8 @@ function roleLabel(msg: ChatMessage): string {
           $event,
           message.content,
           !isUser(message) && !isSystem(message),
-          message.playlist || []
+          message.playlist || [],
+          props.index ?? 0
         )
       "
     >

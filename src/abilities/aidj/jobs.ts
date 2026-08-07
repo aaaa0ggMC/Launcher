@@ -14,6 +14,7 @@ import {
   initDbusManager,
   setPersistentSession,
   PersistentSession,
+  SessionManager,
   DBusManager,
   LoudnessCache,
   bumpFrequency
@@ -731,6 +732,10 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const player =
     playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
 
+  const sessionId = await SessionManager.createSession({
+    title: initialPrompt.slice(0, 40),
+    type: 'chat'
+  })
   const session = new PersistentSession(
     client,
     lib.metadata,
@@ -739,8 +744,16 @@ registerJobHandler('aidj.chat', async (control, args) => {
     null,
     initialPrompt
   )
+  session.sessionId = sessionId
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
+    // Persist the seeded history as raw lines (user messages only).
+    await SessionManager.appendMessages(
+      sessionId,
+      history
+        .filter((m) => m.role === 'user')
+        .map((m) => ({ role: 'user', content: m.content, ts: m.timestamp, type: 'user' }))
+    )
   }
   if (Array.isArray(rollingHistoryArg) && rollingHistoryArg.length) {
     session.rollingHistory = rollingHistoryArg.slice(0, 100)
@@ -792,19 +805,22 @@ registerJobHandler('aidj.chat', async (control, args) => {
     const t = setTimeout(() => fetchAc.abort(), FETCH_TIMEOUT)
     let retryStart = 0
     try {
-      await session.fetchBatch(AbortSignal.any([ac.signal, fetchAc.signal]), (attempt, _waitMs, err) => {
-        retryStart = retryStart || Date.now()
-        const elapsed = Math.round((Date.now() - retryStart) / 1000)
-        const errMsg = err ? String(err instanceof Error ? err.message : err) : ''
-        control.push({
-          data: {
-            type: 'retry',
-            attempt,
-            elapsed,
-            content: `重试中(${attempt}: 已经${elapsed}s)${errMsg ? `\n⚠️ ${errMsg}` : ''}`
-          }
-        })
-      })
+      await session.fetchBatch(
+        AbortSignal.any([ac.signal, fetchAc.signal]),
+        (attempt, _waitMs, err) => {
+          retryStart = retryStart || Date.now()
+          const elapsed = Math.round((Date.now() - retryStart) / 1000)
+          const errMsg = err ? String(err instanceof Error ? err.message : err) : ''
+          control.push({
+            data: {
+              type: 'retry',
+              attempt,
+              elapsed,
+              content: `重试中(${attempt}: 已经${elapsed}s)${errMsg ? `\n⚠️ ${errMsg}` : ''}`
+            }
+          })
+        }
+      )
     } finally {
       clearTimeout(t)
     }
@@ -828,7 +844,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
                 type: 'chat_status',
                 promptTokens: session.promptTokens,
                 completionTokens: session.completionTokens,
-memory: session.rollingHistory.length
+                memory: session.rollingHistory.length
               }
             })
           }

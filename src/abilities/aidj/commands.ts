@@ -18,6 +18,7 @@ import {
   getPersistentSession,
   setPersistentSession,
   PersistentSession,
+  SessionManager,
   listAvailablePlayers,
   switchPlayer,
   getCoverArt,
@@ -26,7 +27,7 @@ import {
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import OpenAI from 'openai'
-import type { AidjConfig, SongMeta } from './types'
+import type { AidjConfig, SongMeta, ChatMessage, RawHistoryMessage } from './types'
 import './jobs'
 import {
   getContinuousTasks,
@@ -60,6 +61,49 @@ let _retryAttempt = 0
 let _retryWaitMs = 0
 let _retryStart = 0
 let _retryLastError = ''
+let _sessionId = ''
+
+// ---------------------------------------------------------------------------
+// Revert helpers — rebuild chatHistory/rollingHistory from raw history.jsonl.
+// type="user"  → original user input  (UI + context)
+// type="both"  → assistant response   (UI + context)
+// type="updated" → compact/drop marker (context only)
+// type="model" → wrapped prompt sent to AI (audit only, excluded from context)
+// ---------------------------------------------------------------------------
+function rawToChatHistory(raw: RawHistoryMessage[]): ChatMessage[] {
+  return raw
+    .filter((m) => m.type === 'user' || m.type === 'both' || m.type === 'updated')
+    .map((m) => ({
+      role: m.type === 'both' ? 'assistant' : m.type === 'updated' ? 'system' : 'user',
+      content: m.content,
+      playlist: m.playlist,
+      timestamp: m.ts
+    }))
+}
+
+function rawToRollingHistory(raw: RawHistoryMessage[]): string[] {
+  const out: string[] = []
+  for (const m of raw) {
+    if (m.playlist) {
+      for (const s of m.playlist) out.push(s.name)
+    }
+  }
+  return out.slice(0, 100)
+}
+
+/** Return the raw line index (exclusive) that keeps `keepUiMessages` user/assistant messages. */
+function computeRawKeep(raw: RawHistoryMessage[], keepUiMessages: number): number {
+  if (keepUiMessages <= 0) return 0
+  let uiCount = 0
+  for (let i = 0; i < raw.length; i++) {
+    const t = raw[i].type
+    if (t === 'user' || t === 'both') {
+      uiCount++
+      if (uiCount >= keepUiMessages) return i + 1
+    }
+  }
+  return raw.length
+}
 
 export function getCurrentAbortSignal(): AbortSignal | null {
   return _currentAbort?.signal ?? null
@@ -165,7 +209,7 @@ const commands: CommandSpec[] = [
       _retryStart = 0
       _retryLastError = ''
       try {
-        const { playlist, intro } = await session.nextStep(
+        const { playlist, intro, updated } = await session.nextStep(
           prompt,
           (full: string) => {
             if (_retrying) {
@@ -184,6 +228,19 @@ const commands: CommandSpec[] = [
             _streamingChars = 0
           }
         )
+        if (!_sessionId) {
+          _sessionId = await SessionManager.createSession({
+            title: prompt.slice(0, 40),
+            type: 'generate'
+          })
+        }
+        const rawMsgs: RawHistoryMessage[] = []
+        if (updated) rawMsgs.push(updated)
+        rawMsgs.push(
+          { role: 'user', content: prompt, ts: Date.now(), type: 'user' },
+          { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
+        )
+        await SessionManager.appendMessages(_sessionId, rawMsgs)
         const enriched = playlist.map((s) => ({
           ...s,
           meta: session.metadata.get(s.name) || null
@@ -519,9 +576,80 @@ const commands: CommandSpec[] = [
       const st = getChatTask(taskId)
       if (!st) return { ok: false, error: '持续会话未运行' }
       st.session.clearMemory()
-      st.control.push({ data: { type: 'chat_status', promptTokens: st.session.promptTokens, completionTokens: st.session.completionTokens, memory: 0 } })
+      st.control.push({
+        data: {
+          type: 'chat_status',
+          promptTokens: st.session.promptTokens,
+          completionTokens: st.session.completionTokens,
+          memory: 0
+        }
+      })
       st.control.pushLine('已播记忆已清空')
       return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.chat-revert',
+    description: '回退持续会话到指定消息（删除该消息及之后所有，重建上下文和记忆）',
+    usage: 'aidj.chat-revert --task <id> --keep <count>',
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string
+      const keep = Number(ctx.named.keep) || 0
+      if (!taskId) return { ok: false, error: '需要 --task 参数' }
+      const st = getChatTask(taskId)
+      if (!st) return { ok: false, error: '持续会话未运行' }
+      const sid = st.session.sessionId
+      if (!sid) return { ok: false, error: '持续会话没有 session 记录' }
+
+      const raw = await SessionManager.readRawHistory(sid)
+      const keepLines = computeRawKeep(raw, keep)
+      await SessionManager.truncateTail(sid, raw.length - keepLines)
+      const kept = raw.slice(0, keepLines)
+
+      st.session.chatHistory = rawToChatHistory(kept)
+      st.session.rollingHistory = rawToRollingHistory(kept)
+      st.session.fetchCount = Math.max(0, st.session.rollingHistory.length >= 8 ? 1 : 0)
+
+      st.control.push({ data: { type: 'clear_history' } })
+      for (const m of st.session.chatHistory) {
+        const t = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
+        st.control.push({ data: { type: t, content: m.content, history: true } })
+        if (m.playlist && m.playlist.length > 0) {
+          st.control.push({ data: { type: 'playlist', songs: m.playlist, history: true } })
+        }
+      }
+      st.control.push({
+        data: {
+          type: 'chat_status',
+          promptTokens: st.session.promptTokens,
+          completionTokens: st.session.completionTokens,
+          memory: st.session.rollingHistory.length
+        }
+      })
+      return { ok: true, kept }
+    }
+  },
+  {
+    name: 'aidj.revert',
+    description: '回退主界面会话到指定消息（删除该消息及之后所有）',
+    usage: 'aidj.revert --keep <count>',
+    run: async (ctx) => {
+      const keep = Number(ctx.named.keep) || 0
+      if (!_session) return { ok: false, error: '没有活跃会话' }
+      if (!_sessionId) return { ok: false, error: '没有会话记录' }
+
+      const raw = await SessionManager.readRawHistory(_sessionId)
+      const keepLines = computeRawKeep(raw, keep)
+      await SessionManager.truncateTail(_sessionId, raw.length - keepLines)
+      const kept = raw.slice(0, keepLines)
+
+      const sysPrompt = _session.chatHistory[0]
+      _session.chatHistory = [
+        sysPrompt,
+        ...rawToChatHistory(kept).filter((m) => m.role !== 'system')
+      ]
+      _session.playedSongs = new Set(rawToRollingHistory(kept))
+      return { ok: true, kept }
     }
   },
   {

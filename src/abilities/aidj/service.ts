@@ -12,13 +12,17 @@ import type {
   PlaylistEntry,
   PlayerStatus,
   LoudnessInfo,
-  ChatMessage
+  ChatMessage,
+  RawHistoryMessage,
+  SessionMeta
 } from './types'
 import { AIDJ_DATA_DIR, METADATA_FILE, FREQ_FILE, PLAYLISTS_DIR, SEPARATOR } from './types'
 
 const log = makeLogger('aidj')
 const execFileAsync = promisify(execFile)
 const AIDJ_DIR = join(USER_CONFIG_DIR, AIDJ_DATA_DIR)
+const SESSIONS_DIR = join(AIDJ_DIR, 'sessions')
+const SESSIONS_INDEX = join(SESSIONS_DIR, 'main.json')
 
 /** True for transport-level failures (offline, refused, timeout) and transient server errors (500-504). */
 export function isNetworkError(e: unknown): boolean {
@@ -60,9 +64,7 @@ export async function withNetworkRetry<T>(
     const attemptAc = new AbortController()
     const attemptTimer = setTimeout(() => attemptAc.abort(), 30_000)
     try {
-      const combined = signal
-        ? AbortSignal.any([signal, attemptAc.signal])
-        : attemptAc.signal
+      const combined = signal ? AbortSignal.any([signal, attemptAc.signal]) : attemptAc.signal
       return await fn(combined)
     } catch (e) {
       clearTimeout(attemptTimer)
@@ -1056,29 +1058,47 @@ RULES:
   /**
    * Keep the chat history balanced. The library/system prompt (index 0) is always kept and
    * never sent for compaction.
-   * - discard: drop the oldest messages, keep [0] + last (max-1).
-   * - compact: send all conversation messages (except index 0) to the AI for a summary.
+   * - drop (discard): keep [0] + last (max-1); insert an empty `updated` marker so raw
+   *   history replay knows everything before it is dropped.
+   * - compact: send all conversation messages (except index 0) to the AI for a summary;
+   *   replace with [0] + `[Context Summary]` marker.
+   * Returns the marker to persist to history.jsonl, or null if nothing changed.
    */
-  private async manageContext(): Promise<void> {
+  private async manageContext(): Promise<RawHistoryMessage | null> {
     const max = Math.max(2, this.config.preferences.max_history_length || 10)
-    if (this.chatHistory.length <= max) return
+    if (this.chatHistory.length <= max) return null
     const mode = this.config.preferences.context_mode || 'discard'
     const keep = this.chatHistory[0]
+    const now = Date.now()
 
+    let updatedContent = ''
     if (mode === 'compact') {
       const toCompact = this.chatHistory.slice(1)
       if (toCompact.length > 0) {
         const summary = await this.compactConversation(toCompact)
         if (summary) {
-          this.chatHistory = [
-            keep,
-            { role: 'system', content: `[Context Summary] ${summary}`, timestamp: Date.now() }
-          ]
-          return
+          updatedContent = `[Context Summary] ${summary}`
         }
       }
     }
-    this.chatHistory = [keep, ...this.chatHistory.slice(-(max - 1))]
+
+    const marker: RawHistoryMessage = {
+      role: 'system',
+      content: updatedContent,
+      ts: now,
+      type: 'updated'
+    }
+
+    if (updatedContent) {
+      this.chatHistory = [keep, { role: 'system', content: updatedContent, timestamp: now }]
+    } else {
+      this.chatHistory = [
+        keep,
+        { role: 'system', content: '', timestamp: now },
+        ...this.chatHistory.slice(-(max - 1))
+      ]
+    }
+    return marker
   }
 
   async nextStep(
@@ -1086,14 +1106,14 @@ RULES:
     onStream?: (text: string) => void,
     signal?: AbortSignal,
     onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
-  ): Promise<{ playlist: PlaylistEntry[]; intro: string }> {
+  ): Promise<{ playlist: PlaylistEntry[]; intro: string; updated?: RawHistoryMessage | null }> {
     this.turnCount++
     const model = this.config.preferences.model
     const isVerbose = this.config.preferences.verbose
 
     if (isVerbose) log.info(`Thinking with ${model}...`)
 
-    await this.manageContext()
+    const updated = await this.manageContext()
 
     const basePrompt = `### ROLE DEFINITION
 You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
@@ -1180,16 +1200,16 @@ Instruction: Check the Library in the first System message. If matches found, ou
       if (isVerbose) log.info(`Raw AI output (${cleanContent.length} chars)`)
 
       this.chatHistory.push({ role: 'assistant', content: cleanContent, timestamp: Date.now() })
-      return this.parseRawPlaylist(cleanContent, 'AI')
+      return { ...this.parseRawPlaylist(cleanContent, 'AI'), updated }
     } catch (e) {
       if (signal?.aborted) {
         this.chatHistory.pop()
-        return { playlist: [], intro: '' }
+        return { playlist: [], intro: '', updated }
       }
       const errMsg = String(e)
       log.error('AI API error', { error: errMsg })
       this.chatHistory.pop()
-      return { playlist: [], intro: `⚠️ API 错误: ${errMsg}` }
+      return { playlist: [], intro: `⚠️ API 错误: ${errMsg}`, updated }
     }
   }
 }
@@ -1210,6 +1230,8 @@ export class PersistentSession {
   lastIntro = ''
   promptTokens = 0
   completionTokens = 0
+  /** Optional persistent session id — raw history is appended to history.jsonl when set. */
+  sessionId = ''
   private client: OpenAI
   private volCache: LoudnessCache
   private initialPrompt: string
@@ -1279,11 +1301,26 @@ export class PersistentSession {
       session.playedSongs = new Set(this.rollingHistory)
       session.turnCount = this.fetchCount
 
-      const { playlist, intro } = await session.nextStep(fullPrompt, undefined, signal, onRetry)
+      const { playlist, intro, updated } = await session.nextStep(
+        fullPrompt,
+        undefined,
+        signal,
+        onRetry
+      )
       this.chatHistory = session.chatHistory
       this.lastIntro = intro || ''
       this.promptTokens += session.promptTokens
       this.completionTokens += session.completionTokens
+
+      if (this.sessionId) {
+        const rawMsgs: RawHistoryMessage[] = []
+        if (updated) rawMsgs.push(updated)
+        rawMsgs.push(
+          { role: 'user', content: fullPrompt, ts: Date.now(), type: 'model' },
+          { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
+        )
+        await SessionManager.appendMessages(this.sessionId, rawMsgs)
+      }
 
       if (playlist.length > 0) {
         for (const s of playlist) {
@@ -1351,6 +1388,14 @@ export class PersistentSession {
 
   injectUserMessage(content: string): void {
     this.chatHistory.push({ role: 'user', content, timestamp: Date.now() })
+    if (this.sessionId) {
+      void SessionManager.appendMessage(this.sessionId, {
+        role: 'user',
+        content,
+        ts: Date.now(),
+        type: 'user'
+      })
+    }
   }
 
   clearMemory(): void {
@@ -1476,5 +1521,121 @@ export async function getCoverArt(filepath: string): Promise<string | null> {
   } catch {
     _coverCache.set(filepath, '')
     return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SessionManager — persist raw chat history per session (Stories-style).
+//   ~/.config/LinuxCockpit/aidj/sessions/
+//     main.json              # index: [{id, title, type, initialPrompt, created_at, updated_at}]
+//     <session-id>/history.jsonl  # raw messages, append-only JSONL
+//
+// The system prompt (library injection) is NEVER stored here — it is always
+// rebuilt from the current library when replaying context.
+// ---------------------------------------------------------------------------
+export class SessionManager {
+  static sessionsDir(): string {
+    return SESSIONS_DIR
+  }
+
+  static async ensureIndex(): Promise<void> {
+    await mkdir(SESSIONS_DIR, { recursive: true })
+    const idx = await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)
+    if (!idx) await writeJsonAtomic(SESSIONS_INDEX, { sessions: [] })
+  }
+
+  static async createSession(opts: {
+    title: string
+    type: 'chat' | 'generate'
+    initialPrompt?: string
+  }): Promise<string> {
+    await this.ensureIndex()
+    const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const now = Date.now()
+    const meta: SessionMeta = {
+      id,
+      title: opts.title,
+      type: opts.type,
+      initialPrompt: opts.initialPrompt,
+      created_at: now,
+      updated_at: now
+    }
+    idx.sessions.push(meta)
+    await writeJsonAtomic(SESSIONS_INDEX, idx)
+    await mkdir(join(SESSIONS_DIR, id), { recursive: true })
+    return id
+  }
+
+  static async appendMessage(sessionId: string, msg: RawHistoryMessage): Promise<void> {
+    await this.ensureIndex()
+    const line = JSON.stringify(msg) + '\n'
+    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+    await appendFile(p, line, 'utf-8')
+    await this.touchSession(sessionId)
+  }
+
+  static async appendMessages(sessionId: string, msgs: RawHistoryMessage[]): Promise<void> {
+    if (!msgs.length) return
+    await this.ensureIndex()
+    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+    const data = msgs.map((m) => JSON.stringify(m)).join('\n') + '\n'
+    await appendFile(p, data, 'utf-8')
+    await this.touchSession(sessionId)
+  }
+
+  /** Read all raw history lines for a session. */
+  static async readRawHistory(sessionId: string): Promise<RawHistoryMessage[]> {
+    try {
+      const text = await readFile(join(SESSIONS_DIR, sessionId, 'history.jsonl'), 'utf-8')
+      return text
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => {
+          try {
+            return JSON.parse(l) as RawHistoryMessage
+          } catch {
+            return null
+          }
+        })
+        .filter((m): m is RawHistoryMessage => m !== null)
+    } catch {
+      return []
+    }
+  }
+
+  /** Truncate the last `n` lines from history.jsonl (revert support). */
+  static async truncateTail(sessionId: string, n: number): Promise<void> {
+    if (n <= 0) return
+    const all = await this.readRawHistory(sessionId)
+    const keep = Math.max(0, all.length - n)
+    const p = join(SESSIONS_DIR, sessionId, 'history.jsonl')
+    await writeTextFile(
+      p,
+      all
+        .slice(0, keep)
+        .map((m) => JSON.stringify(m))
+        .join('\n')
+    )
+    await this.touchSession(sessionId)
+  }
+
+  static async listSessions(): Promise<SessionMeta[]> {
+    const idx = await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)
+    return idx?.sessions ?? []
+  }
+
+  static async getSession(sessionId: string): Promise<SessionMeta | null> {
+    const all = await this.listSessions()
+    return all.find((s) => s.id === sessionId) ?? null
+  }
+
+  static async touchSession(sessionId: string): Promise<void> {
+    const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+    const s = idx.sessions.find((x) => x.id === sessionId)
+    if (s) {
+      s.updated_at = Date.now()
+      await writeJsonAtomic(SESSIONS_INDEX, idx)
+    }
   }
 }

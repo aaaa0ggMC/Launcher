@@ -70,6 +70,24 @@ export interface ChatMessage {
   chars?: number
 }
 
+/** Raw history.jsonl entry. type: user=UI only, model=AI only, both=display+AI, updated=compact/drop marker. */
+export interface RawHistoryMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  ts: number
+  type?: 'user' | 'model' | 'both' | 'updated'
+  playlist?: PlaylistEntry[]
+}
+
+export interface SessionMeta {
+  id: string
+  title: string
+  type: 'chat' | 'generate'
+  initialPrompt?: string
+  created_at: number
+  updated_at: number
+}
+
 export interface PlayerStatus {
   status: 'Playing' | 'Paused' | 'Stopped' | 'Unknown'
   track: string
