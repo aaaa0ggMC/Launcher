@@ -56,7 +56,15 @@ onMounted(async () => {
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
-  statusBar.value = { ...((prefs.status_bar as Record<string, number>) || {}) }
+  statusBar.value = {
+    tokens: 1,
+    tracks: 2,
+    memory: 3,
+    volbal: 4,
+    record_freq: 5,
+    backgrounds: 6,
+    ...((prefs.status_bar as Record<string, number>) || {})
+  }
   fetchModels()
 })
 
