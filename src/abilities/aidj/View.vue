@@ -634,6 +634,35 @@ async function doRevert(): Promise<void> {
   showSnack(`已回退到第 ${keep} 条消息`)
   scrollToBottom()
 }
+
+// ---------------------------------------------------------------------------
+// Markdown export — dump the current conversation (messages + playlists).
+// App.vue's copyCurrentView calls toMarkdown() for the copy-view shortcut.
+// ---------------------------------------------------------------------------
+function toMarkdown(): string {
+  const lines: string[] = []
+  for (const m of messages.value) {
+    if (m.role === 'user') {
+      lines.push(`**You**:\n\n${m.content}\n`)
+    } else if (m.role === 'assistant') {
+      if (m.content === '...') continue
+      if (m.content.startsWith('▶ 播放')) {
+        lines.push(`> ${m.content}\n`)
+        continue
+      }
+      lines.push(`**AI DJ**:\n\n${m.content}\n`)
+      if (m.playlist && m.playlist.length > 0) {
+        m.playlist.forEach((s, i) => lines.push(`${i + 1}. ${s.name}`))
+        lines.push('')
+      }
+    } else if (m.role === 'system' && m.content) {
+      lines.push(`> ${m.content}\n`)
+    }
+  }
+  return lines.join('\n').trim() + '\n'
+}
+
+defineExpose({ toMarkdown })
 </script>
 
 <template>
