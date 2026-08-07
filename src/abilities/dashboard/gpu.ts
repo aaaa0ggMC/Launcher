@@ -84,6 +84,6 @@ export async function togglePm(): Promise<0 | 1 | null> {
     throw e
   })
   const value = result === '0' || result === '1' ? (result === '1' ? 1 : 0) : null
-  log.info('pm toggle result', { value })
+  log.info('pm toggle result', { value, scriptOutput: result })
   return value
 }

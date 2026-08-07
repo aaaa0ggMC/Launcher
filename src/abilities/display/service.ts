@@ -15,23 +15,32 @@ export async function listWallpapers(dir: string): Promise<WallpaperFile[]> {
     if (!IMAGE_EXTS.has(extname(name).toLowerCase())) continue
     out.push({ name, path: join(dir, name) })
   }
-  log.info('wallpaper list result', { dir, count: out.length })
+  log.info('wallpaper list result', {
+    dir,
+    count: out.length,
+    skippedNonImage: files.length - out.length
+  })
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function applyWallpaper(path: string): Promise<boolean> {
   const out = await run('plasma-apply-wallpaperimage', [path]).catch(() => '')
   const ok = !out.toLowerCase().includes('error')
-  log.info('apply wallpaper result', { path, ok })
+  log.info('apply wallpaper result', { path, ok, commandOutput: out })
   return ok
 }
 
 export async function listOutputs(): Promise<DisplayOutput[]> {
   const out = await run('kscreen-doctor', ['-o']).catch(() => '')
+  const lines = out.split('\n')
   const outputs: DisplayOutput[] = []
-  for (const line of out.split('\n')) {
+  let unparsed = 0
+  for (const line of lines) {
     const m = line.match(/^Output:\s*\d+\s+(\S+)\s+\((enabled|disabled)\)/)
-    if (!m) continue
+    if (!m) {
+      if (line.trim()) unparsed++
+      continue
+    }
     outputs.push({
       name: m[1],
       description: m[1],
@@ -39,6 +48,6 @@ export async function listOutputs(): Promise<DisplayOutput[]> {
       enabled: m[2] === 'enabled'
     })
   }
-  log.info('output list result', { count: outputs.length })
+  log.info('output list result', { count: outputs.length, rawLineCount: lines.length, unparsed })
   return outputs
 }

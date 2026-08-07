@@ -53,6 +53,12 @@ export default [
           return { ok: false, error: '无效文件：缺少 templates 数组' }
         }
         log.info('playground.import ok', { path, templates: parsed.data.templates.length })
+        log.debug('playground.import details', {
+          path,
+          templates: parsed.data.templates.length,
+          vars: Array.isArray(parsed.data.vars) ? parsed.data.vars.length : 0,
+          globals: Array.isArray(parsed.data.globals) ? parsed.data.globals.length : 0
+        })
         return { ok: true, ...parsed.data }
       } catch (e) {
         log.error('playground.import failed', {

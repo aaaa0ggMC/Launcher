@@ -60,7 +60,10 @@ export async function listAutostart(): Promise<AutostartEntry[]> {
       hidden: hiddenFromGroups(desktop)
     })
   }
-  log.info('autostart list result', { count: out.length })
+  log.info('autostart list result', {
+    count: out.length,
+    skippedNonDesktop: files.filter((f) => !f.endsWith('.desktop')).length
+  })
   return out.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
 
@@ -76,12 +79,14 @@ export async function toggleAutostart(file: string, hidden: boolean): Promise<vo
     delete entry.Hidden
   }
   try {
-    await writeFile(full, serializeDesktop(desktop), 'utf-8')
-    log.info('toggle autostart ok', { file, hidden })
+    const content = serializeDesktop(desktop)
+    await writeFile(full, content, 'utf-8')
+    log.info('toggle autostart ok', { file, hidden, writtenContent: content })
   } catch (e) {
     log.error('toggle autostart failed', {
       file,
       hidden,
+      writtenContent: serializeDesktop(desktop),
       error: e instanceof Error ? e.message : String(e)
     })
     throw e

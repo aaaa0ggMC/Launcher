@@ -73,7 +73,14 @@ export async function assessDir(dir: string): Promise<Assessment> {
   if (network || sys || priv) risk = 'medium'
   if (priv && (network || sys)) risk = 'high'
 
-  log.debug('risk assessed', { dir, risk, notes: notes.size })
+  log.debug('risk assessed', {
+    dir,
+    risk,
+    notes: [...notes],
+    network,
+    priv,
+    sys
+  })
   return {
     risk,
     auto_note: notes.size ? [...notes].join('; ') : undefined

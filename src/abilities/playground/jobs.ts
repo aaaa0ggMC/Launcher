@@ -109,6 +109,12 @@ async function pollTaskTransforms(
         const text = await resp.text()
         if (resp.status === 400) {
           states[i] = { ...states[i], status: 'failed', statusText: text, failReason: text }
+          log.warn('pg-task transform failed', {
+            transformId: tf.id,
+            taskUrl: url,
+            httpStatus: resp.status,
+            failReason: text.slice(0, 500)
+          })
           continue
         }
         let respJson: unknown
@@ -126,6 +132,13 @@ async function pollTaskTransforms(
             statusText: failReason || statusVal,
             failReason: failReason || statusVal
           }
+          log.warn('pg-task transform failed', {
+            transformId: tf.id,
+            taskUrl: url,
+            httpStatus: resp.status,
+            statusVal,
+            failReason: failReason || statusVal
+          })
         } else if (statusVal === tf.taskStatusVal) {
           // Sub-transforms may themselves contain tasks → recurse.
           const nested = await pollTaskTransforms(
@@ -148,6 +161,13 @@ async function pollTaskTransforms(
           states[i] = { ...states[i], statusText: statusVal || 'Processing...' }
           allDone = false
         }
+        log.debug('pg-task transform poll', {
+          transformId: tf.id,
+          taskUrl: url,
+          httpStatus: resp.status,
+          statusVal,
+          failReason
+        })
       } catch (err) {
         if (signal.aborted) throw err
         states[i] = {
@@ -156,6 +176,10 @@ async function pollTaskTransforms(
           statusText: err instanceof Error ? err.message : String(err),
           failReason: err instanceof Error ? err.message : String(err)
         }
+        log.warn('pg-task transform failed', {
+          transformId: tf.id,
+          failReason: err instanceof Error ? err.message : String(err)
+        })
       }
     }
     if (allDone) break
@@ -208,7 +232,13 @@ registerJobHandler('pg-task', async (control: JobControl, args: Record<string, u
       ac.signal,
       pollMs
     )
-    log.info('pg-task done', { results: allResults.length })
+    const done = allResults.filter((r) => r.children?.[0]?.label !== 'Error').length
+    log.info('pg-task done', {
+      taskTransforms: taskTransforms.length,
+      results: allResults.length,
+      done,
+      failed: allResults.length - done
+    })
     control.setProgress(100)
     control.push({ data: allResults })
     control.finish('exited')

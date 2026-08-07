@@ -10,11 +10,13 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
   try {
     const cfg = (await readJson<Record<string, unknown>>(CONFIG_JSON)) ?? {}
     const merged = { ...cfg, ...patch }
+    const changedKeys = Object.keys(patch).filter((k) => cfg[k] !== patch[k])
     await writeJsonAtomic(CONFIG_JSON, merged)
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('cockpit:config-changed', merged)
     }
     log.info('config.set broadcast', { keys: Object.keys(merged) })
+    log.debug('config.set changed', { changedKeys, previousKeys: Object.keys(cfg) })
     return merged
   } catch (e) {
     log.error('config.set failed', {

@@ -107,7 +107,15 @@ let pkgCache: { data: { pacman: number; flatpak: number }; ts: number } | null =
 const PKG_TTL = 60_000
 
 async function packageCounts(): Promise<{ pacman: number; flatpak: number }> {
-  if (pkgCache && Date.now() - pkgCache.ts < PKG_TTL) return pkgCache.data
+  const started = Date.now()
+  if (pkgCache && Date.now() - pkgCache.ts < PKG_TTL) {
+    log.debug('package counts cache hit', {
+      pacman: pkgCache.data.pacman,
+      flatpak: pkgCache.data.flatpak,
+      durationMs: Date.now() - started
+    })
+    return pkgCache.data
+  }
   const [pacmanOut, flatpakOut] = await Promise.all([
     run('pacman', ['-Qq']).catch(() => ''),
     run('flatpak', ['list', '--columns=ref']).catch(() => '')
@@ -125,6 +133,11 @@ async function packageCounts(): Promise<{ pacman: number; flatpak: number }> {
   const flatpak = flatpakRefs.size
   const data = { pacman, flatpak }
   pkgCache = { data, ts: Date.now() }
+  log.debug('package counts cache miss', {
+    pacman,
+    flatpak,
+    durationMs: Date.now() - started
+  })
   return data
 }
 

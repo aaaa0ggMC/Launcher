@@ -252,6 +252,13 @@ const commands: CommandSpec[] = [
           ...s,
           meta: session.metadata.get(s.name) || null
         }))
+        log.info('Generate done', {
+          sessionId: _sessionId || '',
+          ok: !intro.startsWith('⚠️'),
+          playlistCount: playlist.length,
+          introLen: intro.length,
+          tokens: { prompt: session.promptTokens, completion: session.completionTokens }
+        })
         if (intro.startsWith('⚠️')) {
           return { ok: false, error: intro.replace(/^⚠️\s*/, '') }
         }
@@ -613,6 +620,7 @@ const commands: CommandSpec[] = [
       const keepLines = computeRawKeep(raw, keep)
       await SessionManager.truncateTail(sid, raw.length - keepLines)
       const kept = raw.slice(0, keepLines)
+      log.info('Chat revert', { sessionId: sid, keep, removedLines: raw.length - keepLines })
 
       st.abortFetch?.()
       clearContinuousPending(st.player)
@@ -662,6 +670,7 @@ const commands: CommandSpec[] = [
       const keepLines = computeRawKeep(raw, keep)
       await SessionManager.truncateTail(_sessionId, raw.length - keepLines)
       const kept = raw.slice(0, keepLines)
+      log.info('Main revert', { sessionId: _sessionId, keep, removedLines: raw.length - keepLines })
 
       const sysPrompt = _session.chatHistory[0]?.role === 'system' ? _session.chatHistory[0] : null
       const rebuilt = rawToChatHistory(kept).filter((m) => m.role !== 'system')

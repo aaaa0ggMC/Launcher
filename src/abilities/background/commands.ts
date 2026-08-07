@@ -182,6 +182,7 @@ export default [
       const id = String(ctx.named.id ?? '')
       const ok = await stopTask(id)
       if (!ok) return { ok: false, error: `任务不存在或未运行: ${id}` }
+      log.info('background.stop', { id })
       return { ok: true }
     }
   },
@@ -193,6 +194,7 @@ export default [
       const id = String(ctx.named.id ?? '')
       const ok = killTask(id)
       if (!ok) return { ok: false, error: `无法强制结束任务: ${id}` }
+      log.info('background.kill', { id })
       return { ok: true }
     }
   },
@@ -204,6 +206,7 @@ export default [
       const id = String(ctx.named.id ?? '')
       const ok = removeTask(id)
       if (!ok) return { ok: false, error: `任务不可移除: ${id}` }
+      log.debug('background.remove', { id })
       return { ok: true }
     }
   },

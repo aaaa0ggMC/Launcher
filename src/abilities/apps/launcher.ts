@@ -268,6 +268,8 @@ export async function launchSpec(
     root: entry.root,
     name: entry.alias ?? entry.name,
     type: spec.type,
+    argv,
+    cwd,
     ok: res.ok,
     pid: res.pid,
     error: res.error

@@ -35,7 +35,11 @@ export async function listSystemd(): Promise<SystemdUnit[]> {
   const out = await run('systemctl', args).catch(() => '')
   if (!out) log.warn('systemctl list failed')
   const units = parseUnits(out)
-  log.info('systemd list result', { count: units.length })
+  log.debug('systemd list result', {
+    argv: args,
+    rawLines: out ? out.split('\n').filter((l) => l.trim()).length : 0,
+    parsed: units.length
+  })
   return units
 }
 
@@ -47,12 +51,13 @@ export async function systemdAction(
   try {
     await run('systemctl', args)
     const units = await listSystemd()
-    log.info('systemd action ok', { name, action })
+    log.info('systemd action ok', { name, action, argv: args })
     return units
   } catch (e) {
     log.error('systemd action failed', {
       name,
       action,
+      argv: args,
       error: e instanceof Error ? e.message : String(e)
     })
     throw e

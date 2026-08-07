@@ -299,6 +299,7 @@ export function setNcmBaseUrl(url: string): void {
 export async function searchNcmApi(
   keywords: string
 ): Promise<{ sid: number | null; lyric: string }> {
+  const started = Date.now()
   try {
     const sRes = await fetch(
       `${ncmBaseUrl}/search?keywords=${encodeURIComponent(keywords)}&limit=1`
@@ -307,13 +308,28 @@ export async function searchNcmApi(
       code: number
       result: { songCount: number; songs: { id: number }[] }
     }
-    if (sData.code !== 200 || !sData.result?.songCount) return { sid: null, lyric: '' }
+    if (sData.code !== 200 || !sData.result?.songCount) {
+      log.debug('NCM search: no result', {
+        keywords,
+        code: sData.code,
+        latencyMs: Date.now() - started
+      })
+      return { sid: null, lyric: '' }
+    }
     const sid = sData.result.songs[0].id
     const lRes = await fetch(`${ncmBaseUrl}/lyric?id=${sid}`)
     const lData = (await lRes.json()) as { code: number; lrc: { lyric: string } }
     const lyric = lData.code === 200 ? (lData.lrc?.lyric ?? '') : ''
+    log.debug('NCM search ok', {
+      keywords,
+      sid,
+      songCount: sData.result.songCount,
+      lyricLen: lyric.length,
+      latencyMs: Date.now() - started
+    })
     return { sid, lyric }
-  } catch {
+  } catch (e) {
+    log.warn('NCM search failed', { keywords, error: String(e) })
     return { sid: null, lyric: '' }
   }
 }
@@ -324,6 +340,7 @@ export async function extractMetadataAi(
   lyric: string,
   model: string
 ): Promise<SongMeta | null> {
+  const started = Date.now()
   try {
     const info = { title: name, lyrics: lyric.slice(0, 500) }
     const resp = await client.chat.completions.create(
@@ -341,8 +358,19 @@ export async function extractMetadataAi(
       { timeout: 30_000 }
     )
     const content = resp.choices[0]?.message?.content
-    if (!content) return null
-    return JSON.parse(content) as SongMeta
+    if (!content) {
+      log.debug('Metadata extraction: empty', { name, latencyMs: Date.now() - started })
+      return null
+    }
+    const parsed = JSON.parse(content) as SongMeta
+    log.debug('Metadata extracted', {
+      name,
+      model,
+      lyricLen: lyric.length,
+      parsed,
+      latencyMs: Date.now() - started
+    })
+    return parsed
   } catch (e) {
     log.warn('extractMetadataAi failed', { name, error: String(e) })
     return null
@@ -360,20 +388,35 @@ export async function syncMetadata(
   log.info(`Syncing ${missing.size} songs... concurrency=${concurrency}`)
   const entries = [...missing.entries()]
   const workers = Math.min(concurrency, entries.length)
+  const counts = { ok: 0, noLyric: 0, failed: 0 }
   await Promise.allSettled(
     Array.from({ length: workers }, async (_, i) => {
       for (let j = i; j < entries.length; j += workers) {
         const [name] = entries[j]
         const { sid, lyric } = await searchNcmApi(name)
-        if (sid === null) continue
+        if (sid === null) {
+          counts.noLyric++
+          log.debug('Metadata sync: no result', { name })
+          continue
+        }
         const meta = await extractMetadataAi(client, name, lyric, model)
         if (meta) {
           metadata.set(name, meta)
           await appendMetadata(name, meta)
+          counts.ok++
+        } else {
+          counts.failed++
+          log.warn('Metadata sync: extraction failed', { name, sid })
         }
       }
     })
   )
+  log.info('Metadata sync done', {
+    total: entries.length,
+    ok: counts.ok,
+    noLyric: counts.noLyric,
+    failed: counts.failed
+  })
   return metadata
 }
 
@@ -1088,6 +1131,7 @@ RULES:
   private async manageContext(): Promise<RawHistoryMessage | null> {
     const max = Math.max(2, this.config.preferences.max_history_length || 10)
     if (this.chatHistory.length <= max) return null
+    const previous = this.chatHistory.length
     const mode = this.config.preferences.context_mode || 'discard'
     const keep = this.chatHistory[0]
     const now = Date.now()
@@ -1119,6 +1163,13 @@ RULES:
         ...this.chatHistory.slice(-(max - 1))
       ]
     }
+    log.debug('Context trimmed', {
+      mode,
+      max,
+      previous,
+      kept: this.chatHistory.length,
+      summaryChars: updatedContent.length
+    })
     return marker
   }
 

@@ -197,7 +197,12 @@ export async function toggleMirror(name: string, enabled: boolean): Promise<Mirr
     // Re-read to reflect the actual file state after the swap.
     const fresh = await readFile(MIRRORLIST, 'utf-8').catch(() => '')
     const freshMirrors = await mergeWithConfig(parseMirrorlist(fresh))
-    log.info('toggle mirror ok', { name, enabled })
+    log.info('toggle mirror ok', {
+      name,
+      enabled,
+      url: freshMirrors.find((m) => m.name === name)?.url,
+      scriptOutput: result.message
+    })
     resolveRun({ mirrors: freshMirrors })
   })
   // Keep the chain going regardless of success/failure.
@@ -262,10 +267,12 @@ export async function testMirrors(): Promise<MirrorTestResult[]> {
       const testUrl = buildTestUrl(m.url)
       try {
         const { latency, speed } = await probeMirror(testUrl, 10000)
+        log.debug('mirror test ok', { name: m.name, testUrl, latency, speed })
         return { name: m.name, url: m.url, ok: true, latency, speed }
       } catch (e) {
         log.warn('mirror test failed', {
           name: m.name,
+          testUrl,
           error: e instanceof Error ? e.message : String(e)
         })
         return {

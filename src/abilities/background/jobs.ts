@@ -39,6 +39,7 @@ registerJobHandler('download', async (control: JobControl, args: Record<string, 
     return
   }
 
+  const started = Date.now()
   log.info('job download start', { url, out })
   control.pushLine(`下载 ${url}`)
   control.pushLine(`保存到 ${out}`)
@@ -66,6 +67,7 @@ registerJobHandler('download', async (control: JobControl, args: Record<string, 
   }
   if (!res.ok || !res.body) {
     control.pushLine(`HTTP ${res.status} ${res.statusText}`, 'stderr')
+    log.warn('job download http error', { url, out, status: res.status })
     control.finish('error')
     return
   }
@@ -91,6 +93,7 @@ registerJobHandler('download', async (control: JobControl, args: Record<string, 
     control.setProgress(100)
     control.pushLine(`完成: ${received} 字节 → ${out}`)
     control.finish('exited')
+    log.info('job download done', { url, out, received, total, durationMs: Date.now() - started })
   } catch (e) {
     if (ac.signal.aborted) {
       control.pushLine('已取消，删除不完整文件', 'stderr')

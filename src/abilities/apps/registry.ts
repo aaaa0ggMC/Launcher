@@ -189,7 +189,7 @@ export async function listAllApps(): Promise<{
       }
     }
   }
-  log.info('listed apps', { roots: searchRoots.length, apps: Object.keys(out).length })
+  log.debug('listed apps', { roots: searchRoots.length, apps: Object.keys(out).length })
   return { roots: searchRoots, apps: out }
 }
 
@@ -230,7 +230,7 @@ export async function updateEntry(
   reg.apps[id] = merged
   await writeJsonAtomic(file, reg)
   invalidateRegistry(root)
-  log.info('entry saved', { root, id })
+  log.info('entry saved', { root, id, patchKeys: Object.keys(patch) })
   broadcast('cockpit:apps-changed', 'update', { root, id })
   return { ...merged, root }
 }

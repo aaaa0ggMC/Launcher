@@ -40,6 +40,7 @@ export async function dockerAction(
   name: string,
   action: 'start' | 'stop' | 'restart'
 ): Promise<DockerContainer[]> {
+  const argv = ['docker', action === 'restart' ? 'restart' : action, name]
   try {
     if (action === 'restart') {
       await run('docker', ['restart', name])
@@ -47,12 +48,13 @@ export async function dockerAction(
       await run('docker', [action, name])
     }
     const containers = await listDocker()
-    log.info('docker action ok', { name, action })
+    log.info('docker action ok', { name, action, argv })
     return containers
   } catch (e) {
     log.error('docker action failed', {
       name,
       action,
+      argv,
       error: e instanceof Error ? e.message : String(e)
     })
     throw e
