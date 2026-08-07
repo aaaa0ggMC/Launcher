@@ -75,6 +75,14 @@ export async function withNetworkRetry<T>(
       if (!isNetworkError(e) && !isTimeout) throw e
       attempt++
       const waitMs = Math.min(2000, 1000 * attempt)
+      const errInfo = isTimeout ? 'attempt timeout' : String(e)
+      log.warn('AI request retry', {
+        attempt,
+        waitMs,
+        retryMinutes,
+        isTimeout,
+        error: errInfo
+      })
       opts.onRetry?.(attempt, waitMs, isTimeout ? new Error('API 请求超时') : e)
       if (Date.now() >= deadline) throw e
       await new Promise((r) => setTimeout(r, waitMs))
@@ -979,14 +987,13 @@ export class DJSession {
   ): { playlist: PlaylistEntry[]; intro: string } {
     const playlistNames: string[] = []
     let introText = ''
-    const isVerbose = this.config.preferences.verbose
     const keys = this.validKeys()
 
     if (rawText.includes(SEPARATOR)) {
       const parts = rawText.split(SEPARATOR)
       introText = parts[0].trim()
       const rawListBlock = parts.slice(1).join(SEPARATOR)
-      if (isVerbose) log.info('Separator found, parsing list')
+      log.debug('Separator found, parsing list')
       const lines = rawListBlock
         .split('\n')
         .map((l) => l.trim())
@@ -998,16 +1005,16 @@ export class DJSession {
         if (clean.length < 2) continue
         const match = this.bestMatch(clean, keys)
         if (match) {
-          if (isVerbose) log.info(`Matched: ${clean} -> ${match}`)
+          log.debug(`Matched: ${clean} -> ${match}`)
           playlistNames.push(match)
-        } else if (isVerbose) {
-          log.info(`Ignored line: ${clean}`)
+        } else {
+          log.debug(`Ignored line: ${clean}`)
         }
       }
     } else {
       introText = rawText.trim()
-      if (isVerbose && source === 'AI') {
-        log.info('No separator found. Treating as pure conversation.')
+      if (source === 'AI') {
+        log.debug('No separator found. Treating as pure conversation.')
       }
     }
 
@@ -1018,13 +1025,21 @@ export class DJSession {
       const path = this.musicPaths.get(name)
       if (path) playlist.push({ name, path })
     }
+    log.debug('Playlist parsed', {
+      source,
+      hasSeparator: rawText.includes(SEPARATOR),
+      rawLines: rawText.split('\n').filter((l) => l.trim()).length,
+      matched: playlistNames.length,
+      unique: unique.length,
+      resolved: playlist.length,
+      names: playlist.map((s) => s.name)
+    })
     return { playlist, intro: introText }
   }
 
   /** Compact old conversation messages into a summary via the AI. Never includes the library prompt. */
   private async compactConversation(messages: ChatMessage[]): Promise<string> {
     if (!messages.length) return ''
-    const isVerbose = this.config.preferences.verbose
     try {
       const instruction = `You are a context compactor for an AI music DJ chat session.
 Your ONLY job is to summarize the conversation history.
@@ -1049,7 +1064,11 @@ RULES:
         { timeout: 30_000 }
       )
       const content = resp.choices?.[0]?.message?.content?.trim() || ''
-      if (isVerbose) log.info(`compacted ${messages.length} messages into summary`)
+      log.debug('Compacted conversation', {
+        messagesIn: messages.length,
+        summaryLength: content.length,
+        summary: content
+      })
       return content
     } catch (e) {
       log.warn('compactConversation failed', { error: String(e) })
@@ -1111,9 +1130,8 @@ RULES:
   ): Promise<{ playlist: PlaylistEntry[]; intro: string; updated?: RawHistoryMessage | null }> {
     this.turnCount++
     const model = this.config.preferences.model
-    const isVerbose = this.config.preferences.verbose
 
-    if (isVerbose) log.info(`Thinking with ${model}...`)
+    log.debug(`Thinking with ${model}...`)
 
     const basePrompt = `### ROLE DEFINITION
 You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
@@ -1145,7 +1163,7 @@ ${SEPARATOR}
       const libraryStr = this.formatLibrary()
       const systemContent = `${basePrompt}\n\n### CURRENT MUSIC LIBRARY (Exact Keys Only):\n${libraryStr}`
       this.chatHistory.unshift({ role: 'system', content: systemContent, timestamp: Date.now() })
-      if (isVerbose) log.info('Library injected once')
+      log.debug('Library injected once')
     }
 
     const updated = await this.manageContext()
@@ -1177,7 +1195,7 @@ Instruction: Check the Library in the first System message. If matches found, ou
           retryMinutes: this.config.preferences.network_retry_minutes ?? 0,
           signal,
           onRetry: (attempt, waitMs, err) => {
-            if (isVerbose) log.warn('AI network retry', { attempt, waitMs, error: String(err) })
+            log.warn('AI network retry', { attempt, waitMs, error: String(err) })
             onRetry?.(attempt, waitMs, err)
           }
         }
@@ -1201,7 +1219,12 @@ Instruction: Check the Library in the first System message. If matches found, ou
         .replace(/<think>[\s\S]*/g, '')
         .trim()
 
-      if (isVerbose) log.info(`Raw AI output (${cleanContent.length} chars)`)
+      log.debug('AI raw output', {
+        model,
+        turnCount: this.turnCount,
+        rawContent: cleanContent,
+        playedSongsCount: this.playedSongs.size
+      })
 
       this.chatHistory.push({ role: 'assistant', content: cleanContent, timestamp: Date.now() })
       return { ...this.parseRawPlaylist(cleanContent, 'AI'), updated }
@@ -1594,6 +1617,7 @@ export class SessionManager {
       await writeJsonAtomic(SESSIONS_INDEX, idx)
     })
     await mkdir(join(SESSIONS_DIR, id), { recursive: true })
+    log.info('Session created', { id, title: meta.title, type: meta.type })
     return id
   }
 
@@ -1655,6 +1679,7 @@ export class SessionManager {
       await writeFile(tmp, text, 'utf-8')
       await rename(tmp, p)
       await this.touchSession(sessionId)
+      log.info('Session truncated (revert)', { sessionId, removed: n, kept: keep })
     })
   }
 

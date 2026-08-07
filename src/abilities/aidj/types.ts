@@ -8,7 +8,6 @@ export interface AidjConfig {
   }
   preferences: {
     model: string
-    verbose: boolean
     auto_play: boolean
     dbus_target: string
     record_freq: boolean

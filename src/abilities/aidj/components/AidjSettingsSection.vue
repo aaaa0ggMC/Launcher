@@ -13,7 +13,6 @@ const autoPlay = ref(true)
 const dynamicBalance = ref(true)
 const adjMethod = ref<'lufs' | 'linear'>('lufs')
 const volumeCurve = ref(3.0)
-const verbose = ref(false)
 const recordFreq = ref(true)
 const metadataConcurrency = ref(8)
 const maxHistoryLength = ref(10)
@@ -50,7 +49,6 @@ onMounted(async () => {
   dynamicBalance.value = (prefs.dynamic_balance_volume as boolean) ?? true
   adjMethod.value = (prefs.sound_adjust_method as 'lufs' | 'linear') || 'lufs'
   volumeCurve.value = (prefs.volume_curve as number) ?? 3.0
-  verbose.value = (prefs.verbose as boolean) ?? false
   recordFreq.value = (prefs.record_freq as boolean) ?? true
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
@@ -96,7 +94,6 @@ watch(autoPlay, (v) => update('preferences.auto_play', v))
 watch(dynamicBalance, (v) => update('preferences.dynamic_balance_volume', v))
 watch(adjMethod, (v) => update('preferences.sound_adjust_method', v))
 watch(volumeCurve, (v) => update('preferences.volume_curve', v))
-watch(verbose, (v) => update('preferences.verbose', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
@@ -224,15 +221,6 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
               v-model="dynamicBalance"
               color="primary"
               label="动态响度平衡"
-              hide-details
-              density="compact"
-            />
-          </v-col>
-          <v-col cols="6" md="3">
-            <v-switch
-              v-model="verbose"
-              color="primary"
-              label="详细日志"
               hide-details
               density="compact"
             />
