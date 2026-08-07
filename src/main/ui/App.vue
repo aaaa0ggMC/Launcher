@@ -757,6 +757,7 @@ onBeforeUnmount(() => {
         <div
           class="brand-header"
           :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
+          @click="rail = !rail"
         >
           <div class="brand-logo">
             <GameIcon name="boss" :size="30" />
@@ -1054,6 +1055,7 @@ body,
 
 .brand-header {
   gap: 10px;
+  cursor: pointer;
 }
 
 .brand-header--rail {
