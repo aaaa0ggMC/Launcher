@@ -20,6 +20,27 @@ const CIRCLE: FtPreset = {
   runSpeed: 1
 }
 
+/** Circle in the YZ plane — a single vector with only the polar (X) period. */
+const CIRCLE_3D: FtPreset = {
+  name: 'circle3d',
+  vectors: [
+    { x: 0, y: 0, secperRound: 0 },
+    { x: 0, y: 120, z: 0, secperRound: 0, secperRoundX: 1 }
+  ],
+  runSpeed: 1
+}
+
+/** Double-period demo: an azimuth circle plus a fast polar wobble — the tips
+ *  sweep a torus-like 3D surface (turn on "cover" in 3D view to see it). */
+const TORUS: FtPreset = {
+  name: 'torus',
+  vectors: [
+    { x: 100, y: 0, secperRound: 1 },
+    { x: 0, y: 0, z: 40, secperRound: 0, secperRoundX: 0.25 }
+  ],
+  runSpeed: 1
+}
+
 const LIMACON: FtPreset = {
   name: 'limacon',
   // r1·e^{iωt} + r2·e^{i2ωt} traces a cardioid-like limacon
@@ -97,13 +118,49 @@ function randomVectors(): FtVector[] {
     const len = 24 + Math.random() * 90
     const phase = Math.random() * 2 * Math.PI
     const period = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 2.6)
-    v.push({ x: len * Math.cos(phase), y: len * Math.sin(phase), secperRound: period })
+    v.push({
+      x: len * Math.cos(phase),
+      y: len * Math.sin(phase),
+      secperRound: period,
+      orot: Math.random() * 360 - 180
+    })
+  }
+  return v
+}
+
+/**
+ * Random 3D vectors for 3D mode: directions are uniform on the sphere, and
+ * roughly half the vectors also get a polar period (`secperRoundX`), so the
+ * double-period rotation sweeps a true 3D region instead of a flat scribble.
+ * Both initial phases (θ₀ and φ₀) are randomized.
+ */
+function randomVectors3d(): FtVector[] {
+  const v: FtVector[] = []
+  const n = 10 + Math.floor(Math.random() * 6)
+  for (let i = 0; i < n; i++) {
+    const len = 24 + Math.random() * 90
+    const az = Math.random() * 2 * Math.PI
+    const inc = Math.acos(2 * Math.random() - 1)
+    const vec: FtVector = {
+      x: len * Math.sin(inc) * Math.cos(az),
+      y: len * Math.sin(inc) * Math.sin(az),
+      z: len * Math.cos(inc),
+      secperRound: (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 2.6),
+      orot: Math.random() * 360 - 180,
+      orotX: Math.random() * 360 - 180
+    }
+    if (Math.random() < 0.55) {
+      vec.secperRoundX = (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 2)
+    }
+    v.push(vec)
   }
   return v
 }
 
 const PRESETS: Record<string, FtPreset> = {
   circle: CIRCLE,
+  circle3d: CIRCLE_3D,
+  torus: TORUS,
   limacon: LIMACON,
   cardioid: CARDIOID,
   square: SQUARE,
@@ -114,6 +171,8 @@ const PRESETS: Record<string, FtPreset> = {
 
 const DESCRIPTIONS: Record<string, string> = {
   circle: '单矢量 · 经典圆周',
+  circle3d: '垂直圆 · 仅极向旋转',
+  torus: '双周期 · 环面覆盖区域',
   limacon: '两矢量 · 利马曲线',
   cardioid: '心形线 · DFT',
   square: '方形 · 角点吉布斯振铃',
@@ -131,10 +190,10 @@ export function listFtPresets(): FtPresetMeta[] {
   return presets
 }
 
-export function loadFtPreset(name: string): FtPreset | null {
+export function loadFtPreset(name: string, mode: '2d' | '3d' = '2d'): FtPreset | null {
   if (name === 'random') {
-    const vectors = randomVectors()
-    log.info('preset loaded', { name, vectors: vectors.length })
+    const vectors = mode === '3d' ? randomVectors3d() : randomVectors()
+    log.info('preset loaded', { name, mode, vectors: vectors.length })
     return { name: 'random', vectors, runSpeed: 1 }
   }
   const preset = PRESETS[name] ?? null
@@ -153,6 +212,8 @@ function normalizeVector(raw: unknown): FtVector {
   }
   if (v.z !== undefined) vec.z = Number(v.z)
   if (v.orot !== undefined) vec.orot = Number(v.orot)
+  if (v.orotX !== undefined) vec.orotX = Number(v.orotX)
+  if (v.secperRoundX !== undefined) vec.secperRoundX = Number(v.secperRoundX)
   return vec
 }
 
@@ -160,7 +221,7 @@ function normalizeVector(raw: unknown): FtVector {
  * Load vectors from a JSON file. Accepted shapes:
  *   - `{ "vectors": [...], "runSpeed": 1, "verticesLimit": 4096 }`
  *   - a bare `[...]` array of vectors
- * Each vector: `{ x, y, secperRound, orot?, z? }`.
+ * Each vector: `{ x, y, secperRound, orot?, z?, secperRoundX?, orotX? }`.
  */
 export async function loadFtFile(path: string): Promise<{
   ok: boolean

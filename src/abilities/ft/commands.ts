@@ -16,11 +16,12 @@ export default [
   },
   {
     name: 'ft.load',
-    description: '加载傅里叶预设 (--name <circle|square|heart|...>)',
+    description: '加载傅里叶预设 (--name <circle|square|heart|...> [--mode 2d|3d])',
     usage: 'ft.load --name heart',
     run: async (ctx) => {
       const name = String(ctx.named.name ?? '')
-      const preset = loadFtPreset(name)
+      const mode = ctx.named.mode === '3d' ? '3d' : '2d'
+      const preset = loadFtPreset(name, mode)
       if (!preset) {
         log.warn('ft.load failed', { name, error: `未知预设: ${name}` })
         return { ok: false, error: `未知预设: ${name}` }

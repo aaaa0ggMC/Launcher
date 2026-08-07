@@ -43,7 +43,7 @@ const state = reactive<FtUiState>({
   mode: '2d',
   follow: false,
   neon: false,
-  show: { coords: true, circles: false, vectors: true, track: true, final: true },
+  show: { coords: true, cover: false, vectors: true, track: true, final: true },
   runSpeed: 1,
   verticesLimit: 4096,
   fps: 0,
@@ -124,7 +124,7 @@ async function loadPreset(name: string): Promise<void> {
   if (!engine || !scene) return
   presetLoading.value = true
   try {
-    const res = (await window.cockpit.command('ft.load', { name })) as {
+    const res = (await window.cockpit.command('ft.load', { name, mode: state.mode })) as {
       vectors?: FtVectorLike[]
       runSpeed?: number
       verticesLimit?: number
@@ -142,7 +142,9 @@ interface FtVectorLike {
   y: number
   z?: number
   orot?: number
+  orotX?: number
   secperRound: number
+  secperRoundX?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +299,7 @@ onMounted(async () => {
   // sync initial state into the scene
   scene.setOptions({
     showCoords: state.show.coords,
-    showCircles: state.show.circles,
+    showCover: state.show.cover,
     showVectors: state.show.vectors,
     showTrack: state.show.track,
     showFinal: state.show.final,
@@ -358,7 +360,7 @@ async function initScene(): Promise<void> {
   syncPalette()
   scene.setOptions({
     showCoords: state.show.coords,
-    showCircles: state.show.circles,
+    showCover: state.show.cover,
     showVectors: state.show.vectors,
     showTrack: state.show.track,
     showFinal: state.show.final,
@@ -411,7 +413,7 @@ watch(
   (s) =>
     scene?.setOptions({
       showCoords: s.coords,
-      showCircles: s.circles,
+      showCover: s.cover,
       showVectors: s.vectors,
       showTrack: s.track,
       showFinal: s.final
@@ -430,7 +432,11 @@ function toMarkdown(): string {
     `- ${t('ft.info.time')}: ${state.time.toFixed(2)}s · ${t('ft.info.vectors')}: ${state.vectorCount} · ${t('ft.info.points')}: ${state.trackCount} · FPS: ${state.fps}`
   )
   if (state.tip) {
-    lines.push(`- ${t('ft.info.tip')}: (${state.tip.x.toFixed(3)}, ${state.tip.y.toFixed(3)})`)
+    const tip =
+      state.mode === '3d'
+        ? `(${state.tip.x.toFixed(3)}, ${state.tip.y.toFixed(3)}, ${state.tip.z.toFixed(3)})`
+        : `(${state.tip.x.toFixed(3)}, ${state.tip.y.toFixed(3)})`
+    lines.push(`- ${t('ft.info.tip')}: ${tip}`)
   }
   if (state.currentPreset) {
     lines.push(`- ${t('ft.mdPreset')}: ${state.currentPreset}`)
@@ -443,9 +449,18 @@ function toMarkdown(): string {
   state.vectors.forEach((v, i) => {
     const x = Number(v.x.toFixed(3))
     const y = Number(v.y.toFixed(3))
-    const period =
-      v.secperRound === 0 ? t('ft.mdStatic') : `${v.secperRound}s/${t('ft.mdPerRound')}`
-    lines.push(`- **${i + 1}** — x: \`${x}\`, y: \`${y}\` · ${period}`)
+    const z = v.z === undefined ? '' : `, z: \`${Number(v.z.toFixed(3))}\``
+    const az = v.secperRound ? `T_φ: ${v.secperRound}s/${t('ft.mdPerRound')}` : ''
+    const pol = v.secperRoundX ? `T_θ: ${v.secperRoundX}s/${t('ft.mdPerRound')}` : ''
+    const periods = [az, pol].filter(Boolean).join(' · ') || t('ft.mdStatic')
+    const phases = [
+      v.orotX ? `θ₀: ${Number(v.orotX.toFixed(1))}°` : '',
+      v.orot ? `φ₀: ${Number(v.orot.toFixed(1))}°` : ''
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    const suffix = [periods, phases].filter(Boolean).join(' · ')
+    lines.push(`- **${i + 1}** — x: \`${x}\`, y: \`${y}\`${z} · ${suffix}`)
   })
   return lines.join('\n')
 }

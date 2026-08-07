@@ -20,6 +20,8 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 /** Per-preset leading icon, matching the apps ability's icon+label button style. */
 const PRESET_ICONS: Record<string, string> = {
   circle: 'mdi-circle-outline',
+  circle3d: 'mdi-orbit',
+  torus: 'mdi-ring',
   limacon: 'mdi-chart-arc',
   cardioid: 'mdi-heart-outline',
   square: 'mdi-square-outline',

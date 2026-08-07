@@ -1,11 +1,12 @@
 import type { FtVector } from './types'
 import type { FtChain, FtPoint } from './engine'
+import { rotateVector } from './engine'
 
 export type FtMode = '2d' | '3d'
 
 export interface FtDisplayOptions {
   showCoords: boolean
-  showCircles: boolean
+  showCover: boolean
   showVectors: boolean
   showTrack: boolean
   showFinal: boolean
@@ -14,7 +15,7 @@ export interface FtDisplayOptions {
 
 const DEFAULT_OPTIONS: FtDisplayOptions = {
   showCoords: true,
-  showCircles: false,
+  showCover: false,
   showVectors: true,
   showTrack: true,
   showFinal: true,
@@ -64,7 +65,7 @@ export interface FtPalette {
   axisZ: string
   gridMinor: string
   gridCenter: string
-  circle: string
+  cover: string
   arm: string
   track: string
   final: string
@@ -78,7 +79,7 @@ const DEFAULT_PALETTE: FtPalette = {
   axisZ: '#6b99ff',
   gridMinor: '#1c242f',
   gridCenter: '#2c3640',
-  circle: '#8b97a5',
+  cover: '#8b97a5',
   arm: '#ffe066',
   track: '#ffffff',
   final: '#9adcff',
@@ -99,7 +100,7 @@ export function paletteFromTheme(colors: Record<string, string>): FtPalette {
     axisZ: pick('accent-3', DEFAULT_PALETTE.axisZ),
     gridMinor: pick('surface-variant', DEFAULT_PALETTE.gridMinor),
     gridCenter: pick('secondary-container', DEFAULT_PALETTE.gridCenter),
-    circle: pick('on-surface-variant', DEFAULT_PALETTE.circle),
+    cover: pick('on-surface-variant', DEFAULT_PALETTE.cover),
     arm: pick('accent-4', DEFAULT_PALETTE.arm),
     track: pick('on-surface', DEFAULT_PALETTE.track),
     final: pick('accent-5', DEFAULT_PALETTE.final),
@@ -123,22 +124,37 @@ function computeChainReach(vectors: FtVector[]): number {
     let y = 0
     let z = 0
     for (const v of vectors) {
-      if (v.secperRound === 0) {
-        x += v.x
-        y += v.y
-        z += v.z ?? 0
-        continue
-      }
-      const angle = (2 * Math.PI * t) / v.secperRound + ((v.orot ?? 0) * Math.PI) / 180
-      const cos = Math.cos(angle)
-      const sin = Math.sin(angle)
-      x += v.x * cos - v.y * sin
-      y += v.x * sin + v.y * cos
-      z += v.z ?? 0
+      const r = rotateVector(v, t)
+      x += r.x
+      y += r.y
+      z += r.z
     }
     max = Math.max(max, Math.hypot(x, y, z))
   }
   return Math.max(10, max)
+}
+
+/**
+ * Sample the swept region of EVERY vector on its own — each vector alone, its
+ * own pivot as origin, over one representative cycle of its two periods. The
+ * regions are NOT accumulated; the renderer later translates each shape onto
+ * the vector's current pivot. Returns one point set per vector.
+ */
+function computeCoverShapes(vectors: FtVector[]): Vec3[][] {
+  if (vectors.length === 0) return []
+  const perVector = Math.max(24, Math.min(256, Math.round(8192 / vectors.length)))
+  return vectors.map((v) => {
+    let maxPeriod = 1
+    if (v.secperRound) maxPeriod = Math.max(maxPeriod, Math.abs(v.secperRound))
+    if (v.secperRoundX) maxPeriod = Math.max(maxPeriod, Math.abs(v.secperRoundX))
+    const window = Math.min(16, Math.max(1, maxPeriod))
+    const shape: Vec3[] = []
+    for (let i = 0; i < perVector; i++) {
+      const r = rotateVector(v, (i / perVector) * window)
+      shape.push({ x: r.x, y: r.y, z: r.z })
+    }
+    return shape
+  })
 }
 
 /**
@@ -175,8 +191,8 @@ export class FtScene {
   private currentTip: FtPoint | null = null
 
   // frame geometry
-  private circlePivots: FtPoint[] = []
-  private circleRadii: number[] = []
+  private coverShapes: Vec3[][] = []
+  private coverPoints: Vec3[] = []
   private armPoints: Vec3[] = []
   private finalPoints: Vec3[] = []
   private trackPoints: FtPoint[] = []
@@ -220,8 +236,10 @@ export class FtScene {
     this.orbitRadius = this.viewDistance * 1.3
     this.target = { x: 0, y: 0, z: 0 }
 
-    this.circleRadii = vectors.map((v) => Math.hypot(v.x, v.y))
-    this.circlePivots = []
+    this.coverShapes = computeCoverShapes(vectors)
+    const total = this.coverShapes.reduce((n, s) => n + s.length, 0)
+    this.coverPoints = new Array(total)
+    for (let i = 0; i < total; i++) this.coverPoints[i] = { x: 0, y: 0, z: 0 }
     this.armPoints = []
     this.finalPoints = []
     this.trackPoints = []
@@ -306,9 +324,21 @@ export class FtScene {
   /** 3D orbit drag in pixels — rotates the view direction (azimuth/elevation). */
   orbitBy(dx: number, dy: number): void {
     if (this.mode !== '3d') return
-    this.azimuth -= dx * 0.006
-    this.elevation = clamp(this.elevation - dy * 0.006, -1.45, 1.45)
+    const rate = this.orbitRate()
+    this.azimuth -= dx * rate
+    this.elevation = clamp(this.elevation - dy * rate, -1.45, 1.45)
     this.updateCamera()
+  }
+
+  /**
+   * Orbit sensitivity. Calibrated to the viewport (a full-height drag sweeps
+   * the vertical FOV) and scaled by the current zoom, so zooming in rotates
+   * more slowly for precise inspection — the old fixed 0.006 rad/px felt far
+   * too sensitive once zoomed in.
+   */
+  private orbitRate(): number {
+    const base = rad(FOV) / (this.container.clientHeight || 1)
+    return base * clamp(this.getZoom(), 0.3, 2.5)
   }
 
   resize(): void {
@@ -347,7 +377,7 @@ export class FtScene {
   /** Refresh all moving geometry from the latest simulation frame. */
   update(chain: FtChain): void {
     this.currentTip = chain.tip
-    this.circlePivots = chain.pivots
+    this.rebuildCover(chain)
 
     this.armPoints = [{ x: 0, y: 0, z: 0 }]
     for (const p of chain.pivots) this.armPoints.push(p)
@@ -357,6 +387,29 @@ export class FtScene {
       { x: 0, y: 0, z: 0 },
       { x: chain.tip.x, y: chain.tip.y, z: chain.tip.z }
     ]
+  }
+
+  /**
+   * Place every vector's own swept region at that vector's CURRENT pivot
+   * (`chain.pivots[i]`) — the pivot moves with the simulation, so the cover
+   * follows the chain as it animates instead of being stuck at the origin.
+   * Points are preallocated and mutated in place to avoid per-frame GC.
+   */
+  private rebuildCover(chain: FtChain): void {
+    const shapes = this.coverShapes
+    const pivots = chain.pivots
+    const n = Math.min(shapes.length, pivots.length)
+    let k = 0
+    for (let i = 0; i < n; i++) {
+      const p = pivots[i]
+      const shape = shapes[i]
+      for (const s of shape) {
+        const pt = this.coverPoints[k++]
+        pt.x = p.x + s.x
+        pt.y = p.y + s.y
+        pt.z = p.z + s.z
+      }
+    }
   }
 
   /** Stream track points (already capped by the engine). */
@@ -473,19 +526,26 @@ export class FtScene {
     return ca.z > NEAR ? [ca, c] : [c, cb]
   }
 
-  /** Fill a sphere of `worldRadius` world units projected at `center`. */
-  private fillDot(center: Vec3, worldRadius: number, style: string): void {
+  /**
+   * Fill a dot at `center` with a FIXED screen-space radius (CSS px) — it must
+   * not grow with zoom nor shrink with figure depth, otherwise the tip marker
+   * changes size as you zoom or switch presets.
+   */
+  private fillDot(center: Vec3, radiusPx: number, style: string): void {
     const c = this.toCam(center)
     if (c.z <= NEAR) return
     const p = this.project(c)
     if (!p) return
-    const focal = this.height / 2 / this.projT
-    const r = Math.max(1, (worldRadius * focal) / c.z)
     const ctx = this.ctx
     ctx.fillStyle = style
     ctx.beginPath()
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+    ctx.arc(p.x, p.y, radiusPx, 0, Math.PI * 2)
     ctx.fill()
+  }
+
+  /** Tip-dot radius, proportional to the viewport but zoom/depth independent. */
+  private tipDotRadius(): number {
+    return Math.max(2.5, Math.min(6, this.height * 0.0045))
   }
 
   // ---------------------------------------------------------------------------
@@ -504,12 +564,12 @@ export class FtScene {
 
     if (this.mode === '3d') this.drawGrid()
     if (this.options.showCoords) this.drawAxes()
-    if (this.options.showCircles) this.drawCircles()
+    if (this.options.showCover) this.drawCover()
     if (this.options.showTrack) this.drawTrack()
     if (this.options.showVectors) this.strokePath(this.armPoints, this.palette.arm)
     if (this.options.showFinal) {
       this.strokePath(this.finalPoints, this.palette.final)
-      if (this.currentTip) this.fillDot(this.currentTip, 4, this.palette.tip)
+      if (this.currentTip) this.fillDot(this.currentTip, this.tipDotRadius(), this.palette.tip)
     }
   }
 
@@ -548,19 +608,22 @@ export class FtScene {
     }
   }
 
-  private drawCircles(): void {
-    for (let i = 0; i < this.circlePivots.length; i++) {
-      const r = this.circleRadii[i] ?? 0
-      if (r < 0.01) continue
-      const p = this.circlePivots[i]
-      const pts: Vec3[] = []
-      const SEGMENTS = 64
-      for (let s = 0; s <= SEGMENTS; s++) {
-        const a = (s / SEGMENTS) * Math.PI * 2
-        pts.push({ x: p.x + r * Math.cos(a), y: p.y + r * Math.sin(a), z: p.z })
-      }
-      this.strokePath(pts, this.palette.circle)
+  private drawCover(): void {
+    if (this.coverPoints.length === 0) return
+    const ctx = this.ctx
+    const focal = this.height / 2 / this.projT
+    ctx.fillStyle = this.palette.cover
+    ctx.beginPath()
+    for (const p of this.coverPoints) {
+      const c = this.toCam(p)
+      if (c.z <= NEAR) continue
+      const sp = this.project(c)
+      if (!sp) continue
+      const r = Math.max(0.5, Math.min(2, (1.2 * focal) / c.z))
+      ctx.moveTo(sp.x + r, sp.y)
+      ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
     }
+    ctx.fill()
   }
 
   private drawGrid(): void {

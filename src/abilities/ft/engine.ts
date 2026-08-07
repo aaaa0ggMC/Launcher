@@ -14,6 +14,51 @@ export interface FtChain {
 }
 
 /**
+ * Rotate a vector to its orientation at sim-time `t` (double-period, nested):
+ *
+ *   v(t) = R_z(2π·t/T_φ + orot) · R_x(2π·t/T_θ + orotX) · v0
+ *
+ *   - T_θ = `secperRoundX`, θ₀ = `orotX` — polar rotation about X (changes the
+ *     spherical polar angle); 0 period = no polar rotation.
+ *   - T_φ = `secperRound`, φ₀ = `orot` — azimuth rotation about Z (classic
+ *     epicycle); 0 period = no azimuth rotation.
+ *
+ * Default `T_θ = 0` makes `R_x` the identity, so a vector reduces to the
+ * classic 2D epicycle `(x cosα − y sinα, x sinα + y cosα, z)` with
+ * `α = 2π·t/T_φ + orot` — fully backward compatible.
+ */
+export function rotateVector(v: FtVector, t: number): FtPoint {
+  const x0 = v.x
+  const y0 = v.y
+  const z0 = v.z ?? 0
+  let x = x0
+  let y = y0
+  let z = z0
+
+  // polar: rotate about X by 2π·t/T_θ + orotX
+  if (v.secperRoundX) {
+    const a = (2 * Math.PI * t) / v.secperRoundX + ((v.orotX ?? 0) * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const ny = y * c - z * s
+    z = y * s + z * c
+    y = ny
+  }
+
+  // azimuth: rotate about Z by 2π·t/T_φ + orot
+  if (v.secperRound) {
+    const a = (2 * Math.PI * t) / v.secperRound + ((v.orot ?? 0) * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const nx = x * c - y * s
+    y = x * s + y * c
+    x = nx
+  }
+
+  return { x, y, z }
+}
+
+/**
  * Deterministic epicycle simulation, faithful to SimpleVectors:
  * each vector rotates by 2π·t/secperRound (signed period; 0 = static offset),
  * and the track accumulates the tip of the final vector over time.
@@ -34,11 +79,7 @@ export class FtEngine {
 
   /** Rotate one vector to its orientation at sim-time `t`. */
   private rotated(v: FtVector, t: number): FtPoint {
-    if (v.secperRound === 0) return { x: v.x, y: v.y, z: v.z ?? 0 }
-    const angle = (2 * Math.PI * t) / v.secperRound + ((v.orot ?? 0) * Math.PI) / 180
-    const cos = Math.cos(angle)
-    const sin = Math.sin(angle)
-    return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos, z: v.z ?? 0 }
+    return rotateVector(v, t)
   }
 
   /** Compute pivot + tip positions for the current time without advancing. */

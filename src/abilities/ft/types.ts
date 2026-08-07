@@ -1,19 +1,26 @@
 // Ft ability domain types — SimpleVectors-style epicycle visualizer.
 
 /**
- * One rotating vector (epicycle). Semantics mirror SimpleVectors' `Vector`:
- * at sim-time `t` the vector is rotated by `2π * t / secperRound` plus `orot`.
- * `secperRound === 0` marks a static offset (DFT's DC term). `z` is reserved
- * for future 3D extension.
+ * One rotating vector (epicycle). At sim-time `t` it is rotated by two nested
+ * rotations with independent periods AND initial phases: a polar rotation about
+ * X by `2π·t/T_θ + orotX` (`secperRoundX`), then an azimuth rotation about Z by
+ * `2π·t/T_φ + orot` (`secperRound`). Default `T_θ = 0` (no polar rotation)
+ * reproduces the classic 2D XY-plane epicycle exactly. `0` period = no
+ * rotation for either axis; a vector with both zero is a static DC offset.
+ * `z` is the out-of-plane component used when the polar rotation is active.
  */
 export interface FtVector {
   x: number
   y: number
   z?: number
-  /** initial rotation in degrees */
+  /** initial azimuth (φ) rotation in degrees */
   orot?: number
-  /** seconds (of sim time) per full 2π rotation; 0 = static */
+  /** initial polar (θ) rotation in degrees */
+  orotX?: number
+  /** azimuth period (rotation about Z), seconds per full 2π; 0 = static */
   secperRound: number
+  /** polar period (rotation about X), seconds per full 2π; 0 = no polar rotation */
+  secperRoundX?: number
 }
 
 /** One loadable preset returned by the `ft.load` command. */
@@ -31,7 +38,8 @@ export interface FtPreset {
 /** Live display toggles, mirroring SimpleVectors' 显示 menu. */
 export interface FtShowOptions {
   coords: boolean
-  circles: boolean
+  /** swept region of the vector tips (a surface in 3D, circles in 2D) */
+  cover: boolean
   vectors: boolean
   track: boolean
   final: boolean

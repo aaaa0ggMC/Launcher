@@ -44,7 +44,10 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
     <div class="info-cell">
       <span class="info-label">{{ t('ft.info.tip') }}</span>
       <span class="info-value font-family-mono">
-        ({{ state.tip.x.toFixed(1) }}, {{ state.tip.y.toFixed(1) }})
+        <template v-if="state.mode === '3d'">
+          ({{ state.tip.x.toFixed(1) }}, {{ state.tip.y.toFixed(1) }}, {{ state.tip.z.toFixed(1) }})
+        </template>
+        <template v-else> ({{ state.tip.x.toFixed(1) }}, {{ state.tip.y.toFixed(1) }}) </template>
       </span>
     </div>
     <div class="info-cell">

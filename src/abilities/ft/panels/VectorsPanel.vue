@@ -13,13 +13,19 @@ const apply = inject('ft:applyVectors') as (
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
-/** One editable row. Length/period/phase are edited as text; the base angle
+/** One editable row. Length/periods/phases are edited as text; the base angle
  *  (direction of (x, y) at t = 0) is captured once so editing |v| keeps it. */
 interface EditableRow {
   len: string
   angle: number
+  /** azimuth (Z) period — the classic epicycle period */
   period: string
+  /** polar (X) period — second, independent period of the double rotation */
+  periodX: string
+  /** initial azimuth phase (φ₀) */
   phase: string
+  /** initial polar phase (θ₀) */
+  phaseX: string
   z?: number
 }
 
@@ -28,7 +34,9 @@ function toDraft(vectors: FtVector[]): EditableRow[] {
     len: round(Math.hypot(v.x, v.y)),
     angle: Math.atan2(v.y, v.x),
     period: v.secperRound === 0 ? '0' : round(v.secperRound),
+    periodX: round(v.secperRoundX ?? 0),
     phase: round(v.orot ?? 0),
+    phaseX: round(v.orotX ?? 0),
     z: v.z
   }))
 }
@@ -53,7 +61,7 @@ watch(
 )
 
 function addRow(): void {
-  draft.value.push({ len: '50', angle: 0, period: '1', phase: '0' })
+  draft.value.push({ len: '50', angle: 0, period: '1', periodX: '0', phase: '0', phaseX: '0' })
 }
 
 function removeRow(i: number): void {
@@ -65,8 +73,18 @@ function buildVectors(): FtVector[] {
     .map((r) => {
       const len = Number(r.len)
       const period = Number(r.period)
+      const periodX = Number(r.periodX)
       const phase = Number(r.phase)
-      if (!Number.isFinite(len) || !Number.isFinite(period) || !Number.isFinite(phase)) return null
+      const phaseX = Number(r.phaseX)
+      if (
+        !Number.isFinite(len) ||
+        !Number.isFinite(period) ||
+        !Number.isFinite(periodX) ||
+        !Number.isFinite(phase) ||
+        !Number.isFinite(phaseX)
+      ) {
+        return null
+      }
       const vec: FtVector = {
         x: len * Math.cos(r.angle),
         y: len * Math.sin(r.angle),
@@ -74,6 +92,9 @@ function buildVectors(): FtVector[] {
         orot: phase
       }
       if (r.z !== undefined) vec.z = r.z
+      // only persist non-default fields so legacy 2D files stay untouched
+      if (periodX) vec.secperRoundX = periodX
+      if (phaseX) vec.orotX = phaseX
       return vec
     })
     .filter((v): v is FtVector => v !== null)
@@ -159,32 +180,39 @@ async function exportVectors(): Promise<void> {
     <div v-if="error" class="vec-edit__error">{{ error }}</div>
 
     <div class="vec-table">
-      <div class="vec-table__head font-family-mono">
-        <span>#</span>
-        <span>|v|</span>
-        <span>T</span>
-        <span>φ</span>
-        <span></span>
-      </div>
-      <div class="vec-table__body font-family-mono">
-        <div v-for="(r, i) in draft" :key="i" class="vec-table__row">
-          <span class="on-surface-variant">{{ i }}</span>
-          <input v-model="r.len" class="vec-input" inputmode="decimal" spellcheck="false" />
-          <input v-model="r.period" class="vec-input" inputmode="decimal" spellcheck="false" />
-          <input v-model="r.phase" class="vec-input" inputmode="decimal" spellcheck="false" />
-          <v-btn
-            icon
-            size="x-small"
-            variant="text"
-            color="error"
-            :title="t('ft.edit.removeRow')"
-            @click="removeRow(i)"
-          >
-            <v-icon size="14">mdi-close</v-icon>
-          </v-btn>
+      <div class="vec-table__hint">{{ t('ft.edit.axisHint') }}</div>
+      <div class="vec-table__scroll">
+        <div class="vec-table__head font-family-mono">
+          <span>#</span>
+          <span>|v|</span>
+          <span>T<sub>θ</sub></span>
+          <span>T<sub>φ</sub></span>
+          <span>θ<sub>0</sub></span>
+          <span>φ<sub>0</sub></span>
+          <span></span>
         </div>
-        <div v-if="draft.length === 0" class="vec-table__empty">
-          {{ t('ft.edit.empty') }}
+        <div class="vec-table__body font-family-mono">
+          <div v-for="(r, i) in draft" :key="i" class="vec-table__row">
+            <span class="on-surface-variant">{{ i }}</span>
+            <input v-model="r.len" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.periodX" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.period" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.phaseX" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <input v-model="r.phase" class="vec-input" inputmode="decimal" spellcheck="false" />
+            <v-btn
+              icon
+              size="x-small"
+              variant="text"
+              color="error"
+              :title="t('ft.edit.removeRow')"
+              @click="removeRow(i)"
+            >
+              <v-icon size="14">mdi-close</v-icon>
+            </v-btn>
+          </div>
+          <div v-if="draft.length === 0" class="vec-table__empty">
+            {{ t('ft.edit.empty') }}
+          </div>
         </div>
       </div>
     </div>
@@ -226,11 +254,54 @@ async function exportVectors(): Promise<void> {
   gap: 2px;
 }
 
+.vec-table__hint {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: rgba(var(--v-theme-on-surface-variant), 0.7);
+  padding: 2px 6px;
+}
+
+/* horizontal overflow is intentional: the 7 columns are wider than the panel */
+.vec-table__scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--v-theme-primary), 0.5) transparent;
+}
+
+.vec-table__scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.vec-table__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vec-table__scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--v-theme-primary), 0.5);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.vec-table__scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--v-theme-primary), 0.7);
+  background-clip: padding-box;
+}
+
+.vec-table__scroll::-webkit-scrollbar-button {
+  display: none;
+}
+
+.vec-table__head,
+.vec-table__body {
+  min-width: 34rem;
+}
+
 .vec-table__head,
 .vec-table__row {
   display: grid;
-  grid-template-columns: 1.6rem 1fr 1fr 1fr 1.6rem;
-  gap: 4px;
+  grid-template-columns: 1.6rem 1fr 1fr 1fr 1fr 1fr 1.6rem;
+  gap: 6px;
   align-items: center;
 }
 
@@ -242,7 +313,7 @@ async function exportVectors(): Promise<void> {
 }
 
 .vec-table__body {
-  max-height: calc(28px * 8 + 7px);
+  max-height: calc(30px * 8 + 9px);
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;

@@ -67,10 +67,10 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
         :label="t('ft.ctrl.vectors')"
       />
       <v-checkbox
-        v-model="state.show.circles"
+        v-model="state.show.cover"
         density="compact"
         hide-details
-        :label="t('ft.ctrl.circles')"
+        :label="t('ft.ctrl.cover')"
       />
       <v-checkbox
         v-model="state.show.coords"
