@@ -735,8 +735,9 @@ const commands: CommandSpec[] = [
           signal: controller.signal
         })
         clearTimeout(t)
-        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-        return { ok: true, latency: 'ok' }
+        // Any HTTP response (2xx/3xx/4xx/5xx) proves the endpoint is reachable.
+        // Some providers don't expose /models and return 404, but chat works fine.
+        return { ok: true, latency: `HTTP ${res.status}` }
       } catch (e) {
         return { ok: false, error: String(e) }
       }
