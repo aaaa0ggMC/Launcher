@@ -65,7 +65,9 @@ export async function withNetworkRetry<T>(
     const attemptTimer = setTimeout(() => attemptAc.abort(), 30_000)
     try {
       const combined = signal ? AbortSignal.any([signal, attemptAc.signal]) : attemptAc.signal
-      return await fn(combined)
+      const result = await fn(combined)
+      clearTimeout(attemptTimer)
+      return result
     } catch (e) {
       clearTimeout(attemptTimer)
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')

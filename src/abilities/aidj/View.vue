@@ -349,6 +349,7 @@ async function sendMessage(): Promise<void> {
       const result = (await window.cockpit.command('aidj.generate', {
         prompt: text
       })) as Record<string, unknown>
+      if (messages.value[placeholderIdx] == null) return
       if (result?.ok) {
         if (result.tokens)
           lastTokens.value = result.tokens as { prompt: number; completion: number }
@@ -375,6 +376,13 @@ async function sendMessage(): Promise<void> {
             timestamp: Date.now(),
             uid: makeUid()
           })
+        } else {
+          messages.value[placeholderIdx] = {
+            role: 'assistant',
+            content: '（AI 无输出）',
+            timestamp: Date.now(),
+            uid: placeholderUid ?? makeUid()
+          }
         }
       } else {
         messages.value[placeholderIdx] = {
@@ -386,6 +394,7 @@ async function sendMessage(): Promise<void> {
       }
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return
+      if (messages.value[placeholderIdx] == null) return
       messages.value[placeholderIdx] = {
         role: 'assistant',
         content: `错误: ${e instanceof Error ? e.message : String(e)}`,
