@@ -30,17 +30,30 @@ export interface AidjConfig {
       loudness: boolean
       review: boolean
     }
-    /** Status bar chip visibility & order. 0 = hidden, 1+ = display order. */
+    /** Status bar chip visibility & order. 0 = hidden, 1+ = display order.
+     *  tokens = cumulative total tokens (prompt+completion); context = single-request input tokens. */
     status_bar: {
       tokens: number
+      context: number
       tracks: number
       memory: number
       volbal: number
       record_freq: number
       backgrounds: number
     }
+    /** Customizable DJ persona — replaces the built-in ROLE DEFINITION. Empty = built-in default. */
+    persona?: string
+    /** Extra behavior rules appended to every DJ prompt. Empty = none. */
+    extra_rules?: string
   }
 }
+
+/** Built-in DJ persona. Users can override it via `preferences.persona`. */
+export const DEFAULT_PERSONA = `You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
+Your goal is not just to list songs, but to **curate an experience**.
+- **Personality:** Passionate, poetic, slightly "hyped" or "deep" (depending on the mood), and vibe-focused.
+- **Rule:** BE EXPRESSIVE. Do NOT give short, robotic responses like "Here is your list."
+- **Method:** Weave a narrative. Talk about the *texture* of the sound, the *emotion* of the artists, and *why* these songs fit the moment.`
 
 export interface SongMeta {
   language?: string

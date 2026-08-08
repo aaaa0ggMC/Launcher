@@ -36,6 +36,7 @@ function makeUid(): number {
 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
 const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
+const lastContext = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
 const sbTracks = ref(0)
 const sbMemory = ref(0)
 const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
@@ -49,11 +50,12 @@ const snackText = ref('')
 const snackColor = ref('success')
 const sbOrder = ref<Record<string, number>>({
   tokens: 1,
-  tracks: 2,
-  memory: 3,
-  volbal: 4,
-  record_freq: 5,
-  backgrounds: 6
+  context: 2,
+  tracks: 3,
+  memory: 4,
+  volbal: 5,
+  record_freq: 6,
+  backgrounds: 7
 })
 const availablePlayers = ref<string[]>([])
 const selectedPlayer = ref('')
@@ -143,6 +145,7 @@ onActivated(() => {
     netPollTimer = setInterval(pollNetwork, 15000)
   }
   listenBt()
+  scrollToBottom()
 })
 
 onDeactivated(() => {
@@ -248,11 +251,12 @@ async function pollStatus(): Promise<void> {
       if (result.statusBar) {
         sbOrder.value = {
           tokens: 1,
-          tracks: 2,
-          memory: 3,
-          volbal: 4,
-          record_freq: 5,
-          backgrounds: 6,
+          context: 2,
+          tracks: 3,
+          memory: 4,
+          volbal: 5,
+          record_freq: 6,
+          backgrounds: 7,
           ...(result.statusBar as Record<string, number>)
         }
       }
@@ -353,6 +357,8 @@ async function sendMessage(): Promise<void> {
       if (result?.ok) {
         if (result.tokens)
           lastTokens.value = result.tokens as { prompt: number; completion: number }
+        if (result.context)
+          lastContext.value = result.context as { prompt: number; completion: number }
         const pl = result.playlist as { name: string; path: string }[] | undefined
         const placeholderUid = messages.value[placeholderIdx]?.uid
         if (pl && pl.length > 0) {
@@ -766,13 +772,37 @@ defineExpose({ toMarkdown })
       <div class="aidj-status-bar">
         <template v-for="key in visibleStatus" :key="key">
           <template v-if="key === 'tokens'">
-            <v-chip variant="flat" size="small" class="status-chip is-on">
-              <span class="status-label">Prompt</span
-              ><span class="status-value">{{ formatTokens(lastTokens.prompt) }}</span>
+            <v-chip
+              variant="flat"
+              size="small"
+              class="status-chip is-on"
+              :title="'累计所有请求的 tokens 总和'"
+            >
+              <span class="status-label">Tokens</span
+              ><span class="status-value">{{
+                formatTokens(lastTokens.prompt + lastTokens.completion)
+              }}</span>
             </v-chip>
-            <v-chip variant="flat" size="small" class="status-chip is-on">
+          </template>
+
+          <template v-else-if="key === 'context'">
+            <v-chip
+              variant="flat"
+              size="small"
+              class="status-chip is-on"
+              :title="'单次请求的上下文输入 tokens'"
+            >
+              <span class="status-label">Context</span
+              ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
+            </v-chip>
+            <v-chip
+              variant="flat"
+              size="small"
+              class="status-chip is-on"
+              :title="'单次请求的输出 tokens'"
+            >
               <span class="status-label">Completion</span
-              ><span class="status-value">{{ formatTokens(lastTokens.completion) }}</span>
+              ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
             </v-chip>
           </template>
 
@@ -1041,7 +1071,9 @@ defineExpose({ toMarkdown })
 }
 .chat-area {
   min-height: 0;
-  scroll-behavior: smooth;
+  /* No smooth scroll: programmatic scroll-to-bottom on a long history would
+     animate the whole distance and take seconds. Instant jump instead. */
+  scroll-behavior: auto;
 }
 .chat-area::-webkit-scrollbar {
   width: 6px;

@@ -104,7 +104,8 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
   "animations": {
     "modernMotion": true, // 现代动效总开关（关 → 所有动效关闭，主题即时切换）
     "enabled": true, // 页面切换动画开关
-    "pageTransition": "fade" // fade | slide | slide-up | zoom | flip
+    "pageTransition": "fade", // fade | slide | slide-up | zoom | flip
+    "themeTransition": "corner" // 主题切换扩散起点: corner(左上角) | cursor(鼠标处)
   },
   "window": {
     "width": 1280,
@@ -252,7 +253,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - 每个配色方案是一个独立 JSON（`src/main/ui/color_schemes/*.json`），`color_schemes/index.ts` glob 注册并构建 Vuetify `ThemeDefinition`（`buildThemeDefinitions`）。
 - 内置 10 个：`dark` / `light` / `pureblack` / `moonlight` / `forest` / `aurora` / `rosy` / `sepia` / `slate` + `system`（跟随系统亮暗）。
 - `config.json` 的 `theme` 存方案 id；未知 id 一律回落 `DEFAULT_SCHEME_ID`（`dark`），不会弄坏 UI。
-- 主题切换：开启「现代动效」时用 View Transitions API 做左上角扩散的波纹揭示，关闭则即时切换（见 `App.vue` 的 `applyTheme`）。`<html>` 加 `motion-off` 类可全局关闭所有 CSS 过渡。
+- 主题切换：开启「现代动效」时用 View Transitions API 做波纹揭示，扩散起点由 `animations.themeTransition` 决定（`corner`=左上角、`cursor`=鼠标处，见 `App.vue` 的 `applyTheme` 与 `global.css` 的 `--vt-origin-*`），关闭则即时切换。`<html>` 加 `motion-off` 类可全局关闭所有 CSS 过渡。
 - ft 等画布类渲染端的配色跟随当前主题（读取 `--v-theme-*` CSS 变量），不是硬编码 hex。
 
 ### 镜像源 toggle 安全性

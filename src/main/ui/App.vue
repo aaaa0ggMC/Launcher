@@ -352,17 +352,22 @@ function applyWindowRounded(): void {
 function applyTheme(): void {
   const t = (runtimeConfig.value.theme as string) ?? null
   const resolved = resolveSchemeId(t, prefersDark())
-  if (theme.global.name.value === resolved) return
+  if (theme.name.value === resolved) return
   if (modernMotionEnabled() && typeof document.startViewTransition === 'function') {
+    // Reveal origin: 'corner' (top-left, default) or 'cursor' (last pointer).
+    const a = (runtimeConfig.value.animations as Record<string, unknown>) ?? {}
+    const origin = a.themeTransition === 'cursor' ? lastPointer : { x: 0, y: 0 }
+    document.documentElement.style.setProperty('--vt-origin-x', `${origin.x}px`)
+    document.documentElement.style.setProperty('--vt-origin-y', `${origin.y}px`)
     const vt = document.startViewTransition(async () => {
-      theme.global.name.value = resolved
+      theme.change(resolved)
       await nextTick()
     })
     // A second theme change mid-transition skips the running one; swallowing
     // the rejection keeps the UI responsive instead of surfacing an error.
     vt.finished.catch(() => {})
   } else {
-    theme.global.name.value = resolved
+    theme.change(resolved)
   }
 }
 
@@ -716,7 +721,16 @@ onMounted(async () => {
   quitUnsub = window.cockpit.on('cockpit:confirm-quit', onQuitConfirm)
   // restore the "don't remind me again" preference
   quitSuppress.value = localStorage.getItem(QUIT_SUPPRESS_KEY) === '1'
+  // Track the last pointer position so the theme reveal can originate from
+  // the cursor (`animations.themeTransition = 'cursor'`).
+  window.addEventListener('pointermove', onPointerMove, { passive: true })
 })
+
+let lastPointer = { x: 0, y: 0 }
+function onPointerMove(e: PointerEvent): void {
+  lastPointer.x = e.clientX
+  lastPointer.y = e.clientY
+}
 
 watch(currentId, () => persistUiState(), { flush: 'post' })
 watch(rail, () => persistUiState())
@@ -729,6 +743,7 @@ onBeforeUnmount(() => {
   schemeMedia?.removeEventListener?.('change', onSchemeChange)
   btUnsub?.()
   quitUnsub?.()
+  window.removeEventListener('pointermove', onPointerMove)
   if (searchDebounce) {
     clearTimeout(searchDebounce)
     searchDebounce = null

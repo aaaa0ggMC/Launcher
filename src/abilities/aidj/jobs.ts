@@ -626,6 +626,10 @@ export interface ChatTaskState {
   player: string
   control: JobControl
   abortFetch?: () => void
+  /** Set by /discard_follows — force the loop to refetch even while the queue is full. */
+  forceFetch?: boolean
+  /** Set by /discard_follows — the next generated batch REPLACES the continuous queue. */
+  replaceQueueOnNext?: boolean
 }
 
 const chatTasks = new Map<string, ChatTaskState>()
@@ -691,6 +695,27 @@ export function clearContinuousPending(player: string): void {
   st.index = st.queue.length
   st.total = st.queue.length
   pushContinuousState(st)
+}
+
+/** /discard_follows generation: swap the queued-but-unplayed songs for the new
+ *  batch once it's ready — the currently playing track keeps running, and the
+ *  old pending songs are dropped only now (never before the AI answers). */
+export function replaceContinuousQueue(
+  player: string,
+  songs: PlaylistEntry[]
+): { ok: boolean; error?: string; taskId?: string; queueLen?: number } {
+  if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
+  const existing = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  if (existing) {
+    existing.queue = songs
+    existing.index = 0
+    existing.total = songs.length
+    pushContinuousState(existing)
+    return { ok: true, taskId: existing.control.id, queueLen: songs.length }
+  }
+  const task = startJobByName('aidj.continuous', { songs, player, view: 'continuous' })
+  if (!task) return { ok: false, error: '创建连续播放任务失败' }
+  return { ok: true, taskId: task.id, queueLen: songs.length }
 }
 
 registerJobHandler('aidj.chat', async (control, args) => {
@@ -802,6 +827,9 @@ registerJobHandler('aidj.chat', async (control, args) => {
       type: 'chat_status',
       promptTokens: 0,
       completionTokens: 0,
+      tokens: 0,
+      context: 0,
+      contextCompletion: 0,
       memory: session.rollingHistory.length
     }
   })
@@ -846,7 +874,10 @@ registerJobHandler('aidj.chat', async (control, args) => {
         const cont = findContinuousByPlayer(st.player)
         const queueLen = cont ? cont.total - cont.index : 0
 
-        if (queueLen < REFILL && !session.working) {
+        // Refill when the queue is low — or immediately when the user sent a
+        // new message (/discard_follows), regardless of the batch threshold.
+        if ((queueLen < REFILL || st.forceFetch) && !session.working) {
+          st.forceFetch = false
           control.push({ data: { type: 'thinking' } })
           try {
             await fetchWithTimeout()
@@ -858,6 +889,9 @@ registerJobHandler('aidj.chat', async (control, args) => {
                 type: 'chat_status',
                 promptTokens: session.promptTokens,
                 completionTokens: session.completionTokens,
+                tokens: session.promptTokens + session.completionTokens,
+                context: session.lastPromptTokens,
+                contextCompletion: session.lastCompletionTokens,
                 memory: session.rollingHistory.length
               }
             })
@@ -877,7 +911,12 @@ registerJobHandler('aidj.chat', async (control, args) => {
               }
             }
             control.push({ data: { type: 'playlist', songs: batch } })
-            const r = ensureContinuousPlayer(st.player, batch)
+            // A user-directed /discard_follows generation REPLACES the pending
+            // queue once the new songs are ready (never clears it beforehand).
+            const r = st.replaceQueueOnNext
+              ? replaceContinuousQueue(st.player, batch)
+              : ensureContinuousPlayer(st.player, batch)
+            st.replaceQueueOnNext = false
             if (r.ok) {
               control.pushLine(`推送 ${batch.length} 首到连续播放`)
             } else {

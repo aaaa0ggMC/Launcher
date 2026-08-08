@@ -470,15 +470,6 @@ onBeforeUnmount(() => {
               <v-chip variant="tonal" :color="statusColor(selected.status)">
                 {{ statusLabel(selected.status) }}
               </v-chip>
-              <template v-if="selected.kind === 'job' && selected.progress !== undefined">
-                <v-progress-linear
-                  :model-value="selected.progress"
-                  color="primary"
-                  height="6"
-                  rounded
-                  class="bt-progress"
-                />
-              </template>
               <v-spacer />
 
               <!-- view tools (icon-only, compact) -->
@@ -628,9 +619,6 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-.bt-progress {
-  width: 140px;
 }
 .bt-cmd {
   word-break: break-all;

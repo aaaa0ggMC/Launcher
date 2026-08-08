@@ -17,10 +17,15 @@ export async function readJson<T>(p: string): Promise<T | null> {
   }
 }
 
-/** Atomic JSON write (write temp then rename). */
+/** Atomic JSON write (write temp then rename). The temp name must be unique
+ *  per call: a fixed `${p}.tmp-${pid}` collides when two saves run concurrently
+ *  (e.g. settings auto-save) — the second rename fails with ENOENT and the
+ *  config is silently lost. Last writer wins, which is fine for config. */
 export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
   await mkdir(dirname(p), { recursive: true })
-  const tmp = `${p}.tmp-${process.pid}`
+  const tmp = `${p}.tmp-${process.pid}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`
   await writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8')
   await rename(tmp, p)
 }

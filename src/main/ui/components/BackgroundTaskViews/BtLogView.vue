@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
 import { inject } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import { ansiToHtml } from '@ui/ansi'
 
 /**
  * Default background-task view — a live console with an interactive input row.
@@ -35,10 +36,9 @@ const visible = computed(() => {
   return list.slice(start)
 })
 
-/** True when the window is pinned to the newest message. */
-const pinned = computed(() => windowStart.value <= 0)
-
-// When new messages arrive: if we're pinned to the tail, follow it + autoscroll.
+// When new messages arrive: follow the tail only while the user is anchored
+// at the bottom (autoScroll). The window may be pinned (windowStart > 0) even
+// when following — the tail always includes the newest messages.
 let hasInited = false
 watch(
   () => props.messages,
@@ -47,10 +47,12 @@ watch(
     if (!hasInited) {
       hasInited = true
       if (list.length > PAGE) windowStart.value = list.length - PAGE
-      scrollBottom()
+      // Defer until after mount — consoleEl is still null during the
+      // immediate pre-mount invocation.
+      nextTick(scrollBottom)
       return
     }
-    if (pinned.value) scrollBottom()
+    if (autoScroll.value) scrollBottom()
   },
   { immediate: true }
 )
@@ -117,14 +119,14 @@ function onCtrlD(): void {
         >
           {{ loadingOlder ? t('bt.loadingOlder') : t('bt.loadOlder') }}
         </div>
+        <!-- eslint-disable vue/no-v-html -- content escaped by ansiToHtml -->
         <template v-for="(m, i) in visible" :key="i">
           <div
             v-if="m.line !== undefined"
             class="bt-line"
             :class="m.stream === 'stderr' ? 'bt-line--err' : ''"
-          >
-            {{ m.line }}
-          </div>
+            v-html="ansiToHtml(m.line)"
+          ></div>
           <div v-else-if="m.data !== undefined" class="bt-data">
             <span v-if="m.label" class="bt-data__label">{{ m.label }}</span>
             <pre class="bt-data__pre">{{
@@ -132,8 +134,12 @@ function onCtrlD(): void {
             }}</pre>
           </div>
         </template>
+        <!-- eslint-enable vue/no-v-html -->
         <div v-if="props.messages.length === 0" class="on-surface-variant text-caption pa-2">
           {{ t('bt.noOutput') }}
+        </div>
+        <div v-if="task.kind === 'job' && task.progress !== undefined" class="bt-console-progress">
+          <v-progress-linear :model-value="task.progress" color="primary" height="6" rounded />
         </div>
       </div>
     </div>
@@ -211,6 +217,10 @@ function onCtrlD(): void {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 0.8rem;
   line-height: 1.5;
+}
+.bt-console-progress {
+  margin: 8px 0 4px;
+  padding: 0 4px;
 }
 .bt-line {
   color: rgba(var(--v-theme-on-surface), 0.92);

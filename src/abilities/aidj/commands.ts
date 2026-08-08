@@ -266,7 +266,8 @@ const commands: CommandSpec[] = [
           ok: true,
           intro,
           playlist: enriched,
-          tokens: { prompt: session.promptTokens, completion: session.completionTokens }
+          tokens: { prompt: session.promptTokens, completion: session.completionTokens },
+          context: { prompt: session.lastPromptTokens, completion: session.lastCompletionTokens }
         }
       } finally {
         _currentAbort = null
@@ -537,14 +538,38 @@ const commands: CommandSpec[] = [
       if (!taskId || !text) return { ok: false, error: '需要 --task 和 --text 参数' }
       const st = getChatTask(taskId)
       if (!st) return { ok: false, error: '持续会话未运行' }
-      if (text.startsWith('/discard_follows')) {
-        st.session.discardFollows()
-        clearContinuousPending(st.player)
-        return { ok: true, effect: 'discard_follows' }
+
+      // `/discard_follows` may be sent alone OR appended to a real message
+      // (e.g. "从C418开始，语种多样化吧 /discard_follows"). Strip it, apply
+      // the discard, and still send the rest as the user message so the DJ
+      // reacts to the new direction immediately.
+      const raw = text.trim()
+      let content = raw
+      let discard = false
+      const lead = raw.match(/^\/discard_follows\s*([\s\S]*)$/)
+      const trail = raw.match(/^([\s\S]*?)\s+\/discard_follows\s*$/)
+      if (lead) {
+        discard = true
+        content = lead[1].trim()
+      } else if (trail) {
+        discard = true
+        content = trail[1].trim()
       }
-      st.session.injectUserMessage(text)
-      st.control.push({ data: { type: 'user', content: text } })
-      return { ok: true, effect: 'injected' }
+      if (discard) {
+        // Don't clear the continuous queue now — the old songs keep playing
+        // while the AI works. The new batch replaces the queue once generated.
+        st.session.discardFollows()
+        st.forceFetch = true
+        st.replaceQueueOnNext = true
+      }
+      if (content) {
+        st.session.injectUserMessage(content)
+        st.control.push({ data: { type: 'user', content } })
+      }
+      return {
+        ok: true,
+        effect: discard ? (content ? 'discard_follows+injected' : 'discard_follows') : 'injected'
+      }
     }
   },
   {
@@ -596,6 +621,9 @@ const commands: CommandSpec[] = [
           type: 'chat_status',
           promptTokens: st.session.promptTokens,
           completionTokens: st.session.completionTokens,
+          tokens: st.session.promptTokens + st.session.completionTokens,
+          context: st.session.lastPromptTokens,
+          contextCompletion: st.session.lastCompletionTokens,
           memory: 0
         }
       })
@@ -634,13 +662,17 @@ const commands: CommandSpec[] = [
       st.session.fetchCount = sysPrompt ? Math.max(1, bothCount) : 0
       st.session.promptTokens = 0
       st.session.completionTokens = 0
+      st.session.pendingUserPrompt = null
       st.session.buffer = []
       st.session.currentQueue = []
       st.session.lastIntro = ''
 
       st.control.push({ data: { type: 'clear_history' } })
       for (const m of st.session.chatHistory) {
-        const t = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
+        // The library/system prompt (chatHistory[0]) and compact markers must stay
+        // in the AI context but must NOT be rendered as chat messages.
+        if (m.role === 'system') continue
+        const t = m.role === 'user' ? 'user' : 'assistant'
         st.control.push({ data: { type: t, content: m.content, history: true } })
         if (m.playlist && m.playlist.length > 0) {
           st.control.push({ data: { type: 'playlist', songs: m.playlist, history: true } })
@@ -651,6 +683,9 @@ const commands: CommandSpec[] = [
           type: 'chat_status',
           promptTokens: st.session.promptTokens,
           completionTokens: st.session.completionTokens,
+          tokens: st.session.promptTokens + st.session.completionTokens,
+          context: st.session.lastPromptTokens,
+          contextCompletion: st.session.lastCompletionTokens,
           memory: st.session.rollingHistory.length
         }
       })

@@ -16,7 +16,14 @@ import type {
   RawHistoryMessage,
   SessionMeta
 } from './types'
-import { AIDJ_DATA_DIR, METADATA_FILE, FREQ_FILE, PLAYLISTS_DIR, SEPARATOR } from './types'
+import {
+  AIDJ_DATA_DIR,
+  METADATA_FILE,
+  FREQ_FILE,
+  PLAYLISTS_DIR,
+  SEPARATOR,
+  DEFAULT_PERSONA
+} from './types'
 
 const log = makeLogger('aidj')
 const execFileAsync = promisify(execFile)
@@ -349,7 +356,17 @@ export async function extractMetadataAi(
         messages: [
           {
             role: 'system',
-            content: '提取歌曲信息JSON: language, emotion, genre, loudness, review'
+            content: `You are a music metadata annotator. Given a song title and its lyrics (which may be partial or missing), return a JSON object with EXACTLY these fields:
+- "language": string — the dominant language of the song, e.g. "Chinese", "English", "Japanese", "Cantonese". Use "Unknown" when the lyrics are empty.
+- "emotion": string or string[] — one to three concise mood keywords, e.g. "nostalgic", "upbeat", "melancholic".
+- "genre": string or string[] — one to three genre tags, e.g. "indie rock", "city pop", "folk".
+- "loudness": string — a coarse intensity descriptor: "soft", "medium", or "loud". Infer it from the song style implied by the title and lyrics, never from the lyrics text itself.
+- "review": string — a vivid 1-2 sentence review of the song.
+
+RULES:
+- Use a string[] for "emotion" and "genre" when there are multiple values; otherwise use a plain string.
+- Only infer from the information provided. Never invent facts about the artist, release year, or awards.
+- When the lyrics are empty, rely on the title alone and set "language" to "Unknown".`
           },
           { role: 'user', content: JSON.stringify(info) }
         ],
@@ -921,8 +938,14 @@ export class DJSession {
   chatHistory: ChatMessage[]
   turnCount: number
   playedSongs: Set<string>
+  /** Cumulative prompt tokens across all requests in this session. */
   promptTokens: number
+  /** Cumulative completion tokens across all requests in this session. */
   completionTokens: number
+  /** Per-request context: the prompt (input) tokens of the most recent request. */
+  lastPromptTokens: number
+  /** Per-request context: the completion (output) tokens of the most recent request. */
+  lastCompletionTokens: number
 
   constructor(
     client: OpenAI,
@@ -939,6 +962,8 @@ export class DJSession {
     this.playedSongs = new Set()
     this.promptTokens = 0
     this.completionTokens = 0
+    this.lastPromptTokens = 0
+    this.lastCompletionTokens = 0
   }
 
   refresh(clearHistory = false): void {
@@ -1088,8 +1113,9 @@ export class DJSession {
 Your ONLY job is to summarize the conversation history.
 RULES:
 - DO NOT mention any specific song names, track titles, or library keys.
-- Instead, summarize what the user has talked about and the general types, genres, and moods of music they have listened to or requested.
-- Keep the summary concise (at most 200 words), written in the same language as the conversation.
+- Summarize what the user talked about and the general types, genres, and moods of music they played or requested.
+- Preserve any persistent user constraints or preferences stated during the conversation (e.g. disliked genres, desired mood direction).
+- Keep the summary concise (at most 200 words), written in the dominant language of the conversation.
 - Output ONLY the summary text. No preamble, no markdown, no song lists.`
       const resp = await this.client.chat.completions.create(
         {
@@ -1184,29 +1210,40 @@ RULES:
 
     log.debug(`Thinking with ${model}...`)
 
+    const persona = (this.config.preferences.persona || '').trim() || DEFAULT_PERSONA
+    const extraRules = (this.config.preferences.extra_rules || '').trim()
+    const extraRulesBlock = extraRules
+      ? `### ADDITIONAL USER RULES
+${extraRules}
+
+`
+      : ''
+
     const basePrompt = `### ROLE DEFINITION
-You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
-Your goal is not just to list songs, but to **curate an experience**.
-- **Personality:** Passionate, poetic, slightly "hyped" or "deep" (depending on the mood), and vibe-focused.
-- **Rule:** BE EXPRESSIVE. Do NOT give short, robotic responses like "Here is your list."
-- **Method:** Weave a narrative. Talk about the *texture* of the sound, the *emotion* of the artists, and *why* these songs fit the moment.
+${persona}
 
 ### DATA SOURCE (CRITICAL)
 You are provided with a **Music Library**.
 - **RESTRICTION:** You can ONLY select songs that exist EXACTLY in the provided Library.
-- **PROHIBITION:** Do NOT hallucinate songs. Do NOT translate song titles. Do NOT fix typos in the library keys.
+- **PROHIBITION:** Do NOT hallucinate songs. Do NOT translate song titles. Do NOT fix typos in the library keys. Do NOT split or recombine keys.
 - If no songs in the library fit the mood, just chat and DO NOT output the separator.
 
-### OUTPUT PROTOCOL
-Your output is parsed by a script. You must strictly follow this structure:
+${extraRulesBlock}### OUTPUT PROTOCOL (STRICT)
+Your output is parsed by a script. Follow this structure exactly:
 
-[Part 1: The Intro]
-(Content: A rich, paragraph-length DJ commentary. Use Markdown bolding for emphasis.)
+**Part 1 — The Intro**
+A rich, paragraph-length DJ commentary. Use Markdown bolding for emphasis.
 
-${SEPARATOR}
+**Part 2 — The Payload** (only if at least one matching song exists)
+${SEPARATOR} (on its own line)
+Exact song keys from the Library, one per line.
 
-[Part 2: The Payload]
-(Content: Exact song keys from the Library. One key per line. NO numbering. NO markdown bullets. NO extra text.)`
+**FORMATTING RULES:**
+1. Place ${SEPARATOR} on its own line, surrounded by blank lines.
+2. After the separator, list ONLY library keys — one key per line.
+3. NEVER add numbering, bullets, quotes, colons, or any other decoration to key lines.
+4. Use the keys EXACTLY as they appear in the Library. Never invent, rename, or "clean up" a key.
+5. Stop immediately after the last key. No trailing commentary, no summary after the list.`
 
     // Inject the library/system prompt at the FRONT before manageContext runs,
     // so manageContext's `keep = chatHistory[0]` always preserves it.
@@ -1221,9 +1258,11 @@ ${SEPARATOR}
 
     const forbiddenList = this.playedSongs.size > 0 ? [...this.playedSongs].join(', ') : 'None'
     const fullReq = `User Request: "${userRequest}"
-Constraint: Don't repeat these songs: [${forbiddenList}]
-Language Rule: Detect the language used in the 'User Request'. The [Intro] section MUST be written in that EXACT SAME language.
-Instruction: Check the Library in the first System message. If matches found, output Intro + ${SEPARATOR} + SongKeys. If no matches, just Intro.`
+
+Constraints:
+1. Language: The 'User Request' block above is a system instruction, NOT the user's own words — do not match its language. Write the [Intro] in the language the user actually writes in (their original request and earlier chat messages in this session).
+2. No repeats: Do NOT reuse any song from the forbidden list: [${forbiddenList}].
+3. Matching: Look up songs in the Music Library from the first System message. If at least one matches, output Intro + ${SEPARATOR} + SongKeys. If none match, output ONLY the Intro.`
 
     this.chatHistory.push({ role: 'user', content: fullReq, timestamp: Date.now() })
 
@@ -1255,8 +1294,10 @@ Instruction: Check the Library in the first System message. If matches found, ou
       let fullContent = ''
       for await (const chunk of stream) {
         if (chunk.usage) {
-          this.promptTokens += chunk.usage.prompt_tokens ?? 0
-          this.completionTokens += chunk.usage.completion_tokens ?? 0
+          this.lastPromptTokens = chunk.usage.prompt_tokens ?? 0
+          this.lastCompletionTokens = chunk.usage.completion_tokens ?? 0
+          this.promptTokens += this.lastPromptTokens
+          this.completionTokens += this.lastCompletionTokens
         }
         const delta = chunk.choices?.[0]?.delta?.content
         if (delta) {
@@ -1308,6 +1349,13 @@ export class PersistentSession {
   lastIntro = ''
   promptTokens = 0
   completionTokens = 0
+  /** Per-request context: the prompt (input) tokens of the most recent batch. */
+  lastPromptTokens = 0
+  /** Per-request context: the completion (output) tokens of the most recent batch. */
+  lastCompletionTokens = 0
+  /** Latest user chat message awaiting the next batch — it becomes a
+   *  USER DIRECTED phase (highest priority) instead of autonomous radio. */
+  pendingUserPrompt: string | null = null
   /** Optional persistent session id — raw history is appended to history.jsonl when set. */
   sessionId = ''
   private client: OpenAI
@@ -1361,18 +1409,38 @@ export class PersistentSession {
     this.working = true
     try {
       let phaseInstruction: string
-      if (this.fetchCount === 0) {
-        phaseInstruction = `### PHASE 1: INITIAL REQUEST\nUser Goal: '${this.initialPrompt}'\nTarget: At least 8 tracks matching this mood.`
+      if (this.pendingUserPrompt) {
+        const dir = this.pendingUserPrompt
+        this.pendingUserPrompt = null
+        phaseInstruction = `### USER DIRECTED REQUEST
+New User Goal: '${dir}'
+Priority: This is the user's LATEST direction — follow it over any earlier goal or the autonomous flow.
+Target: Curate at least 8 tracks from the Library that match this new goal.
+Language: Write the Intro in the same language as the New User Goal.`
+      } else if (this.fetchCount === 0) {
+        phaseInstruction = `### PHASE 1: INITIAL REQUEST
+User Goal: '${this.initialPrompt}'
+Target: Curate at least 8 tracks that match this goal.
+Language: Write the Intro in the same language as the User Goal.`
       } else {
         const lastTracks = this.rollingHistory.slice(-15)
         const negativeHint =
           this.fetchCount < 3
-            ? 'but DO follow the negative part of the initial prompt. '
-            : 'and gradually relax any original exclusions. '
-        phaseInstruction = `### PHASE ${this.fetchCount + 1}: AUTONOMOUS RADIO FLOW\nRecent Sequence: [${lastTracks.join(', ')}]\nTask: Ignore the positive part of the initial prompt ${negativeHint}Based on the sequence above, predict and curate the next logical musical chapter (at least 8 tracks).`
+            ? 'Keep honoring the original exclusions from the User Goal. '
+            : 'You may gradually relax the original exclusions. '
+        phaseInstruction = `### PHASE ${this.fetchCount + 1}: AUTONOMOUS RADIO FLOW
+Recent Sequence: [${lastTracks.join(', ')}]
+Task: Step beyond the original request — ignore its positive part. ${negativeHint}Based on the Recent Sequence, predict and curate the next logical musical chapter (at least 8 tracks).
+Language: Write the Intro in the language of the user's original request ("${this.initialPrompt}") — match its language. Do NOT write in English unless that request is English.`
       }
 
-      const fullPrompt = `${phaseInstruction}\n\n**STRICT RULES:**\n1. OUTPUT AT LEAST 8 TRACKS FROM THE LIBRARY.\n2. Forbidden (Rolling 100): [${this.rollingHistory.join(', ')}].\n3. Genre Shifting: If matches run out, gradually transition to a complementary vibe.\n4. Use EXACT library keys. NO hallucination.`
+      const fullPrompt = `${phaseInstruction}
+
+**STRICT RULES:**
+1. Output AT LEAST 8 tracks, all from the Library (exact keys).
+2. Do NOT reuse any of these already-played keys: [${this.rollingHistory.join(', ')}].
+3. If good matches run out, gradually shift to a complementary vibe (genre/emotion) instead of repeating.
+4. Use EXACT library keys. NEVER hallucinate, translate, or modify a key.`
 
       const session = new DJSession(this.client, this.metadata, this.musicPaths, this.config)
       session.chatHistory = this.chatHistory.map((m) => ({ ...m }))
@@ -1391,6 +1459,8 @@ export class PersistentSession {
       }
       this.chatHistory = session.chatHistory
       this.lastIntro = intro || ''
+      this.lastPromptTokens = session.lastPromptTokens
+      this.lastCompletionTokens = session.lastCompletionTokens
       this.promptTokens += session.promptTokens
       this.completionTokens += session.completionTokens
 
@@ -1470,6 +1540,7 @@ export class PersistentSession {
   }
 
   injectUserMessage(content: string): void {
+    this.pendingUserPrompt = content
     this.chatHistory.push({ role: 'user', content, timestamp: Date.now() })
     if (this.sessionId) {
       void SessionManager.appendMessage(this.sessionId, {

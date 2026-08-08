@@ -42,20 +42,38 @@ let dragActive = false
 let autoScrollRaf = 0
 let lastClientY = 0
 
+// Module-level cache shared across every SongGrid instance (chat view +
+// continuous view both render the same paths) so each file's cover is fetched
+// once per session instead of re-requesting on every remount/poll.
+const coverCache = new Map<string, string>()
+const loadingCovers = new Set<string>()
+
+async function fetchCover(path: string): Promise<string | null> {
+  if (coverCache.has(path)) return coverCache.get(path) ?? null
+  if (loadingCovers.has(path)) return null
+  loadingCovers.add(path)
+  try {
+    const r = (await window.cockpit.command('aidj.get-cover', {
+      path
+    })) as Record<string, unknown>
+    const url = r?.ok && r.url ? (r.url as string) : ''
+    coverCache.set(path, url)
+    return url || null
+  } catch {
+    coverCache.set(path, '')
+    return null
+  } finally {
+    loadingCovers.delete(path)
+  }
+}
+
 async function loadCovers(): Promise<void> {
   if (!props.showCovers) return
+  const loaded = new Set(Object.keys(covers.value))
   for (const song of props.songs) {
-    if (covers.value[song.path]) continue
-    try {
-      const r = (await window.cockpit.command('aidj.get-cover', {
-        path: song.path
-      })) as Record<string, unknown>
-      if (r?.ok && r.url) {
-        covers.value[song.path] = r.url as string
-      }
-    } catch {
-      /* noop */
-    }
+    if (loaded.has(song.path)) continue
+    const url = await fetchCover(song.path)
+    if (url) covers.value[song.path] = url
   }
 }
 

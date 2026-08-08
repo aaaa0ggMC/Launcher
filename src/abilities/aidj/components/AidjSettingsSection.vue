@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
+import { DEFAULT_PERSONA } from '../types'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
 
@@ -23,13 +24,16 @@ const availableModels = ref<string[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref(false)
 const libraryInjects = ref<Record<string, boolean>>({})
+const persona = ref(DEFAULT_PERSONA)
+const extraRules = ref<string[]>([''])
 const statusBar = ref<Record<string, number>>({
   tokens: 1,
-  tracks: 2,
-  memory: 3,
-  volbal: 4,
-  record_freq: 5,
-  backgrounds: 6
+  context: 2,
+  tracks: 3,
+  memory: 4,
+  volbal: 5,
+  record_freq: 6,
+  backgrounds: 7
 })
 
 onMounted(async () => {
@@ -56,13 +60,17 @@ onMounted(async () => {
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
+  persona.value = (prefs.persona as string) || DEFAULT_PERSONA
+  extraRules.value = ((prefs.extra_rules as string) || '').split('\n').filter((l) => l.trim())
+  if (extraRules.value.length === 0) extraRules.value = ['']
   statusBar.value = {
     tokens: 1,
-    tracks: 2,
-    memory: 3,
-    volbal: 4,
-    record_freq: 5,
-    backgrounds: 6,
+    context: 2,
+    tracks: 3,
+    memory: 4,
+    volbal: 5,
+    record_freq: 6,
+    backgrounds: 7,
     ...((prefs.status_bar as Record<string, number>) || {})
   }
   fetchModels()
@@ -110,6 +118,38 @@ watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
 watch(networkRetryMinutes, (v) => update('preferences.network_retry_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
 watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true })
+watch(persona, (v) => update('preferences.persona', v))
+watch(
+  extraRules,
+  (v) =>
+    update(
+      'preferences.extra_rules',
+      v
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join('\n')
+    ),
+  { deep: true }
+)
+
+function addRule(): void {
+  extraRules.value.push('')
+}
+function removeRule(i: number): void {
+  extraRules.value.splice(i, 1)
+  if (extraRules.value.length === 0) extraRules.value = ['']
+}
+function moveRule(i: number, dir: -1 | 1): void {
+  const j = i + dir
+  if (j < 0 || j >= extraRules.value.length) return
+  const arr = [...extraRules.value]
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  extraRules.value = arr
+}
+function resetDj(): void {
+  persona.value = DEFAULT_PERSONA
+  extraRules.value = ['']
+}
 </script>
 
 <template>
@@ -330,6 +370,93 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
       <v-divider />
 
       <div>
+        <div class="text-subtitle-2 mb-2">DJ 人设定制</div>
+        <div class="text-caption text-medium-emphasis mb-2">
+          即时与持久模式共用。空人设 = 使用内置默认；人设会替换 Role
+          定义，附加规则追加到每次请求的提示词
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="6">
+            <v-textarea
+              v-model="persona"
+              label="DJ 人设（Role 定义）"
+              no-resize
+              hide-details
+              density="compact"
+              variant="outlined"
+              class="persona-input"
+            />
+          </v-col>
+          <v-col cols="12" md="6">
+            <div class="d-flex flex-column ga-2 rules-list">
+              <div
+                v-for="(_rule, i) in extraRules"
+                :key="i"
+                class="d-flex align-center ga-2 flex-wrap"
+              >
+                <v-text-field
+                  v-model="extraRules[i]"
+                  :label="`规则 ${i + 1}`"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="flex-grow-1 rule-input"
+                  placeholder="例如：不要播放悲伤的歌"
+                />
+                <div class="d-flex ga-1">
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="flat"
+                    :disabled="i === 0"
+                    :title="'上移'"
+                    @click="moveRule(i, -1)"
+                  >
+                    <v-icon size="small">mdi-arrow-up</v-icon>
+                  </v-btn>
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="flat"
+                    :disabled="i === extraRules.length - 1"
+                    :title="'下移'"
+                    @click="moveRule(i, 1)"
+                  >
+                    <v-icon size="small">mdi-arrow-down</v-icon>
+                  </v-btn>
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="flat"
+                    color="error"
+                    :title="'删除该规则'"
+                    @click="removeRule(i)"
+                  >
+                    <v-icon size="small">mdi-close</v-icon>
+                  </v-btn>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex align-center ga-2 mt-2 flex-wrap">
+              <v-btn variant="text" color="primary" prepend-icon="mdi-plus" @click="addRule">
+                添加规则
+              </v-btn>
+              <v-btn
+                variant="text"
+                color="primary"
+                prepend-icon="mdi-backup-restore"
+                @click="resetDj"
+              >
+                恢复默认
+              </v-btn>
+            </div>
+          </v-col>
+        </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
         <div class="text-subtitle-2 mb-2">连续播放</div>
         <div class="text-caption text-medium-emphasis mb-2">
           播放器断开时的处理：0 = 立即结束，大于 0 = 在 N 分钟内尝试重连，小于 0 = 永不停止重连
@@ -414,3 +541,26 @@ watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true
     </v-card-text>
   </v-card>
 </template>
+
+<style scoped>
+/* Both columns are fixed to the same height so the persona textarea and the
+   rules list align. The rules list scrolls internally when it overflows. */
+.persona-input {
+  height: 232px;
+}
+.persona-input :deep(.v-field),
+.persona-input :deep(.v-field__field),
+.persona-input :deep(.v-field__input) {
+  height: 100%;
+}
+.rules-list {
+  height: 232px;
+  overflow-y: auto;
+  /* Top padding gives the floating outlined label (which straddles the field's
+     top border) room so the first rule's label isn't clipped by the scroll box. */
+  padding: 10px 6px 8px 2px;
+}
+.rule-input {
+  min-width: 160px;
+}
+</style>

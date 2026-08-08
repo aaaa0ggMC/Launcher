@@ -4,6 +4,7 @@ import type { AppEntry } from '@abilities/apps/types'
 import type { ProcOutputEvent } from '@shared/types'
 import UiNode from './UiNode.vue'
 import { createUi, type UiNode as UiNodeDesc, type UiApi } from '../transformer'
+import { ansiToHtml } from '@ui/ansi'
 
 const props = defineProps<{
   modelValue: boolean
@@ -238,19 +239,20 @@ onBeforeUnmount(() => unsub?.())
           <v-progress-circular indeterminate size="18" />
           <span class="text-caption">等待程序输出…</span>
         </div>
+        <!-- eslint-disable vue/no-v-html -- content escaped by ansiToHtml -->
         <template v-if="showRaw">
           <div
             v-for="(l, i) in rawLines"
             :key="i"
             class="raw-line"
             :class="l.stream === 'stderr' ? 'raw-err' : ''"
-          >
-            {{ l.text }}
-          </div>
+            v-html="ansiToHtml(l.text)"
+          ></div>
           <div v-if="rawLines.length === 0 && !error" class="on-surface-variant text-caption">
             暂无原始输出
           </div>
         </template>
+        <!-- eslint-enable vue/no-v-html -->
         <div v-else class="d-flex flex-column ga-2">
           <UiNode v-for="(n, i) in buffer" :key="i" :node="n" />
         </div>

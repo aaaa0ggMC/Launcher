@@ -22,7 +22,14 @@ const inputText = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
 
 // -- status bar -----------------------------------------------------------
-const chatStatus = ref({ promptTokens: 0, completionTokens: 0, memory: 0 })
+const chatStatus = ref({
+  promptTokens: 0,
+  completionTokens: 0,
+  tokens: 0,
+  context: 0,
+  contextCompletion: 0,
+  memory: 0
+})
 const memoryConfirm = ref(false)
 
 function formatTokens(n: number): string {
@@ -195,7 +202,8 @@ watch(
     nextTick(() => {
       if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight
     })
-  }
+  },
+  { immediate: true }
 )
 
 watch(
@@ -209,6 +217,12 @@ watch(
         chatStatus.value = {
           promptTokens: (data.promptTokens as number) ?? 0,
           completionTokens: (data.completionTokens as number) ?? 0,
+          tokens:
+            (data.tokens as number) ??
+            ((data.promptTokens as number) ?? 0) + ((data.completionTokens as number) ?? 0),
+          context: (data.context as number) ?? (data.promptTokens as number) ?? 0,
+          contextCompletion:
+            (data.contextCompletion as number) ?? (data.completionTokens as number) ?? 0,
           memory: (data.memory as number) ?? 0
         }
         break
@@ -322,13 +336,22 @@ watch(
     </div>
 
     <div class="aidj-status-bar">
-      <v-chip variant="flat" size="small" class="status-chip">
-        <span class="status-label">Prompt</span
-        ><span class="status-value">{{ formatTokens(chatStatus.promptTokens) }}</span>
+      <v-chip variant="flat" size="small" class="status-chip" :title="'累计所有请求的 tokens 总和'">
+        <span class="status-label">Tokens</span
+        ><span class="status-value">{{ formatTokens(chatStatus.tokens) }}</span>
       </v-chip>
-      <v-chip variant="flat" size="small" class="status-chip">
+      <v-chip
+        variant="flat"
+        size="small"
+        class="status-chip"
+        :title="'单次请求的上下文输入 tokens'"
+      >
+        <span class="status-label">Context</span
+        ><span class="status-value">{{ formatTokens(chatStatus.context) }}</span>
+      </v-chip>
+      <v-chip variant="flat" size="small" class="status-chip" :title="'单次请求的输出 tokens'">
         <span class="status-label">Completion</span
-        ><span class="status-value">{{ formatTokens(chatStatus.completionTokens) }}</span>
+        ><span class="status-value">{{ formatTokens(chatStatus.contextCompletion) }}</span>
       </v-chip>
       <v-chip
         variant="flat"
@@ -399,7 +422,9 @@ watch(
 <style scoped>
 .chat-scroll {
   min-height: 0;
-  scroll-behavior: smooth;
+  /* No smooth scroll: programmatic scroll-to-bottom on a long history would
+     animate the whole distance and take seconds. Instant jump instead. */
+  scroll-behavior: auto;
 }
 .chat-player-select {
   width: 160px;
