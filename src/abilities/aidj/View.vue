@@ -28,6 +28,26 @@ const sending = ref(false)
 const pendingText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 const expanded = ref(false)
+const contentRef = ref<HTMLElement | null>(null)
+let overlayRO: ResizeObserver | null = null
+
+const collapsedH = ref(132)
+const overlayStyle = computed(() => ({
+  height: expanded.value ? '80%' : `${collapsedH.value}px`
+}))
+const chatPadStyle = computed(() => ({ paddingBottom: `${collapsedH.value + 12}px` }))
+
+function setupOverlayMeasure(): void {
+  if (overlayRO || !contentRef.value) return
+  overlayRO = new ResizeObserver(() => {
+    if (expanded.value) return
+    const el = contentRef.value
+    if (!el) return
+    const h = Array.from(el.children).reduce((acc, c) => acc + (c as HTMLElement).offsetHeight, 0)
+    if (h > 0) collapsedH.value = h
+  })
+  overlayRO.observe(contentRef.value)
+}
 
 let msgSeq = 0
 function makeUid(): number {
@@ -132,6 +152,7 @@ onMounted(() => {
   playersPollTimer = setInterval(pollPlayers, 5000)
   netPollTimer = setInterval(pollNetwork, 15000)
   listenBt()
+  setupOverlayMeasure()
 })
 
 onActivated(() => {
@@ -146,6 +167,7 @@ onActivated(() => {
   }
   listenBt()
   scrollToBottom()
+  setupOverlayMeasure()
 })
 
 onDeactivated(() => {
@@ -160,6 +182,10 @@ onDeactivated(() => {
   if (netPollTimer) {
     clearInterval(netPollTimer)
     netPollTimer = null
+  }
+  if (overlayRO) {
+    overlayRO.disconnect()
+    overlayRO = null
   }
   if (btUnsub) {
     btUnsub()
@@ -740,6 +766,7 @@ defineExpose({ toMarkdown })
     <div
       ref="chatContainer"
       class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
+      :style="chatPadStyle"
     >
       <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
         <div
@@ -768,108 +795,108 @@ defineExpose({ toMarkdown })
 
     <v-divider />
 
-    <div class="input-overlay d-flex flex-column" :class="{ 'input-expanded': expanded }">
-      <div class="aidj-status-bar">
-        <template v-for="key in visibleStatus" :key="key">
-          <template v-if="key === 'tokens'">
+    <div class="input-overlay" :style="overlayStyle">
+      <div ref="contentRef" class="overlay-content">
+        <div class="aidj-status-bar">
+          <template v-for="key in visibleStatus" :key="key">
+            <template v-if="key === 'tokens'">
+              <v-chip
+                variant="flat"
+                size="small"
+                class="status-chip is-on"
+                :title="'累计所有请求的 tokens 总和'"
+              >
+                <span class="status-label">Tokens</span
+                ><span class="status-value">{{
+                  formatTokens(lastTokens.prompt + lastTokens.completion)
+                }}</span>
+              </v-chip>
+            </template>
+
+            <template v-else-if="key === 'context'">
+              <v-chip
+                variant="flat"
+                size="small"
+                class="status-chip is-on"
+                :title="'单次请求的上下文输入 tokens'"
+              >
+                <span class="status-label">Context</span
+                ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
+              </v-chip>
+              <v-chip
+                variant="flat"
+                size="small"
+                class="status-chip is-on"
+                :title="'单次请求的输出 tokens'"
+              >
+                <span class="status-label">Completion</span
+                ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
+              </v-chip>
+            </template>
+
             <v-chip
+              v-else-if="key === 'tracks'"
               variant="flat"
               size="small"
               class="status-chip is-on"
-              :title="'累计所有请求的 tokens 总和'"
             >
-              <span class="status-label">Tokens</span
-              ><span class="status-value">{{
-                formatTokens(lastTokens.prompt + lastTokens.completion)
-              }}</span>
+              <span class="status-label">Tracks</span
+              ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
+            </v-chip>
+
+            <v-chip
+              v-else-if="key === 'memory'"
+              variant="flat"
+              size="small"
+              class="status-chip clickable is-on"
+              @click="memoryConfirm = true"
+              :title="'点击清空已播记忆'"
+            >
+              <span class="status-label">Memory</span
+              ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
+            </v-chip>
+
+            <v-chip
+              v-else-if="key === 'volbal'"
+              variant="flat"
+              size="small"
+              class="status-chip clickable"
+              :class="{ 'is-on': sbVolbal.enabled }"
+              @click="toggleVolbal"
+              :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
+            >
+              <span class="status-label">Volbal</span
+              ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
+            </v-chip>
+
+            <v-chip
+              v-else-if="key === 'record_freq'"
+              variant="flat"
+              size="small"
+              class="status-chip clickable"
+              :class="{ 'is-on': sbRecordFreq }"
+              @click="toggleRecordFreq"
+              :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
+            >
+              <span class="status-label">RecordFreq</span
+              ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
+            </v-chip>
+
+            <v-chip
+              v-else-if="key === 'backgrounds'"
+              variant="flat"
+              size="small"
+              class="status-chip"
+              :class="{ 'is-on': sbBackgrounds > 0 }"
+              :title="'运行中的后台任务数量'"
+            >
+              <span class="status-label">Backgrounds</span
+              ><span class="status-value">{{ sbBackgrounds }}</span>
             </v-chip>
           </template>
+        </div>
 
-          <template v-else-if="key === 'context'">
-            <v-chip
-              variant="flat"
-              size="small"
-              class="status-chip is-on"
-              :title="'单次请求的上下文输入 tokens'"
-            >
-              <span class="status-label">Context</span
-              ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
-            </v-chip>
-            <v-chip
-              variant="flat"
-              size="small"
-              class="status-chip is-on"
-              :title="'单次请求的输出 tokens'"
-            >
-              <span class="status-label">Completion</span
-              ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
-            </v-chip>
-          </template>
-
-          <v-chip
-            v-else-if="key === 'tracks'"
-            variant="flat"
-            size="small"
-            class="status-chip is-on"
-          >
-            <span class="status-label">Tracks</span
-            ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
-          </v-chip>
-
-          <v-chip
-            v-else-if="key === 'memory'"
-            variant="flat"
-            size="small"
-            class="status-chip clickable is-on"
-            @click="memoryConfirm = true"
-            :title="'点击清空已播记忆'"
-          >
-            <span class="status-label">Memory</span
-            ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
-          </v-chip>
-
-          <v-chip
-            v-else-if="key === 'volbal'"
-            variant="flat"
-            size="small"
-            class="status-chip clickable"
-            :class="{ 'is-on': sbVolbal.enabled }"
-            @click="toggleVolbal"
-            :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
-          >
-            <span class="status-label">Volbal</span
-            ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
-          </v-chip>
-
-          <v-chip
-            v-else-if="key === 'record_freq'"
-            variant="flat"
-            size="small"
-            class="status-chip clickable"
-            :class="{ 'is-on': sbRecordFreq }"
-            @click="toggleRecordFreq"
-            :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
-          >
-            <span class="status-label">RecordFreq</span
-            ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
-          </v-chip>
-
-          <v-chip
-            v-else-if="key === 'backgrounds'"
-            variant="flat"
-            size="small"
-            class="status-chip"
-            :class="{ 'is-on': sbBackgrounds > 0 }"
-            :title="'运行中的后台任务数量'"
-          >
-            <span class="status-label">Backgrounds</span
-            ><span class="status-value">{{ sbBackgrounds }}</span>
-          </v-chip>
-        </template>
-      </div>
-
-      <template v-if="!expanded">
-        <div class="input-bar d-flex ga-2 align-center px-4 pb-3">
+        <div v-if="!expanded" class="input-bar d-flex ga-2 align-center px-4 pb-3">
           <v-btn-toggle
             v-model="mode"
             mandatory
@@ -907,7 +934,7 @@ defineExpose({ toMarkdown })
               size="small"
               class="expand-btn"
               @click="expanded = true"
-              title="展开"
+              :title="t('aidj.expand')"
               >&lt;&gt;</v-btn
             >
           </div>
@@ -934,75 +961,76 @@ defineExpose({ toMarkdown })
             {{ t('aidj.send') }}
           </v-btn>
         </div>
-      </template>
 
-      <template v-else>
-        <div class="d-flex align-center ga-2 px-4 pt-1">
-          <v-btn-toggle
-            v-model="mode"
-            mandatory
-            color="primary"
-            variant="outlined"
-            divided
-            class="mode-toggle flex-shrink-0"
-            style="white-space: nowrap"
-          >
-            <v-btn value="immediate" class="px-3">
-              {{ t('aidj.mode_immediate') }}
+        <div v-else class="expanded-panel d-flex flex-column flex-grow-1">
+          <div class="d-flex align-center ga-2 px-4 pt-1">
+            <v-btn-toggle
+              v-model="mode"
+              mandatory
+              color="primary"
+              variant="outlined"
+              divided
+              class="mode-toggle flex-shrink-0"
+              style="white-space: nowrap"
+            >
+              <v-btn value="immediate" class="px-3">
+                {{ t('aidj.mode_immediate') }}
+              </v-btn>
+              <v-btn value="persistent" class="px-3">
+                {{ t('aidj.mode_persistent') }}
+              </v-btn>
+            </v-btn-toggle>
+
+            <v-spacer />
+
+            <v-btn
+              variant="text"
+              class="flex-shrink-0"
+              @click="expanded = false"
+              :title="t('aidj.collapse')"
+            >
+              <v-icon start>mdi-chevron-down</v-icon>
+              {{ t('aidj.collapse') }}
             </v-btn>
-            <v-btn value="persistent" class="px-3">
-              {{ t('aidj.mode_persistent') }}
+
+            <v-btn
+              v-if="sending"
+              color="error"
+              variant="elevated"
+              class="flex-shrink-0"
+              @click="stopSending"
+            >
+              <v-icon start>mdi-stop</v-icon>
+              {{ t('aidj.stop') }}
             </v-btn>
-          </v-btn-toggle>
+            <v-btn
+              v-else
+              :disabled="!inputText.trim()"
+              color="primary"
+              variant="elevated"
+              class="flex-shrink-0"
+              @click="sendMessage"
+            >
+              <v-icon start>mdi-send</v-icon>
+              {{ t('aidj.send') }}
+            </v-btn>
+          </div>
 
-          <v-spacer />
-
-          <v-btn
-            v-if="sending"
-            color="error"
-            variant="elevated"
-            class="flex-shrink-0"
-            @click="stopSending"
-          >
-            <v-icon start>mdi-stop</v-icon>
-            {{ t('aidj.stop') }}
-          </v-btn>
-          <v-btn
-            v-else
-            :disabled="!inputText.trim()"
-            color="primary"
-            variant="elevated"
-            class="flex-shrink-0"
-            @click="sendMessage"
-          >
-            <v-icon start>mdi-send</v-icon>
-            {{ t('aidj.send') }}
-          </v-btn>
-
-          <v-btn
-            variant="text"
-            size="small"
-            class="flex-shrink-0"
-            @click="expanded = false"
-            title="收缩"
-            >&gt;&lt;</v-btn
-          >
+          <div class="expanded-textarea-wrap flex-grow-1 px-4 pb-3">
+            <v-textarea
+              v-model="inputText"
+              :auto-grow="false"
+              rows="8"
+              :placeholder="t('aidj.input_placeholder')"
+              :disabled="thinking"
+              hide-details
+              variant="outlined"
+              class="h-100 input-textarea"
+              @keydown="onKeydown"
+            />
+          </div>
         </div>
-
-        <div class="expanded-textarea-wrap flex-grow-1 px-4 pb-3">
-          <v-textarea
-            v-model="inputText"
-            :auto-grow="false"
-            rows="8"
-            :placeholder="t('aidj.input_placeholder')"
-            :disabled="thinking"
-            hide-details
-            variant="outlined"
-            class="h-100 input-textarea"
-            @keydown="onKeydown"
-          />
-        </div>
-      </template>
+      </div>
     </div>
 
     <v-dialog v-model="memoryConfirm" width="420">
@@ -1083,9 +1111,26 @@ defineExpose({ toMarkdown })
   border-radius: 3px;
 }
 .input-overlay {
-  flex-shrink: 0;
-  background: transparent;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+  transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.overlay-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  min-height: 0;
 }
 .aidj-status-bar {
   display: flex;
@@ -1093,6 +1138,7 @@ defineExpose({ toMarkdown })
   gap: 6px;
   width: 100%;
   padding: 6px 16px 10px;
+  flex-shrink: 0;
 }
 .status-chip {
   padding-block: 4px;
@@ -1115,16 +1161,6 @@ defineExpose({ toMarkdown })
 .status-chip .status-value {
   font-family: monospace;
   font-weight: 600;
-}
-.input-overlay.input-expanded {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 80%;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
 }
 .expanded-textarea-wrap {
   min-height: 0;
@@ -1165,6 +1201,9 @@ defineExpose({ toMarkdown })
 }
 .input-textarea {
   min-width: 120px;
+}
+.input-bar {
+  flex-shrink: 0;
 }
 .input-bar > .v-btn {
   flex: 0 0 auto;
@@ -1208,5 +1247,10 @@ defineExpose({ toMarkdown })
 .msg-leave-to {
   opacity: 0;
   transform: translateX(-20px);
+}
+
+.expanded-panel {
+  min-height: 0;
+  flex-shrink: 0;
 }
 </style>

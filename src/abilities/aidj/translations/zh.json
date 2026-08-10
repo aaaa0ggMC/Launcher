@@ -4,6 +4,8 @@
   "aidj.heading": "AI DJ",
   "aidj.input_placeholder": "输入需求，例如：来点轻松的中文歌...",
   "aidj.send": "发送",
+  "aidj.collapse": "收起",
+  "aidj.expand": "展开",
   "aidj.mode_immediate": "即时模式",
   "aidj.mode_persistent": "持久模式",
   "aidj.mode_persistent_locked": "持久模式 🔒",

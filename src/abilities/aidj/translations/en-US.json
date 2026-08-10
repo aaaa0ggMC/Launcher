@@ -4,6 +4,8 @@
   "aidj.heading": "AI DJ",
   "aidj.input_placeholder": "Describe the vibe, e.g. some chill Chinese songs...",
   "aidj.send": "Send",
+  "aidj.collapse": "Collapse",
+  "aidj.expand": "Expand",
   "aidj.mode_immediate": "Immediate",
   "aidj.mode_persistent": "Persistent",
   "aidj.mode_persistent_locked": "Persistent 🔒",
