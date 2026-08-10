@@ -113,8 +113,10 @@ watch(
   min-width: 110px;
   padding: 4px;
   border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 .aidj-ctx-item {

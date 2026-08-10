@@ -11,6 +11,7 @@
   "aidj.mode_persistent_locked": "持久模式 🔒",
   "aidj.thinking": "AI 思考中...",
   "aidj.no_match": "未找到匹配的歌曲",
+  "aidj.no_match_hint": "💬 AI 未生成歌曲列表（库中可能没有匹配的歌曲）",
   "aidj.playlist_title": "推荐歌单",
   "aidj.now_playing": "正在播放",
   "aidj.player_status": "播放器状态",
@@ -51,5 +52,18 @@
   "aidj.clear_memory_title": "清空已播记忆",
   "aidj.clear_memory_text": "确定要清空已播放歌曲的记忆吗？AI 将不再回避这些歌曲。",
   "aidj.cancel": "取消",
-  "aidj.clear": "清空"
+  "aidj.clear": "清空",
+  "aidj.subpage.chat": "对话",
+  "aidj.subpage.sessions": "会话记录",
+  "aidj.sessions.back": "返回",
+  "aidj.sessions.today": "今天",
+  "aidj.sessions.yesterday": "昨天",
+  "aidj.sessions.search": "搜索会话…",
+  "aidj.sessions.count": "会话",
+  "aidj.sessions.refresh": "刷新",
+  "aidj.sessions.empty": "没有会话",
+  "aidj.sessions.empty_hint": "在 Chat 中对话后会在这里出现",
+  "aidj.sessions.pin": "置顶",
+  "aidj.sessions.unpin": "取消置顶",
+  "aidj.sessions.delete": "删除"
 }

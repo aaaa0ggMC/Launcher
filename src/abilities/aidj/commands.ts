@@ -1,5 +1,6 @@
 import type { CommandSpec } from '../../main/process/commands/types'
 import { makeLogger } from '../../main/process/logger'
+import { t } from '../../main/process/i18n'
 import {
   loadAidjConfig,
   saveAidjConfig,
@@ -27,7 +28,8 @@ import {
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import OpenAI from 'openai'
-import type { AidjConfig, SongMeta, ChatMessage, RawHistoryMessage } from './types'
+import type { AidjConfig, SongMeta, ChatMessage, RawHistoryMessage, PlaylistEntry } from './types'
+import { SEPARATOR } from './types'
 import './jobs'
 import {
   getContinuousTasks,
@@ -69,27 +71,73 @@ let _sessionId = ''
 // type="both"  → assistant response   (UI + context)
 // type="updated" → compact/drop marker (context only)
 // type="model" → wrapped prompt sent to AI (audit only, excluded from context)
+//
+// `both` messages now store the FULL raw assistant text (may contain the
+// SONG_LIST separator). The optional `parse` callback resolves it back to
+// { intro, playlist } using the same code path the live generator uses.
 // ---------------------------------------------------------------------------
-function rawToChatHistory(raw: RawHistoryMessage[]): ChatMessage[] {
-  return raw
-    .filter(
-      (m) => m.type === 'user' || m.type === 'both' || (m.type === 'updated' && m.content !== '')
-    )
-    .map((m) => ({
-      role: m.type === 'both' ? 'assistant' : m.type === 'updated' ? 'system' : 'user',
+function rawToChatHistory(
+  raw: RawHistoryMessage[],
+  parse?: (rawText: string) => { intro: string; playlist: PlaylistEntry[] }
+): ChatMessage[] {
+  const out: ChatMessage[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const m = raw[i]
+    const keep =
+      m.type === 'user' || m.type === 'both' || (m.type === 'updated' && m.content !== '')
+    if (!keep) continue
+    const role: ChatMessage['role'] =
+      m.type === 'both' ? 'assistant' : m.type === 'updated' ? 'system' : 'user'
+
+    if (role === 'assistant' && parse && m.content.includes(SEPARATOR)) {
+      const parsed = parse(m.content)
+      out.push({
+        role,
+        content: parsed.intro || m.content,
+        playlist: parsed.playlist,
+        timestamp: m.ts
+      })
+      // An assistant reply with prose but no resolved songs → surface a hint.
+      if (parsed.intro.trim() !== '' && parsed.playlist.length === 0) {
+        const next = raw[i + 1]
+        const alreadyHint = next?.type === 'updated' && (next.content || '').startsWith('💬')
+        if (!alreadyHint) {
+          out.push({
+            role: 'system',
+            content: t('aidj.no_match_hint'),
+            timestamp: m.ts
+          })
+        }
+      }
+      continue
+    }
+
+    out.push({
+      role,
       content: m.content,
       playlist: m.playlist,
       timestamp: m.ts
-    }))
+    })
+  }
+  return out
 }
 
 function rawToRollingHistory(raw: RawHistoryMessage[]): string[] {
   const seen = new Set<string>()
+  const push = (name: string): void => {
+    if (name && !seen.has(name) && seen.size < 100) seen.add(name)
+  }
   for (let i = raw.length - 1; i >= 0 && seen.size < 100; i--) {
     const m = raw[i]
     if (m.playlist) {
-      for (const s of m.playlist) {
-        if (!seen.has(s.name) && seen.size < 100) seen.add(s.name)
+      for (const s of m.playlist) push(s.name)
+      continue
+    }
+    if (m.type === 'both' && m.content.includes(SEPARATOR)) {
+      const listBlock = m.content.split(SEPARATOR).slice(1).join(SEPARATOR)
+      for (const line of listBlock.split('\n')) {
+        const clean = line.replace(/["']/g, '').trim()
+        if (clean && !clean.startsWith('#')) push(clean)
       }
     }
   }
@@ -214,7 +262,7 @@ const commands: CommandSpec[] = [
       _retryStart = 0
       _retryLastError = ''
       try {
-        const { playlist, intro, updated } = await session.nextStep(
+        const { playlist, intro, raw, updated } = await session.nextStep(
           prompt,
           (full: string) => {
             if (_retrying) {
@@ -244,7 +292,13 @@ const commands: CommandSpec[] = [
           if (updated) rawMsgs.push(updated)
           rawMsgs.push(
             { role: 'user', content: prompt, ts: Date.now(), type: 'user' },
-            { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
+            {
+              role: 'assistant',
+              content: raw || intro || '',
+              ts: Date.now(),
+              type: 'both',
+              playlist
+            }
           )
           await SessionManager.appendMessages(_sessionId, rawMsgs)
         }
@@ -708,7 +762,7 @@ const commands: CommandSpec[] = [
       log.info('Main revert', { sessionId: _sessionId, keep, removedLines: raw.length - keepLines })
 
       const sysPrompt = _session.chatHistory[0]?.role === 'system' ? _session.chatHistory[0] : null
-      const rebuilt = rawToChatHistory(kept).filter((m) => m.role !== 'system')
+      const rebuilt = rawToChatHistory(kept)
       const bothCount = kept.filter((m) => m.type === 'both').length
       _session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       _session.playedSongs = new Set(rawToRollingHistory(kept))
@@ -716,6 +770,97 @@ const commands: CommandSpec[] = [
       _session.promptTokens = 0
       _session.completionTokens = 0
       return { ok: true, kept }
+    }
+  },
+  {
+    name: 'aidj.sessions.list',
+    description: '列出所有已保存的 AI DJ 会话',
+    usage: 'aidj.sessions.list',
+    run: async () => {
+      const meta = await SessionManager.listSessions()
+      const sessions = await Promise.all(
+        meta.map(async (s) => {
+          const raw = await SessionManager.readRawHistory(s.id)
+          const messages = rawToChatHistory(raw)
+          const last = messages[messages.length - 1]
+          const preview = last ? (last.content || '').split(SEPARATOR)[0].trim().slice(0, 80) : ''
+          return {
+            ...s,
+            messageCount: messages.length,
+            preview
+          }
+        })
+      )
+      sessions.sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+        return b.updated_at - a.updated_at
+      })
+      return { ok: true, sessions }
+    }
+  },
+  {
+    name: 'aidj.sessions.open',
+    description: '载入一个已保存的会话为当前活跃会话',
+    usage: 'aidj.sessions.open --id <sessionId>',
+    run: async (ctx) => {
+      const id = (ctx.named.id as string) || ''
+      if (!id) return { ok: false, error: '需要 --id 参数' }
+      const { session } = await ensureInit()
+      const raw = await SessionManager.readRawHistory(id)
+      if (!raw.length) return { ok: false, error: '会话为空或不存在' }
+
+      const sysPrompt = session.buildSystemPrompt()
+      const uiMessages = rawToChatHistory(raw, (rawText) => session.parseRawPlaylist(rawText, 'AI'))
+      // AI context keeps EVERY persisted line: raw assistant text (separator
+      // included), user requests, and `updated` system markers (compact/drop
+      // hints) — exactly what a live session would carry, so manageContext and
+      // nextStep see identical history. `model` audit lines are already
+      // excluded by rawToChatHistory.
+      const rebuilt = rawToChatHistory(raw)
+      const bothCount = raw.filter((m) => m.type === 'both').length
+
+      session.chatHistory = [
+        { role: 'system', content: sysPrompt, timestamp: Date.now() },
+        ...rebuilt
+      ]
+      session.playedSongs = new Set(rawToRollingHistory(raw))
+      session.turnCount = Math.max(1, bothCount)
+      session.promptTokens = 0
+      session.completionTokens = 0
+      session.lastPromptTokens = 0
+      session.lastCompletionTokens = 0
+      _session = session
+      _sessionId = id
+      abortCurrentRequest()
+      log.info('Session loaded', { id, messages: uiMessages.length, bothCount })
+      return { ok: true, messages: uiMessages, sessionId: id }
+    }
+  },
+  {
+    name: 'aidj.sessions.delete',
+    description: '删除一个已保存的会话及其历史',
+    usage: 'aidj.sessions.delete --id <sessionId>',
+    run: async (ctx) => {
+      const id = (ctx.named.id as string) || ''
+      if (!id) return { ok: false, error: '需要 --id 参数' }
+      const ok = await SessionManager.deleteSession(id)
+      if (ok && _sessionId === id) {
+        _sessionId = ''
+        _session?.refresh(true)
+      }
+      return ok ? { ok: true } : { ok: false, error: '会话不存在' }
+    }
+  },
+  {
+    name: 'aidj.sessions.pin',
+    description: '置顶/取消置顶一个会话',
+    usage: 'aidj.sessions.pin --id <sessionId>',
+    run: async (ctx) => {
+      const id = (ctx.named.id as string) || ''
+      if (!id) return { ok: false, error: '需要 --id 参数' }
+      const pinned = await SessionManager.togglePin(id)
+      if (pinned === null) return { ok: false, error: '会话不存在' }
+      return { ok: true, pinned }
     }
   },
   {

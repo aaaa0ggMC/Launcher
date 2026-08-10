@@ -11,6 +11,7 @@
   "aidj.mode_persistent_locked": "Persistent 🔒",
   "aidj.thinking": "AI is thinking...",
   "aidj.no_match": "No matching songs found",
+  "aidj.no_match_hint": "💬 AI found no songs to match your request",
   "aidj.playlist_title": "Recommended Playlist",
   "aidj.now_playing": "Now Playing",
   "aidj.player_status": "Player Status",
@@ -51,5 +52,18 @@
   "aidj.clear_memory_title": "Clear Played Memory",
   "aidj.clear_memory_text": "Clear the memory of played songs? AI will no longer avoid these songs.",
   "aidj.cancel": "Cancel",
-  "aidj.clear": "Clear"
+  "aidj.clear": "Clear",
+  "aidj.subpage.chat": "Chat",
+  "aidj.subpage.sessions": "Chat Sessions",
+  "aidj.sessions.back": "Back",
+  "aidj.sessions.today": "Today",
+  "aidj.sessions.yesterday": "Yesterday",
+  "aidj.sessions.search": "Search sessions…",
+  "aidj.sessions.count": "Sessions",
+  "aidj.sessions.refresh": "Refresh",
+  "aidj.sessions.empty": "No sessions",
+  "aidj.sessions.empty_hint": "Conversations in Chat will appear here",
+  "aidj.sessions.pin": "Pin",
+  "aidj.sessions.unpin": "Unpin",
+  "aidj.sessions.delete": "Delete"
 }

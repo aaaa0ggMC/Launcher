@@ -100,6 +100,8 @@ export interface SessionMeta {
   initialPrompt?: string
   created_at: number
   updated_at: number
+  /** Pinned sessions sort above the rest in the sessions list. */
+  pinned?: boolean
 }
 
 export interface PlayerStatus {

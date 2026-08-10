@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir, appendFile, writeFile, rename } from 'fs/promises'
+import { readFile, readdir, mkdir, appendFile, writeFile, rename, rm } from 'fs/promises'
 import { join, extname } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -1199,17 +1199,12 @@ RULES:
     return marker
   }
 
-  async nextStep(
-    userRequest: string,
-    onStream?: (text: string) => void,
-    signal?: AbortSignal,
-    onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
-  ): Promise<{ playlist: PlaylistEntry[]; intro: string; updated?: RawHistoryMessage | null }> {
-    this.turnCount++
-    const model = this.config.preferences.model
-
-    log.debug(`Thinking with ${model}...`)
-
+  /**
+   * Build the full system prompt (role + rules + music library) injected at the
+   * front of chatHistory. Reused by nextStep (first turn) and when loading a
+   * saved session — the persisted history.jsonl never stores the system prompt.
+   */
+  buildSystemPrompt(): string {
     const persona = (this.config.preferences.persona || '').trim() || DEFAULT_PERSONA
     const extraRules = (this.config.preferences.extra_rules || '').trim()
     const extraRulesBlock = extraRules
@@ -1245,12 +1240,35 @@ Exact song keys from the Library, one per line.
 4. Use the keys EXACTLY as they appear in the Library. Never invent, rename, or "clean up" a key.
 5. Stop immediately after the last key. No trailing commentary, no summary after the list.`
 
+    const libraryStr = this.formatLibrary()
+    return `${basePrompt}\n\n### CURRENT MUSIC LIBRARY (Exact Keys Only):\n${libraryStr}`
+  }
+
+  async nextStep(
+    userRequest: string,
+    onStream?: (text: string) => void,
+    signal?: AbortSignal,
+    onRetry?: (attempt: number, waitMs: number, error?: unknown) => void
+  ): Promise<{
+    playlist: PlaylistEntry[]
+    intro: string
+    /** Full raw assistant text (may contain the SONG_LIST separator). */
+    raw: string
+    updated?: RawHistoryMessage | null
+  }> {
+    this.turnCount++
+    const model = this.config.preferences.model
+
+    log.debug(`Thinking with ${model}...`)
+
     // Inject the library/system prompt at the FRONT before manageContext runs,
     // so manageContext's `keep = chatHistory[0]` always preserves it.
     if (this.turnCount === 1) {
-      const libraryStr = this.formatLibrary()
-      const systemContent = `${basePrompt}\n\n### CURRENT MUSIC LIBRARY (Exact Keys Only):\n${libraryStr}`
-      this.chatHistory.unshift({ role: 'system', content: systemContent, timestamp: Date.now() })
+      this.chatHistory.unshift({
+        role: 'system',
+        content: this.buildSystemPrompt(),
+        timestamp: Date.now()
+      })
       log.debug('Library injected once')
     }
 
@@ -1319,16 +1337,16 @@ Constraints:
       })
 
       this.chatHistory.push({ role: 'assistant', content: cleanContent, timestamp: Date.now() })
-      return { ...this.parseRawPlaylist(cleanContent, 'AI'), updated }
+      return { ...this.parseRawPlaylist(cleanContent, 'AI'), raw: cleanContent, updated }
     } catch (e) {
       if (signal?.aborted) {
         this.chatHistory.pop()
-        return { playlist: [], intro: '', updated }
+        return { playlist: [], intro: '', raw: '', updated }
       }
       const errMsg = String(e)
       log.error('AI API error', { error: errMsg })
       this.chatHistory.pop()
-      return { playlist: [], intro: `⚠️ API 错误: ${errMsg}`, updated }
+      return { playlist: [], intro: `⚠️ API 错误: ${errMsg}`, raw: '', updated }
     }
   }
 }
@@ -1447,7 +1465,7 @@ Language: Write the Intro in the language of the user's original request ("${thi
       session.playedSongs = new Set(this.rollingHistory)
       session.turnCount = this.fetchCount
 
-      const { playlist, intro, updated } = await session.nextStep(
+      const { playlist, intro, raw, updated } = await session.nextStep(
         fullPrompt,
         undefined,
         signal,
@@ -1469,7 +1487,7 @@ Language: Write the Intro in the language of the user's original request ("${thi
         if (updated) rawMsgs.push(updated)
         rawMsgs.push(
           { role: 'user', content: fullPrompt, ts: Date.now(), type: 'model' },
-          { role: 'assistant', content: intro || '', ts: Date.now(), type: 'both', playlist }
+          { role: 'assistant', content: raw || intro || '', ts: Date.now(), type: 'both', playlist }
         )
         await SessionManager.appendMessages(this.sessionId, rawMsgs)
       }
@@ -1824,5 +1842,34 @@ export class SessionManager {
         await writeJsonAtomic(SESSIONS_INDEX, idx)
       }
     })
+  }
+
+  /** Remove a session from the index and delete its history directory. */
+  static async deleteSession(sessionId: string): Promise<boolean> {
+    return withHistoryLock('__index__', async () => {
+      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const before = idx.sessions.length
+      idx.sessions = idx.sessions.filter((s) => s.id !== sessionId)
+      if (idx.sessions.length === before) return false
+      await writeJsonAtomic(SESSIONS_INDEX, idx)
+      await rm(join(SESSIONS_DIR, sessionId), { recursive: true, force: true }).catch(() => {})
+      log.info('Session deleted', { sessionId })
+      return true
+    })
+  }
+
+  /** Toggle the pinned flag of a session; returns the new state. */
+  static async togglePin(sessionId: string): Promise<boolean | null> {
+    let result: boolean | null = null
+    await withHistoryLock('__index__', async () => {
+      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const s = idx.sessions.find((x) => x.id === sessionId)
+      if (s) {
+        s.pinned = !s.pinned
+        result = s.pinned
+        await writeJsonAtomic(SESSIONS_INDEX, idx)
+      }
+    })
+    return result
   }
 }

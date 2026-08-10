@@ -1,1265 +1,546 @@
 <script setup lang="ts">
-import {
-  ref,
-  inject,
-  type Ref,
-  computed,
-  onMounted,
-  onActivated,
-  onDeactivated,
-  nextTick
-} from 'vue'
+import { ref, inject, type Ref, computed, watch, nextTick, onMounted, onDeactivated } from 'vue'
 import { translate } from '../../main/ui/i18n'
-import type { ChatMessage, PlayerStatus } from './types'
-import ChatMessageVue from './components/ChatMessage.vue'
-import ContextMenu from './components/ContextMenu.vue'
+import ChatView from './components/ChatView.vue'
 
 defineOptions({ name: 'cockpit-aidj' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
-const messages = ref<ChatMessage[]>([])
-const inputText = ref('')
-const mode = ref<'immediate' | 'persistent'>('immediate')
-const thinking = ref(false)
-const persistentTaskId = ref('')
-const sending = ref(false)
-const pendingText = ref('')
-const chatContainer = ref<HTMLElement | null>(null)
-const expanded = ref(false)
-const contentRef = ref<HTMLElement | null>(null)
-let overlayRO: ResizeObserver | null = null
+const menuOpen = ref(false)
+const menuStep = ref<'main' | 'sessions'>('main')
+const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 
-const collapsedH = ref(132)
-const overlayStyle = computed(() => ({
-  height: expanded.value ? '80%' : `${collapsedH.value}px`
-}))
-
-function setupOverlayMeasure(): void {
-  if (overlayRO || !contentRef.value) return
-  overlayRO = new ResizeObserver(() => {
-    if (expanded.value) return
-    const el = contentRef.value
-    if (!el) return
-    const h = Array.from(el.children).reduce((acc, c) => acc + (c as HTMLElement).offsetHeight, 0)
-    if (h > 0) collapsedH.value = h
-  })
-  overlayRO.observe(contentRef.value)
+interface SessionItem {
+  id: string
+  title: string
+  type: 'chat' | 'generate'
+  initialPrompt?: string
+  created_at: number
+  updated_at: number
+  messageCount?: number
+  preview?: string
+  pinned?: boolean
 }
 
-let msgSeq = 0
-function makeUid(): number {
-  return ++msgSeq
-}
+const sessions = ref<SessionItem[]>([])
+const sessionsLoading = ref(false)
+const search = ref('')
+const currentId = ref('')
+let btUnsub: (() => void) | null = null
 
-const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
-const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
-const lastContext = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
-const sbTracks = ref(0)
-const sbMemory = ref(0)
-const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
-const sbRecordFreq = ref(false)
-const sbBackgrounds = ref(0)
-const memoryConfirm = ref(false)
-const playAllConfirm = ref(false)
-const pendingPlayAll = ref<{ name: string; path: string }[] | null>(null)
-const snackOpen = ref(false)
-const snackText = ref('')
-const snackColor = ref('success')
-const sbOrder = ref<Record<string, number>>({
-  tokens: 1,
-  context: 2,
-  tracks: 3,
-  memory: 4,
-  volbal: 5,
-  record_freq: 6,
-  backgrounds: 7
-})
-const availablePlayers = ref<string[]>([])
-const selectedPlayer = ref('')
-const autoMode = ref(true)
-const netState = ref<'ok' | 'bad' | 'checking'>('checking')
+const ctxMenuOpen = ref(false)
+const ctxPos = ref({ x: 0, y: 0 })
+const ctxTarget = ref<SessionItem | null>(null)
 
-function formatTokens(n: number): string {
-  if (n >= 1000) {
-    return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
-  }
-  return n.toLocaleString()
-}
-
-const visibleStatus = computed(() => {
-  return Object.entries(sbOrder.value)
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
-    .map(([k]) => k)
+const filteredSessions = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return sessions.value
+  return sessions.value.filter(
+    (s) =>
+      s.title.toLowerCase().includes(q) ||
+      (s.initialPrompt || '').toLowerCase().includes(q) ||
+      (s.preview || '').toLowerCase().includes(q)
+  )
 })
 
-async function toggleVolbal(): Promise<void> {
-  const { enabled, method } = sbVolbal.value
-  let next: { enabled: boolean; method: string }
-  if (!enabled) {
-    next = { enabled: true, method: 'lufs' }
-  } else if (method === 'lufs') {
-    next = { enabled: true, method: 'linear' }
-  } else {
-    next = { enabled: false, method: 'linear' }
+function dayKey(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function dayLabel(ts: number): string {
+  const now = new Date()
+  const today = dayKey(now.getTime())
+  const yest = dayKey(now.getTime() - 86_400_000)
+  const k = dayKey(ts)
+  if (k === today) return t('aidj.sessions.today', 'Today')
+  if (k === yest) return t('aidj.sessions.yesterday', 'Yesterday')
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`
+}
+
+const sessionGroups = computed(() => {
+  const groups: { label: string; sessions: SessionItem[] }[] = []
+  for (const s of filteredSessions.value) {
+    const label = dayLabel(s.updated_at)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) {
+      last.sessions.push(s)
+    } else {
+      groups.push({ label, sessions: [s] })
+    }
   }
-  await window.cockpit.command('aidj.update-config', {
-    path: 'preferences.dynamic_balance_volume',
-    value: next.enabled
-  })
-  await window.cockpit.command('aidj.update-config', {
-    path: 'preferences.sound_adjust_method',
-    value: next.method
-  })
-  sbVolbal.value = next
-  await pollStatus()
-}
+  return groups
+})
 
-async function toggleRecordFreq(): Promise<void> {
-  const next = !sbRecordFreq.value
-  await window.cockpit.command('aidj.update-config', {
-    path: 'preferences.record_freq',
-    value: next
-  })
-  sbRecordFreq.value = next
-  await pollStatus()
-}
-
-async function clearMemory(): Promise<void> {
-  memoryConfirm.value = false
+async function refreshSessions(): Promise<void> {
+  sessionsLoading.value = true
   try {
-    await window.cockpit.command('aidj.refresh')
-    sbMemory.value = 0
+    const result = (await window.cockpit.command('aidj.sessions.list')) as {
+      ok?: boolean
+      sessions?: SessionItem[]
+    }
+    if (result?.ok && Array.isArray(result.sessions)) {
+      sessions.value = result.sessions
+    }
+  } catch {
+    /* noop */
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function toggleMenu(): void {
+  if (menuOpen.value) {
+    menuOpen.value = false
+    menuStep.value = 'main'
+  } else {
+    menuOpen.value = true
+    menuStep.value = 'main'
+    refreshSessions()
+  }
+}
+
+function enterSessions(): void {
+  menuStep.value = 'sessions'
+  search.value = ''
+  refreshSessions()
+}
+
+function selectChat(): void {
+  menuOpen.value = false
+  menuStep.value = 'main'
+}
+
+async function openSession(sessionId: string): Promise<void> {
+  currentId.value = sessionId
+  menuOpen.value = false
+  menuStep.value = 'main'
+  await nextTick()
+  chatRef.value?.loadSession(sessionId)
+}
+
+function openSessionCtx(e: MouseEvent, s: SessionItem): void {
+  e.preventDefault()
+  e.stopPropagation()
+  ctxTarget.value = s
+  ctxPos.value = { x: e.clientX + 8, y: e.clientY + 8 }
+  ctxMenuOpen.value = true
+}
+
+async function deleteSession(s: SessionItem): Promise<void> {
+  ctxMenuOpen.value = false
+  try {
+    const r = (await window.cockpit.command('aidj.sessions.delete', {
+      id: s.id
+    })) as { ok?: boolean; error?: string }
+    if (r?.ok) {
+      sessions.value = sessions.value.filter((x) => x.id !== s.id)
+      if (currentId.value === s.id) currentId.value = ''
+    } else {
+      window.alert(r?.error || '删除失败')
+    }
+  } catch (e) {
+    window.alert(`删除失败: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+async function pinSession(s: SessionItem): Promise<void> {
+  ctxMenuOpen.value = false
+  try {
+    const r = (await window.cockpit.command('aidj.sessions.pin', {
+      id: s.id
+    })) as { ok?: boolean; pinned?: boolean }
+    if (r?.ok && typeof r.pinned === 'boolean') {
+      const target = sessions.value.find((x) => x.id === s.id)
+      if (target) target.pinned = r.pinned
+      sessions.value = [...sessions.value]
+    }
   } catch {
     /* noop */
   }
 }
 
-let statusPollTimer: ReturnType<typeof setInterval> | null = null
-let playersPollTimer: ReturnType<typeof setInterval> | null = null
-let netPollTimer: ReturnType<typeof setInterval> | null = null
-let btUnsub: (() => void) | null = null
+function toMarkdown(): string {
+  return chatRef.value?.toMarkdown?.() ?? ''
+}
 
-onMounted(() => {
-  pollStatus()
-  pollPlayers()
-  pollNetwork()
-  refreshBackgroundCount()
-  statusPollTimer = setInterval(pollStatus, 2000)
-  playersPollTimer = setInterval(pollPlayers, 5000)
-  netPollTimer = setInterval(pollNetwork, 15000)
-  listenBt()
-  setupOverlayMeasure()
-})
+let ctxCleanup: (() => void) | null = null
 
-onActivated(() => {
-  if (!statusPollTimer) {
-    statusPollTimer = setInterval(pollStatus, 2000)
+function ctxClose(): void {
+  ctxMenuOpen.value = false
+}
+
+function onCtxKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') ctxClose()
+}
+
+watch(ctxMenuOpen, (open) => {
+  ctxCleanup?.()
+  ctxCleanup = null
+  if (open) {
+    document.addEventListener('click', ctxClose)
+    document.addEventListener('contextmenu', ctxClose)
+    document.addEventListener('keydown', onCtxKey)
+    ctxCleanup = (): void => {
+      document.removeEventListener('click', ctxClose)
+      document.removeEventListener('contextmenu', ctxClose)
+      document.removeEventListener('keydown', onCtxKey)
+    }
   }
-  if (!playersPollTimer) {
-    playersPollTimer = setInterval(pollPlayers, 5000)
-  }
-  if (!netPollTimer) {
-    netPollTimer = setInterval(pollNetwork, 15000)
-  }
-  listenBt()
-  scrollToBottom()
-  setupOverlayMeasure()
 })
 
 onDeactivated(() => {
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer)
-    statusPollTimer = null
+  ctxCleanup?.()
+  ctxCleanup = null
+})
+
+onMounted(() => {
+  if (window.cockpit?.on) {
+    btUnsub = window.cockpit.on('cockpit:bt', () => {
+      if (menuStep.value === 'sessions') refreshSessions()
+    })
   }
-  if (playersPollTimer) {
-    clearInterval(playersPollTimer)
-    playersPollTimer = null
-  }
-  if (netPollTimer) {
-    clearInterval(netPollTimer)
-    netPollTimer = null
-  }
-  if (overlayRO) {
-    overlayRO.disconnect()
-    overlayRO = null
-  }
+})
+
+onDeactivated(() => {
   if (btUnsub) {
     btUnsub()
     btUnsub = null
   }
 })
 
-async function pollNetwork(): Promise<void> {
-  netState.value = 'checking'
-  try {
-    const r = (await window.cockpit.command('aidj.network-test')) as { ok?: boolean }
-    netState.value = r?.ok ? 'ok' : 'bad'
-  } catch {
-    netState.value = 'bad'
-  }
-}
-
-function refreshBackgroundCount(): void {
-  window.cockpit
-    .btList()
-    .then((res) => {
-      const r = res as { ok?: boolean; tasks?: { status?: string }[] } | null
-      if (r?.ok && Array.isArray(r.tasks)) {
-        sbBackgrounds.value = r.tasks.filter((t) => t.status === 'running').length
-      }
-    })
-    .catch(() => {})
-}
-
-function listenBt(): void {
-  if (btUnsub) return
-  if (!window.cockpit?.on) return
-  btUnsub = window.cockpit.on('cockpit:bt', (event: unknown) => {
-    const ev = event as Record<string, unknown>
-    if (ev?.type === 'output' && String(ev.id ?? '').startsWith('bt-')) {
-      if (persistentTaskId.value && ev.id === persistentTaskId.value) {
-        const msgs = (ev.messages ?? []) as Record<string, unknown>[]
-        for (const msg of msgs) {
-          if (msg.data && typeof msg.data === 'object') {
-            handleBtData(msg.data as Record<string, unknown>)
-          }
-        }
-      }
-    }
-    if (ev?.type === 'changed') {
-      const tasks = (ev.tasks ?? []) as Record<string, unknown>[]
-      sbBackgrounds.value = tasks.filter((t) => t.status === 'running').length
-    }
-    if (ev?.type === 'exit') {
-      if (ev.id === persistentTaskId.value) {
-        persistentTaskId.value = ''
-      }
-      sbBackgrounds.value = Math.max(0, sbBackgrounds.value - 1)
-    }
-  })
-}
-
-function handleBtData(data: Record<string, unknown>): void {
-  if (data.type === 'now_playing') {
-    messages.value.push({
-      role: 'assistant',
-      content: `▶ 播放: ${String(data.track ?? '')}`,
-      timestamp: Date.now(),
-      uid: makeUid()
-    })
-    scrollToBottom()
-  } else if (data.type === 'status' && data.message === 'started') {
-    messages.value.push({
-      role: 'system',
-      content: `持久模式已启动 | 提示: ${String(data.prompt ?? '')}`,
-      timestamp: Date.now(),
-      uid: makeUid()
-    })
-    scrollToBottom()
-  }
-}
-
-async function pollStatus(): Promise<void> {
-  try {
-    const result = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
-    if (result?.ok && result.status) {
-      playerStatus.value = result.status as PlayerStatus
-    }
-    if (result?.ok) {
-      if (typeof result.tracks === 'number') sbTracks.value = result.tracks
-      if (typeof result.memory === 'number') sbMemory.value = result.memory
-      if (result.volbal) sbVolbal.value = result.volbal as { enabled: boolean; method: string }
-      if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
-      if (result.statusBar) {
-        sbOrder.value = {
-          tokens: 1,
-          context: 2,
-          tracks: 3,
-          memory: 4,
-          volbal: 5,
-          record_freq: 6,
-          backgrounds: 7,
-          ...(result.statusBar as Record<string, number>)
-        }
-      }
-    }
-  } catch {
-    /* noop */
-  }
-}
-
-async function pollPlayers(): Promise<void> {
-  try {
-    const result = (await window.cockpit.command('aidj.list-players')) as Record<string, unknown>
-    if (result?.ok && Array.isArray(result.players)) {
-      availablePlayers.value = result.players as string[]
-      autoMode.value = result.auto === true
-      if (autoMode.value) {
-        selectedPlayer.value = '__auto__'
-      } else {
-        const current = result.current as string
-        if (current) {
-          selectedPlayer.value = current
-        }
-      }
-    }
-  } catch {
-    /* noop */
-  }
-}
-
-async function selectPlayer(name: string): Promise<void> {
-  if (!name) return
-  const result = (await window.cockpit.command('aidj.select-player', {
-    name
-  })) as Record<string, unknown>
-  if (result?.ok) {
-    selectedPlayer.value = name
-  }
-}
-
-function shortPlayer(name: string): string {
-  const short = name.replace(/^org\.mpris\.MediaPlayer2\./, '')
-  if (short.length <= 10) return short
-  return short.slice(0, 5) + '…' + short.slice(-4)
-}
-
-const trackText = computed(() => {
-  const t = playerStatus.value.track
-  if (!t) return '—'
-  return t.length > 8 ? t.slice(0, 8) + '…' : t
-})
-
-function onKeydown(e: KeyboardEvent): void {
-  if (e.shiftKey && e.key === 'Enter' && !sending.value && !thinking.value) {
-    e.preventDefault()
-    sendMessage()
-  }
-}
-
-async function sendMessage(): Promise<void> {
-  const text = inputText.value.trim()
-  if (!text || sending.value || thinking.value) return
-
-  pendingText.value = text
-  inputText.value = ''
-  messages.value.push({ role: 'user', content: text, timestamp: Date.now(), uid: makeUid() })
-  const placeholderIdx = messages.value.length
-  messages.value.push({
-    role: 'assistant',
-    content: '...',
-    timestamp: Date.now(),
-    uid: makeUid()
-  })
-  scrollToBottom()
-
-  if (mode.value === 'immediate') {
-    sending.value = true
-    let charTimer: ReturnType<typeof setInterval> | null = null
-    charTimer = setInterval(async () => {
-      if (!sending.value) {
-        if (charTimer) clearInterval(charTimer)
-        return
-      }
-      try {
-        const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
-        if (r?.ok) {
-          const msg = messages.value[placeholderIdx]
-          if (!msg) return
-          if (typeof r.chars === 'number') msg.chars = r.chars as number
-          if (r.retrying === true) {
-            const elapsed = Math.round(((r.retryElapsed as number) ?? 0) / 1000)
-            const err = (r.retryLastError as string) || ''
-            msg.content = `重试中(${String(r.retryAttempt ?? 0)}: 已经${elapsed}s)${err ? `\n⚠️ ${err}` : ''}`
-          }
-        }
-      } catch {
-        /* noop */
-      }
-    }, 200)
-    try {
-      const result = (await window.cockpit.command('aidj.generate', {
-        prompt: text
-      })) as Record<string, unknown>
-      if (messages.value[placeholderIdx] == null) return
-      if (result?.ok) {
-        if (result.tokens)
-          lastTokens.value = result.tokens as { prompt: number; completion: number }
-        if (result.context)
-          lastContext.value = result.context as { prompt: number; completion: number }
-        const pl = result.playlist as { name: string; path: string }[] | undefined
-        const placeholderUid = messages.value[placeholderIdx]?.uid
-        if (pl && pl.length > 0) {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: (result.intro as string) || '推荐歌单',
-            playlist: pl as ChatMessage['playlist'],
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
-        } else if (result.intro) {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: result.intro as string,
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
-          messages.value.push({
-            role: 'system',
-            content: '💬 AI 未生成歌曲列表（库中可能没有匹配的歌曲）',
-            timestamp: Date.now(),
-            uid: makeUid()
-          })
-        } else {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: '（AI 无输出）',
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
-        }
-      } else {
-        messages.value[placeholderIdx] = {
-          role: 'assistant',
-          content: `错误: ${(result?.error as string) || '请求失败'}`,
-          timestamp: Date.now(),
-          uid: messages.value[placeholderIdx]?.uid ?? makeUid()
-        }
-      }
-    } catch (e: unknown) {
-      if (e instanceof DOMException && e.name === 'AbortError') return
-      if (messages.value[placeholderIdx] == null) return
-      messages.value[placeholderIdx] = {
-        role: 'assistant',
-        content: `错误: ${e instanceof Error ? e.message : String(e)}`,
-        timestamp: Date.now(),
-        uid: messages.value[placeholderIdx]?.uid ?? makeUid()
-      }
-    } finally {
-      if (charTimer) clearInterval(charTimer)
-      sending.value = false
-      scrollToBottom()
-    }
-  } else {
-    // persistent mode → start a background chat session, then return to immediate
-    messages.value.pop()
-    messages.value.pop()
-    await startPersistentChat(text)
-  }
-}
-
-async function stopSending(): Promise<void> {
-  await window.cockpit.command('aidj.abort')
-  sending.value = false
-  inputText.value = pendingText.value
-  pendingText.value = ''
-  messages.value.splice(-2)
-  scrollToBottom()
-}
-
-async function handlePlayAll(songs: { name: string; path: string }[]): Promise<void> {
-  if (!songs.length) return
-  try {
-    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
-    const status = statusRes?.status as { player?: string } | undefined
-    const resolved = status?.player || ''
-    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
-
-    const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
-    const tasks = (list?.tasks ?? []) as { player: string }[]
-    const occupied = player ? tasks.some((t) => t.player === player) : false
-
-    if (occupied) {
-      pendingPlayAll.value = songs
-      playAllConfirm.value = true
-      return
-    }
-  } catch {
-    /* fall through to direct send */
-  }
-  doPlayAll(songs)
-}
-
-function doPlayAll(songs: { name: string; path: string }[]): void {
-  const paths = songs.map((s) => s.path)
-  window.cockpit.command('aidj.send', { path: paths })
-  pollStatus()
-}
-
-function confirmPlayAll(): void {
-  playAllConfirm.value = false
-  if (pendingPlayAll.value) {
-    doPlayAll(pendingPlayAll.value)
-    pendingPlayAll.value = null
-  }
-}
-
-function showSnack(text: string, color = 'success'): void {
-  snackText.value = text
-  snackColor.value = color
-  snackOpen.value = true
-}
-
-async function handleContinuous(songs: { name: string; path: string }[]): Promise<void> {
-  if (!songs.length) return
-  try {
-    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
-    const status = statusRes?.status as { player?: string } | undefined
-    const resolved = status?.player || ''
-    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
-
-    const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
-    const tasks = (list?.tasks ?? []) as { taskId: string; player: string }[]
-    const existing = tasks.find((t) => t.player === player && player)
-
-    if (existing) {
-      const r = (await window.cockpit.command('aidj.continuous-enqueue', {
-        task: existing.taskId,
-        songs: JSON.stringify(songs.map((s) => ({ name: s.name, path: s.path })))
-      })) as Record<string, unknown>
-      if (r?.ok) {
-        showSnack(`已加入连续播放队列 (共 ${r.total ?? songs.length} 首)`)
-      } else {
-        showSnack(`加入队列失败: ${(r?.error as string) || '未知错误'}`, 'error')
-      }
-      return
-    }
-
-    const r = (await window.cockpit.btJob('aidj.continuous', {
-      songs: songs.map((s) => ({ name: s.name, path: s.path })),
-      player: player || '__auto__',
-      view: 'continuous'
-    })) as Record<string, unknown>
-    if (r?.ok && r.task) {
-      showSnack(`已启动连续播放后台任务 (${songs.length} 首)`)
-    } else {
-      showSnack(`启动连续播放失败: ${(r?.error as string) || '未知错误'}`, 'error')
-    }
-  } catch (e: unknown) {
-    showSnack(`推送到后台失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
-  }
-}
-
-async function handlePlayOne(song: { path: string }): Promise<void> {
-  await window.cockpit.command('aidj.send', { path: [song.path] })
-  pollStatus()
-}
-
-function handleReorder(msgIdx: number, songs: { name: string; path: string }[]): void {
-  const msg = messages.value[msgIdx]
-  if (msg) {
-    msg.playlist = songs
-  }
-}
-
-/** Persistent mode: start a background chat session with the current conversation copied in. */
-async function startPersistentChat(prompt: string): Promise<void> {
-  try {
-    const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
-    const status = statusRes?.status as { player?: string } | undefined
-    const resolved = status?.player || ''
-    const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
-
-    const rollingHistory: string[] = []
-    for (const m of messages.value) {
-      if (m.playlist && m.playlist.length > 0) {
-        for (const s of m.playlist) {
-          rollingHistory.push(s.name)
-        }
-      }
-    }
-
-    const history: ChatMessage[] = [
-      ...messages.value.map((m) => ({
-        role: m.role,
-        content: m.content,
-        playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
-        timestamp: m.timestamp
-      })),
-      { role: 'user', content: prompt, timestamp: Date.now() }
-    ]
-
-    const result = (await window.cockpit.btJob('aidj.chat', {
-      prompt,
-      history: JSON.parse(JSON.stringify(history)),
-      rollingHistory,
-      player: player || '__auto__',
-      view: 'chat'
-    })) as Record<string, unknown>
-    if (result?.task || result?.ok) {
-      const task = result.task as { id?: string } | undefined
-      if (task?.id) persistentTaskId.value = task.id
-      mode.value = 'immediate'
-      showSnack('已在后台启动持续会话，可打开后台面板继续对话')
-    } else {
-      showSnack(`启动持续会话失败: ${(result?.error as string) || '未知错误'}`, 'error')
-    }
-  } catch (e: unknown) {
-    showSnack(`启动持续会话失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
-  }
-}
-
-function scrollToBottom(): void {
-  nextTick(() => {
-    if (chatContainer.value) {
-      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-    }
-  })
-}
-
-const ctxMenu = ref(false)
-const ctxPos = ref({ x: 0, y: 0 })
-const ctxTarget = ref('')
-const ctxIsAi = ref(false)
-const ctxSongs = ref<{ name: string }[]>([])
-const ctxMsgIndex = ref(-1)
-let ctxCloseTimer: ReturnType<typeof setTimeout> | null = null
-
-function handleContextMenu(
-  e: MouseEvent,
-  content: string,
-  isAi: boolean,
-  songs: { name: string }[],
-  msgIndex: number
-): void {
-  e.preventDefault()
-  e.stopPropagation()
-  ctxTarget.value = content
-  ctxIsAi.value = isAi
-  ctxSongs.value = songs
-  ctxMsgIndex.value = msgIndex
-  const pos = { x: e.clientX + 8, y: e.clientY + 8 }
-  if (ctxMenu.value) {
-    ctxMenu.value = false
-    if (ctxCloseTimer) clearTimeout(ctxCloseTimer)
-    ctxCloseTimer = setTimeout(() => {
-      ctxPos.value = pos
-      ctxMenu.value = true
-    }, 120)
-  } else {
-    ctxPos.value = pos
-    ctxMenu.value = true
-  }
-}
-
-async function doRevert(): Promise<void> {
-  const idx = ctxMsgIndex.value
-  if (idx < 0) return
-  ctxMenu.value = false
-  // Count user/assistant messages BEFORE the clicked one (skip now_playing pseudo-messages).
-  let keep = 0
-  for (let i = 0; i < idx && i < messages.value.length; i++) {
-    const m = messages.value[i]
-    if (
-      (m.role === 'user' || m.role === 'assistant') &&
-      !(m.role === 'assistant' && m.content.startsWith('▶ 播放'))
-    ) {
-      keep++
-    }
-  }
-  const removed = messages.value.splice(idx)
-  try {
-    await window.cockpit.command('aidj.revert', { keep })
-  } catch (e) {
-    messages.value.splice(idx, 0, ...removed)
-    showSnack(`回退失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
-    return
-  }
-  showSnack(`已回退到第 ${keep} 条消息`)
-  scrollToBottom()
-}
-
-// ---------------------------------------------------------------------------
-// Markdown export — dump the current conversation (messages + playlists).
-// App.vue's copyCurrentView calls toMarkdown() for the copy-view shortcut.
-// ---------------------------------------------------------------------------
-function toMarkdown(): string {
-  const lines: string[] = []
-  for (const m of messages.value) {
-    if (m.role === 'user') {
-      lines.push(`**You**:\n\n${m.content}\n`)
-    } else if (m.role === 'assistant') {
-      if (m.content === '...') continue
-      if (m.content.startsWith('▶ 播放')) {
-        lines.push(`> ${m.content}\n`)
-        continue
-      }
-      lines.push(`**AI DJ**:\n\n${m.content}\n`)
-      if (m.playlist && m.playlist.length > 0) {
-        m.playlist.forEach((s, i) => lines.push(`${i + 1}. ${s.name}`))
-        lines.push('')
-      }
-    } else if (m.role === 'system' && m.content) {
-      lines.push(`> ${m.content}\n`)
-    }
-  }
-  return lines.join('\n').trim() + '\n'
-}
-
 defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div class="aidj-root d-flex flex-column h-100">
-    <div class="px-4 py-3">
-      <v-row dense align="center">
-        <v-col cols="auto">
-          <v-icon start>mdi-disc-player</v-icon>
-          <span class="text-body-2 font-weight-medium ml-1">{{ t('aidj.now_playing') }}</span>
-        </v-col>
-        <v-col class="min-w-0 d-flex align-center">
-          <span class="text-body-2 track-name text-truncate" :title="playerStatus.track || ''">{{
-            trackText
-          }}</span>
-          <v-chip
-            size="small"
-            variant="flat"
-            :color="
-              playerStatus.status === 'Playing'
-                ? 'success'
-                : playerStatus.status === 'Paused'
-                  ? 'warning'
-                  : 'secondary'
-            "
-            class="ml-2 status-chip flex-shrink-0"
-          >
-            {{ playerStatus.status }}
-          </v-chip>
-          <v-chip
-            size="small"
-            variant="flat"
-            :color="netState === 'ok' ? 'success' : netState === 'checking' ? 'secondary' : 'error'"
-            class="ml-2 status-chip flex-shrink-0"
-            :title="netState === 'ok' ? 'AI API 已连接' : 'AI API 无法连接'"
-          >
-            <span class="d-flex align-center ga-1">
-              <v-icon size="12">
-                {{
-                  netState === 'ok'
-                    ? 'mdi-wifi-check'
-                    : netState === 'checking'
-                      ? 'mdi-wifi-sync'
-                      : 'mdi-wifi-off'
-                }}
-              </v-icon>
-              <span>{{ netState === 'ok' ? 'API' : netState === 'checking' ? '…' : '离线' }}</span>
-            </span>
-          </v-chip>
-        </v-col>
-        <v-col cols="auto" class="player-select-col">
-          <v-select
-            v-model="selectedPlayer"
-            :items="[
-              { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
-              ...availablePlayers.map((p) => ({ title: shortPlayer(p), value: p }))
-            ]"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="player-select"
-            :placeholder="t('aidj.select_player', '选择播放器')"
-            @update:model-value="selectPlayer"
-          >
-          </v-select>
-        </v-col>
-      </v-row>
-    </div>
+  <div class="aidj-shell">
+    <ChatView ref="chatRef" />
 
-    <v-divider />
+    <div class="page-menu" :class="{ 'is-open': menuOpen }">
+      <button class="page-menu-handle" @click="toggleMenu">
+        <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+      </button>
 
-    <div
-      ref="chatContainer"
-      class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
-    >
-      <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
-        <div
-          v-if="messages.length === 0"
-          key="empty"
-          class="empty-state flex-grow-1 d-flex flex-column align-center justify-center text-center text-medium-emphasis"
-        >
-          <v-icon size="64" class="mb-4">mdi-chat-processing-outline</v-icon>
-          <div class="text-h6">{{ t('aidj.heading') }}</div>
-          <div class="text-body-2 mt-1">{{ t('aidj.input_placeholder') }}</div>
-        </div>
+      <Transition name="menu-pop">
+        <div v-if="menuOpen" class="page-menu-pop">
+          <template v-if="menuStep === 'main'">
+            <div class="menu-item" @click="selectChat">
+              <v-icon size="18">mdi-comment-text-multiple-outline</v-icon>
+              <span>{{ t('aidj.subpage.chat', 'Chat') }}</span>
+              <v-icon size="14" class="ml-auto">mdi-check</v-icon>
+            </div>
+            <div class="menu-item" @click="enterSessions">
+              <v-icon size="18">mdi-history</v-icon>
+              <span>{{ t('aidj.subpage.sessions', 'Chat Sessions') }}</span>
+              <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+            </div>
+          </template>
 
-        <ChatMessageVue
-          v-for="(msg, idx) in messages"
-          :key="msg.uid ?? msg.timestamp"
-          :message="msg"
-          :index="idx"
-          @play-all="handlePlayAll"
-          @play-one="handlePlayOne"
-          @reorder="(songs: any) => handleReorder(idx, songs)"
-          @context-menu="handleContextMenu"
-          @continuous="handleContinuous"
-        />
-      </TransitionGroup>
-    </div>
-
-    <v-divider />
-
-    <div class="input-overlay" :class="{ 'input-expanded': expanded }" :style="overlayStyle">
-      <div ref="contentRef" class="overlay-content">
-        <div class="aidj-status-bar">
-          <template v-for="key in visibleStatus" :key="key">
-            <template v-if="key === 'tokens'">
-              <v-chip
-                variant="flat"
+          <template v-else>
+            <div class="sessions-head d-flex align-center ga-2">
+              <v-btn
+                icon
                 size="small"
-                class="status-chip is-on"
-                :title="'累计所有请求的 tokens 总和'"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
               >
-                <span class="status-label">Tokens</span
-                ><span class="status-value">{{
-                  formatTokens(lastTokens.prompt + lastTokens.completion)
-                }}</span>
-              </v-chip>
-            </template>
-
-            <template v-else-if="key === 'context'">
-              <v-chip
-                variant="flat"
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{
+                t('aidj.subpage.sessions', 'Chat Sessions')
+              }}</span>
+              <v-spacer />
+              <v-btn
+                icon
                 size="small"
-                class="status-chip is-on"
-                :title="'单次请求的上下文输入 tokens'"
+                variant="text"
+                :loading="sessionsLoading"
+                :title="t('aidj.sessions.refresh', '刷新')"
+                @click="refreshSessions"
               >
-                <span class="status-label">Context</span
-                ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
-              </v-chip>
-              <v-chip
-                variant="flat"
-                size="small"
-                class="status-chip is-on"
-                :title="'单次请求的输出 tokens'"
-              >
-                <span class="status-label">Completion</span
-                ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
-              </v-chip>
-            </template>
+                <v-icon size="18">mdi-refresh</v-icon>
+              </v-btn>
+            </div>
 
-            <v-chip
-              v-else-if="key === 'tracks'"
-              variant="flat"
-              size="small"
-              class="status-chip is-on"
-            >
-              <span class="status-label">Tracks</span
-              ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
-            </v-chip>
+            <div class="px-1 pt-1">
+              <v-text-field
+                v-model="search"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :placeholder="t('aidj.sessions.search', '搜索会话…')"
+                prepend-inner-icon="mdi-magnify"
+                clearable
+              />
+            </div>
 
-            <v-chip
-              v-else-if="key === 'memory'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable is-on"
-              @click="memoryConfirm = true"
-              :title="'点击清空已播记忆'"
-            >
-              <span class="status-label">Memory</span
-              ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
-            </v-chip>
+            <div class="session-count d-flex align-center ga-2 px-1 pt-2 pb-1">
+              <span class="text-caption text-medium-emphasis">{{
+                t('aidj.sessions.count', '会话')
+              }}</span>
+              <v-chip size="x-small" variant="flat">{{ filteredSessions.length }}</v-chip>
+            </div>
 
-            <v-chip
-              v-else-if="key === 'volbal'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable"
-              :class="{ 'is-on': sbVolbal.enabled }"
-              @click="toggleVolbal"
-              :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
-            >
-              <span class="status-label">Volbal</span
-              ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'record_freq'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable"
-              :class="{ 'is-on': sbRecordFreq }"
-              @click="toggleRecordFreq"
-              :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
-            >
-              <span class="status-label">RecordFreq</span
-              ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'backgrounds'"
-              variant="flat"
-              size="small"
-              class="status-chip"
-              :class="{ 'is-on': sbBackgrounds > 0 }"
-              :title="'运行中的后台任务数量'"
-            >
-              <span class="status-label">Backgrounds</span
-              ><span class="status-value">{{ sbBackgrounds }}</span>
-            </v-chip>
+            <div class="sessions-scroll">
+              <v-empty-state
+                v-if="!sessionsLoading && filteredSessions.length === 0"
+                icon="mdi-account-search-outline"
+                :title="t('aidj.sessions.empty', '没有会话')"
+                :text="t('aidj.sessions.empty_hint', '在 Chat 中对话后会在这里出现')"
+              />
+              <div v-else class="px-1 pb-1">
+                <template v-for="g in sessionGroups" :key="g.label">
+                  <div class="session-group-label">{{ g.label }}</div>
+                  <div
+                    v-for="s in g.sessions"
+                    :key="s.id"
+                    class="session-item"
+                    :class="{ 'is-active': s.id === currentId }"
+                    @click="openSession(s.id)"
+                    @contextmenu="openSessionCtx($event, s)"
+                  >
+                    <v-icon
+                      size="18"
+                      :icon="
+                        s.pinned
+                          ? 'mdi-pin'
+                          : s.type === 'chat'
+                            ? 'mdi-message-text-outline'
+                            : 'mdi-music-note-outline'
+                      "
+                    />
+                    <div class="min-w-0 flex-grow-1">
+                      <div class="session-title text-truncate">{{ s.title }}</div>
+                      <div class="session-meta">{{ s.messageCount ?? 0 }} 条</div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
           </template>
         </div>
-
-        <div v-if="!expanded" class="input-bar d-flex ga-2 align-center px-4 pb-3">
-          <v-btn-toggle
-            v-model="mode"
-            mandatory
-            color="primary"
-            variant="outlined"
-            divided
-            class="mode-toggle flex-shrink-0"
-            style="white-space: nowrap"
-          >
-            <v-btn value="immediate" class="px-3">
-              {{ t('aidj.mode_immediate') }}
-            </v-btn>
-            <v-btn value="persistent" class="px-3">
-              {{ t('aidj.mode_persistent') }}
-            </v-btn>
-          </v-btn-toggle>
-
-          <div class="textarea-wrap flex-grow-1">
-            <v-textarea
-              v-model="inputText"
-              rows="1"
-              :max-rows="3"
-              auto-grow
-              no-resize
-              :placeholder="t('aidj.input_placeholder')"
-              :disabled="thinking"
-              hide-details
-              variant="outlined"
-              class="input-textarea"
-              @keydown="onKeydown"
-            />
-            <v-btn
-              v-if="inputText.includes('\n')"
-              variant="text"
-              size="small"
-              class="expand-btn"
-              @click="expanded = true"
-              :title="t('aidj.expand')"
-              >&lt;&gt;</v-btn
-            >
-          </div>
-
-          <v-btn
-            v-if="sending"
-            color="error"
-            variant="elevated"
-            class="flex-shrink-0"
-            @click="stopSending"
-          >
-            <v-icon start>mdi-stop</v-icon>
-            {{ t('aidj.stop') }}
-          </v-btn>
-          <v-btn
-            v-else
-            :disabled="!inputText.trim()"
-            color="primary"
-            variant="elevated"
-            class="flex-shrink-0"
-            @click="sendMessage"
-          >
-            <v-icon start>mdi-send</v-icon>
-            {{ t('aidj.send') }}
-          </v-btn>
-        </div>
-
-        <div v-else class="expanded-panel d-flex flex-column flex-grow-1">
-          <div class="d-flex align-center ga-2 px-4 pt-1">
-            <v-btn-toggle
-              v-model="mode"
-              mandatory
-              color="primary"
-              variant="outlined"
-              divided
-              class="mode-toggle flex-shrink-0"
-              style="white-space: nowrap"
-            >
-              <v-btn value="immediate" class="px-3">
-                {{ t('aidj.mode_immediate') }}
-              </v-btn>
-              <v-btn value="persistent" class="px-3">
-                {{ t('aidj.mode_persistent') }}
-              </v-btn>
-            </v-btn-toggle>
-
-            <v-spacer />
-
-            <v-btn
-              variant="text"
-              class="flex-shrink-0"
-              @click="expanded = false"
-              :title="t('aidj.collapse')"
-            >
-              <v-icon start>mdi-chevron-down</v-icon>
-              {{ t('aidj.collapse') }}
-            </v-btn>
-
-            <v-btn
-              v-if="sending"
-              color="error"
-              variant="elevated"
-              class="flex-shrink-0"
-              @click="stopSending"
-            >
-              <v-icon start>mdi-stop</v-icon>
-              {{ t('aidj.stop') }}
-            </v-btn>
-            <v-btn
-              v-else
-              :disabled="!inputText.trim()"
-              color="primary"
-              variant="elevated"
-              class="flex-shrink-0"
-              @click="sendMessage"
-            >
-              <v-icon start>mdi-send</v-icon>
-              {{ t('aidj.send') }}
-            </v-btn>
-          </div>
-
-          <div class="expanded-textarea-wrap flex-grow-1 px-4 pb-3">
-            <v-textarea
-              v-model="inputText"
-              :auto-grow="false"
-              rows="8"
-              :placeholder="t('aidj.input_placeholder')"
-              :disabled="thinking"
-              hide-details
-              variant="outlined"
-              class="h-100 input-textarea"
-              @keydown="onKeydown"
-            />
-          </div>
-        </div>
-      </div>
+      </Transition>
     </div>
 
-    <v-dialog v-model="memoryConfirm" width="420">
-      <v-card rounded="lg">
-        <v-card-title class="text-subtitle-1">
-          <v-icon start>mdi-delete-sweep</v-icon>
-          {{ t('aidj.clear_memory_title', '清空已播记忆') }}
-        </v-card-title>
-        <v-card-text class="text-body-2">
-          {{ t('aidj.clear_memory_text', '确定要清空已播放歌曲的记忆吗？AI 将不再回避这些歌曲。') }}
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4 pt-2">
-          <v-spacer />
-          <v-btn variant="text" @click="memoryConfirm = false">
-            {{ t('aidj.cancel', '取消') }}
-          </v-btn>
-          <v-btn color="error" @click="clearMemory">
-            {{ t('aidj.clear', '清空') }}
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <v-dialog v-model="playAllConfirm" width="440">
-      <v-card rounded="lg">
-        <v-card-title class="text-subtitle-1">
-          <v-icon start>mdi-alert-circle-outline</v-icon>
-          覆盖播放列表？
-        </v-card-title>
-        <v-card-text class="text-body-2">
-          该播放器上有一个连续播放后台任务正在推送歌曲。直接播放全部可能与之冲突（两个来源会争抢切歌），冲突需要你自行处理。
-          确认仍要播放全部吗？
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4 pt-2">
-          <v-spacer />
-          <v-btn variant="text" @click="playAllConfirm = false">
-            {{ t('aidj.cancel', '取消') }}
-          </v-btn>
-          <v-btn color="primary" @click="confirmPlayAll"> 覆盖并播放 </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <v-snackbar v-model="snackOpen" :timeout="2500" :color="snackColor" location="top">
-      {{ snackText }}
-    </v-snackbar>
-
-    <ContextMenu
-      v-model="ctxMenu"
-      :x="ctxPos.x"
-      :y="ctxPos.y"
-      :content="ctxTarget"
-      :is-ai="ctxIsAi"
-      :songs="ctxSongs"
-      :can-revert="ctxMsgIndex >= 0"
-      @revert="doRevert"
-    />
+    <Teleport to="body">
+      <Transition name="ctx">
+        <div
+          v-if="ctxMenuOpen && ctxTarget"
+          class="aidj-session-ctx"
+          :style="{ left: ctxPos.x + 'px', top: ctxPos.y + 'px' }"
+          @click.stop
+        >
+          <button class="aidj-session-ctx-item" @click="ctxTarget && pinSession(ctxTarget)">
+            <v-icon :icon="ctxTarget?.pinned ? 'mdi-pin-off' : 'mdi-pin'" size="14" />
+            <span>{{
+              ctxTarget?.pinned
+                ? t('aidj.sessions.unpin', '取消置顶')
+                : t('aidj.sessions.pin', '置顶')
+            }}</span>
+          </button>
+          <button
+            class="aidj-session-ctx-item is-danger"
+            @click="ctxTarget && deleteSession(ctxTarget)"
+          >
+            <v-icon icon="mdi-delete-outline" size="14" />
+            <span>{{ t('aidj.sessions.delete', '删除') }}</span>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
-.aidj-root {
+.aidj-shell {
   position: absolute;
   inset: 0;
   overflow: hidden;
 }
-.chat-area {
-  min-height: 0;
-  /* No smooth scroll: programmatic scroll-to-bottom on a long history would
-     animate the whole distance and take seconds. Instant jump instead. */
-  scroll-behavior: auto;
-}
-.chat-area::-webkit-scrollbar {
-  width: 6px;
-}
-.chat-area::-webkit-scrollbar-thumb {
-  background: rgba(var(--v-theme-on-surface-variant), 0.45);
-  border-radius: 3px;
-}
-.input-overlay {
-  flex-shrink: 0;
+
+.page-menu {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
   display: flex;
   flex-direction: column;
+  align-items: center;
+}
+
+.page-menu-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 24px;
+  border: none;
+  cursor: pointer;
+  color: rgb(var(--v-theme-on-surface-variant));
   background: rgba(var(--v-theme-surface), 0.2);
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
-  transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  border-top: none;
+  border-radius: 0 0 24px 24px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: color 0.15s ease;
+}
+.page-menu-handle:hover {
+  color: rgb(var(--v-theme-primary));
+}
+.page-menu.is-open .page-menu-handle {
+  color: rgb(var(--v-theme-primary));
+}
+
+.page-menu-pop {
+  margin-top: 4px;
+  width: 340px;
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 8px;
   overflow: hidden;
 }
-.input-overlay.input-expanded {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 10;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
-}
-.overlay-content {
+
+.menu-item {
   display: flex;
-  flex-direction: column;
-  flex: 1 0 auto;
-  min-height: 0;
-}
-.aidj-status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 16px 10px;
-  flex-shrink: 0;
-}
-.status-chip {
-  padding-block: 4px;
-  min-height: 24px;
-}
-.status-chip.clickable {
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
   cursor: pointer;
+  font-size: 0.9rem;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
-.status-chip.clickable:hover {
-  filter: brightness(1.15);
+.menu-item:hover {
+  background: rgba(var(--v-theme-primary), 0.12);
+  color: rgb(var(--v-theme-primary));
 }
-.status-chip.is-on {
-  background: rgba(var(--v-theme-success-container), 0.9);
-  color: rgb(var(--v-theme-on-success-container));
+
+.sessions-head {
+  padding: 2px 4px 6px;
 }
-.status-chip .status-label {
-  opacity: 0.6;
-  margin-right: 5px;
+.sessions-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  min-height: 0;
 }
-.status-chip .status-value {
-  font-family: monospace;
+.sessions-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sessions-scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--v-theme-on-surface-variant), 0.45);
+  border-radius: 3px;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-block: 1px;
+  transition: background-color 0.15s ease;
+}
+.session-group-label {
+  font-size: 0.7rem;
   font-weight: 600;
-}
-.expanded-textarea-wrap {
-  min-height: 0;
-}
-.expanded-textarea-wrap :deep(.v-textarea) {
-  height: 100% !important;
-}
-.expanded-textarea-wrap :deep(.v-textarea) textarea {
-  height: 100% !important;
-  max-height: none !important;
-}
-.status-chip {
-  padding-block: 4px;
-  min-height: 24px;
-}
-.mode-toggle {
-  flex: 0 0 auto;
-}
-.textarea-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 120px;
-}
-.expand-btn {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  min-width: 28px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   opacity: 0.6;
-  z-index: 1;
+  padding: 10px 10px 4px;
 }
-.expand-btn:hover {
+.session-item:hover {
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+.session-item.is-active {
+  background: rgba(var(--v-theme-primary), 0.14);
+}
+.session-title {
+  font-size: 0.85rem;
+}
+.session-meta {
+  font-size: 0.72rem;
+  opacity: 0.6;
+}
+
+.menu-pop-enter-active,
+.menu-pop-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+.menu-pop-enter-from,
+.menu-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+</style>
+
+<style>
+.aidj-session-ctx {
+  position: fixed;
+  z-index: 3000;
+  min-width: 130px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.aidj-session-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.aidj-session-ctx-item:hover {
+  background: rgba(var(--v-theme-primary), 0.15);
+}
+.aidj-session-ctx-item.is-danger:hover {
+  background: rgba(var(--v-theme-error), 0.18);
+  color: rgb(var(--v-theme-error));
+}
+.ctx-enter-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.ctx-leave-active {
+  transition: opacity 0.1s ease;
+}
+.ctx-enter-from {
+  opacity: 0;
+  transform: scale(0.92) translateY(-4px);
+}
+.ctx-enter-to {
   opacity: 1;
+  transform: scale(1) translateY(0);
 }
-.expanded-btn {
-  top: 8px;
-  right: 12px;
-}
-.input-textarea {
-  min-width: 120px;
-}
-.input-bar {
-  flex-shrink: 0;
-}
-.input-bar > .v-btn {
-  flex: 0 0 auto;
-  height: 36px;
-}
-.input-bar > .v-btn-toggle {
-  flex: 0 0 auto;
-  height: 36px;
-}
-.player-select-col {
-  min-width: 200px;
-  max-width: 280px;
-}
-.track-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.player-select {
-  min-width: 160px;
-}
-.player-select :deep(.v-field) {
-  font-size: 0.8rem;
-}
-.player-select :deep(.v-select__selection) {
-  font-size: 0.8rem;
-}
-
-.msg-enter-active {
-  transition: all 0.3s ease-out;
-}
-.msg-enter-from {
+.ctx-leave-to {
   opacity: 0;
-  transform: translateY(8px);
-}
-.msg-leave-active {
-  transition: all 0.2s ease-in;
-}
-.msg-leave-to {
-  opacity: 0;
-  transform: translateX(-20px);
-}
-
-.expanded-panel {
-  min-height: 0;
-  flex-shrink: 0;
 }
 </style>
