@@ -35,7 +35,6 @@ const collapsedH = ref(132)
 const overlayStyle = computed(() => ({
   height: expanded.value ? '80%' : `${collapsedH.value}px`
 }))
-const chatPadStyle = computed(() => ({ paddingBottom: `${collapsedH.value + 12}px` }))
 
 function setupOverlayMeasure(): void {
   if (overlayRO || !contentRef.value) return
@@ -327,6 +326,12 @@ function shortPlayer(name: string): string {
   if (short.length <= 10) return short
   return short.slice(0, 5) + '…' + short.slice(-4)
 }
+
+const trackText = computed(() => {
+  const t = playerStatus.value.track
+  if (!t) return '—'
+  return t.length > 8 ? t.slice(0, 8) + '…' : t
+})
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.shiftKey && e.key === 'Enter' && !sending.value && !thinking.value) {
@@ -706,7 +711,9 @@ defineExpose({ toMarkdown })
           <span class="text-body-2 font-weight-medium ml-1">{{ t('aidj.now_playing') }}</span>
         </v-col>
         <v-col class="min-w-0 d-flex align-center">
-          <span class="text-body-2 track-name text-truncate">{{ playerStatus.track || '—' }}</span>
+          <span class="text-body-2 track-name text-truncate" :title="playerStatus.track || ''">{{
+            trackText
+          }}</span>
           <v-chip
             size="small"
             variant="flat"
@@ -766,7 +773,6 @@ defineExpose({ toMarkdown })
     <div
       ref="chatContainer"
       class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
-      :style="chatPadStyle"
     >
       <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
         <div
@@ -795,7 +801,7 @@ defineExpose({ toMarkdown })
 
     <v-divider />
 
-    <div class="input-overlay" :style="overlayStyle">
+    <div class="input-overlay" :class="{ 'input-expanded': expanded }" :style="overlayStyle">
       <div ref="contentRef" class="overlay-content">
         <div class="aidj-status-bar">
           <template v-for="key in visibleStatus" :key="key">
@@ -1111,20 +1117,23 @@ defineExpose({ toMarkdown })
   border-radius: 3px;
 }
 .input-overlay {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 10;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: rgba(var(--v-theme-surface), 0.2);
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
   transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
+}
+.input-overlay.input-expanded {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
 }
 .overlay-content {
   display: flex;
