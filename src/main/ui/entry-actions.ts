@@ -1,4 +1,4 @@
-import type { AppEntry, AppAction } from '@abilities/apps/types'
+import type { AppEntry, AppAction } from '@shared/types'
 
 /**
  * Entry action injection — framework-level, generic.

@@ -1,6 +1,10 @@
 {
   "ability.aidj.name": "AI DJ",
   "ability.aidj.category": "Tools",
+  "ability.aidj-lyrics.name": "Lyrics",
+  "ability.aidj-lyrics.category": "Tools",
+  "label.AIDJ Lyrics": "AIDJ Lyrics",
+  "label.歌词页配置": "Lyrics page config",
   "aidj.heading": "AI DJ",
   "aidj.input_placeholder": "Describe the vibe, e.g. some chill Chinese songs...",
   "aidj.send": "Send",
@@ -103,5 +107,21 @@
   "aidj.sessions.title_running": "A title generation task for this session is already running",
   "aidj.sessions.title_gen_desc": "Auto-generate session title",
   "aidj.sessions.title_gen_failed": "Title generation failed",
-  "aidj.sessions.save": "Save"
+  "aidj.sessions.save": "Save",
+  "aidj.lyrics_page.playing": "Playing",
+  "aidj.lyrics_page.paused": "Paused",
+  "aidj.lyrics_page.stopped": "Stopped",
+  "aidj.lyrics_page.unknown": "Unknown",
+  "aidj.lyrics_page.waiting": "Waiting to play…",
+  "aidj.lyrics_page.noTrack": "Nothing playing",
+  "aidj.lyrics_page.noTrackHint": "Lyrics will appear here once AI DJ starts playing a song.",
+  "aidj.lyrics_page.noLyric": "No lyrics",
+  "aidj.lyrics_page.noLyricHint": "This track has no stored LRC lyric yet.",
+  "aidj.lyrics_page.player": "Player",
+  "aidj.lyrics_page.prev": "Previous",
+  "aidj.lyrics_page.next": "Next",
+  "aidj.lyrics_page.play": "Play / Pause",
+  "aidj.lyrics_page.stop": "Stop",
+  "aidj.lyrics_page.desktop": "Desktop lyrics",
+  "aidj.lyrics_page.lock": "Lock"
 }

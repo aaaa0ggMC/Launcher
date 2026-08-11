@@ -2,11 +2,13 @@ import type { Component } from 'vue'
 
 /**
  * Ability contract — every `abilities/<id>/index.ts` default-exports an object
- * satisfying this interface. The sidebar is driven by config/abilities.yaml;
- * components load dynamically (code-split) on first show.
+ * (or an array of objects, so one folder can register several abilities) that
+ * satisfies this interface. Abilities are self-injecting: the loader scans the
+ * folders at build time, so the sidebar no longer depends on
+ * config/abilities.yaml ordering. Components load dynamically (code-split).
  */
 export interface Ability {
-  /** Ability id, must match the folder name. */
+  /** Ability id. With a single export it must match the folder name. */
   id: string
   /** Display name (Chinese UI). */
   name: string
@@ -19,6 +21,13 @@ export interface Ability {
   icon: string | null
   /** Sidebar group label. */
   category: string
+  /**
+   * Applicable platforms — `process.platform` values (`'linux' | 'darwin' |
+   * 'win32'`). Omitted / empty means the ability works everywhere. When set,
+   * the ability is only injected on a matching platform; on other platforms it
+   * is filtered out and reported as ignored in the logs.
+   */
+  platforms?: string[]
   /**
    * Page component. Optional — a backend-only ability (commands but no UI
    * page, e.g. `display`) omits it and stays hidden from the sidebar.

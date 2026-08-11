@@ -8,6 +8,7 @@ import { CONFIG_JSON, SCRIPTS_DIR } from '../../main/process/paths'
 import { readJson } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
 import { startProcessTask } from '../../main/process/background-tasks'
+import { getBroadcast } from '../../main/process/broadcast'
 
 const log = makeLogger('apps-launcher')
 
@@ -17,12 +18,9 @@ interface RuntimeConfig {
 
 export type { ProcOutputEvent }
 
-type OutputBroadcast = (event: ProcOutputEvent) => void
-
-let outputBroadcast: OutputBroadcast = () => {}
-
-export function setOutputBroadcast(fn: OutputBroadcast): void {
-  outputBroadcast = fn
+/** Broadcast a streamed output event to every window (`cockpit:proc-output`). */
+function outputBroadcast(event: ProcOutputEvent): void {
+  getBroadcast()('cockpit:proc-output', event)
 }
 
 /** Read a piped stream, emit each complete line to the broadcast. */

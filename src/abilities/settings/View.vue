@@ -10,8 +10,7 @@ import { scoreFields, type SearchField } from '@ui/composables/search'
 
 /**
  * Settings page — consumes the injection list built & provided by App.vue
- * (`cockpit:settings`), so it never re-scans ability modules or re-reads the
- * manifest. Layout:
+ * (`cockpit:settings`), so it never re-scans ability modules. Layout:
  *
  *   level 1  top row: search box + horizontally scrollable category chips
  *   level 2  the active category's items rendered inline (grid) — no drilling

@@ -7,7 +7,7 @@ import '@mdi/font/css/materialdesignicons.css'
 import 'vuetify/styles'
 import './styles/global.css'
 import App from './App.vue'
-import { windowViews } from './windows'
+import { resolveWindowView } from './windows'
 import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 
 const vuetify = createVuetify({
@@ -78,16 +78,17 @@ forwardConsoleErrors()
 /**
  * Root switch: the SAME renderer entry serves both the main shell and every
  * managed child window. A child window loads with `?view=<key>`; if the key
- * exists in the windows/ glob registry we mount that component instead of the
- * full App shell (sidebar / background layers / quit guard are all skipped).
+ * resolves in the window registry (framework + ability windows) we mount that
+ * component instead of the full App shell (sidebar / background layers / quit
+ * guard are all skipped).
  */
 async function mountRoot(): Promise<void> {
   let root: Component = App
   const view = new URLSearchParams(location.search).get('view')
   if (view) {
-    const loader = windowViews[`./${view}.vue`]
+    const loader = resolveWindowView(view)
     if (loader) {
-      const mod = (await loader()) as { default: Component }
+      const mod = await loader()
       root = mod.default
     }
   }

@@ -1,10 +1,4 @@
-import type {
-  AbilitiesManifest,
-  LaunchResult,
-  BtOutputMessage,
-  BtTaskInfo,
-  ChildWindowInfo
-} from '../shared/types'
+import type { LaunchResult, BtOutputMessage, BtTaskInfo, ChildWindowInfo } from '../shared/types'
 import type { AppEntry } from '../abilities/apps/types'
 import type { AutostartEntry } from '../abilities/autostart/types'
 import type { DisplayOutput } from '../abilities/display/types'
@@ -29,7 +23,7 @@ export interface CockpitApi {
   listCommands: () => Promise<{ name: string; description: string; usage?: string }[]>
   getConfig: () => Promise<Record<string, unknown> | null>
   setConfig: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>
-  getManifest: () => Promise<AbilitiesManifest | null>
+  platform: string
   listApps: () => Promise<AppsListResult>
   getEntry: (root: string, id: string) => Promise<AppEntry | null>
   updateEntry: (root: string, id: string, patch: Partial<AppEntry>) => Promise<AppEntry>
@@ -89,10 +83,7 @@ export interface CockpitApi {
   moveWindowTo: (x: number, y: number) => Promise<boolean>
   resizeWindow: (w: number, h: number) => Promise<boolean>
   getWorkArea: () => Promise<{ x: number; y: number; width: number; height: number }>
-  centerWindow: (
-    anchor: 'top' | 'center' | 'bottom',
-    margin: number
-  ) => Promise<boolean>
+  centerWindow: (anchor: 'top' | 'center' | 'bottom', margin: number) => Promise<boolean>
   autoFitWindow: (
     w: number,
     h: number,

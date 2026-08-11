@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import type { AppEntry } from '@abilities/apps/types'
+import type { AppEntry } from '@shared/types'
 import type { ProcOutputEvent } from '@shared/types'
 import UiNode from './UiNode.vue'
 import { createUi, type UiNode as UiNodeDesc, type UiApi } from '../transformer'

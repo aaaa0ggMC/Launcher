@@ -2,8 +2,6 @@ import { ipcMain, BrowserWindow, dialog, clipboard } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
-import { getManifest } from './manifest'
-import { watchRoots } from '../../abilities/apps/registry'
 import { cliExec } from './cli'
 import { runCommand, listCommands, UnknownCommandError } from './commands/registry'
 
@@ -64,9 +62,6 @@ async function kdeWallpaperPath(): Promise<string | null> {
  * passthroughs so the UI executes the exact same command handlers as the CLI.
  */
 export function registerIpc(): void {
-  // App chrome (not an ability operation).
-  ipcMain.handle('abilities:manifest', async () => getManifest())
-
   // Frameless window controls (Linux/Wayland: no native title bar). These are
   // sender-scoped: a child window (lyrics etc.) controls ITSELF, never the main
   // shell — the BT panel manages children cross-window via `window:control`.
@@ -200,7 +195,7 @@ export function registerIpc(): void {
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) => {
     // Log the concrete command + its (redacted) args. The file always keeps
-    // these (even `logs.*`) — the UI just filters them via `excludeSelf`.
+    // these (even `logs.*`) — the logs ability filters them via `excludeSelf`.
     log.info(name, { args: redactArgs(args ?? {}) })
     try {
       return await runCommand(name, args ?? {})
@@ -225,9 +220,4 @@ export function registerIpc(): void {
 
   // CLI REPL.
   ipcMain.handle('cli:exec', async (_e, cmd: string) => cliExec(cmd))
-}
-
-export function startWatching(): void {
-  log.info('start watching app roots')
-  watchRoots()
 }

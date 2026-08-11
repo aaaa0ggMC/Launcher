@@ -15,6 +15,7 @@ import {
 import { rescanRoot } from './scanner'
 import { launchEntry, launchAction } from './launcher'
 import { makeLogger } from '../../main/process/logger'
+import './cli'
 
 const log = makeLogger('apps')
 

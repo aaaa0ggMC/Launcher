@@ -1,6 +1,10 @@
 {
   "ability.aidj.name": "AI DJ",
   "ability.aidj.category": "工具",
+  "ability.aidj-lyrics.name": "歌词",
+  "ability.aidj-lyrics.category": "工具",
+  "label.AIDJ Lyrics": "歌词",
+  "label.歌词页配置": "歌词页配置",
   "aidj.heading": "AI DJ",
   "aidj.input_placeholder": "输入需求，例如：来点轻松的中文歌...",
   "aidj.send": "发送",
@@ -103,5 +107,21 @@
   "aidj.sessions.title_running": "该会话的标题生成任务正在运行中",
   "aidj.sessions.title_gen_desc": "自动生成会话标题",
   "aidj.sessions.title_gen_failed": "标题生成失败",
-  "aidj.sessions.save": "保存"
+  "aidj.sessions.save": "保存",
+  "aidj.lyrics_page.playing": "播放中",
+  "aidj.lyrics_page.paused": "已暂停",
+  "aidj.lyrics_page.stopped": "已停止",
+  "aidj.lyrics_page.unknown": "未知状态",
+  "aidj.lyrics_page.waiting": "等待播放…",
+  "aidj.lyrics_page.noTrack": "暂无播放",
+  "aidj.lyrics_page.noTrackHint": "通过 AI DJ 播放歌曲后，歌词会实时显示在这里。",
+  "aidj.lyrics_page.noLyric": "暂无歌词",
+  "aidj.lyrics_page.noLyricHint": "这首歌还没有存储的 LRC 歌词。",
+  "aidj.lyrics_page.player": "播放器",
+  "aidj.lyrics_page.prev": "上一首",
+  "aidj.lyrics_page.next": "下一首",
+  "aidj.lyrics_page.play": "播放 / 暂停",
+  "aidj.lyrics_page.stop": "停止",
+  "aidj.lyrics_page.desktop": "桌面歌词",
+  "aidj.lyrics_page.lock": "锁定"
 }

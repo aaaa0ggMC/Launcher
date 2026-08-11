@@ -79,14 +79,9 @@
   "bt.win.pinned": "已置顶",
   "bt.win.minimized": "已最小化",
   "bt.win.maximized": "已最大化",
-  "lyrics.title": "歌词",
-  "lyrics.sub": "浮动歌词",
-  "lyrics.lock": "锁定",
-  "lyrics.waiting": "等待播放…",
-  "lyrics.noLyric": "暂无歌词",
-  "lyrics.empty": "暂无播放",
-  "lyrics.emptyText": "开始播放歌曲后，歌词会显示在这里。",
   "sidebar.expand": "展开侧边栏",
   "sidebar.collapse": "收起侧边栏",
-  "commandError.notFound": "功能「{name}」不存在或已被移除"
+  "commandError.notFound": "功能「{name}」不存在或已被移除",
+  "cli.help.allCmds": "  所有能力命令均可直接输入 (Tab 补全):",
+  "cli.error.unknown": "未知命令: {cmd} (输入 help 查看全部命令)"
 }

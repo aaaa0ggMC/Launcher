@@ -2,7 +2,6 @@ import { markRaw } from 'vue'
 import type { Component } from 'vue'
 import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
 import BtLogView from './components/BackgroundTaskViews/BtLogView.vue'
-import BtResponseView from './components/BackgroundTaskViews/BtResponseView.vue'
 
 /**
  * Background task view registry — architectural.
@@ -10,7 +9,7 @@ import BtResponseView from './components/BackgroundTaskViews/BtResponseView.vue'
  * Each background task carries a `view` id. The global panel resolves it here
  * and renders the matching component in the detail area. `log` (the default
  * console) is built in; any ability can register a custom view (e.g. a
- * structured response view) via `registerBtView`.
+ * structured response view) via `registerBtView` from its own `index.ts`.
  *
  * Views receive the task + its messages and render them however they like;
  * the lifecycle toolbar (stop/kill/remove) is rendered by the panel itself and
@@ -34,10 +33,6 @@ export function registerBtView(id: string, factory: ViewFactory): void {
 
 // Built-in default: log console (existing behavior).
 registerBtView('log', () => ({ component: markRaw(BtLogView) }))
-
-// Structured response view — renders TransformResults pushed by the task as
-// structured messages. Registered globally so any ability can use it.
-registerBtView('response', () => ({ component: markRaw(BtResponseView) }))
 
 /** Resolve the component for a task's view id. */
 export function resolveBtView(task: BtTaskInfo): {

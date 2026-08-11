@@ -121,15 +121,18 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
   "runtime": {
     "terminal": ["konsole", "--hold", "-e"], // terminal:true 的条目用这个
     "confirmBeforeLaunch": true
+  },
+  "sidebar": {
+    "default": "cli" // 初始页面（缺失/无效时回落第一个能力）
   }
 }
 ```
 
 `theme` 的取值来自 `src/main/ui/color_schemes/*.json`（见 §9「主题」）；未知 id 自动回落 `dark`，不会弄坏 UI。
 
-### ~/.config/LinuxCockpit/abilities.yaml — 侧栏清单
+### config.json 的 `sidebar` — 初始页面
 
-控制侧栏顺序和启用状态。各能力的专属配置已移出 yaml，独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`（如 AIDJ 的 `aidj/config.json` 存曲库路径、API 密钥、模型与播放偏好）。
+侧栏**不再**由 yaml 文件驱动能力清单/顺序——Ability 自注入（见 §9「Ability 动态加载」）：扫描 `src/abilities/*/index.ts`，按 `category` 字母序分组、组内按名称字母序排序，`platforms` 过滤平台。`config.json` 里的 `sidebar.default` 只指定初始页面（缺失/无效时回落第一个能力）。各能力的专属配置独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`（如 AIDJ 的 `aidj/config.json` 存曲库路径、API 密钥、模型与播放偏好）。
 
 ### ~/Apps/apps.json — 应用注册表
 
@@ -172,8 +175,8 @@ src/
       commands/        # 命令注册表 (CLI-first 核心): types.ts + registry.ts
       abilities-loader.ts  # 加载器: globs src/abilities/*/commands.ts → registerAll
       ability-loader.ts    # 外部用户能力 (esbuild 即时编译)
-      manifest.ts      # ~/.config/LinuxCockpit/abilities.yaml 读取
       background-tasks.ts  # 后台任务框架 (进程/作业任务, 资源统计, stdin/信号)
+      windows.ts           # 子窗口管理器 (SubWindow): 生命周期/几何/样式重建/KWin 定位
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/               # 渲染 UI 框架
       App.vue         # 侧栏 + 搜索/快速启动 + app-bar + keep-alive 宿主 (provide cockpit:* 上下文)
@@ -209,14 +212,14 @@ src/
     index.ts          # contextBridge → window.cockpit.*
     index.d.ts        # 类型声明
   shared/
-    types.ts          # 仅框架契约 (AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt*)
+    types.ts          # 仅框架契约 (LaunchResult / ProcOutputEvent / Bt*)
   main/ui/
     bt-views.ts       # 后台任务 View 注册表 (log 内置 / 能力可注册自定义)
     components/BackgroundTaskViews/  # BtLogView (控制台) / BtResponseView (结构化响应)
+    windows/          # 子窗口视图注册表 (globs windows/*.vue → ?view=<key>, 如 LyricsWindow)
     composables/      # download.ts (本地下载经主进程命令) / format.ts / useLoading.ts
 ~/.config/LinuxCockpit/
-  config.json           # 全局外壳配置（theme / uiScale / animations / window / runtime）
-  abilities.yaml        # 侧栏清单（abilities 列表，不包含能力专属配置）
+  config.json           # 全局外壳配置（theme / uiScale / animations / window / runtime / sidebar.default）
   <ability-id>/
     config.json         # 各能力独立配置（镜像源列表、搜索目录等）
 scripts/               # pkexec helper 脚本 + polkit 规则
@@ -231,11 +234,14 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 - UI: `window.cockpit.command('mirror.toggle', { name, enable })`
 - CLI: `mirror.toggle --name USTC --enable true`
 
-### Ability 动态加载
+### Ability 动态加载（自注入）
 
-- 渲染端: `src/abilities/index.ts` 的 Vite `import.meta.glob` → 首次显示时 async `import()` (code-split)
-- 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`
-- 侧栏由 `~/.config/LinuxCockpit/abilities.yaml` 驱动，增删能力文件夹 + 改 yaml 即可
+- 渲染端: `src/abilities/index.ts` 的 Vite `import.meta.glob` → `loadAbilityModules()` 拍平成 `Record<id, Ability>`；首次显示时 async `import()` 页面组件 (code-split)
+- **自注入排序**：侧栏直接由能力元数据驱动，**不再读 yaml 顺序**——按 `category` 字母序分组、组内按 `name` 字母序排序（`App.vue` 用翻译后文本排序，`resolveSidebarAbilities` 也有 raw 兜底排序）
+- **平台过滤**：`Ability` 可声明 `platforms?: string[]`（`process.platform` 值），未给/空 = 全平台可用；给了且不包含当前平台 → 侧栏过滤掉，并在日志中报告。`resolveSidebarAbilities(platform)` 返回 `{ loaded, ignoredPlatform, backendOnly }`，通过 `logs.post`（scope `abilities`）输出「加载了哪些 / 平台不符忽略了哪些 / 纯后端不进侧栏哪些」
+- **一文件夹多 Ability**：`index.ts` 可 default-export `Ability | Ability[]`——一个能力注册多个侧栏条目（如 AIDJ 注册 `aidj` 主页面 + `aidj-lyrics` 歌词页），`id` 必须唯一
+- 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
+- 增删能力 = 增删 `src/abilities/<id>` 文件夹即可，无需改任何 yaml/注册表
 
 ### 图标
 
@@ -325,20 +331,21 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 
 每个 ability 由几个可选的注入点组成，全部内聚在 `src/abilities/<id>/` 一个文件夹，按需添加：
 
-1. **渲染端页面** `src/abilities/<id>/index.ts`（`Ability` 对象）+ `View.vue`
+1. **渲染端页面** `src/abilities/<id>/index.ts`（`Ability | Ability[]` 对象）+ `View.vue`
 2. **主进程命令** `src/abilities/<id>/commands.ts`（导出 `CommandSpec[]`）——由 `src/main/process/abilities-loader.ts` 自动 glob 注册，无需改任何 import
 3. **领域类型** `src/abilities/<id>/types.ts`（不进 shared）
 4. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
 5. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
+6. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
 
-然后在 `~/.config/LinuxCockpit/abilities.yaml` 的 `abilities` 列表注册（`id`/`order`/`enabled`）。
+**无需改任何 yaml/注册表**——侧栏按 `category`/`name` 字母序自注入（见上）。
 
 **依赖原则**：
 
 - settings 是自身能力，其注入项不能调用其他能力已移除的命令（跨能力设置项应由对应能力自己注入）
 - 渲染端页面不应 `import` 其他 ability 模块
-- 删除能力 = 删 `src/abilities/<id>` 文件夹 + 改 `~/.config/LinuxCockpit/abilities.yaml`
-- 纯后端能力（无 View.vue，如 `display` / `background`）不需要在 abilities.yaml 注册，命令仍会自动加载，只是不进侧栏
+- 删除能力 = 删 `src/abilities/<id>` 文件夹
+- 纯后端能力（无 View.vue，如 `display` / `background`）不进侧栏，命令仍会自动加载
 
 ### 写一个 playground 能力（接口调试）
 
@@ -360,6 +367,7 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 - **后台作业**：`jobs.ts` 注册 `aidj.persistent` 命名作业——在后台跑 AI DJ 自动轮播（`await` 即 yield），通过 `pushLine` / `push({ data: { type: 'now_playing' | 'status' } })` 输出，面板「停止」→ abort 并断开 DBus。
 - **元数据同步**：新歌经 NeteaseCloudMusicApi 拉歌词 → LLM 提取 `language/emotion/genre/loudness/review` → 写入 `aidj/music_metadata.jsonl`。
 - **音量平衡**：`LoudnessCache` 用 `ffprobe` 测响度（LUFS/RMS），按曲目动态调音量。
+- **歌词页（第二个 Ability `aidj-lyrics`）**：同文件夹 `index.ts` 导出 `Ability[]` 注册独立歌词页（`LyricsView.vue`），配置在 `aidj-lyrics/config.json`（`loadLyricsPageConfig` / `saveLyricsPageConfig`，命令 `aidj.lyrics-page-config/save`，设置页单独分类「AIDJ Lyrics」）。页面配色**只跟主题**（`--v-theme-*`，无颜色配置），但自带**卡拉OK 逐字高亮**（LRC 内联时间戳切分 `chunks`）与**歌词滚动跟随**（`scroll_follow`）两档，逻辑与桌面浮窗 `LyricsWindow.vue` 完全独立（不共用解析/渲染代码）。
 
 ## 10. 国际化 (i18n)
 

@@ -17,7 +17,8 @@ import type {
   ChatMessage,
   RawHistoryMessage,
   SessionMeta,
-  LyricPlaybackState
+  LyricPlaybackState,
+  AidjLyricsPageConfig
 } from './types'
 import {
   AIDJ_DATA_DIR,
@@ -26,7 +27,8 @@ import {
   FREQ_FILE,
   PLAYLISTS_DIR,
   SEPARATOR,
-  DEFAULT_PERSONA
+  DEFAULT_PERSONA,
+  DEFAULT_LYRICS_PAGE_CFG
 } from './types'
 
 const log = makeLogger('aidj')
@@ -113,6 +115,31 @@ export async function saveAidjConfig(config: AidjConfig): Promise<{ ok: boolean;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     log.error('saveAidjConfig failed', { error })
+    return { ok: false, error }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-app lyrics page config — `~/.config/LinuxCockpit/aidj-lyrics/config.json`
+// (the `aidj-lyrics` ability's own settings; colors are NOT part of it — the
+// page always follows the app theme).
+// ---------------------------------------------------------------------------
+const LYRICS_PAGE_CONFIG_PATH = abilityConfigPath('aidj-lyrics')
+
+export async function loadLyricsPageConfig(): Promise<AidjLyricsPageConfig> {
+  const saved = await readJson<Partial<AidjLyricsPageConfig>>(LYRICS_PAGE_CONFIG_PATH)
+  return { ...DEFAULT_LYRICS_PAGE_CFG, ...(saved ?? {}) }
+}
+
+export async function saveLyricsPageConfig(
+  config: AidjLyricsPageConfig
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await writeJsonAtomic(LYRICS_PAGE_CONFIG_PATH, config)
+    return { ok: true }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    log.error('saveLyricsPageConfig failed', { error })
     return { ok: false, error }
   }
 }
@@ -684,11 +711,22 @@ export class DBusManager {
       if (!players.length) return null
       for (const name of players) {
         try {
-          const obj = await this.bus!.getProxyObject(name, '/org/mpris/MediaPlayer2')
+          // A listed bus name can be stale (owner just exited) — Introspect on
+          // it would hang forever, so race each probe against a timeout.
+          const obj = await withTimeout(
+            this.bus!.getProxyObject(name, '/org/mpris/MediaPlayer2'),
+            3000,
+            null
+          )
+          if (!obj) continue
           const props = obj.getInterface(
             'org.freedesktop.DBus.Properties'
           ) as unknown as PropertiesInterface
-          const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus')
+          const statusV = await withTimeout(
+            props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'),
+            3000,
+            { value: '', signature: '' }
+          )
           if (statusV.value === 'Playing') return name
         } catch {
           /* skip */
@@ -711,7 +749,12 @@ export class DBusManager {
     if (this.playerName === target && this.propsProxy) return true
     try {
       this.playerName = target
-      this.playerProxy = await this.bus!.getProxyObject(target, '/org/mpris/MediaPlayer2')
+      this.playerProxy = await withTimeout(
+        this.bus!.getProxyObject(target, '/org/mpris/MediaPlayer2'),
+        4000,
+        null
+      )
+      if (!this.playerProxy) return false
       this.propsProxy = this.playerProxy.getInterface('org.freedesktop.DBus.Properties')
       return true
     } catch {
@@ -775,7 +818,8 @@ export class DBusManager {
 
   /**
    * Richer playback snapshot for the desktop-lyrics window: adds artist /
-   * album / position (µs) / length (µs). A single DBus round-trip group.
+   * album / position (µs) / length (µs) / media URL. A single DBus round-trip
+   * group.
    */
   async getPlaybackDetail(): Promise<{
     ok: boolean
@@ -785,6 +829,8 @@ export class DBusManager {
     album: string
     positionMs: number | null
     lengthMs: number | null
+    /** raw `xesam:url` — used to resolve the exact file path for cover art */
+    url: string
   }> {
     const unreachable = {
       ok: false,
@@ -793,12 +839,16 @@ export class DBusManager {
       artist: '',
       album: '',
       positionMs: null as number | null,
-      lengthMs: null as number | null
+      lengthMs: null as number | null,
+      url: ''
     }
     try {
       if (this._autoMode) {
-        const target = await this.autoDetectPlayer()
-        if (!target) return unreachable
+        // autoDetectPlayer only returns a NAME — it must be actually bound
+        // (playerProxy/propsProxy) before reading properties, otherwise
+        // props.Get below throws on null. ensureBound does the binding.
+        const ok = await this.ensureBound()
+        if (!ok) return unreachable
       } else if (!this.propsProxy) {
         return unreachable
       }
@@ -825,7 +875,8 @@ export class DBusManager {
         artist,
         album,
         positionMs: position > 0 ? Math.round(position / 1000) : null,
-        lengthMs: length > 0 ? Math.round(length / 1000) : null
+        lengthMs: length > 0 ? Math.round(length / 1000) : null,
+        url: String(meta['xesam:url'] ?? '')
       }
     } catch (e) {
       log.warn('getPlaybackDetail failed', { error: String(e) })
@@ -956,9 +1007,18 @@ export class DBusManager {
     const url = String(meta?.['xesam:url'] ?? '').trim()
     if (!url) return ''
     const clean = url.replace(/^file:\/\//, '')
-    const name = clean.split('/').pop() || clean
-    const ext = name.lastIndexOf('.')
-    return ext > 0 ? name.slice(0, ext) : name
+    let name = clean.split('/').pop() || clean
+    // URL path segments are percent-encoded (e.g. `%E5%AE%89%E9%9D%99%20-%20...`
+    // = "安静 - ..."); strip any query string, drop the extension, then decode
+    // so the UI shows the real track name instead of the raw encoding.
+    const noQuery = name.split('?')[0]
+    const ext = noQuery.lastIndexOf('.')
+    name = ext > 0 ? noQuery.slice(0, ext) : noQuery
+    try {
+      return decodeURIComponent(name)
+    } catch {
+      return name
+    }
   }
 
   /** The actually-bound MPRIS bus name (resolves auto mode to a concrete player). */
@@ -1841,6 +1901,28 @@ export async function initDbusManager(config: AidjConfig): Promise<DBusManager> 
   return dbus
 }
 
+/**
+ * Lightweight AIDJ activation — initializes the SHARED DBus manager (the same
+ * one the main AIDJ page uses) from config, so the lyrics page can bind to a
+ * player without the user first starting an AIDJ session. No OpenAI client /
+ * library scan, just the player binding. Idempotent: reuses an existing
+ * session manager (the main AIDJ page is keep-alive, so once bound it stays).
+ */
+export async function activateAidjDbus(): Promise<{ ok: boolean; error?: string }> {
+  const config = await loadAidjConfig()
+  if (!config) return { ok: false, error: 'AIDJ 配置未找到，请先在设置里配置' }
+  try {
+    if (!getDbusManager()) {
+      await initDbusManager(config)
+    }
+    return { ok: true }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    log.warn('activateAidjDbus failed', { error })
+    return { ok: false, error }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Desktop-lyrics playback probe — binds to the AIDJ session's CURRENTLY SET
 // DBus player (the one the user selected / configured), so the lyrics window
@@ -1848,6 +1930,21 @@ export async function initDbusManager(config: AidjConfig): Promise<DBusManager> 
 // (≈1 Hz) and this resolves the LRC text for the current track.
 // ---------------------------------------------------------------------------
 let _lyricsDbus: DBusManager | null = null
+
+/** Race a promise against a timeout — DBus calls (Introspect etc.) can hang
+ *  forever when the target bus name is stale; never block the caller. */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    p.then((v) => {
+      clearTimeout(timer)
+      resolve(v)
+    }).catch(() => {
+      clearTimeout(timer)
+      resolve(fallback)
+    })
+  })
+}
 
 async function getLyricsDbus(): Promise<DBusManager | null> {
   // Prefer the session manager — it carries the user's current DBus binding
@@ -1857,10 +1954,59 @@ async function getLyricsDbus(): Promise<DBusManager | null> {
   if (!_lyricsDbus) {
     const config = await loadAidjConfig()
     const dbus = new DBusManager(config?.preferences?.dbus_target ?? 'vlc')
-    await dbus.connect()
+    const ok = await withTimeout(dbus.connect(), 4000, false)
+    if (!ok) return null
     _lyricsDbus = dbus
   }
   return _lyricsDbus
+}
+
+/**
+ * Resolve the on-disk path of the currently playing track. Prefers the exact
+ * `file://` URL reported by MPRIS (players usually expose `xesam:url`); falls
+ * back to an exact (then " - artist"-stripped) match against the library's
+ * name→path map, which is keyed by file name.
+ */
+function resolveTrackPath(
+  detail: { url: string; track: string },
+  musicPaths: Map<string, string>
+): string | null {
+  const url = detail.url
+  if (url.startsWith('file://')) {
+    let p = url.slice('file://'.length)
+    if (p.startsWith('localhost/')) p = p.slice('localhost/'.length)
+    try {
+      return decodeURIComponent(p)
+    } catch {
+      return p
+    }
+  }
+  if (!detail.track) return null
+  if (musicPaths.has(detail.track)) return musicPaths.get(detail.track) ?? null
+  const base = detail.track
+    .replace(/\s+-\s+.+$/, '')
+    .replace(/[（）()【】[\]]/g, ' ')
+    .trim()
+  if (base && base !== detail.track && musicPaths.has(base)) return musicPaths.get(base) ?? null
+  return null
+}
+
+/** Current binding of the effective lyrics DBus (AIDJ session preferred). */
+export async function getLyricPlayerBinding(): Promise<{ current: string; auto: boolean }> {
+  const dbus = await getLyricsDbus()
+  if (!dbus) return { current: '', auto: true }
+  return { current: dbus.getPlayerName(), auto: dbus.autoMode }
+}
+
+/** Bind the lyrics source to a specific MPRIS player (or `__auto__`). Works even
+ *  without an initialized AIDJ session — manages the lyrics-only DBus directly.
+ *  DBus calls (Introspect) can hang indefinitely when the target bus name is
+ *  stale (owner just exited), so both steps are raced against a timeout. */
+export async function switchLyricsPlayer(playerName: string): Promise<boolean> {
+  const session = getDbusManager()
+  const mgr = session ?? (await getLyricsDbus())
+  if (!mgr) return false
+  return withTimeout(mgr.switchToPlayer(playerName), 4000, false)
 }
 
 export async function getLyricPlayback(): Promise<LyricPlaybackState> {
@@ -1895,6 +2041,7 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
     }
     const lib = await loadLibrary()
     const lyric = resolveLyricForTrack(detail.track, lib.lyrics)
+    const path = resolveTrackPath(detail, lib.musicPaths)
     return {
       ok: true,
       status: detail.status,
@@ -1904,6 +2051,7 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
       player: dbus.resolvedPlayerName,
       positionMs: detail.positionMs,
       lengthMs: detail.lengthMs,
+      path,
       lyric
     }
   } catch (e) {

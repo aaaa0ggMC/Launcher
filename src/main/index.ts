@@ -2,12 +2,12 @@ import { app, shell, BrowserWindow, protocol, ipcMain } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { registerIpc, startWatching } from './process/ipc'
+import { registerIpc } from './process/ipc'
 import { registerIconProtocol } from './process/icon-protocol'
 import { loadExternalAbilities } from './process/ability-loader'
 import { registerAbilityCommands } from './process/abilities-loader'
-import { setRegistryBroadcast } from '../abilities/apps/registry'
-import { setOutputBroadcast } from '../abilities/apps/launcher'
+import { setBroadcast } from './process/broadcast'
+import { runStartupHooks } from './process/startup'
 import {
   setBackgroundBroadcast,
   shutdownBackgroundTasks,
@@ -123,7 +123,7 @@ if (!gotLock) {
     }
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.aaaa0ggmc.linux-cockpit')
 
     app.on('browser-window-created', (_, window) => {
@@ -131,14 +131,17 @@ if (!gotLock) {
     })
 
     registerIconProtocol()
-    setRegistryBroadcast(broadcast)
-    setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
+    // The shell owns the window broadcast; framework modules and abilities pull
+    // it via the broadcast hub (setBroadcast/getBroadcast).
+    setBroadcast(broadcast)
     setLogBroadcast((entry) => broadcast('cockpit:log', entry))
     setBackgroundBroadcast((event) => broadcast('cockpit:bt', event))
     setWindowBroadcast((event) => broadcast('cockpit:windows', event))
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
+    // Abilities self-start (watchers, eager bindings) via registered hooks.
+    await runStartupHooks()
     // Renderer confirmed it's OK to close despite running tasks.
     ipcMain.handle('window:confirm-close', (e) => {
       // Only the main shell may authorize quitting; a child window must never
@@ -147,7 +150,6 @@ if (!gotLock) {
       quitApproved = true
       mainWindow?.close()
     })
-    startWatching()
     log.info('app started', {
       platform: process.platform,
       version: process.versions.electron,

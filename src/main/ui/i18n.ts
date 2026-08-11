@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import type { AppEntry } from '@abilities/apps/types'
+import type { AppEntry } from '@shared/types'
 import zh from './translations/zh.json'
 import enUS from './translations/en-US.json'
 import languages from './translations/index.json'

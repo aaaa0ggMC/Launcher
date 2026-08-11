@@ -47,9 +47,9 @@ src/
         registry.ts         # 命令 Map + runCommand / tryRunCommand / parseArgs
       abilities-loader.ts   # 加载器：globs abilities/*/commands.ts → registerAll
       ability-loader.ts     # 外部用户能力（esbuild 即时编译）
-      manifest.ts           # abilities.yaml 读取
       logger.ts             # 日志管线（winston 轮转文件 + 内存缓冲 + 广播）
       background-tasks.ts   # 后台任务框架（进程/作业任务、资源统计、stdin/信号、广播）
+      windows.ts            # 子窗口管理器（SubWindow）：创建/聚焦/销毁、几何记忆、样式重建、KWin 定位
       paths.ts / util.ts / i18n.ts / icon-protocol.ts
     ui/
       App.vue               # 侧栏 + 搜索/快速启动 + app-bar + keep-alive 宿主（provide cockpit:* 上下文）
@@ -57,8 +57,9 @@ src/
       color_schemes/        # 主题配色注册表：*.json + index.ts（buildThemeDefinitions / resolveSchemeId）
       animations.ts         # 页面切换过渡注册表（PAGE_TRANSITIONS）
       components/           # GameIcon / AbilityIcon / BackgroundLayer / FuseLayer / TransformerModal / BackgroundTasksDialog / UiNode / LoadingBar
-      components/BackgroundTaskViews/   # BtLogView（控制台）/ BtResponseView（结构化响应）
+      components/BackgroundTaskViews/   # BtLogView（控制台）/ BtResponseView（结构化响应）/ BtWindowView（子窗口控制）
       bt-views.ts           # 后台任务 View 注册表（log 内置 / 能力可注册自定义）
+      windows/              # 子窗口视图注册表（globs windows/*.vue → ?view=<key> 挂载，如 LyricsWindow）
       entry-actions.ts      # 应用快速启动右键动作注入（registerEntryActionProvider）
       icon.ts               # 统一图标语法解析（parseIcon / fileIconUrl）
       transformer.ts        # 应用输出 transformer 运行时
@@ -83,10 +84,9 @@ src/
   preload/
     index.ts / index.d.ts   # contextBridge 白名单 API
   shared/
-    types.ts                # 仅框架契约：AbilitiesManifest / LaunchResult / ProcOutputEvent / Bt* (后台任务)
+    types.ts                # 仅框架契约：LaunchResult / ProcOutputEvent / Bt* (后台任务)
 ~/.config/LinuxCockpit/
-  config.json               # 全局外壳配置（theme / uiScale / animations / window / runtime）
-  abilities.yaml            # 侧栏清单（abilities 列表，不包含能力专属配置）
+  config.json               # 全局外壳配置（theme / uiScale / animations / window / runtime / sidebar.default）
   <ability-id>/
     config.json             # 各能力独立配置（镜像源列表、搜索目录等）
 scripts/                    # pkexec helper 脚本 + polkit 规则
@@ -119,11 +119,11 @@ CLI: mirror.toggle --name USTC --enable true
 
 ```
 渲染端:  abilities/index.ts  globs abilities/*/index.ts（仅元数据，View 懒加载 code-split）
-          └→ App.vue 侧栏按 abilities.yaml 渲染，keep-alive 缓存
+          └→ App.vue 侧栏自注入：按 category/name 字母序排序，platforms 平台过滤，keep-alive 缓存
 主进程:  process/abilities-loader.ts  globs abilities/*/commands.ts → registerAll
 ```
 
-- 侧栏顺序 / 启用 / 各能力 config 都由 `~/.config/LinuxCockpit/abilities.yaml` 控制。
+- 侧栏由能力元数据自注入（`platforms` 过滤 + `category`/`name` 字母序），不再依赖任何 yaml/manifest；`config.json` 的 `sidebar.default` 只指定初始页面（缺失/无效时回落第一个能力）。
 - 加载到的一切通过 `App.vue` 的 `provide('cockpit:*')` 暴露给单个能力，实现跨范围控制（能力列表、当前能力、configs、launch、命令列表、设置聚合等）。
 
 ### 3.3 日志流
@@ -170,6 +170,22 @@ Background  —— background/<type>/ 加载器驱动：透明 / 自定义图片
 - 任务**依附于本程序**：退出时 `will-quit` 统一清理；有运行中任务时拦截 close 弹确认。
 - 执行载体并列：终端 / systemd ability / 后台任务，由能力按需选用，非替代关系。
 
+### 3.5b 子窗口流（SubWindow）
+
+渲染端无法直接建窗口（BrowserWindow 只能由主进程创建），由 `process/windows.ts` 统一管理生命周期：
+
+```
+能力渲染端: window.cockpit.createChildWindow({ id, view, title, width, height, frameless, transparent, ... })
+    └→ ipc ─→ process/windows.ts
+        ├→ makeChild：单例 per id（已存在则聚焦），透明/无边框/OSD 类型按 spec 创建
+        ├→ loadView：加载同一 renderer + ?view=<key>，按 windows/ glob 挂载对应 Vue 组件
+        ├→ 广播 cockpit:windows ─→ BT 面板「子窗口」分类（置顶/锁/最小化/最大化/关闭/样式重建）
+        └→ KDE Wayland 定位：原生 x/y 被合成器忽略 → KWin scripting 经 frameGeometry 重定位
+```
+
+- **分工**：主进程只管 open/close/几何/样式（frameless/rounded 运行时不可改 → 样式变更 = 保留 bounds 重建窗口）；渲染端自绘内容。
+- 子窗口视图注册表 `ui/windows/`：每个 `.vue` 是一个可能根（如 `LyricsWindow`），编译期 glob，杜绝任意路径。
+
 ### 3.6 国际化
 
 翻译按模块拆分（框架层 + 每个能力 + 每个背景的 `translations/{zh,en-US}.json`），运行期合并为一张表；渲染端 `ui/i18n.ts` 用 `import.meta.glob` 合并，主进程 `process/i18n.ts` 用 filesystem glob 合并。回退链：当前语言 → zh → fallback → key。
@@ -210,7 +226,7 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ---
 
-## 4. Abilities（当前 11 个 + 2 个纯后端）
+## 4. Abilities（当前 11 个 + 2 个纯后端；aidj 一文件夹注册两条目）
 
 | id                    | 介绍                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -221,7 +237,7 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 | `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                          |
 | `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                                   |
 | `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url`           |
-| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等 |
+| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等。**实际注册两个 ability**：`aidj`（聊天/持续播放页）+ `aidj-lyrics`（整页卡拉OK歌词）。播放层依赖 DBus/MPRIS，实质 Linux-only（未声明 platforms） |
 | `ft` 傅里叶变换       | Canvas2D 天体/傅里叶可视化（无 GPU 依赖，规避 radeonsi 崩溃）：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机，画布配色跟随当前主题                                                                                 |
 | `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                                  |
 | `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 界面缩放 / 窗口 / 界面动画 / 语言 / 启动 / 关于）                                                                                                             |
@@ -242,8 +258,7 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 | 文件                                              | 作用                                                            |
 | ------------------------------------------------- | --------------------------------------------------------------- |
-| `~/.config/LinuxCockpit/config.json`              | 全局外壳：theme / uiScale / animations.* / window.* / runtime.* |
-| `~/.config/LinuxCockpit/abilities.yaml`           | 侧栏清单（abilities 列表，不包含能力专属配置）                  |
+| `~/.config/LinuxCockpit/config.json`              | 全局外壳：theme / uiScale / animations.* / window.* / runtime.* / sidebar.default |
 | `~/.config/LinuxCockpit/<ability-id>/config.json` | 各能力独立配置（镜像列表、搜索目录等）                          |
 | `~/Apps/apps.json`                                | 每个搜索根的应用注册表（手工优先，扫描器只补充不覆盖）          |
 

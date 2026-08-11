@@ -1,22 +1,11 @@
 // Shared framework contract types used across main / preload / renderer.
-// Ability-specific domain types live in each ability's own `types.ts` —
-// shared should NOT accumulate per-ability models.
-
-/** Per-ability manifest entry from abilities.yaml (no per-ability config). */
-export interface AbilityConfig {
-  id: string
-  order: number
-  enabled: boolean
-}
-
-export interface AbilitiesManifest {
-  sidebar: {
-    default: string
-    showLabels: boolean
-    searchBox: boolean
-  }
-  abilities: AbilityConfig[]
-}
+//
+// These are contracts the framework (`src/main`) genuinely needs while staying
+// ability-agnostic: the framework never imports from `abilities/<id>/`, so any
+// shape it must consume (log pipeline entries, app-entry launch model,
+// structured task output, ...) lives here. The owning ability imports/re-exports
+// them from its own `types.ts` so the ability stays self-contained. Anything
+// used only inside a single ability belongs in that ability's `types.ts`.
 
 /** Result of a process launch — the framework launch service contract. */
 export interface LaunchResult {
@@ -151,3 +140,127 @@ export interface ChildWindowInfo {
 
 /** Window manager change event (`cockpit:windows` broadcast). */
 export type WindowChangedEvent = { type: 'changed'; windows: ChildWindowInfo[] }
+
+// ---------------------------------------------------------------------------
+// Log pipeline contract (owned by the framework logger in src/main/process;
+// consumed by the `logs` ability).
+// ---------------------------------------------------------------------------
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/** One structured log entry (produced by the main-process logger). */
+export interface LogEntry {
+  /** Monotonic sequence id — the renderer uses it for paging ("before"). */
+  id: number
+  /** Epoch milliseconds. */
+  ts: number
+  level: LogLevel
+  /** Owning module scope, e.g. `mirror`, `launcher`, `renderer`. */
+  scope: string
+  message: string
+  data?: unknown
+  /**
+   * Consecutive duplicates merged into this entry (1 = unique). The UI shows
+   * `*N` for counts > 1; the on-disk file still keeps every raw line.
+   */
+  count?: number
+}
+
+export interface LogQueryResult {
+  entries: LogEntry[]
+  total: number
+}
+
+// ---------------------------------------------------------------------------
+// App-entry launch contract — the shell's search/quick-launch pipeline and the
+// entry-action framework operate on these shapes without importing the `apps`
+// ability. The `apps` ability owns the registry/launcher implementations and
+// re-exports these types from its own `types.ts`.
+// ---------------------------------------------------------------------------
+
+export type ExecType =
+  'uv' | 'python' | 'node' | 'docker' | 'systemd' | 'script' | 'desktop' | 'custom'
+
+export interface AppExecSpec {
+  type: ExecType
+  /** entry point, e.g. ["bili-viewer"] for uv, ["app.js"] for node */
+  command: string[]
+  args?: string[]
+  /** "{self}" = entry's own dir; default = path's parent dir */
+  cwd?: string
+  env?: Record<string, string>
+  terminal?: boolean
+  root?: boolean
+  /**
+   * run as a managed background task instead of a terminal window — the app is
+   * spawned with piped stdio and attached to the framework task service, so it
+   * appears in the global Background Tasks panel (live console + stdin/signals).
+   */
+  background?: boolean
+  /** override the script/desktop target for this spec (default: entry.path) */
+  path?: string
+}
+
+export type RiskLevel = 'low' | 'medium' | 'high'
+
+export interface AppSecurity {
+  risk: RiskLevel
+  auto_note?: string
+  note?: string
+  acknowledged?: boolean
+}
+
+/**
+ * One additional operation on an app entry (e.g. new-api: start/stop/recreate).
+ * Each action renders as its own button on the app card; the button background
+ * color encodes the (effective) risk level — darker = more dangerous.
+ */
+export interface AppAction {
+  /** button label, e.g. "开始" / "停止" */
+  name: string
+  description?: string
+  localized?: Record<string, { name?: string; description?: string }>
+  icon?: string
+  /** per-action risk override; falls back to entry.security.risk for coloring */
+  risk?: RiskLevel
+  /** primary exec (single-step action) */
+  exec: AppExecSpec
+  /**
+   * multi-step sequence. Steps are run one by one in order; intermediate
+   * steps run headless and are awaited, the LAST step launches detached
+   * (honors its own terminal/root flags). Overrides `exec` when present.
+   */
+  steps?: AppExecSpec[]
+}
+
+export interface AppEntry {
+  alias?: string
+  name: string
+  description?: string
+  localized?: Record<string, { name?: string; description?: string; alias?: string }>
+  path: string
+  icon?: string
+  /** primary launch spec — rendered as the default「启动」button */
+  exec: AppExecSpec
+  /** additional clustered operations, keyed by action id */
+  actions?: Record<string, AppAction>
+  tags?: string[]
+  tags_auto?: string[]
+  security?: AppSecurity
+  managed?: boolean
+  missing?: boolean
+  /**
+   * optional JS source: a constructor with `onNewLine(e, ui)` — e is each line
+   * of the process output, ui is a component factory (ui.NewAlign/NewBar/...).
+   * Combined with transformer_display, a live 80% modal renders the output.
+   */
+  transformer?: string
+  transformer_display?: boolean
+  /** search root this entry lives in (runtime info, not persisted) */
+  root?: string
+}
+
+export interface AppRegistryFile {
+  version: number
+  apps: Record<string, AppEntry>
+}

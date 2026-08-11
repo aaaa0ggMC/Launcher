@@ -155,6 +155,64 @@ export const DEFAULT_LYRICS_CFG: LyricsDisplayConfig = {
   line_gap: 6
 }
 
+/**
+ * In-app lyrics page (`aidj-lyrics` ability) display config. Unlike the desktop
+ * floating lyrics window, the page's COLORS are not configurable here — the
+ * page always follows the app theme (`rgb(var(--v-theme-*))`), so this only
+ * carries typography and playback-presentation options (karaoke, scroll, …).
+ * Stored in `~/.config/LinuxCockpit/aidj-lyrics/config.json`.
+ */
+export interface AidjLyricsPageConfig {
+  /** shared font family, e.g. "Iansui Regular" */
+  font_family: string
+  /** current-line font size (px) */
+  font_size: number
+  /** non-current (candidate) line font size (px) */
+  candidate_size: number
+  /** current-line font weight (400–900) */
+  current_weight: number
+  /** candidate line font weight (400–900) */
+  candidate_weight: number
+  /** line-height factor (1.0–2.0) */
+  line_height: number
+  /** letter spacing (px) */
+  letter_spacing: number
+  /** vertical gap between lyric lines, px */
+  line_gap: number
+  /** position adjustment in ms (positive = show earlier, negative = later) */
+  position_offset_ms: number
+  /** word-by-word karaoke fill on the current line */
+  karaoke: boolean
+  /** auto-scroll so the current line stays centered (false = static window) */
+  scroll_follow: boolean
+  /** lines shown ABOVE the current line (static-window mode) */
+  lines_before: number
+  /** lines shown BELOW the current line (static-window mode) */
+  lines_after: number
+  /** dim non-current lines */
+  dim_candidates: boolean
+  /** show the track/player header + playback controls */
+  show_header: boolean
+}
+
+export const DEFAULT_LYRICS_PAGE_CFG: AidjLyricsPageConfig = {
+  font_family: 'Iansui Regular',
+  font_size: 34,
+  candidate_size: 20,
+  current_weight: 700,
+  candidate_weight: 500,
+  line_height: 1.3,
+  letter_spacing: 0,
+  line_gap: 10,
+  position_offset_ms: 0,
+  karaoke: true,
+  scroll_follow: true,
+  lines_before: 2,
+  lines_after: 3,
+  dim_candidates: true,
+  show_header: true
+}
+
 /** Built-in DJ persona. Users can override it via `preferences.persona`. */
 export const DEFAULT_PERSONA = `You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
 Your goal is not just to list songs, but to **curate an experience**.
@@ -271,7 +329,9 @@ export const LYRICS_WINDOW_ID = 'aidj-lyrics'
 /**
  * Live DBus playback snapshot for the desktop-lyrics window. `position` /
  * `length` are in milliseconds; `lyric` is the LRC text resolved for the
- * current track (null when no lyric is stored for it).
+ * current track (null when no lyric is stored for it); `path` is the resolved
+ * library file path of the current track (null when unknown — used for cover
+ * art).
  */
 export interface LyricPlaybackState {
   ok: boolean
@@ -283,4 +343,5 @@ export interface LyricPlaybackState {
   positionMs: number | null
   lengthMs: number | null
   lyric: string | null
+  path?: string | null
 }

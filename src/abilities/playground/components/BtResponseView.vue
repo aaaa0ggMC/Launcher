@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
-import type { TransformResult } from '@abilities/playground/parser/variableParser'
+import type { TransformResult } from '../parser/variableParser'
 import { translate } from '@ui/i18n'
 import { downloadTextToLocal, downloadUrlToLocal } from '@ui/composables/download'
 

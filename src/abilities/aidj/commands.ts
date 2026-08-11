@@ -27,7 +27,12 @@ import {
   bumpFrequency,
   loadFrequency,
   getLyricPlayback,
-  getCurrentPlayerKey
+  getCurrentPlayerKey,
+  loadLyricsPageConfig,
+  saveLyricsPageConfig,
+  getLyricPlayerBinding,
+  switchLyricsPlayer,
+  activateAidjDbus
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -42,7 +47,8 @@ import type {
   ChatMessage,
   RawHistoryMessage,
   PlaylistEntry,
-  LyricsDisplayConfig
+  LyricsDisplayConfig,
+  AidjLyricsPageConfig
 } from './types'
 import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG } from './types'
 import './jobs'
@@ -122,7 +128,7 @@ async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: Windo
     spec: {
       id,
       title: `[AIDJ-Lyrics] ${key}`,
-      view: 'LyricsWindow',
+      view: 'aidj/LyricsWindow',
       width: w,
       height: h,
       x: pos.x,
@@ -1721,6 +1727,61 @@ const commands: CommandSpec[] = [
       if (res.created) return { ok: true, open: true, windowId: id, player: key }
       destroyChildWindow(id)
       return { ok: true, open: false, windowId: id, player: key }
+    }
+  },
+  {
+    name: 'aidj.activate',
+    description: '激活 AIDJ 的共享 DBus 播放器绑定（无需启动 AI 会话）',
+    usage: 'aidj.activate',
+    run: async () => activateAidjDbus()
+  },
+  {
+    name: 'aidj.lyrics-player',
+    description: '获取歌词页当前绑定的 MPRIS 播放器与可用列表',
+    usage: 'aidj.lyrics-player',
+    run: async () => {
+      const players = await listAvailablePlayers()
+      const binding = await getLyricPlayerBinding()
+      return { ok: true, players, current: binding.current, auto: binding.auto }
+    }
+  },
+  {
+    name: 'aidj.lyrics-select-player',
+    description: '绑定歌词页到指定 MPRIS 播放器（或 __auto__ 自动跟随）',
+    usage: 'aidj.lyrics-select-player --name <player>',
+    run: async (ctx) => {
+      const name = ctx.named.name as string
+      if (!name) return { ok: false, error: '需要 --name 参数指定播放器' }
+      const ok = await switchLyricsPlayer(name)
+      return ok ? { ok: true, player: name } : { ok: false, error: `切换到 ${name} 失败` }
+    }
+  },
+  {
+    name: 'aidj.lyrics-page-config',
+    description: '获取歌词页（AIDJ Lyrics）显示配置',
+    usage: 'aidj.lyrics-page-config',
+    run: async () => {
+      const config = await loadLyricsPageConfig()
+      return { ok: true, config }
+    }
+  },
+  {
+    name: 'aidj.lyrics-page-save',
+    description: '保存歌词页（AIDJ Lyrics）显示配置',
+    usage: 'aidj.lyrics-page-save --config <json>',
+    run: async (ctx) => {
+      let config = ctx.named.config as AidjLyricsPageConfig | undefined
+      if (typeof config === 'string') {
+        try {
+          config = JSON.parse(config)
+        } catch {
+          return { ok: false, error: '--config 不是合法 JSON' }
+        }
+      }
+      if (!config || typeof config !== 'object') {
+        return { ok: false, error: '需要 --config <json>' }
+      }
+      return saveLyricsPageConfig(config)
     }
   }
 ]

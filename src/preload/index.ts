@@ -23,7 +23,7 @@ const cockpit = {
     cockpit.command('config.get') as Promise<Record<string, unknown> | null>,
   setConfig: (patch: CommandArgs): Promise<Record<string, unknown>> =>
     cockpit.command('config.set', { patch }) as Promise<Record<string, unknown>>,
-  getManifest: (): Promise<unknown> => ipcRenderer.invoke('abilities:manifest'),
+  platform: process.platform,
 
   // apps registry
   listApps: (): Promise<unknown> => cockpit.command('apps.list'),
@@ -129,10 +129,8 @@ const cockpit = {
   getWorkArea: (): Promise<{ x: number; y: number; width: number; height: number }> =>
     ipcRenderer.invoke('window:work-area'),
   /** Center horizontally + place per anchor/margin (main-process computed). */
-  centerWindow: (
-    anchor: 'top' | 'center' | 'bottom',
-    margin: number
-  ): Promise<boolean> => ipcRenderer.invoke('window:center', anchor, margin),
+  centerWindow: (anchor: 'top' | 'center' | 'bottom', margin: number): Promise<boolean> =>
+    ipcRenderer.invoke('window:center', anchor, margin),
   /** Resize + re-center atomically using the target dims (no stale-bounds drift). */
   autoFitWindow: (
     w: number,

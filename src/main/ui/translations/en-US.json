@@ -78,14 +78,9 @@
   "bt.win.pinned": "pinned",
   "bt.win.minimized": "minimized",
   "bt.win.maximized": "maximized",
-  "lyrics.title": "Lyrics",
-  "lyrics.sub": "Floating lyrics",
-  "lyrics.lock": "Lock",
-  "lyrics.waiting": "Waiting to play…",
-  "lyrics.noLyric": "No lyrics",
-  "lyrics.empty": "Nothing playing",
-  "lyrics.emptyText": "Lyrics will appear here once a song starts playing.",
   "sidebar.expand": "Expand sidebar",
   "sidebar.collapse": "Collapse sidebar",
-  "commandError.notFound": "Command \"{name}\" no longer exists"
+  "commandError.notFound": "Command \"{name}\" no longer exists",
+  "cli.help.allCmds": "  All ability commands (Tab to complete):",
+  "cli.error.unknown": "Unknown command: {cmd} (type help for all commands)"
 }

@@ -1,42 +1,68 @@
-import type { AppEntry } from '../../abilities/apps/types'
-import { listAllApps } from '../../abilities/apps/registry'
-import { launchEntry, launchAction } from '../../abilities/apps/launcher'
 import { listCommands, tryRunCommand } from './commands/registry'
 import { t, te } from './i18n'
 import { makeLogger } from './logger'
 
 const log = makeLogger('cli')
 
-function formatEntry(e: AppEntry): string {
-  const actions = Object.entries(e.actions ?? {})
-  const lines = [
-    te('cli.formatEntry.name', { val: e.name }),
-    te('cli.formatEntry.alias', { val: e.alias ?? '' }),
-    te('cli.formatEntry.path', { val: e.path }),
-    te('cli.formatEntry.type', { val: e.exec.type, cmd: e.exec.command.join(' ') }),
-    te('cli.formatEntry.risk', {
-      val: e.security?.risk ?? 'low',
-      note: e.security?.note ? `  (${e.security.note})` : ''
-    }),
-    te('cli.formatEntry.tags', {
-      val: [...(e.tags ?? []), ...(e.tags_auto ?? [])].join(', ') || '—'
-    })
-  ]
-  if (actions.length) {
-    lines.push(
-      te('cli.formatEntry.actions', {
-        val: actions.map(([id, a]) => `${id} (${a.name})`).join(', ')
-      })
-    )
+/**
+ * CLI REPL backend.
+ *
+ * Dispatch order:
+ *  1. `help`
+ *  2. extension built-ins (e.g. apps: `list` / `info` / `launch` / `run`)
+ *  3. a registered ability command (`mirror.toggle`, ...)
+ *  4. extension bare-alias resolution (e.g. apps: `<alias>` → launch)
+ *
+ * The REPL core is ability-agnostic: abilities register their CLI vocabulary
+ * through `registerCliExtension` from their own modules.
+ */
+
+export interface CliAliasMatch {
+  run: (rest: string[]) => Promise<string>
+}
+
+export interface CliExtension {
+  /** extra help lines shown at the top of `help` output */
+  helpLines?: () => string[]
+  /** additional built-in subcommands keyed by first token */
+  builtins?: {
+    name: string
+    help: string
+    run: (rest: string[], input: string) => string | Promise<string>
+  }[]
+  /** resolve a bare first token into a launchable action */
+  resolveAlias?: (token: string) => Promise<CliAliasMatch | null>
+}
+
+const extensions: CliExtension[] = []
+
+/** Register CLI vocabulary contributed by an ability (call once at load). */
+export function registerCliExtension(ext: CliExtension): void {
+  extensions.push(ext)
+}
+
+function renderHelp(): string {
+  const cmds = listCommands()
+  const grouped = new Map<string, string[]>()
+  for (const c of cmds) {
+    const ability = c.name.split('.')[0]
+    const list = grouped.get(ability) ?? []
+    list.push(`  ${c.name.padEnd(24)} ${t(c.name + '.desc', c.description)}`)
+    grouped.set(ability, list)
+  }
+  const lines: string[] = []
+  for (const ext of extensions) {
+    for (const hl of ext.helpLines?.() ?? []) lines.push(hl)
+    for (const b of ext.builtins ?? []) if (b.help) lines.push(b.help)
+  }
+  lines.push(t('cli.help.allCmds'))
+  for (const [ability, cmdsList] of grouped) {
+    lines.push(`[${ability}]`)
+    lines.push(...cmdsList)
   }
   return lines.join('\n')
 }
 
-/**
- * CLI REPL backend.
- *  1. First token is a registered ability command (mirror.toggle, ...) → dispatch.
- *  2. Otherwise: <alias> launch, launch <alias>, info <alias>, list, help.
- */
 export async function cliExec(input: string): Promise<string> {
   const tokens = input.trim().split(/\s+/)
   const [cmdRaw, ...rest] = tokens
@@ -44,55 +70,12 @@ export async function cliExec(input: string): Promise<string> {
   const cmd = cmdRaw.toLowerCase()
   log.debug('cli input', { cmd })
 
-  // Built-ins first.
-  switch (cmd) {
-    case 'help': {
-      const cmds = listCommands()
-      const grouped = new Map<string, string[]>()
-      for (const c of cmds) {
-        const ability = c.name.split('.')[0]
-        const list = grouped.get(ability) ?? []
-        list.push(`  ${c.name.padEnd(24)} ${t(c.name + '.desc', c.description)}`)
-        grouped.set(ability, list)
-      }
-      const lines = [
-        t('cli.help.appCmds'),
-        t('cli.help.aliasLaunch'),
-        t('cli.help.aliasAction'),
-        t('cli.help.launch'),
-        t('cli.help.launchAction'),
-        t('cli.help.info'),
-        t('cli.help.list'),
-        t('cli.help.allCmds')
-      ]
-      for (const [ability, cmdsList] of grouped) {
-        lines.push(`[${ability}]`)
-        lines.push(...cmdsList)
-      }
-      return lines.join('\n')
-    }
-    case 'list':
-    case 'ls': {
-      const { apps } = await listAllApps()
-      if (Object.keys(apps).length === 0) return t('cli.list.empty')
-      const rows = Object.entries(apps).map(([id, e]) => {
-        const alias = e.alias && e.alias !== id ? e.alias : ''
-        return `  ${(alias || id).padEnd(18)} ${e.name}`
-      })
-      return `${te('cli.list.count', { n: String(rows.length) })}\n${rows.join('\n')}`
-    }
-    case 'info': {
-      const key = rest[0]
-      if (!key) return t('cli.info.usage')
-      const e = await resolveByAlias(key)
-      if (!e) return te('cli.launch.notFound', { key })
-      return formatEntry(e)
-    }
-    case 'launch':
-    case 'run': {
-      const key = rest[0]
-      if (!key) return t('cli.launch.usage')
-      return await launchByAlias(key, rest[1])
+  if (cmd === 'help') return renderHelp()
+
+  // Extension built-ins (apps: list/info/launch/run).
+  for (const ext of extensions) {
+    for (const b of ext.builtins ?? []) {
+      if (b.name === cmd) return b.run(rest, input)
     }
   }
 
@@ -100,51 +83,13 @@ export async function cliExec(input: string): Promise<string> {
   const commandOut = await tryRunCommand(input)
   if (commandOut !== null) return commandOut
 
-  // Bare alias / tag → launch (optionally an action: <alias> <action>).
-  const e = await resolveByAlias(cmdRaw)
-  if (!e) {
-    log.warn('unknown cli command', { cmd: cmdRaw })
-    return te('cli.error.unknown', { cmd: cmdRaw })
+  // Bare token → extension alias resolution (apps: `<alias>` launches).
+  for (const ext of extensions) {
+    if (!ext.resolveAlias) continue
+    const match = await ext.resolveAlias(cmdRaw)
+    if (match) return match.run(rest)
   }
-  return await launchByAlias(cmdRaw, rest[0])
-}
-async function resolveByAlias(key: string): Promise<AppEntry | null> {
-  const { apps } = await listAllApps()
-  const k = key.toLowerCase()
-  for (const [id, e] of Object.entries(apps)) {
-    const alias = (e.alias || id).toLowerCase()
-    const tags = (e.tags ?? []).map((t) => t.toLowerCase())
-    if (alias === k || id.toLowerCase() === k || tags.includes(k)) return e
-  }
-  return null
-}
 
-async function launchByAlias(key: string, actionId?: string): Promise<string> {
-  const e = await resolveByAlias(key)
-  if (!e) return te('cli.launch.notFound', { key })
-  if (actionId) {
-    const action = e.actions?.[actionId]
-    if (!action) {
-      const known = Object.keys(e.actions ?? {}).join(', ') || '—'
-      return te('cli.launch.actionNotFound', { action: actionId, known })
-    }
-    const res = await launchAction(e, action)
-    if (!res.ok)
-      log.error('cli action launch failed', { name: e.name, action: action.name, error: res.error })
-    return res.ok
-      ? te('cli.launch.executed', {
-          name: e.name,
-          action: action.name,
-          pid: res.pid ? ` (pid ${res.pid})` : ''
-        })
-      : te('cli.launch.failed', { error: res.error ?? '' })
-  }
-  const res = await launchEntry(e)
-  if (!res.ok) log.error('cli launch failed', { name: e.name, error: res.error })
-  return res.ok
-    ? te('cli.launch.started', {
-        name: e.name,
-        pid: res.pid ? ` (pid ${res.pid})` : ''
-      })
-    : te('cli.launch.failedStart', { error: res.error ?? '' })
+  log.warn('unknown cli command', { cmd: cmdRaw })
+  return te('cli.error.unknown', { cmd: cmdRaw })
 }

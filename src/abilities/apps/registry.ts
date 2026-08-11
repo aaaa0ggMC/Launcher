@@ -4,20 +4,14 @@ import type { AppEntry, AppRegistryFile } from './types'
 import { CONFIG_JSON, abilityConfigPath } from '../../main/process/paths'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
+import { getBroadcast } from '../../main/process/broadcast'
+import { registerStartupHook } from '../../main/process/startup'
 
 const log = makeLogger('apps-registry')
 
 export interface SearchRoot {
   path: string
   watch: boolean
-}
-
-type Broadcast = (channel: string, ...args: unknown[]) => void
-
-let broadcast: Broadcast = () => {}
-
-export function setRegistryBroadcast(fn: Broadcast): void {
-  broadcast = fn
 }
 
 const APPS_CONFIG_PATH = abilityConfigPath('apps')
@@ -49,7 +43,7 @@ export async function addSearchRoot(path: string): Promise<SearchRoot[]> {
     searchRoots.push({ path, watch: true })
     await saveAppsConfig({ searchRoots, confirmBeforeLaunch })
     log.info('search root added', { path })
-    broadcast('cockpit:apps-changed', 'roots', null)
+    getBroadcast()('cockpit:apps-changed', 'roots', null)
   }
   return searchRoots
 }
@@ -59,7 +53,7 @@ export async function removeSearchRoot(path: string): Promise<SearchRoot[]> {
   const next = searchRoots.filter((r) => r.path !== path)
   await saveAppsConfig({ searchRoots: next, confirmBeforeLaunch })
   log.info('search root removed', { path })
-  broadcast('cockpit:apps-changed', 'roots', null)
+  getBroadcast()('cockpit:apps-changed', 'roots', null)
   return next
 }
 
@@ -231,7 +225,7 @@ export async function updateEntry(
   await writeJsonAtomic(file, reg)
   invalidateRegistry(root)
   log.info('entry saved', { root, id, patchKeys: Object.keys(patch) })
-  broadcast('cockpit:apps-changed', 'update', { root, id })
+  getBroadcast()('cockpit:apps-changed', 'update', { root, id })
   return { ...merged, root }
 }
 
@@ -242,14 +236,14 @@ export async function deleteEntry(root: string, id: string): Promise<void> {
   await writeJsonAtomic(file, reg)
   invalidateRegistry(root)
   log.info('entry deleted', { root, id })
-  broadcast('cockpit:apps-changed', 'delete', { root, id })
+  getBroadcast()('cockpit:apps-changed', 'delete', { root, id })
 }
 
 export async function writeRegistry(root: string, reg: AppRegistryFile): Promise<void> {
   await writeJsonAtomic(appsJsonPath(root), reg)
   invalidateRegistry(root)
   log.info('registry written (rescan broadcast)', { root, apps: Object.keys(reg.apps).length })
-  broadcast('cockpit:apps-changed', 'rescan', root)
+  getBroadcast()('cockpit:apps-changed', 'rescan', root)
 }
 
 /**
@@ -284,7 +278,7 @@ export function watchRoots(): void {
   const notify = (root: string): void => {
     if (notifyTimer) clearTimeout(notifyTimer)
     notifyTimer = setTimeout(() => {
-      broadcast('cockpit:apps-changed', 'structure', root)
+      getBroadcast()('cockpit:apps-changed', 'structure', root)
       notifyTimer = null
     }, 400)
   }
@@ -297,7 +291,7 @@ export function watchRoots(): void {
     if (rel.endsWith('apps.json')) {
       log.debug('watcher apps.json change', { root })
       invalidateRegistry(root)
-      broadcast('cockpit:apps-changed', 'file', root)
+      getBroadcast()('cockpit:apps-changed', 'file', root)
     } else if (rel && !id.startsWith('.') && STRUCTURAL.has(event)) {
       log.debug('watcher structural event', { root, event, path: rel })
       notify(root)
@@ -307,3 +301,10 @@ export function watchRoots(): void {
   rebuild()
   watcher.on('error', (err) => console.error('[cockpit] watch error:', err))
 }
+
+// Self-start: the framework never wires abilities. Start watching the search
+// roots once the shell is up (registered before `runStartupHooks` runs).
+registerStartupHook(() => {
+  log.info('start watching app roots')
+  watchRoots()
+})

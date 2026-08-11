@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { translate } from '@ui/i18n'
-import { DEFAULT_LYRICS_CFG } from '@abilities/aidj/types'
-import type { LyricsDisplayConfig } from '@abilities/aidj/types'
+import { DEFAULT_LYRICS_CFG } from '../types'
+import type { LyricsDisplayConfig } from '../types'
 
 interface LyricLine {
   time: number
@@ -137,8 +137,8 @@ const plainLyric = computed<string>(() => {
   return lrcLines.value.length ? '' : lyric.replace(/\[[^\]]*\]/g, '').trim()
 })
 
-const positionMs = computed(() =>
-  (state.value.positionMs ?? 0) + (lyricsCfg.value.position_offset_ms ?? 0)
+const positionMs = computed(
+  () => (state.value.positionMs ?? 0) + (lyricsCfg.value.position_offset_ms ?? 0)
 )
 
 /** Index of the current line: the last line whose time ≤ playback position. */
@@ -169,7 +169,9 @@ const inGap = computed(() => {
 })
 
 /** Static window around the current line: before + current + after (no scroll). */
-const windowStart = computed(() => Math.max(0, displayIdx.value - (lyricsCfg.value.lines_before ?? 0)))
+const windowStart = computed(() =>
+  Math.max(0, displayIdx.value - (lyricsCfg.value.lines_before ?? 0))
+)
 const windowEnd = computed(() =>
   Math.min(lrcLines.value.length, displayIdx.value + (lyricsCfg.value.lines_after ?? 0) + 1)
 )
@@ -439,7 +441,9 @@ onBeforeUnmount(() => {
       <template v-if="!cardEmpty">
         <!-- track header (optional) -->
         <div v-if="lyricsCfg.show_title" class="lyrics-track">
-          <span class="lyrics-track-name">{{ hasTrack ? state.track : t('lyrics.waiting') }}</span>
+          <span class="lyrics-track-name">{{
+            hasTrack ? state.track : t('aidj.lyrics_page.waiting')
+          }}</span>
           <span v-if="state.artist" class="lyrics-track-artist">{{ state.artist }}</span>
         </div>
 
@@ -458,7 +462,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-else class="lyrics-line is-current lyrics-empty">
-              {{ hasTrack ? t('lyrics.noLyric') : t('lyrics.waiting') }}
+              {{ hasTrack ? t('aidj.lyrics_page.noLyric') : t('aidj.lyrics_page.waiting') }}
             </div>
           </template>
         </div>
@@ -474,7 +478,7 @@ onBeforeUnmount(() => {
     >
       <div class="lyrics-menu-item" @click="lockWindow">
         <v-icon size="16">mdi-lock-outline</v-icon>
-        <span>{{ t('lyrics.lock') }}</span>
+        <span>{{ t('aidj.lyrics_page.lock') }}</span>
       </div>
     </div>
   </div>

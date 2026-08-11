@@ -2,7 +2,7 @@ import { mkdirSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import winston from 'winston'
 import DailyRotateFile from 'winston-daily-rotate-file'
-import type { LogEntry, LogLevel } from '../../abilities/logs/types'
+import type { LogEntry, LogLevel } from '../../shared/types'
 import { LOG_DIR } from './paths'
 
 /**
@@ -65,15 +65,6 @@ let broadcast: LogBroadcast = () => {}
 
 export function setLogBroadcast(fn: LogBroadcast): void {
   broadcast = fn
-}
-
-/**
- * Whether an entry belongs to the logs ability's own operations (scope `logs`,
- * or the `logs.*` command lines logged by the ipc dispatcher). The file ALWAYS
- * keeps these for audit — the UI just filters them when "hide logs self" is on.
- */
-export function isLogsSelfEntry(e: Pick<LogEntry, 'scope' | 'message'>): boolean {
-  return e.scope === 'logs' || (e.scope === 'ipc' && e.message.startsWith('logs.'))
 }
 
 /**
@@ -178,8 +169,8 @@ export interface LogQueryOptions {
   scope?: string
   /** Exclude these scopes entirely. */
   excludeScopes?: string[]
-  /** Hide the logs ability's own entries (display-only; the file keeps them). */
-  excludeSelf?: boolean
+  /** Ability-supplied predicate (e.g. hide a particular ability's own noise). */
+  filter?: (e: LogEntry) => boolean
 }
 
 /** Query the current session's buffer, newest-first paging via `before`. */
@@ -192,8 +183,8 @@ export function queryLogs(opts: LogQueryOptions = {}): { entries: LogEntry[]; to
       e.id < before &&
       (!opts.level || e.level === opts.level) &&
       !excluded.has(e.scope) &&
-      !(opts.excludeSelf && isLogsSelfEntry(e)) &&
-      (!opts.scope || e.scope === opts.scope)
+      (!opts.scope || e.scope === opts.scope) &&
+      (!opts.filter || opts.filter(e))
   )
   return { entries: matched.slice(-limit), total: matched.length }
 }

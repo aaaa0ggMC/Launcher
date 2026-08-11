@@ -4,6 +4,13 @@ import { queryLogs, exportLogs, logAt, makeLogger } from '../../main/process/log
 
 const log = makeLogger('logs')
 
+/** Whether an entry belongs to this ability's own operations (scope `logs`, or
+ *  the `logs.*` command lines logged by the ipc dispatcher). The file ALWAYS
+ *  keeps these for audit — the UI just filters them when "hide logs self" is on. */
+function isSelfEntry(e: { scope: string; message: string }): boolean {
+  return e.scope === 'logs' || (e.scope === 'ipc' && e.message.startsWith('logs.'))
+}
+
 export default [
   {
     name: 'logs.query',
@@ -26,7 +33,10 @@ export default [
         ctx.named['exclude-self'] === 'true' ||
         ctx.named['exclude-self'] === true ||
         ctx.named.excludeSelf === true
-      return queryLogs({ level, before, limit, scope, excludeScopes, excludeSelf })
+      const filter = excludeSelf
+        ? (e: { scope: string; message: string }) => !isSelfEntry(e)
+        : undefined
+      return queryLogs({ level, before, limit, scope, excludeScopes, filter })
     }
   },
   {

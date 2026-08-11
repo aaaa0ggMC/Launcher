@@ -11,10 +11,10 @@ import {
 } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Ability } from '@abilities/types'
-import { getAbilityModuleEntries, buildSettingsSections } from '@abilities'
+import { getAbilityModules, resolveSidebarAbilities, buildSettingsSections } from '@abilities'
 import type { SettingsCategory } from '@abilities'
-import type { AbilitiesManifest, LaunchResult } from '@shared/types'
-import type { AppAction, AppEntry, RiskLevel } from '@abilities/apps/types'
+import type { LaunchResult } from '@shared/types'
+import type { AppAction, AppEntry, RiskLevel } from '@shared/types'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import TransformerModal from './components/TransformerModal.vue'
@@ -31,23 +31,23 @@ import { PAGE_TRANSITIONS } from './animations'
 // ---------------------------------------------------------------------------
 // Ability loader: `src/abilities/index.ts` globs every ability's orchestrator
 // (index.ts carries metadata only; the heavy View.vue loads on first show as
-// an async component). This frame consumes the loaded registry and exposes it
-// back to abilities for cross-scope control (see provide('cockpit:abilities')).
+// an async component). Abilities are self-injecting: platform-filtered and
+// alphabetically ordered here (category then name), no yaml/manifest order.
+// This frame consumes the loaded registry and exposes it back to abilities for
+// cross-scope control (see provide('cockpit:abilities')).
 // ---------------------------------------------------------------------------
-const abilityModules = getAbilityModuleEntries()
+const sidebarReport = resolveSidebarAbilities(window.cockpit.platform)
 
 interface SidebarAbility {
   id: string
-  order: number
   config: Record<string, unknown>
   name: string
-  icon: string
+  icon: string | null
   category: string
   keepAlive: boolean
   comp: Ability['component']
 }
 
-const manifest = shallowRef<AbilitiesManifest | null>(null)
 const runtimeConfig = ref<Record<string, unknown>>({})
 const theme = useTheme()
 
@@ -234,26 +234,20 @@ function restoreUiState(): void {
 }
 
 const abilities = computed<SidebarAbility[]>(() => {
-  if (!manifest.value) return []
-  return manifest.value.abilities
-    .filter((a) => a.enabled)
-    .sort((a, b) => a.order - b.order)
-    .map((cfg) => {
-      const mod = abilityModules[`./${cfg.id}/index.ts`]
-      if (!mod) return null
-      const meta = mod.default
-      return {
-        id: cfg.id,
-        order: cfg.order,
-        config: {} as Record<string, unknown>,
-        name: t(`ability.${cfg.id}.name`, meta.name),
-        icon: meta.icon ?? null,
-        category: t(`ability.${cfg.id}.category`, meta.category),
-        keepAlive: meta.keepAlive !== false,
-        comp: meta.component
-      }
+  return sidebarReport.loaded
+    .map((meta) => ({
+      id: meta.id,
+      config: {} as Record<string, unknown>,
+      name: t(`ability.${meta.id}.name`, meta.name),
+      icon: meta.icon ?? null,
+      category: t(`ability.${meta.id}.category`, meta.category),
+      keepAlive: meta.keepAlive !== false,
+      comp: meta.component
+    }))
+    .sort((a, b) => {
+      const c = a.category.localeCompare(b.category, lang.value)
+      return c !== 0 ? c : a.name.localeCompare(b.name, lang.value)
     })
-    .filter((x): x is SidebarAbility => x !== null)
 })
 
 const currentAbility = computed(() => abilities.value.find((a) => a.id === currentId.value) ?? null)
@@ -277,7 +271,7 @@ const pageTransitionName = computed(() => {
  * uses, then provided to the settings page so it never re-scans.
  */
 const settingsSections = computed<SettingsCategory[]>(() =>
-  buildSettingsSections(abilities.value, abilityModules)
+  buildSettingsSections(abilities.value, getAbilityModules())
 )
 // keep-alive caches only abilities that opted in (keepAlive !== false).
 // Each cached page must declare a matching name via defineOptions.
@@ -698,13 +692,14 @@ let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
 
 onMounted(async () => {
-  const [cfg, mani] = await Promise.all([window.cockpit.getConfig(), window.cockpit.getManifest()])
+  const cfg = await window.cockpit.getConfig()
   onConfigChanged(cfg)
-  manifest.value = mani
-  const def = mani?.sidebar.default
-  if (!currentId.value || !abilities.value.some((a) => a.id === currentId.value)) {
-    currentId.value = def && abilities.value.some((a) => a.id === def) ? def : null
-  }
+  // Default page comes from config.json (sidebar.default); fall back to the
+  // first alphabetical ability when missing/invalid (or no config at all).
+  const def = (cfg as Record<string, unknown> | null)?.sidebar?.['default'] ?? null
+  const fallback = abilities.value[0]?.id ?? null
+  const valid = (id: string | null): boolean => !!id && abilities.value.some((a) => a.id === id)
+  if (!valid(currentId.value)) currentId.value = valid(def) ? def : fallback
   restoreUiState()
   unsub = window.cockpit.on('cockpit:apps-changed', () => {
     if (searchDebounce) {
