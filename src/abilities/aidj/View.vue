@@ -2,6 +2,7 @@
 import { ref, inject, type Ref, computed, watch, nextTick, onMounted, onDeactivated } from 'vue'
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
+import FreqList from './components/FreqList.vue'
 
 defineOptions({ name: 'cockpit-aidj' })
 
@@ -11,7 +12,7 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 const openBt = inject('cockpit:open-bt', null) as (() => void) | null
 
 const menuOpen = ref(false)
-const menuStep = ref<'main' | 'sessions'>('main')
+const menuStep = ref<'main' | 'sessions' | 'freq'>('main')
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 
 interface SessionItem {
@@ -300,10 +301,17 @@ function menuClose(): void {
   menuStep.value = 'main'
 }
 
-/** Close the page dropdown when clicking/right-clicking outside of it. */
+/** Close the page dropdown when clicking/right-clicking outside of it.
+ *  Only closes when the target is still attached to the document AND outside
+ *  the menu — a click that triggers a re-render (e.g. switching subpages) can
+ *  detach its own target before the document listener runs, which would
+ *  otherwise falsely look like an outside click. */
 function onMenuDocClick(e: MouseEvent): void {
   const el = pageMenuRef.value
-  if (el && !el.contains(e.target as Node)) menuClose()
+  const t = e.target as Node | null
+  if (!el || !t || !t.isConnected) return
+  if (el.contains(t)) return
+  menuClose()
 }
 
 function onMenuKey(e: KeyboardEvent): void {
@@ -405,13 +413,13 @@ defineExpose({ toMarkdown })
   <div class="aidj-shell">
     <ChatView ref="chatRef" />
 
-    <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }">
+    <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
       <button class="page-menu-handle" @click="toggleMenu">
         <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
       </button>
 
       <Transition name="menu-pop">
-        <div v-if="menuOpen" class="page-menu-pop">
+        <div v-if="menuOpen" class="page-menu-pop" :class="{ 'is-wide': menuStep === 'freq' }">
           <template v-if="menuStep === 'main'">
             <div class="menu-item" @click="selectChat">
               <v-icon size="18">mdi-comment-text-multiple-outline</v-icon>
@@ -423,13 +431,18 @@ defineExpose({ toMarkdown })
               <span>{{ t('aidj.subpage.sessions', 'Chat Sessions') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
+            <div class="menu-item" @click="menuStep = 'freq'">
+              <v-icon size="18">mdi-poll</v-icon>
+              <span>{{ t('aidj.subpage.freq', '歌曲频率') }}</span>
+              <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+            </div>
             <div class="menu-item" @click="updateMetadata">
               <v-icon size="18">mdi-database-sync-outline</v-icon>
               <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
             </div>
           </template>
 
-          <template v-else>
+          <template v-else-if="menuStep === 'sessions'">
             <div class="sessions-head d-flex align-center ga-2">
               <v-btn
                 icon
@@ -511,6 +524,24 @@ defineExpose({ toMarkdown })
                 </template>
               </div>
             </div>
+          </template>
+
+          <template v-else-if="menuStep === 'freq'">
+            <div class="sessions-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{
+                t('aidj.subpage.freq', '歌曲频率')
+              }}</span>
+            </div>
+            <FreqList />
           </template>
         </div>
       </Transition>
@@ -643,6 +674,9 @@ defineExpose({ toMarkdown })
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 8px;
   overflow: hidden;
+}
+.page-menu-pop.is-wide {
+  width: 460px;
 }
 
 .menu-item {

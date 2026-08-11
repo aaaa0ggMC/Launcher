@@ -24,7 +24,8 @@ import {
   listAvailablePlayers,
   switchPlayer,
   getCoverArt,
-  bumpFrequency
+  bumpFrequency,
+  loadFrequency
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -1151,6 +1152,18 @@ const commands: CommandSpec[] = [
       if (!path) return { ok: false, error: '需要 --path 参数' }
       const url = await getCoverArt(path)
       return { ok: true, url }
+    }
+  },
+  {
+    name: 'aidj.freq',
+    description: '歌曲播放频率列表（含曲库路径，按次数降序）',
+    usage: 'aidj.freq',
+    run: async () => {
+      const [freq, lib] = await Promise.all([loadFrequency(), loadLibrary()])
+      const rows = [...freq.entries()]
+        .map(([name, times]) => ({ name, times, path: lib.musicPaths.get(name) ?? '' }))
+        .sort((a, b) => b.times - a.times)
+      return { ok: true, rows }
     }
   },
   {
