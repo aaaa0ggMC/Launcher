@@ -37,42 +37,48 @@ const metaModules = import.meta.glob<{ platforms?: string[] }>('../../abilities/
   eager: true
 })
 
-let _modulesCache: Record<string, Ability> | null = null
-let _platformsCache: Record<string, string[] | undefined> | null = null
+interface AbilityEntry {
+  ability: Ability
+  /** folder-level platforms from meta.ts (applies to every ability in the folder). */
+  platforms: string[] | undefined
+}
 
-/** All ability metadata keyed by their id (last duplicate wins). */
-export function loadAbilityModules(): Record<string, Ability> {
-  if (_modulesCache) return _modulesCache
-  const out: Record<string, Ability> = {}
+let _registry: Record<string, AbilityEntry> | null = null
+
+/**
+ * Build the full registry keyed by ability id. Platforms come from the ability
+ * FOLDER's `meta.ts` and apply to every ability it exports — so a folder that
+ * registers several abilities (e.g. aidj + aidj-lyrics) shares one label.
+ */
+function loadRegistry(): Record<string, AbilityEntry> {
+  if (_registry) return _registry
+  const out: Record<string, AbilityEntry> = {}
   for (const key of Object.keys(abilityModules)) {
+    const folder = key.split('/').at(-2) ?? key
     const mod = abilityModules[key]
     const def = mod?.default
     if (!def) continue
+    const platforms = metaModules[`../../abilities/${folder}/meta.ts`]?.platforms
     for (const a of Array.isArray(def) ? def : [def]) {
       if (out[a.id]) {
         console.warn(`[abilities] duplicate ability id "${a.id}" — overriding (${key})`)
       }
-      out[a.id] = a
+      out[a.id] = { ability: a, platforms }
     }
   }
-  _modulesCache = out
+  _registry = out
   return out
 }
 
-/** Shared per-ability metadata (platforms) keyed by ability id. */
-export function loadAbilityMetas(): Record<string, string[] | undefined> {
-  if (_platformsCache) return _platformsCache
-  const out: Record<string, string[] | undefined> = {}
-  for (const key of Object.keys(metaModules)) {
-    const id = key.split('/').at(-2) ?? key
-    out[id] = metaModules[key].platforms
-  }
-  _platformsCache = out
+/** All ability metadata keyed by their id (last duplicate wins). */
+export function loadAbilityModules(): Record<string, Ability> {
+  const out: Record<string, Ability> = {}
+  for (const [id, entry] of Object.entries(loadRegistry())) out[id] = entry.ability
   return out
 }
 
 export function getAbility(id: string): Ability | undefined {
-  return loadAbilityModules()[id]
+  return loadRegistry()[id]?.ability
 }
 
 /** The flattened module table keyed by ability id (for iteration / settings). */
@@ -111,18 +117,16 @@ export interface AbilityLoadReport {
  * ignored sets are reported through the main log (`logs.post`).
  */
 export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
-  const modules = loadAbilityModules()
-  const platforms = loadAbilityMetas()
+  const registry = loadRegistry()
   const loaded: SidebarAbilityMeta[] = []
   const ignoredPlatform: string[] = []
   const backendOnly: string[] = []
-  for (const [id, meta] of Object.entries(modules)) {
+  for (const [id, { ability: meta, platforms }] of Object.entries(registry)) {
     if (!meta.component) {
       backendOnly.push(id)
       continue
     }
-    const ps = platforms[id]
-    if (ps && ps.length > 0 && !ps.includes(platform)) {
+    if (platforms && platforms.length > 0 && !platforms.includes(platform)) {
       ignoredPlatform.push(id)
       continue
     }
