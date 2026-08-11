@@ -34,7 +34,7 @@ import { join } from 'path'
 import { screen } from 'electron'
 import OpenAI from 'openai'
 import { startJobByName, listTasks } from '../../main/process/background-tasks'
-import { createChildWindow, destroyChildWindow } from '../../main/process/windows'
+import { createChildWindow, destroyChildWindow, listChildWindows } from '../../main/process/windows'
 import type { WindowSpec } from '../../main/process/windows'
 import type {
   AidjConfig,
@@ -121,6 +121,7 @@ async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: Windo
     key,
     spec: {
       id,
+      title: `[AIDJ-Lyrics] ${key}`,
       view: 'LyricsWindow',
       width: w,
       height: h,
@@ -132,7 +133,8 @@ async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: Windo
       alwaysOnTop: true,
       skipTaskbar: true,
       resizable: false,
-      shadow: false
+      shadow: false,
+      osd: true
     }
   }
 }
@@ -1677,6 +1679,17 @@ const commands: CommandSpec[] = [
     description: '当前 DBus 播放状态 + 对应歌词（桌面歌词窗口 1Hz 轮询）',
     usage: 'aidj.lyrics',
     run: async () => getLyricPlayback()
+  },
+  {
+    name: 'aidj.lyrics-state',
+    description: '当前 DBus 播放器对应的歌词窗口是否已打开（菜单开关状态）',
+    usage: 'aidj.lyrics-state',
+    run: async () => {
+      const key = await getCurrentPlayerKey()
+      const windowId = lyricWindowId(key)
+      const open = listChildWindows().some((w) => w.id === windowId)
+      return { ok: true, open, windowId, player: key }
+    }
   },
   {
     name: 'aidj.lyrics-open',

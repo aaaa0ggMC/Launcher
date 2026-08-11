@@ -1,4 +1,5 @@
 import { BrowserWindow, app, screen } from 'electron'
+import { execFile } from 'child_process'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { writeFile, unlink } from 'fs/promises'
@@ -30,6 +31,9 @@ export interface WindowSpec {
   id: string
   /** renderer view key resolved against the windows/ glob. */
   view: string
+  /** optional window title (KWin-rules friendly pattern, e.g. `[AIDJ-Lyrics] <player>`).
+   *  Defaults to `id`. Kept stable against the page's <title>. */
+  title?: string
   width?: number
   height?: number
   /** explicit position (when set, `center` is disabled). */
@@ -43,6 +47,10 @@ export interface WindowSpec {
   alwaysOnTop?: boolean
   skipTaskbar?: boolean
   center?: boolean
+  /** true = treat the window as an OSD / notification on X11 (EWMH window type
+   *  `_NET_WM_WINDOW_TYPE_NOTIFICATION`), so KWin applies OSD rules. No-op on
+   *  Wayland (xdg-shell has no window type). */
+  osd?: boolean
 }
 
 export type WindowControlAction =
@@ -148,6 +156,30 @@ function applyAlwaysOnTop(win: BrowserWindow, on: boolean): void {
   }
 }
 
+/**
+ * Set an EWMH window type on X11 (e.g. `_NET_WM_WINDOW_TYPE_NOTIFICATION` =
+ * KWin's OSD/Notification class) so the window manager treats it accordingly.
+ * Electron exposes no window-type API, so drive `xprop` with the native handle.
+ */
+function setX11WindowType(win: BrowserWindow, type: string): void {
+  try {
+    const handle = win.getNativeWindowHandle()
+    const wid = handle.readUInt32LE(0)
+    execFile('xprop', [
+      '-id',
+      String(wid),
+      '-f',
+      '_NET_WM_WINDOW_TYPE',
+      '32a',
+      '-set',
+      '_NET_WM_WINDOW_TYPE',
+      type
+    ])
+  } catch {
+    /* xprop missing / handle unavailable — non-fatal */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // KDE Wayland window placement. Electron's x/y / setPosition are ignored by
 // the compositor on Wayland (it owns window positions), so to honor anchor /
@@ -231,15 +263,16 @@ async function kwinRunScript(script: string): Promise<void> {
 }
 
 /**
- * KWin 6 move script. `move()` is a bool property and there's no `Qt` global in
- * plain-JS scripts — the working pattern is to set the frameGeometry x/y:
- *   w.frameGeometry.x = X; w.frameGeometry.y = Y;
+ * KWin 6 move script. VERIFIED via probe: `w.frameGeometry.x = X` is a NO-OP in
+ * the QJSEngine (frameGeometry reads as a JS copy), but assigning the WHOLE
+ * object `w.frameGeometry = { x, y, width, height }` moves the window to the
+ * absolute position. This is the only reliable way.
  */
 function kwinMoveScript(title: string, x: number, y: number): string {
   const id = escapeJs(title)
-  return `const list = workspace.windowList(); const w = list.find(x => x.caption === '${id}') || list.find(x => String(x.caption).includes('${id}')); if (w) { w.frameGeometry.x = ${Math.round(
+  return `const list = workspace.windowList(); const w = list.find(x => x.caption === '${id}') || list.find(x => String(x.caption).includes('${id}')); if (w) { const g = w.frameGeometry; w.frameGeometry = { x: ${Math.round(
     x
-  )}; w.frameGeometry.y = ${Math.round(y)}; }`
+  )}, y: ${Math.round(y)}, width: g.width, height: g.height }; }`
 }
 
 /**
@@ -252,8 +285,10 @@ function moveChildWindow(win: BrowserWindow, x: number, y: number): void {
   const py = Math.round(y)
   if (!isKdeWayland()) return
   const script = kwinMoveScript(win.getTitle(), px, py)
-  for (let i = 0; i < 4; i++) {
-    setTimeout(() => void kwinRunScript(script), 300 + i * 350)
+  // First attempt fast (80ms) to minimize the show→center gap; one retry for
+  // the case the compositor hadn't mapped/placed the window yet.
+  for (let i = 0; i < 2; i++) {
+    setTimeout(() => void kwinRunScript(script), 80 + i * 400)
   }
 }
 
@@ -308,6 +343,62 @@ export function getPrimaryWorkArea(): { x: number; y: number; width: number; hei
   return { x: a.x, y: a.y, width: a.width, height: a.height }
 }
 
+/**
+ * Center a child window horizontally (and place vertically per anchor/margin)
+ * using AUTHORITATIVE main-process data: the window's real bounds and the
+ * display it's actually on. Skips when the REQUESTED size+position are
+ * unchanged (getBounds() is unreliable on Wayland, so never compare against it).
+ */
+const lastCenter = new WeakMap<BrowserWindow, { x: number; y: number; w: number; h: number }>()
+export function centerChildWindow(
+  win: BrowserWindow | null,
+  anchor: 'top' | 'center' | 'bottom',
+  margin: number
+): boolean {
+  if (!win || win.isDestroyed()) return false
+  const b = win.getBounds()
+  const area = screen.getDisplayMatching(b).workArea
+  const x = area.x + Math.round((area.width - b.width) / 2)
+  let y: number
+  if (anchor === 'bottom') y = area.y + area.height - b.height - margin
+  else if (anchor === 'top') y = area.y + margin
+  else y = area.y + Math.round((area.height - b.height) / 2)
+  const last = lastCenter.get(win)
+  if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height) return false
+  lastCenter.set(win, { x, y, w: b.width, h: b.height })
+  return moveWindowTo(win, x, y)
+}
+
+/**
+ * Atomically resize a child window to (w, h) AND center it horizontally, using
+ * the TARGET dimensions for the centering math — the previous flow re-centered
+ * with win.getBounds(), which lags on Wayland after setSize, so every auto-fit
+ * grow drifted the window right.
+ */
+export function resizeAndCenterChildWindow(
+  win: BrowserWindow | null,
+  w: number,
+  h: number,
+  anchor: 'top' | 'center' | 'bottom',
+  margin: number
+): boolean {
+  if (!win || win.isDestroyed()) return false
+  const cw = Math.max(120, Math.round(w))
+  const ch = Math.max(60, Math.round(h))
+  const b = win.getBounds()
+  const area = screen.getDisplayMatching(b).workArea
+  const x = area.x + Math.round((area.width - cw) / 2)
+  let y: number
+  if (anchor === 'bottom') y = area.y + area.height - ch - margin
+  else if (anchor === 'top') y = area.y + margin
+  else y = area.y + Math.round((area.height - ch) / 2)
+  const last = lastCenter.get(win)
+  if (last && last.x === x && last.y === y && last.w === cw && last.h === ch) return false
+  lastCenter.set(win, { x, y, w: cw, h: ch })
+  resizeWindowTo(win, cw, ch)
+  return moveWindowTo(win, x, y)
+}
+
 function makeChild(
   spec: WindowSpec,
   bounds?: { x?: number; y?: number; width: number; height: number }
@@ -323,7 +414,7 @@ function makeChild(
     width: bounds?.width ?? spec.width ?? 480,
     height: bounds?.height ?? spec.height ?? 720,
     show: false,
-    title: spec.id,
+    title: spec.title ?? spec.id,
     frame: !frameless,
     transparent,
     hasShadow: spec.shadow !== false,
@@ -341,15 +432,21 @@ function makeChild(
   })
   win.on('ready-to-show', () => {
     win.show()
+    // X11: advertise the window as an OSD / notification so KWin treats it as
+    // one (non-focus-stealing, matching OSD window rules). Wayland has no
+    // window type — every xdg-toplevel is "Normal".
+    if (spec.osd === true && process.platform === 'linux' && !isKdeWayland()) {
+      setX11WindowType(win, '_NET_WM_WINDOW_TYPE_NOTIFICATION')
+    }
     if (spec.alwaysOnTop === true) applyAlwaysOnTop(win, true)
     positionChildWindow(win, bounds?.x ?? spec.x, bounds?.y ?? spec.y)
   })
-  // Keep the window title = spec.id: the page (shared index.html) sets
+  // Keep the window title stable: the page (shared index.html) sets
   // `Linux Cockpit`, which would otherwise override it — so the taskbar and
-  // window lists always show a stable, identifiable title.
+  // window lists always show the spec title / id.
   win.on('page-title-updated', (e) => {
     e.preventDefault()
-    win.setTitle(spec.id)
+    win.setTitle(spec.title ?? spec.id)
   })
   win.on('closed', () => {
     children.delete(spec.id)

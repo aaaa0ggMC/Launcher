@@ -176,8 +176,11 @@ async function toggleLyricsWindow(): Promise<void> {
 }
 
 async function refreshLyricsOpen(): Promise<void> {
-  const wins = (await window.cockpit.listWindows().catch(() => [])) as { id: string }[]
-  lyricsOpen.value = wins.some((w) => w.id.startsWith('aidj-lyrics-'))
+  const res = (await window.cockpit.command('aidj.lyrics-state').catch(() => null)) as {
+    open?: boolean
+  } | null
+  // 状态绑定「当前 DBus 播放器」自己的歌词窗口，而不是任意一个（每个播放器独立实例）
+  lyricsOpen.value = res?.open === true
 }
 
 async function openSession(sessionId: string): Promise<void> {

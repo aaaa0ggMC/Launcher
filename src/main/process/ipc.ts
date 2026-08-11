@@ -30,6 +30,8 @@ import {
   moveWindowTo,
   resizeWindowTo,
   getPrimaryWorkArea,
+  centerChildWindow,
+  resizeAndCenterChildWindow,
   type WindowSpec,
   type WindowControlAction
 } from './windows'
@@ -104,6 +106,26 @@ export function registerIpc(): void {
   // Primary display work area — the renderer's window.screen is unreliable on
   // Wayland, so anchor/center placement queries it from the main process.
   ipcMain.handle('window:work-area', () => getPrimaryWorkArea())
+  // Center horizontally + place per anchor/margin, computed in the main process
+  // from the window's real bounds + the display it is on.
+  ipcMain.handle('window:center', (e, anchor: string, margin: number) =>
+    centerChildWindow(
+      senderWindow(e),
+      anchor === 'bottom' ? 'bottom' : anchor === 'top' ? 'top' : 'center',
+      Number(margin) || 0
+    )
+  )
+  // Resize + re-center atomically using the TARGET dimensions (avoids the
+  // stale-bounds drift on Wayland).
+  ipcMain.handle('window:auto-fit', (e, w: number, h: number, anchor: string, margin: number) =>
+    resizeAndCenterChildWindow(
+      senderWindow(e),
+      Number(w) || 0,
+      Number(h) || 0,
+      anchor === 'bottom' ? 'bottom' : anchor === 'top' ? 'top' : 'center',
+      Number(margin) || 0
+    )
+  )
 
   // Child window manager — BrowserWindows can only be created in the main
   // process; the renderer sends a declarative spec and this owns lifecycle.

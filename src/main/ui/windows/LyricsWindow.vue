@@ -70,21 +70,14 @@ const rootStyle = computed(() => {
 const anchorClass = computed(() => `anchor-${lyricsCfg.value.anchor}`)
 
 /**
- * Re-assert the configured anchor/margin placement once this window is fully
- * mounted. Centering uses the PRIMARY display work area from the main process
- * (the renderer's `window.screen` is unreliable on Wayland).
+ * Center + anchor placement, computed in the MAIN process from the window's
+ * real bounds and the display it is on (renderer window.innerWidth / screen
+ * are unreliable on Wayland, especially after auto-fit resizes). The main
+ * process skips when the requested position is unchanged.
  */
 async function applyAnchorPlacement(): Promise<void> {
   const c = lyricsCfg.value
-  const area = await window.cockpit.getWorkArea()
-  const w = window.innerWidth
-  const h = window.innerHeight
-  const x = area.x + Math.round((area.width - w) / 2)
-  let y: number
-  if (c.anchor === 'bottom') y = area.y + area.height - h - c.margin
-  else if (c.anchor === 'top') y = area.y + c.margin
-  else y = area.y + Math.round((area.height - h) / 2)
-  void window.cockpit.moveWindowTo(x, y)
+  void window.cockpit.centerWindow(c.anchor, c.margin)
 }
 
 /**
@@ -303,7 +296,12 @@ function setCardEl(el: unknown): void {
  * Wayland has NO input passthrough — a locked window still blocks its whole
  * BrowserWindow area. To shrink the blocked region to ~the visible card, resize
  * the window to the card bounds while locked.
+ * The card is always horizontally centered inside the window, so shrink =
+ * resize to the card size + re-center with the TARGET dims (never derive the
+ * position from win.getBounds() — it's stale on Wayland after KWin moves it,
+ * which caused the ever-rightward drift).
  */
+let lastFit = { w: 0, h: 0 }
 function fitWindowToContent(): void {
   const card = cardEl.value
   if (!card) return
@@ -311,49 +309,72 @@ function fitWindowToContent(): void {
   if (r.width < 4 || r.height < 4) return
   const w = Math.ceil(r.width) + 2
   const h = Math.ceil(r.height) + 2
-  const newX = (window.screenX ?? 0) + Math.round(r.left)
-  const newY = (window.screenY ?? 0) + Math.round(r.top)
-  if (Math.abs(window.innerWidth - w) > 2 || Math.abs(window.innerHeight - h) > 2) {
-    void window.cockpit.resizeWindow(w, h)
-    void window.cockpit.moveWindowTo(newX, newY)
-  }
+  if (w === lastFit.w && h === lastFit.h) return
+  lastFit = { w, h }
+  const c = lyricsCfg.value
+  void window.cockpit.autoFitWindow(w, h, c.anchor, c.margin)
 }
 
+// Restore the base size only on the lock→unlock TRANSITION. On every line
+// change (windowLines) autoFitWidth may legitimately grow the window — the
+// old "size !== base → restore" logic fired then too, shrinking then growing
+// the window every lyric line (the vertical/horizontal "jumping").
+let wasLocked = false
 watch([locked, windowLines, cardEmpty], () => {
+  const nowLocked = locked.value
   void nextTick().then(() => {
-    if (locked.value) {
+    if (nowLocked) {
       fitWindowToContent()
+      wasLocked = true
+      lastFitW = 0
       return
     }
-    // unlocked → restore the configured base size + anchor position
-    if (Math.abs(window.innerWidth - baseWinW.value) > 2 || window.innerHeight !== baseWinH.value) {
-      void window.cockpit.resizeWindow(baseWinW.value, baseWinH.value).then(() => {
-        applyAnchorPlacement()
-      })
+    if (wasLocked) {
+      // just unlocked → restore the configured base size + anchor position
+      wasLocked = false
+      lastFitW = 0
+      void window.cockpit.autoFitWindow(
+        baseWinW.value,
+        baseWinH.value,
+        lyricsCfg.value.anchor,
+        lyricsCfg.value.margin
+      )
+      return
     }
     autoFitWidth()
   })
 })
 
+// Last width auto-fit resized to. On Wayland `setSize` is async, so
+// `window.innerWidth` lags — without this guard autoFitWidth re-resized and
+// re-anchored on EVERY poll (the "kwin script ran ×100+" spam).
+let lastFitW = 0
 function autoFitWidth(): void {
   const card = cardEl.value
   if (!card) return
-  if (lyricsCfg.value.auto_width === false) {
-    if (Math.abs(window.innerWidth - baseWinW.value) > 40) {
-      void window.cockpit.resizeWindow(baseWinW.value, window.innerHeight).then(() => {
-        applyAnchorPlacement()
-      })
+  const c = lyricsCfg.value
+  const doFit = (force: boolean): void => {
+    if (c.auto_width === false) {
+      if (lastFitW !== baseWinW.value) {
+        lastFitW = baseWinW.value
+        void window.cockpit.autoFitWindow(baseWinW.value, window.innerHeight, c.anchor, c.margin)
+      }
+      return
     }
-    return
+    const pad = 12 // breathing room around the card
+    const maxW = Math.round(window.screen.availWidth * 0.9)
+    const rect = card.getBoundingClientRect()
+    const needed = Math.min(maxW, Math.max(baseWinW.value, Math.ceil(rect.width) + pad))
+    if (needed !== lastFitW || force) {
+      lastFitW = needed
+      void window.cockpit.autoFitWindow(needed, window.innerHeight, c.anchor, c.margin)
+    }
   }
-  const pad = 12 // breathing room around the card
-  const maxW = Math.round(window.screen.availWidth * 0.9)
-  const needed = Math.min(maxW, Math.max(baseWinW.value, card.offsetWidth + pad))
-  if (Math.abs(needed - window.innerWidth) > 40) {
-    void window.cockpit.resizeWindow(needed, window.innerHeight).then(() => {
-      applyAnchorPlacement()
-    })
-  }
+  doFit(false)
+  // Re-measure once the layout settles — the first pass can read the card
+  // BEFORE a freshly-rendered long line has fully laid out (stale width →
+  // under-grown window + off-center alignment).
+  setTimeout(() => doFit(true), 120)
 }
 
 function onResize(): void {
@@ -576,16 +597,22 @@ onBeforeUnmount(() => {
   font-weight: 500;
   opacity: 0.5;
 }
+/* Timestamp-less lyrics: show the whole text as a bounded, scrollable block
+   (the window height is fixed, so cap it and scroll internally). */
 .lyrics-plain {
   font-family: var(--lyr-font);
   font-size: var(--lyr-candidate-size);
   font-weight: var(--lyr-candidate-weight);
   line-height: var(--lyr-line-height);
+  letter-spacing: var(--lyr-letter-spacing);
   text-align: center;
   color: var(--lyr-candidate-color);
   opacity: 0.9;
-  max-height: 80%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: calc(100vh - 120px);
   overflow-y: auto;
+  padding: 2px 6px;
 }
 .lyrics-menu {
   position: fixed;

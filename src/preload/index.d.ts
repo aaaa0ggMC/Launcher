@@ -89,6 +89,16 @@ export interface CockpitApi {
   moveWindowTo: (x: number, y: number) => Promise<boolean>
   resizeWindow: (w: number, h: number) => Promise<boolean>
   getWorkArea: () => Promise<{ x: number; y: number; width: number; height: number }>
+  centerWindow: (
+    anchor: 'top' | 'center' | 'bottom',
+    margin: number
+  ) => Promise<boolean>
+  autoFitWindow: (
+    w: number,
+    h: number,
+    anchor: 'top' | 'center' | 'bottom',
+    margin: number
+  ) => Promise<boolean>
   createWindow: (
     spec: Record<string, unknown>
   ) => Promise<{ ok: boolean; created?: boolean; error?: string }>

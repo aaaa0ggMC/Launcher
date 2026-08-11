@@ -128,6 +128,18 @@ const cockpit = {
   /** Primary display work area ({x, y, width, height}). */
   getWorkArea: (): Promise<{ x: number; y: number; width: number; height: number }> =>
     ipcRenderer.invoke('window:work-area'),
+  /** Center horizontally + place per anchor/margin (main-process computed). */
+  centerWindow: (
+    anchor: 'top' | 'center' | 'bottom',
+    margin: number
+  ): Promise<boolean> => ipcRenderer.invoke('window:center', anchor, margin),
+  /** Resize + re-center atomically using the target dims (no stale-bounds drift). */
+  autoFitWindow: (
+    w: number,
+    h: number,
+    anchor: 'top' | 'center' | 'bottom',
+    margin: number
+  ): Promise<boolean> => ipcRenderer.invoke('window:auto-fit', w, h, anchor, margin),
 
   // child window manager (single-instance per id; the panel controls children
   // cross-window via controlWindow)
