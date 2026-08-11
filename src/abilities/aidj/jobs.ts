@@ -8,6 +8,7 @@ import {
   loadAidjConfig,
   ensureAidjDir,
   loadLibrary,
+  scanMusicFiles,
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
@@ -55,13 +56,15 @@ registerJobHandler('aidj.persistent', async (control, args) => {
   const missing = await findMissingSongs(musicPaths, metadata)
   if (missing.size > 0) {
     control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)
-    metadata = await syncMetadata(
-      client,
-      missing,
-      metadata,
-      config.ai_settings.metadata_model,
-      config.preferences.metadata_concurrency
-    )
+    metadata = (
+      await syncMetadata(
+        client,
+        missing,
+        metadata,
+        config.ai_settings.metadata_model,
+        config.preferences.metadata_concurrency
+      )
+    ).metadata
   }
 
   control.pushLine(`曲库已加载: ${metadata.size} 首歌曲`)
@@ -1056,5 +1059,87 @@ registerJobHandler('aidj.title', async (control, args) => {
   log.info('Session title generated', { sessionId, title })
   control.pushLine(`标题已生成: ${title}`)
   control.push({ data: { type: 'title', sessionId, title } })
+  control.finish('exited')
+})
+
+// ---------------------------------------------------------------------------
+// aidj.metadata-sync — 后台扫描曲库，为缺失元数据的歌曲生成元数据并写入
+// music_metadata.jsonl。与 AIDJ 参考实现的 sync_metadata 逻辑一致
+// (NCM 搜索歌词 → AI 提取 language/emotion/genre/loudness/review → 追加 JSONL)。
+// 任务 name 固定为 'AIDJ 元数据同步'，用于渲染端/命令的去重检测。
+// ---------------------------------------------------------------------------
+registerJobHandler('aidj.metadata-sync', async (control) => {
+  const config = await loadAidjConfig()
+  if (!config) {
+    control.pushLine('错误: AIDJ 配置未找到', 'stderr')
+    control.finish('error')
+    return
+  }
+  setNcmBaseUrl(config.ncm_base_url)
+  await ensureAidjDir()
+
+  const client = new OpenAI({
+    apiKey: config.secrets.api_key,
+    baseURL: config.ai_settings.base_url
+  })
+
+  control.pushLine('扫描曲库中...')
+  const lib = await loadLibrary()
+  // loadLibrary 可能返回过期缓存（新文件在缓存建立之后才加入磁盘）。
+  // 重新扫描磁盘，并把新歌就地合并进共享的 musicPaths map —— 这样引用同一
+  // map 的主会话等所有消费者都能立刻看到新歌，metadata 也保持只增不减。
+  const fresh = await scanMusicFiles(config.music_folders ?? [])
+  let added = 0
+  for (const [name, path] of fresh) {
+    if (!lib.musicPaths.has(name)) {
+      lib.musicPaths.set(name, path)
+      added++
+    }
+  }
+  if (added > 0) control.pushLine(`在磁盘上发现 ${added} 首新歌曲`)
+  const missing = await findMissingSongs(lib.musicPaths, lib.metadata)
+  if (!missing.size) {
+    control.pushLine('没有需要更新的歌曲元数据')
+    control.finish('exited')
+    return
+  }
+
+  const total = missing.size
+  const model = config.ai_settings.metadata_model
+  const concurrency = config.preferences.metadata_concurrency
+  control.pushLine(
+    `发现 ${total} 首歌曲缺少元数据，使用 ${model} 开始同步 (并发 ${concurrency})...`
+  )
+
+  const { counts } = await syncMetadata(client, missing, lib.metadata, model, concurrency, (p) => {
+    control.setProgress(Math.round((p.done / p.total) * 100))
+    const marker = `[${p.done}/${p.total}] ${p.name}`
+    if (p.status === 'ok') {
+      control.pushLine(marker)
+      control.pushLine(`    ✓ NCM 命中 id=${p.sid ?? ''}，歌词 ${p.lyricLen ?? 0} 字`)
+      control.pushLine(`    ✓ ${JSON.stringify(p.meta)}`)
+    } else if (p.status === 'noLyric') {
+      control.pushLine(`${marker} ⚠ NCM 未找到匹配`)
+    } else if (p.status === 'networkError') {
+      control.pushLine(`${marker} ✗ ${p.error ?? 'NCM API 连接失败'}`, 'stderr')
+    } else {
+      control.pushLine(
+        `${marker} ✗ AI 提取失败${p.error ? `: ${p.error}` : ''} (NCM id=${p.sid ?? ''})`,
+        'stderr'
+      )
+    }
+  })
+
+  if (counts.networkError > 0) {
+    control.pushLine(
+      `⚠️ NCM API 不可用 (${counts.networkError} 首请求失败)，请检查 ncm_base_url 或启动 NeteaseCloudMusicApi 服务`,
+      'stderr'
+    )
+  }
+  control.pushLine(
+    `元数据同步完成: 成功 ${counts.ok}，未找到歌词 ${counts.noLyric}，提取失败 ${counts.failed}` +
+      (counts.networkError ? `，网络错误 ${counts.networkError}` : '')
+  )
+  control.push({ data: { type: 'metadata_sync_done', synced: counts.ok } })
   control.finish('exited')
 })

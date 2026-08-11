@@ -63,6 +63,30 @@ export interface SongMeta {
   review?: string
 }
 
+/** Per-sync counters returned by syncMetadata. networkError = NCM API unreachable. */
+export interface MetadataSyncCounts {
+  ok: number
+  noLyric: number
+  failed: number
+  networkError: number
+}
+
+/** Per-song progress emitted by syncMetadata (status/result/error for the console). */
+export interface MetadataSyncProgress {
+  done: number
+  total: number
+  name: string
+  status: 'ok' | 'noLyric' | 'networkError' | 'failed'
+  /** NCM song id when the search hit. */
+  sid?: number | null
+  /** Lyric text length when the search hit. */
+  lyricLen?: number
+  /** The final extracted metadata (status='ok' only). */
+  meta?: SongMeta
+  /** Failure reason (status='networkError' | 'failed'). */
+  error?: string
+}
+
 export interface SongEntry {
   name: string
   path: string

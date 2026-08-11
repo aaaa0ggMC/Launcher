@@ -6,6 +6,7 @@ import {
   saveAidjConfig,
   ensureAidjDir,
   loadLibrary,
+  scanMusicFiles,
   invalidateLibrary,
   findMissingSongs,
   syncMetadata,
@@ -225,6 +226,11 @@ async function ensureInit(): Promise<{
     const lib = await loadLibrary()
     const paths = lib.musicPaths
     const metadata = lib.metadata
+    // 库缓存可能建于新文件加入之前 —— 重新扫描磁盘并就地合并新歌。
+    const fresh = await scanMusicFiles(config.music_folders ?? [])
+    for (const [name, path] of fresh) {
+      if (!paths.has(name)) paths.set(name, path)
+    }
     _musicPaths = paths
     _metadata = metadata
     log.info(`metadata loaded: ${metadata.size} songs`)
@@ -238,7 +244,7 @@ async function ensureInit(): Promise<{
         config.ai_settings.metadata_model,
         config.preferences.metadata_concurrency
       )
-      _metadata = synced
+      _metadata = synced.metadata
     }
     session = new DJSession(client, _metadata, paths, config)
     _session = session
@@ -543,6 +549,11 @@ const commands: CommandSpec[] = [
       _musicPaths = lib.musicPaths
       const musicPaths = lib.musicPaths
       const metadata = lib.metadata
+      // loadLibrary 缓存可能过期：重新扫描磁盘并就地合并新歌（只增不减）。
+      const fresh = await scanMusicFiles(config.music_folders ?? [])
+      for (const [name, path] of fresh) {
+        if (!musicPaths.has(name)) musicPaths.set(name, path)
+      }
       const missing = await findMissingSongs(musicPaths, metadata)
       if (missing.size === 0) return { ok: true, synced: 0, message: '无新歌曲需要同步' }
       const synced = await syncMetadata(
@@ -552,8 +563,26 @@ const commands: CommandSpec[] = [
         config.ai_settings.metadata_model,
         config.preferences.metadata_concurrency
       )
-      _metadata = synced
-      return { ok: true, synced: missing.size }
+      _metadata = synced.metadata
+      return { ok: true, synced: synced.counts.ok }
+    }
+  },
+  {
+    name: 'aidj.metadata-sync',
+    description: '扫描曲库并更新缺失的歌曲元数据（后台任务）',
+    usage: 'aidj.metadata-sync',
+    run: async () => {
+      const already = listTasks().some(
+        (tk) => tk.status === 'running' && tk.name === 'AIDJ 元数据同步'
+      )
+      if (already) return { ok: false, alreadyRunning: true, error: '元数据同步任务正在运行中' }
+      const task = startJobByName('aidj.metadata-sync', {
+        name: 'AIDJ 元数据同步',
+        description: '扫描曲库并更新缺失歌曲元数据'
+      })
+      if (!task) return { ok: false, error: '元数据同步任务无法启动' }
+      log.info('Metadata sync job started', { taskId: task.id })
+      return { ok: true, task }
     }
   },
   {
@@ -1077,6 +1106,16 @@ const commands: CommandSpec[] = [
         librarySize: session.metadata.size,
         pathsSize: session.musicPaths.size
       }
+    }
+  },
+  {
+    name: 'aidj.invalidate-library',
+    description: '使曲库缓存失效（下次加载重新扫描目录）',
+    run: async () => {
+      invalidateLibrary()
+      _metadata = null
+      _musicPaths = null
+      return { ok: true }
     }
   },
   {

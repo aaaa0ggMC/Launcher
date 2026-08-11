@@ -674,6 +674,10 @@ const abilityConfigs = computed(() => {
 
 provide('cockpit:config', runtimeConfig)
 provide('cockpit:settings', settingsSections)
+// Ability 可调用以打开全局面板 (BackgroundTasksDialog)，如后台任务已在运行。
+provide('cockpit:open-bt', (): void => {
+  btOpen.value = true
+})
 // Cross-scope exposure: every ability can reach the full loaded registry
 // (sidebar list, configs, launch helpers, command list) via this single key.
 provide('cockpit:abilities', {

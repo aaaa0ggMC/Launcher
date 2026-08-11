@@ -8,6 +8,8 @@ defineOptions({ name: 'cockpit-aidj' })
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
+const openBt = inject('cockpit:open-bt', null) as (() => void) | null
+
 const menuOpen = ref(false)
 const menuStep = ref<'main' | 'sessions'>('main')
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
@@ -123,6 +125,36 @@ function enterSessions(): void {
   menuStep.value = 'sessions'
   search.value = ''
   refreshSessions()
+}
+
+/** 更新元数据：没有运行中的同步任务则启动后台作业；已有则直接跳到后台面板。 */
+async function updateMetadata(): Promise<void> {
+  try {
+    const runningTasks = (await window.cockpit.btList()) as {
+      name?: string
+      status?: string
+    }[]
+    const alreadyRunning = (runningTasks ?? []).some(
+      (tk) => tk.status === 'running' && tk.name === 'AIDJ 元数据同步'
+    )
+    if (alreadyRunning) {
+      openBt?.()
+      return
+    }
+    const r = (await window.cockpit.btJob('aidj.metadata-sync', {
+      name: 'AIDJ 元数据同步',
+      description: t('aidj.metadata_sync_desc', '扫描曲库并更新缺失歌曲元数据')
+    })) as { ok?: boolean; task?: { id?: string }; error?: string; alreadyRunning?: boolean }
+    if (r?.ok && r.task?.id) {
+      showSnack(t('aidj.metadata_sync_started', '已开始同步元数据…'))
+    } else if (r?.alreadyRunning) {
+      openBt?.()
+    } else {
+      showSnack(r?.error || t('aidj.metadata_sync_failed', '元数据同步失败'), 'error')
+    }
+  } catch (e) {
+    showSnack(`元数据同步失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+  }
 }
 
 function selectChat(): void {
@@ -260,6 +292,39 @@ function toMarkdown(): string {
   return chatRef.value?.toMarkdown?.() ?? ''
 }
 
+const pageMenuRef = ref<HTMLElement | null>(null)
+let menuCleanup: (() => void) | null = null
+
+function menuClose(): void {
+  menuOpen.value = false
+  menuStep.value = 'main'
+}
+
+/** Close the page dropdown when clicking/right-clicking outside of it. */
+function onMenuDocClick(e: MouseEvent): void {
+  const el = pageMenuRef.value
+  if (el && !el.contains(e.target as Node)) menuClose()
+}
+
+function onMenuKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') menuClose()
+}
+
+watch(menuOpen, (open) => {
+  menuCleanup?.()
+  menuCleanup = null
+  if (open) {
+    document.addEventListener('click', onMenuDocClick)
+    document.addEventListener('contextmenu', onMenuDocClick)
+    document.addEventListener('keydown', onMenuKey)
+    menuCleanup = (): void => {
+      document.removeEventListener('click', onMenuDocClick)
+      document.removeEventListener('contextmenu', onMenuDocClick)
+      document.removeEventListener('keydown', onMenuKey)
+    }
+  }
+})
+
 let ctxCleanup: (() => void) | null = null
 
 function ctxClose(): void {
@@ -288,18 +353,20 @@ watch(ctxMenuOpen, (open) => {
 onDeactivated(() => {
   ctxCleanup?.()
   ctxCleanup = null
+  menuCleanup?.()
+  menuCleanup = null
 })
 
 onMounted(() => {
   if (window.cockpit?.on) {
     btUnsub = window.cockpit.on('cockpit:bt', (event: unknown) => {
-      if (menuStep.value !== 'sessions') return
       const ev = event as Record<string, unknown>
       if (ev?.type === 'output') {
         const msgs = (ev.messages ?? []) as Record<string, unknown>[]
         for (const msg of msgs) {
           const data = msg.data as Record<string, unknown> | undefined
-          if (data && typeof data === 'object' && data.type === 'title') {
+          if (!data || typeof data !== 'object') continue
+          if (data.type === 'title') {
             const sid = String(data.sessionId ?? '')
             const title = String(data.title ?? '')
             if (sid && title) {
@@ -308,10 +375,18 @@ onMounted(() => {
               sessions.value = [...sessions.value]
               showSnack(t('aidj.sessions.title_generated', '标题已生成'))
             }
+          } else if (data.type === 'metadata_sync_done') {
+            const synced = Number(data.synced ?? 0)
+            showSnack(
+              synced > 0
+                ? `${t('aidj.metadata_sync_done', '元数据同步完成')}：${synced}`
+                : t('aidj.metadata_sync_none', '没有写入新的元数据'),
+              synced > 0 ? 'success' : 'warning'
+            )
           }
         }
       }
-      refreshSessions()
+      if (menuStep.value === 'sessions') refreshSessions()
     })
   }
 })
@@ -330,7 +405,7 @@ defineExpose({ toMarkdown })
   <div class="aidj-shell">
     <ChatView ref="chatRef" />
 
-    <div class="page-menu" :class="{ 'is-open': menuOpen }">
+    <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }">
       <button class="page-menu-handle" @click="toggleMenu">
         <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
       </button>
@@ -347,6 +422,10 @@ defineExpose({ toMarkdown })
               <v-icon size="18">mdi-history</v-icon>
               <span>{{ t('aidj.subpage.sessions', 'Chat Sessions') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item" @click="updateMetadata">
+              <v-icon size="18">mdi-database-sync-outline</v-icon>
+              <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
             </div>
           </template>
 

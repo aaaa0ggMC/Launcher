@@ -9,6 +9,8 @@ import { readJson, writeJsonAtomic, writeTextFile } from '../../main/process/uti
 import type {
   AidjConfig,
   SongMeta,
+  MetadataSyncCounts,
+  MetadataSyncProgress,
   PlaylistEntry,
   PlayerStatus,
   LoudnessInfo,
@@ -305,7 +307,7 @@ export function setNcmBaseUrl(url: string): void {
 
 export async function searchNcmApi(
   keywords: string
-): Promise<{ sid: number | null; lyric: string }> {
+): Promise<{ sid: number | null; lyric: string; networkError: boolean }> {
   const started = Date.now()
   try {
     const sRes = await fetch(
@@ -321,7 +323,7 @@ export async function searchNcmApi(
         code: sData.code,
         latencyMs: Date.now() - started
       })
-      return { sid: null, lyric: '' }
+      return { sid: null, lyric: '', networkError: false }
     }
     const sid = sData.result.songs[0].id
     const lRes = await fetch(`${ncmBaseUrl}/lyric?id=${sid}`)
@@ -334,10 +336,10 @@ export async function searchNcmApi(
       lyricLen: lyric.length,
       latencyMs: Date.now() - started
     })
-    return { sid, lyric }
+    return { sid, lyric, networkError: false }
   } catch (e) {
     log.warn('NCM search failed', { keywords, error: String(e) })
-    return { sid: null, lyric: '' }
+    return { sid: null, lyric: '', networkError: true }
   }
 }
 
@@ -346,7 +348,7 @@ export async function extractMetadataAi(
   name: string,
   lyric: string,
   model: string
-): Promise<SongMeta | null> {
+): Promise<{ meta: SongMeta | null; error?: string }> {
   const started = Date.now()
   try {
     const info = { title: name, lyrics: lyric.slice(0, 500) }
@@ -377,7 +379,7 @@ RULES:
     const content = resp.choices[0]?.message?.content
     if (!content) {
       log.debug('Metadata extraction: empty', { name, latencyMs: Date.now() - started })
-      return null
+      return { meta: null, error: 'AI 返回空内容' }
     }
     const parsed = JSON.parse(content) as SongMeta
     log.debug('Metadata extracted', {
@@ -387,54 +389,104 @@ RULES:
       parsed,
       latencyMs: Date.now() - started
     })
-    return parsed
+    return { meta: parsed }
   } catch (e) {
-    log.warn('extractMetadataAi failed', { name, error: String(e) })
-    return null
+    const error = e instanceof Error ? e.message : String(e)
+    log.warn('extractMetadataAi failed', { name, error })
+    return { meta: null, error }
   }
 }
+
+/** Names currently being metadata-synced by some caller — concurrent syncs skip
+ *  them so the same (expensive) AI generation + jsonl line never happens twice. */
+const _syncing = new Set<string>()
 
 export async function syncMetadata(
   client: OpenAI,
   missing: Map<string, string>,
   metadata: Map<string, SongMeta>,
   model: string,
-  concurrency: number
-): Promise<Map<string, SongMeta>> {
-  if (!missing.size) return metadata
-  log.info(`Syncing ${missing.size} songs... concurrency=${concurrency}`)
-  const entries = [...missing.entries()]
+  concurrency: number,
+  onProgress?: (p: MetadataSyncProgress) => void
+): Promise<{ metadata: Map<string, SongMeta>; counts: MetadataSyncCounts }> {
+  const counts: MetadataSyncCounts = { ok: 0, noLyric: 0, failed: 0, networkError: 0 }
+  if (!missing.size) return { metadata, counts }
+  const entries = [...missing.entries()].filter(([name]) => {
+    if (_syncing.has(name)) return false
+    _syncing.add(name)
+    return true
+  })
+  if (!entries.length) return { metadata, counts }
+  log.info(`Syncing ${entries.length} songs... concurrency=${concurrency}`)
   const workers = Math.min(concurrency, entries.length)
-  const counts = { ok: 0, noLyric: 0, failed: 0 }
-  await Promise.allSettled(
-    Array.from({ length: workers }, async (_, i) => {
-      for (let j = i; j < entries.length; j += workers) {
-        const [name] = entries[j]
-        const { sid, lyric } = await searchNcmApi(name)
-        if (sid === null) {
-          counts.noLyric++
-          log.debug('Metadata sync: no result', { name })
-          continue
+  let done = 0
+  try {
+    await Promise.allSettled(
+      Array.from({ length: workers }, async (_, i) => {
+        for (let j = i; j < entries.length; j += workers) {
+          const [name] = entries[j]
+          const { sid, lyric, networkError } = await searchNcmApi(name)
+          if (sid === null) {
+            if (networkError) {
+              counts.networkError++
+              log.warn('Metadata sync: NCM unreachable', { name })
+              onProgress?.({
+                done: ++done,
+                total: entries.length,
+                name,
+                status: 'networkError',
+                error: 'NCM API 连接失败'
+              })
+            } else {
+              counts.noLyric++
+              log.debug('Metadata sync: no result', { name })
+              onProgress?.({
+                done: ++done,
+                total: entries.length,
+                name,
+                status: 'noLyric'
+              })
+            }
+            continue
+          }
+          const { meta, error } = await extractMetadataAi(client, name, lyric, model)
+          if (meta) {
+            metadata.set(name, meta)
+            await appendMetadata(name, meta)
+            counts.ok++
+            onProgress?.({
+              done: ++done,
+              total: entries.length,
+              name,
+              status: 'ok',
+              sid,
+              lyricLen: lyric.length,
+              meta
+            })
+          } else {
+            counts.failed++
+            log.warn('Metadata sync: extraction failed', { name, sid, error })
+            onProgress?.({
+              done: ++done,
+              total: entries.length,
+              name,
+              status: 'failed',
+              sid,
+              lyricLen: lyric.length,
+              error
+            })
+          }
         }
-        const meta = await extractMetadataAi(client, name, lyric, model)
-        if (meta) {
-          metadata.set(name, meta)
-          await appendMetadata(name, meta)
-          counts.ok++
-        } else {
-          counts.failed++
-          log.warn('Metadata sync: extraction failed', { name, sid })
-        }
-      }
-    })
-  )
+      })
+    )
+  } finally {
+    for (const [name] of entries) _syncing.delete(name)
+  }
   log.info('Metadata sync done', {
     total: entries.length,
-    ok: counts.ok,
-    noLyric: counts.noLyric,
-    failed: counts.failed
+    ...counts
   })
-  return metadata
+  return { metadata, counts }
 }
 
 interface DbusBus {

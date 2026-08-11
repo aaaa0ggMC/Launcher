@@ -10,6 +10,8 @@ const baseUrl = ref('')
 const apiKey = ref('')
 const ncmBaseUrl = ref('')
 const dbusTarget = ref('vlc')
+const musicFolders = ref<string[]>([])
+const musicFolderInput = ref('')
 const autoPlay = ref(true)
 const dynamicBalance = ref(true)
 const adjMethod = ref<'lufs' | 'linear'>('lufs')
@@ -49,6 +51,7 @@ onMounted(async () => {
   apiKey.value = (sec.api_key as string) || ''
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
+  musicFolders.value = Array.isArray(cfg.music_folders) ? (cfg.music_folders as string[]) : []
   autoPlay.value = (prefs.auto_play as boolean) ?? true
   dynamicBalance.value = (prefs.dynamic_balance_volume as boolean) ?? true
   adjMethod.value = (prefs.sound_adjust_method as 'lufs' | 'linear') || 'lufs'
@@ -98,6 +101,37 @@ function update(path: string, value: unknown): void {
     .command('aidj.update-config', { path, value })
     .then(() => window.cockpit.command('aidj.save-config'))
     .catch(() => {})
+}
+
+async function persistMusicFolders(): Promise<void> {
+  try {
+    await window.cockpit.command('aidj.update-config', {
+      path: 'music_folders',
+      value: [...musicFolders.value]
+    })
+    await window.cockpit.command('aidj.save-config')
+    await window.cockpit.command('aidj.invalidate-library')
+  } catch {
+    /* noop */
+  }
+}
+
+function addMusicFolder(): void {
+  const p = musicFolderInput.value.trim()
+  if (!p || musicFolders.value.includes(p)) return
+  musicFolders.value = [...musicFolders.value, p]
+  musicFolderInput.value = ''
+  void persistMusicFolders()
+}
+
+function removeMusicFolder(p: string): void {
+  musicFolders.value = musicFolders.value.filter((x) => x !== p)
+  void persistMusicFolders()
+}
+
+async function pickMusicFolder(): Promise<void> {
+  const path = await window.cockpit.pickFile({ title: '选择音乐目录', directory: true })
+  if (path) musicFolderInput.value = path
 }
 
 watch(model, (v) => update('preferences.model', v))
@@ -248,6 +282,46 @@ function resetDj(): void {
             />
           </v-col>
         </v-row>
+        <div class="mt-3">
+          <div class="text-caption text-medium-emphasis mb-2">
+            搜索目录（递归扫描目录下所有音乐文件）
+          </div>
+          <div class="mb-2">
+            <template v-for="p in musicFolders" :key="p">
+              <v-chip
+                size="small"
+                variant="outlined"
+                closable
+                class="mr-2 mb-1"
+                @click:close="removeMusicFolder(p)"
+              >
+                {{ p }}
+              </v-chip>
+            </template>
+            <span v-if="musicFolders.length === 0" class="text-caption on-surface-variant">
+              未配置音乐目录
+            </span>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <v-text-field
+              v-model="musicFolderInput"
+              placeholder="/home/aaaa0ggmc/Music"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="flex-grow-1"
+            >
+              <template #append-inner>
+                <v-btn icon variant="text" size="small" title="选择目录" @click="pickMusicFolder">
+                  <v-icon>mdi-folder-open</v-icon>
+                </v-btn>
+              </template>
+            </v-text-field>
+            <v-btn color="primary" variant="tonal" height="40" class="px-5" @click="addMusicFolder">
+              添加
+            </v-btn>
+          </div>
+        </div>
       </div>
 
       <v-divider />
