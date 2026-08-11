@@ -1,4 +1,4 @@
-import type { Ability } from '../types'
+import type { Ability } from '../../main/ui/ability'
 
 /**
  * Background tasks ability — backend-only (no UI page). It exposes the

@@ -1,10 +1,12 @@
 import type { Component } from 'vue'
 
 /**
- * Ability contract — every `abilities/<id>/index.ts` default-exports an object
- * (or an array of objects, so one folder can register several abilities) that
- * satisfies this interface. Abilities are self-injecting: the loader scans the
- * folders at build time, so the sidebar no longer depends on
+ * Ability contract — framework-owned (lives in the shell, not in any ability).
+ *
+ * Every `abilities/<id>/index.ts` default-exports an object (or an array of
+ * objects, so one folder can register several abilities) that satisfies this
+ * interface. Abilities are self-injecting: the loader (`@ui/ability-registry`)
+ * scans the folders at build time, so the sidebar no longer depends on
  * config/abilities.yaml ordering. Components load dynamically (code-split).
  */
 export interface Ability {

@@ -23,6 +23,8 @@ export interface QuickAction {
   icon?: string
   /** display-only risk hint (darker = more dangerous). */
   risk?: 'low' | 'medium' | 'high'
+  /** extra searchable terms (aliases, tags, ...). */
+  keywords?: string[]
   /** opaque payload handed to the owning ability's activate handler. */
   target: Record<string, unknown>
   /** additional actions shown in the right-click menu. */

@@ -3,7 +3,7 @@ defineOptions({ name: 'CockpitSettings' })
 
 import { computed, inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
-import type { SettingsCategory, SettingsItem } from '../index'
+import type { SettingsCategory, SettingsItem } from '@ui/ability-registry'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields, type SearchField } from '@ui/composables/search'

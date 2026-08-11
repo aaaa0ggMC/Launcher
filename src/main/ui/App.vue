@@ -10,9 +10,13 @@ import {
   nextTick
 } from 'vue'
 import { useTheme } from 'vuetify'
-import type { Ability } from '@abilities/types'
-import { getAbilityModules, resolveSidebarAbilities, buildSettingsSections } from '@abilities'
-import type { SettingsCategory } from '@abilities'
+import type { Ability } from './ability'
+import {
+  getAbilityModules,
+  resolveSidebarAbilities,
+  buildSettingsSections
+} from './ability-registry'
+import type { SettingsCategory } from './ability-registry'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
@@ -475,15 +479,28 @@ function activate(abilityId: string, target: Record<string, unknown>): void {
   if (currentId.value !== abilityId) {
     pendingActivate.value = { ability: abilityId, target }
     currentId.value = abilityId
+    // Fallback: if the ref-watch missed the mount (transition timing), retry
+    // once shortly after navigation. Idempotent — only delivers while the
+    // request is still pending and a real view is mounted.
+    setTimeout(() => {
+      const p = pendingActivate.value
+      if (p && currentId.value === p.ability && abilityRef.value) {
+        pendingActivate.value = null
+        deliverActivate(abilityRef.value, p.target)
+      }
+    }, 600)
     return
   }
   deliverActivate(abilityRef.value, target)
 }
 
-// Deliver a pending activation once the target ability's view has mounted.
+// Deliver a pending activation once the target ability's view has actually
+// mounted. NOTE: with the out-in page transition `abilityRef` passes through
+// null (old leaves) before the new view enters — never consume the pending
+// request on that null hop, or the activation is lost.
 watch(abilityRef, (inst) => {
   const p = pendingActivate.value
-  if (p && currentId.value === p.ability) {
+  if (p && inst && currentId.value === p.ability) {
     pendingActivate.value = null
     deliverActivate(inst, p.target)
   }
@@ -544,7 +561,12 @@ async function loadSearchQuick(): Promise<void> {
     const all = await getAllQuickActions()
     const scored: { q: QuickAction; score: number }[] = []
     for (const q of all) {
-      const score = scoreFields(searchText.value, fields(q.label, q.description ?? '', q.id))
+      const score = scoreFields(
+        searchText.value,
+        fields(q.label, q.description ?? '', q.id).concat(
+          (q.keywords ?? []).map((k) => ({ text: k.toLowerCase(), weight: 1 }))
+        )
+      )
       if (score > 0) scored.push({ q, score })
     }
     searchQuick.value = scored

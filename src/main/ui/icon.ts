@@ -1,4 +1,4 @@
-import { FALLBACK_ICON } from '@abilities/types'
+import { FALLBACK_ICON } from './ability'
 
 /**
  * Icon syntax for app entries, actions and ability sidebar entries:

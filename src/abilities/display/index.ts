@@ -1,4 +1,4 @@
-import type { Ability } from '../types'
+import type { Ability } from '../../main/ui/ability'
 
 /**
  * Display ability — backend-only (壁纸 / 显示输出). No UI page: it registers

@@ -1,5 +1,5 @@
 import { defineAsyncComponent } from 'vue'
-import type { Ability } from '../types'
+import type { Ability } from '../../main/ui/ability'
 
 export default {
   id: 'autostart',

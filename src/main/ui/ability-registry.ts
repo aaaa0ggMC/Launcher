@@ -1,9 +1,11 @@
 import { markRaw } from 'vue'
 import type { Component } from 'vue'
-import type { Ability } from './types'
+import type { Ability } from './ability'
 
 /**
- * Ability loader — the single source of truth for what's loaded.
+ * Ability loader — the single source of truth for what's loaded. Framework
+ * infrastructure owned by the shell; the folder it scans (`abilities/`) holds
+ * only the actual abilities.
  *
  * Every `abilities/<id>/index.ts` (the folder's orchestrator) default-exports
  * one `Ability` metadata object — or an ARRAY of them, so a single folder can
@@ -23,7 +25,7 @@ import type { Ability } from './types'
 
 type AbilityDefault = Ability | Ability[]
 
-const abilityModules = import.meta.glob<{ default: AbilityDefault }>('./*/index.ts', {
+const abilityModules = import.meta.glob<{ default: AbilityDefault }>('../../abilities/*/index.ts', {
   eager: true
 })
 

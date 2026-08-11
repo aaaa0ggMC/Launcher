@@ -18,6 +18,11 @@ registerQuickActionProvider(async () => {
     if (!entry || entry.missing) continue
     const root = entry.root ?? ''
     const base = { root, id }
+    const keywords = [
+      ...(entry.tags ?? []),
+      ...(entry.tags_auto ?? []),
+      ...(entry.alias ? [entry.alias] : [])
+    ]
     const children: QuickAction[] = Object.entries(entry.actions ?? {}).map(([aid, act]) => ({
       id: `apps:${id}:${aid}`,
       ability: 'apps',
@@ -34,6 +39,7 @@ registerQuickActionProvider(async () => {
       description: entry.description ?? entry.path,
       icon: entry.icon,
       risk: entry.security?.risk ?? 'low',
+      keywords,
       target: base,
       children
     })

@@ -14,7 +14,6 @@
     "baseUrl": ".",
     "paths": {
       "@ui/*": ["src/main/ui/*"],
-      "@abilities": ["src/abilities/index.ts"],
       "@abilities/*": ["src/abilities/*"],
       "@background/*": ["src/background/*"],
       "@shared/*": ["src/shared/*"]
