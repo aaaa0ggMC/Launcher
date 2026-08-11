@@ -129,6 +129,24 @@ registerJobHandler('download-batch', async (control, args) => {
 
 `src/main/process/paths.ts` 集中了所有系统路径，适配时优先改这里；`scripts/` 按平台替换即可。改一个能力 = 只动那个文件夹，不影响其它能力与框架。
 
+### 已知局限：桌面歌词窗口（AIDJ）
+
+Electron 在 **Wayland 下的窗口能力缺失**（合成器拥有定位/置顶/输入路由），当前只能部分缓解：
+
+| 能力                    | 原生 Wayland（KDE）                                                                                             | X11 / Windows / macOS                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 窗口定位（anchor/margin）| 经 KWin D-Bus scripting 搬窗（`frameGeometry.x/y`，caption 匹配）                                                | 原生 `setPosition` ✓                         |
+| 水平居中                | 主进程主屏工作区计算 + KWin 搬窗 ✓                                                                               | ✓                                            |
+| 置顶                    | 合成器忽略，需 KDE 手动置顶                                                                                      | `setAlwaysOnTop` ✓                           |
+| 锁定（鼠标穿透）        | 不可穿透：`setIgnoreMouseEvents` 在 Wayland 是 no-op；锁定时仅「窗口内部不响应」+ 自动缩窗到贴合内容以减少遮挡      | 真穿透 ✓（X11 需真实 X11 会话）              |
+| 子窗口标题              | 固定为 `aidj-lyrics-<player>`（KWin caption 匹配依赖）                                                           | ✓                                            |
+
+补充：
+
+- `ELECTRON_OZONE_PLATFORM_HINT` 在 **Electron 38 起被移除**；用 `--ozone-platform=x11` 强制 XWayland 会让 GPU 进程段错误（`exit_code=139`），禁用硬件加速后又因透明窗口走 `x11_software_bitmap_presenter` 而无法呈现——**XWayland 路线不可用**。
+- 因此歌词窗口仅推荐在 **X11 会话 / Windows / macOS** 使用完整能力（穿透、置顶、定位）；Wayland 下可接受"内部不响应 + 缩窗"的锁定语义。
+- 其它平台（`setIgnoreMouseEvents`/`setAlwaysOnTop`/`setPosition`）均正常。
+
 ## 系统级配置
 
 提权操作需要把 polkit 规则安装到系统（免重复输密码）：

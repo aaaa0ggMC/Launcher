@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { translate } from '@ui/i18n'
 import { DEFAULT_LYRICS_CFG } from '@abilities/aidj/types'
 import type { LyricsDisplayConfig } from '@abilities/aidj/types'
@@ -41,36 +41,49 @@ function hexToRgba(hex: string): string {
   )}, ${(parseInt(h.slice(6, 8), 16) / 255).toFixed(3)})`
 }
 
-const rootStyle = computed(() => ({
-  '--lyr-bg': hexToRgba(lyricsCfg.value.bg_color),
-  '--lyr-fg': hexToRgba(lyricsCfg.value.fg_color),
-  '--lyr-font': `'${lyricsCfg.value.font_family.replace(/'/g, '')}', 'Iansui', 'Noto Sans CJK SC', sans-serif`,
-  '--lyr-size': `${Math.max(10, lyricsCfg.value.font_size)}px`,
-  '--lyr-next-size': `${Math.max(8, Math.round(lyricsCfg.value.font_size * 0.6))}px`,
-  '--lyr-margin': `${Math.max(0, lyricsCfg.value.margin)}px`
-}) as Record<string, string>)
+const rootStyle = computed(() => {
+  const c = lyricsCfg.value
+  const shadow = Math.min(1, Math.max(0, c.shadow ?? 0.5))
+  return {
+    '--lyr-bg': hexToRgba(c.bg_color),
+    '--lyr-fg': hexToRgba(c.fg_color),
+    '--lyr-header-color': hexToRgba(c.header_color ?? c.fg_color),
+    '--lyr-candidate-color': hexToRgba(c.candidate_color ?? c.fg_color),
+    '--lyr-font': `'${c.font_family.replace(/'/g, '')}', 'Iansui', 'Noto Sans CJK SC', sans-serif`,
+    '--lyr-size': `${Math.max(10, c.font_size)}px`,
+    '--lyr-header-size': `${Math.max(8, c.header_size ?? 13)}px`,
+    '--lyr-candidate-size': `${Math.max(8, c.candidate_size ?? Math.round(c.font_size * 0.6))}px`,
+    '--lyr-current-weight': `${Math.max(400, Math.min(900, c.current_weight ?? 700))}`,
+    '--lyr-candidate-weight': `${Math.max(400, Math.min(900, c.candidate_weight ?? 500))}`,
+    '--lyr-header-weight': `${Math.max(400, Math.min(900, c.header_weight ?? 600))}`,
+    '--lyr-line-height': `${Math.max(1, Math.min(2, c.line_height ?? 1.3))}`,
+    '--lyr-letter-spacing': `${Math.max(-2, Math.min(8, c.letter_spacing ?? 0))}px`,
+    '--lyr-shadow': shadow > 0 ? `0 1px 3px rgba(0, 0, 0, ${shadow.toFixed(2)})` : 'none',
+    '--lyr-margin': `${Math.max(0, c.margin)}px`,
+    '--lyr-gap': `${Math.max(2, c.line_gap ?? 6)}px`,
+    '--lyr-card-radius': `${Math.max(0, c.card_radius ?? 12)}px`,
+    '--lyr-card-pad-y': `${Math.max(0, c.card_padding_y ?? 12)}px`,
+    '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`
+  } as Record<string, string>
+})
 
 const anchorClass = computed(() => `anchor-${lyricsCfg.value.anchor}`)
 
 /**
  * Re-assert the configured anchor/margin placement once this window is fully
- * mounted. `window.screen` reflects the display the window lives on; main then
- * applies native setPosition (X11/Windows) or KWin scripting (KDE Wayland).
+ * mounted. Centering uses the PRIMARY display work area from the main process
+ * (the renderer's `window.screen` is unreliable on Wayland).
  */
-function applyAnchorPlacement(): void {
+async function applyAnchorPlacement(): Promise<void> {
   const c = lyricsCfg.value
-  const screen = window.screen as Screen & { availLeft?: number; availTop?: number }
-  const aw = screen.availWidth
-  const ah = screen.availHeight
-  const left = screen.availLeft ?? 0
-  const top = screen.availTop ?? 0
+  const area = await window.cockpit.getWorkArea()
   const w = window.innerWidth
   const h = window.innerHeight
-  const x = left + Math.round((aw - w) / 2)
+  const x = area.x + Math.round((area.width - w) / 2)
   let y: number
-  if (c.anchor === 'bottom') y = top + ah - h - c.margin
-  else if (c.anchor === 'top') y = top + c.margin
-  else y = top + Math.round((ah - h) / 2)
+  if (c.anchor === 'bottom') y = area.y + area.height - h - c.margin
+  else if (c.anchor === 'top') y = area.y + c.margin
+  else y = area.y + Math.round((area.height - h) / 2)
   void window.cockpit.moveWindowTo(x, y)
 }
 
@@ -87,7 +100,7 @@ const state = ref<PlaybackState>({})
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 /** Consecutive `ok:false` polls → the bound DBus player is gone; nothing left
- *  to read (progress comes from DBus too) so the window closes itself. */
+ *  to read so the window closes itself. */
 const FAIL_LIMIT = 3
 let failCount = 0
 
@@ -106,6 +119,8 @@ function parseLrc(lrc: string): LyricLine[] {
     const timeTags = line.match(/\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g)
     if (!timeTags) continue
     const text = line.replace(/\[[^\]]*\]/g, '').trim()
+    // Keep the timestamp even when the text is empty — it's a timing boundary.
+    // Empty-text lines are skipped only at RENDER time (see windowLines).
     for (const tag of timeTags) {
       const m = tag.match(/\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/)
       if (!m) continue
@@ -129,10 +144,12 @@ const plainLyric = computed<string>(() => {
   return lrcLines.value.length ? '' : lyric.replace(/\[[^\]]*\]/g, '').trim()
 })
 
-const positionMs = computed(() => state.value.positionMs ?? 0)
+const positionMs = computed(() =>
+  (state.value.positionMs ?? 0) + (lyricsCfg.value.position_offset_ms ?? 0)
+)
 
 /** Index of the current line: the last line whose time ≤ playback position. */
-const currentIndex = computed(() => {
+const currentIdx = computed(() => {
   if (!lrcLines.value.length) return -1
   let idx = -1
   for (let i = 0; i < lrcLines.value.length; i++) {
@@ -142,15 +159,46 @@ const currentIndex = computed(() => {
   return idx
 })
 
-const currentLine = computed(() =>
-  currentIndex.value >= 0 ? (lrcLines.value[currentIndex.value]?.text ?? '') : ''
+/** Display index: walk the current line back to the nearest TEXT line, so an
+ *  empty-timestamp line (an instrumental gap) keeps the previous lyric lit —
+ *  only when `ignore_empty_lines` is enabled. */
+const displayIdx = computed(() => {
+  let i = currentIdx.value
+  if (lyricsCfg.value.ignore_empty_lines === false) return i
+  while (i >= 0 && !lrcLines.value[i].text) i--
+  return i
+})
+
+/** True while the current timestamp line carries no lyric text (a gap). */
+const inGap = computed(() => {
+  const i = currentIdx.value
+  return i >= 0 && !lrcLines.value[i].text
+})
+
+/** Static window around the current line: before + current + after (no scroll). */
+const windowStart = computed(() => Math.max(0, displayIdx.value - (lyricsCfg.value.lines_before ?? 0)))
+const windowEnd = computed(() =>
+  Math.min(lrcLines.value.length, displayIdx.value + (lyricsCfg.value.lines_after ?? 0) + 1)
 )
-const nextLine = computed(() =>
-  currentIndex.value >= 0 ? (lrcLines.value[currentIndex.value + 1]?.text ?? '') : ''
-)
+const windowLines = computed(() => {
+  const out: { text: string; isCurrent: boolean }[] = []
+  for (let i = windowStart.value; i < windowEnd.value; i++) {
+    const l = lrcLines.value[i]
+    if (!l || !l.text) continue // render only text lines; empty gaps stay as timing
+    out.push({ text: l.text, isCurrent: i === displayIdx.value })
+  }
+  return out
+})
 
 const playing = computed(() => state.value.status === 'Playing')
 const hasTrack = computed(() => Boolean(state.value.track))
+/** No lyric text → the card backdrop goes fully transparent. When
+ *  `ignore_empty_lines` is off, an instrumental gap (empty current line) also
+ *  hides the window fully transparent. */
+const cardEmpty = computed(() => {
+  if (lyricsCfg.value.ignore_empty_lines === false && inGap.value) return true
+  return !(lrcLines.value.length || plainLyric.value)
+})
 
 // -- right-click context menu (lock) ----------------------------------------
 const menu = ref<{ x: number; y: number } | null>(null)
@@ -165,9 +213,6 @@ function onContextMenu(e: MouseEvent): void {
 
 async function lockWindow(): Promise<void> {
   menuOpen.value = false
-  // App-level lock immediately (so no menu/drag can follow), then push OS-level
-  // passthrough — which only takes effect on X11/Windows; on Wayland the
-  // renderer guard is what actually stops interaction.
   locked.value = true
   await window.cockpit.setWindowLocked(true)
 }
@@ -244,6 +289,77 @@ function onWindowsChanged(raw: unknown): void {
   }
 }
 
+// -- auto-expand the window width to fit long lines --------------------------
+// `auto_width: false` keeps the fixed configured width; otherwise the window
+// grows (up to 90% of the screen) so full lines are seen.
+const baseWinW = ref(560)
+const baseWinH = ref(220)
+const cardEl = ref<HTMLElement | null>(null)
+function setCardEl(el: unknown): void {
+  cardEl.value = (el as HTMLElement | null) ?? null
+}
+
+/**
+ * Wayland has NO input passthrough — a locked window still blocks its whole
+ * BrowserWindow area. To shrink the blocked region to ~the visible card, resize
+ * the window to the card bounds while locked.
+ */
+function fitWindowToContent(): void {
+  const card = cardEl.value
+  if (!card) return
+  const r = card.getBoundingClientRect()
+  if (r.width < 4 || r.height < 4) return
+  const w = Math.ceil(r.width) + 2
+  const h = Math.ceil(r.height) + 2
+  const newX = (window.screenX ?? 0) + Math.round(r.left)
+  const newY = (window.screenY ?? 0) + Math.round(r.top)
+  if (Math.abs(window.innerWidth - w) > 2 || Math.abs(window.innerHeight - h) > 2) {
+    void window.cockpit.resizeWindow(w, h)
+    void window.cockpit.moveWindowTo(newX, newY)
+  }
+}
+
+watch([locked, windowLines, cardEmpty], () => {
+  void nextTick().then(() => {
+    if (locked.value) {
+      fitWindowToContent()
+      return
+    }
+    // unlocked → restore the configured base size + anchor position
+    if (Math.abs(window.innerWidth - baseWinW.value) > 2 || window.innerHeight !== baseWinH.value) {
+      void window.cockpit.resizeWindow(baseWinW.value, baseWinH.value).then(() => {
+        applyAnchorPlacement()
+      })
+    }
+    autoFitWidth()
+  })
+})
+
+function autoFitWidth(): void {
+  const card = cardEl.value
+  if (!card) return
+  if (lyricsCfg.value.auto_width === false) {
+    if (Math.abs(window.innerWidth - baseWinW.value) > 40) {
+      void window.cockpit.resizeWindow(baseWinW.value, window.innerHeight).then(() => {
+        applyAnchorPlacement()
+      })
+    }
+    return
+  }
+  const pad = 12 // breathing room around the card
+  const maxW = Math.round(window.screen.availWidth * 0.9)
+  const needed = Math.min(maxW, Math.max(baseWinW.value, card.offsetWidth + pad))
+  if (Math.abs(needed - window.innerWidth) > 40) {
+    void window.cockpit.resizeWindow(needed, window.innerHeight).then(() => {
+      applyAnchorPlacement()
+    })
+  }
+}
+
+function onResize(): void {
+  autoFitWidth()
+}
+
 onMounted(async () => {
   try {
     const cfg = (await window.cockpit.getConfig()) as { language?: string } | null
@@ -265,8 +381,17 @@ onMounted(async () => {
   // Re-assert placement now that the compositor definitely knows this window.
   applyAnchorPlacement()
   setTimeout(applyAnchorPlacement, 500)
+  baseWinW.value = lyricsCfg.value.width ?? window.innerWidth
+  baseWinH.value = window.innerHeight
+  void nextTick().then(autoFitWidth)
+  // lock_on_open: make the window untouchable right away (unlock via BT panel).
+  if (lyricsCfg.value.lock_on_open === true) {
+    locked.value = true
+    await window.cockpit.setWindowLocked(true)
+  }
   await poll()
   pollTimer.value = setInterval(() => void poll(), 600)
+  window.addEventListener('resize', onResize)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('contextmenu', onContextMenu, true)
   winUnsub = window.cockpit.on('cockpit:windows', onWindowsChanged)
@@ -275,6 +400,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollTimer.value) clearInterval(pollTimer.value)
   winUnsub?.()
+  window.removeEventListener('resize', onResize)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('contextmenu', onContextMenu, true)
 })
@@ -288,28 +414,34 @@ onBeforeUnmount(() => {
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
   >
-    <div class="lyrics-card">
-      <!-- track header -->
-      <div class="lyrics-track">
-        <span class="lyrics-track-name">{{ hasTrack ? state.track : t('lyrics.waiting') }}</span>
-        <span v-if="state.artist" class="lyrics-track-artist">{{ state.artist }}</span>
-      </div>
+    <div :ref="setCardEl" class="lyrics-card" :class="{ 'is-empty': cardEmpty }">
+      <template v-if="!cardEmpty">
+        <!-- track header (optional) -->
+        <div v-if="lyricsCfg.show_title" class="lyrics-track">
+          <span class="lyrics-track-name">{{ hasTrack ? state.track : t('lyrics.waiting') }}</span>
+          <span v-if="state.artist" class="lyrics-track-artist">{{ state.artist }}</span>
+        </div>
 
-      <!-- current + next lyric lines -->
-      <div class="lyrics-lines">
-        <div v-if="plainLyric" class="lyrics-plain">{{ plainLyric }}</div>
-        <template v-else>
-          <div v-if="currentLine" class="lyrics-current" :class="{ 'is-dim': !playing }">
-            {{ currentLine }}
-          </div>
-          <div v-else class="lyrics-current lyrics-empty">
-            {{ hasTrack ? t('lyrics.noLyric') : t('lyrics.waiting') }}
-          </div>
-          <div v-if="nextLine" class="lyrics-next" :class="{ 'is-dim': !playing }">
-            {{ nextLine }}
-          </div>
-        </template>
-      </div>
+        <!-- static lyric window: lines_before + current + lines_after -->
+        <div class="lyrics-lines">
+          <div v-if="plainLyric" class="lyrics-plain">{{ plainLyric }}</div>
+          <template v-else>
+            <div v-if="windowLines.length" class="lyrics-window">
+              <div
+                v-for="(line, i) in windowLines"
+                :key="windowStart + i"
+                class="lyrics-line"
+                :class="{ 'is-current': line.isCurrent, 'is-dim': !playing }"
+              >
+                <span>{{ line.text }}</span>
+              </div>
+            </div>
+            <div v-else class="lyrics-line is-current lyrics-empty">
+              {{ hasTrack ? t('lyrics.noLyric') : t('lyrics.waiting') }}
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- right-click menu -->
@@ -329,8 +461,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* Transparent + frameless window root. The card hugs its text and is placed by
-   the configured anchor/margin (preferences.lyrics). Colors/font come from the
-   same config via CSS variables (--lyr-*). */
+   the configured anchor/margin (preferences.lyrics). */
 .lyrics-root {
   height: 100vh;
   width: 100vw;
@@ -352,9 +483,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   padding-bottom: var(--lyr-margin);
 }
-/* Locked: refuse every pointer interaction in the renderer. On Wayland the OS
-   passthrough (setIgnoreMouseEvents) is a compositor no-op, so this class is
-   what actually makes the locked window untouchable — no drag, no context menu. */
+/* Locked: refuse every pointer interaction in the renderer (Wayland). */
 .lyrics-root.is-locked {
   pointer-events: none;
 }
@@ -364,10 +493,18 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  max-width: calc(100% - 32px);
-  padding: 12px 26px;
-  border-radius: calc(var(--win-radius, 14px) - 1px);
+  /* size to the widest content (no cap) so the backdrop always covers every
+     rendered line; the window auto-fits it (or the root clips both together) */
+  width: max-content;
+  padding: var(--lyr-card-pad-y) var(--lyr-card-pad-x);
+  border-radius: var(--lyr-card-radius);
   background: var(--lyr-bg);
+}
+.lyrics-card.is-empty {
+  background: transparent;
+  /* collapse fully — a padding-only transparent rounded block would still show
+     as a tiny visible dot, so remove the padding too */
+  padding: 0;
 }
 .lyrics-track {
   display: flex;
@@ -377,19 +514,21 @@ onBeforeUnmount(() => {
 }
 .lyrics-track-name {
   font-family: var(--lyr-font);
-  font-size: calc(var(--lyr-size) * 0.28);
-  font-weight: 600;
-  color: var(--lyr-fg);
-  opacity: 0.85;
+  font-size: var(--lyr-header-size);
+  font-weight: var(--lyr-header-weight);
+  letter-spacing: var(--lyr-letter-spacing);
+  color: var(--lyr-header-color);
+  opacity: 0.9;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lyrics-track-artist {
   font-family: var(--lyr-font);
-  font-size: calc(var(--lyr-size) * 0.24);
-  color: var(--lyr-fg);
-  opacity: 0.55;
+  font-size: var(--lyr-header-size);
+  font-weight: var(--lyr-header-weight);
+  color: var(--lyr-header-color);
+  opacity: 0.6;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -398,60 +537,55 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  max-width: 100%;
-}
-.lyrics-current {
-  font-family: var(--lyr-font);
-  font-size: var(--lyr-size);
-  font-weight: 700;
-  line-height: 1.3;
+  gap: var(--lyr-gap);
   text-align: center;
-  color: var(--lyr-fg);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
-.lyrics-current.is-dim,
-.lyrics-next.is-dim {
+.lyrics-window {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lyr-gap);
+}
+/* Lines keep their NATURAL width (no max-width / ellipsis) so the container's
+   scrollWidth reflects the full text — autoFitWidth uses it to expand the
+   window; the window root clips overflow when it can't grow further. */
+.lyrics-line {
+  font-family: var(--lyr-font);
+  letter-spacing: var(--lyr-letter-spacing);
+  color: var(--lyr-fg);
+  white-space: nowrap;
+  text-align: center;
+}
+.lyrics-line:not(.is-current) {
+  font-size: var(--lyr-candidate-size);
+  font-weight: var(--lyr-candidate-weight);
+  color: var(--lyr-candidate-color);
+}
+.lyrics-line.is-current {
+  font-size: var(--lyr-size);
+  font-weight: var(--lyr-current-weight);
+  line-height: var(--lyr-line-height);
+  text-shadow: var(--lyr-shadow);
+}
+.lyrics-line.is-dim {
   opacity: 0.5;
   text-shadow: none;
 }
-.lyrics-next {
-  font-family: var(--lyr-font);
-  font-size: var(--lyr-next-size);
+.lyrics-line.is-current.lyrics-empty {
+  font-size: calc(var(--lyr-size) * 0.6);
   font-weight: 500;
-  line-height: 1.3;
-  text-align: center;
-  color: var(--lyr-fg);
-  opacity: 0.72;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  opacity: 0.5;
 }
 .lyrics-plain {
   font-family: var(--lyr-font);
-  font-size: var(--lyr-next-size);
-  line-height: 1.6;
+  font-size: var(--lyr-candidate-size);
+  font-weight: var(--lyr-candidate-weight);
+  line-height: var(--lyr-line-height);
   text-align: center;
-  color: var(--lyr-fg);
+  color: var(--lyr-candidate-color);
   opacity: 0.9;
   max-height: 80%;
   overflow-y: auto;
-}
-.lyrics-empty {
-  font-family: var(--lyr-font);
-  font-size: calc(var(--lyr-size) * 0.6);
-  font-weight: 500;
-  color: var(--lyr-fg);
-  opacity: 0.5;
 }
 .lyrics-menu {
   position: fixed;

@@ -72,13 +72,28 @@ function lyricWindowId(playerKey: string): string {
   return `${LYRICS_WINDOW_ID}-${playerKey.replace(/[^\w.-]/g, '_')}`
 }
 
-/** Fixed lyrics-window size (fits two lyric lines at the default font size). */
+/** Fixed lyrics-window width — overridden by `preferences.lyrics.width`. */
 const LYRICS_WINDOW_W = 560
-const LYRICS_WINDOW_H = 220
+
+/** Height sized to the display config: exactly lines_before + current + lines_after. */
+function lyricWindowHeight(cfg: LyricsDisplayConfig): number {
+  const before = Math.max(0, cfg.lines_before ?? 0)
+  const after = Math.max(0, cfg.lines_after ?? 0)
+  const lines = before + 1 + after
+  const unit =
+    Math.max(cfg.font_size, cfg.candidate_size ?? 0) * (cfg.line_height ?? 1.3) +
+    Math.max(2, cfg.line_gap ?? 6)
+  const titleH = cfg.show_title !== false ? (cfg.header_size ?? 13) + 8 : 0
+  return Math.max(140, Math.round(24 + titleH + lines * unit))
+}
 
 /** Place the lyrics window per the anchor/margin display config, on the primary
  *  display's work area (mirrors `vp wshowlyrics -a <anchor> -m <margin>`). */
-function lyricWindowPosition(cfg: LyricsDisplayConfig, w: number, h: number): { x: number; y: number } {
+function lyricWindowPosition(
+  cfg: LyricsDisplayConfig,
+  w: number,
+  h: number
+): { x: number; y: number } {
   const area = screen.getPrimaryDisplay().workArea
   const x = area.x + Math.round((area.width - w) / 2)
   let y: number
@@ -98,15 +113,17 @@ async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: Windo
   const key = await getCurrentPlayerKey()
   const id = lyricWindowId(key)
   const cfg = await effectiveLyricsCfg()
-  const pos = lyricWindowPosition(cfg, LYRICS_WINDOW_W, LYRICS_WINDOW_H)
+  const w = Math.max(240, cfg.width ?? LYRICS_WINDOW_W)
+  const h = lyricWindowHeight(cfg)
+  const pos = lyricWindowPosition(cfg, w, h)
   return {
     id,
     key,
     spec: {
       id,
       view: 'LyricsWindow',
-      width: LYRICS_WINDOW_W,
-      height: LYRICS_WINDOW_H,
+      width: w,
+      height: h,
       x: pos.x,
       y: pos.y,
       frameless: true,

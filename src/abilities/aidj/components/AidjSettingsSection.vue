@@ -409,9 +409,9 @@ function resetDj(): void {
         </div>
 
         <div class="mt-3">
-          <div class="text-caption text-medium-emphasis mb-2">桌面歌词显示（等价 vp wshowlyrics 参数）</div>
+          <div class="text-caption text-medium-emphasis mb-2">桌面歌词显示（等价 vp wshowlyrics 参数，按元素定制）</div>
           <v-row dense>
-            <v-col cols="12" md="5">
+            <v-col cols="12" md="6">
               <v-text-field
                 v-model="lyricsCfg.font_family"
                 label="字体"
@@ -421,17 +421,151 @@ function resetDj(): void {
                 variant="outlined"
               />
             </v-col>
-            <v-col cols="4" md="2">
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="lyricsCfg.bg_color"
+                label="背景色 (RRGGBBAA)"
+                placeholder="00000044"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.font_size"
-                label="字号"
+                label="当前行字号"
                 type="number"
                 hide-details
                 density="compact"
                 variant="outlined"
               />
             </v-col>
-            <v-col cols="8" md="5">
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.candidate_size"
+                label="候选行字号"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.header_size"
+                label="歌名字号"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.line_gap"
+                label="行间距"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model="lyricsCfg.fg_color"
+                label="当前行色"
+                placeholder="EEEEFFEE"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model="lyricsCfg.candidate_color"
+                label="候选行色"
+                placeholder="EEEEFF99"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model="lyricsCfg.header_color"
+                label="歌名色"
+                placeholder="EEEEFF66"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.shadow"
+                label="阴影 (0-1)"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.current_weight"
+                label="当前行字重"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.candidate_weight"
+                label="候选行字重"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.header_weight"
+                label="歌名字重"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.line_height"
+                label="行高 (1.0-2.0)"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="6" md="3">
+              <v-text-field
+                v-model.number="lyricsCfg.letter_spacing"
+                label="字间距"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
               <v-select
                 v-model="lyricsCfg.anchor"
                 :items="[
@@ -439,7 +573,17 @@ function resetDj(): void {
                   { title: '居中', value: 'center' },
                   { title: '底部', value: 'bottom' }
                 ]"
-                label="位置"
+                label="窗口位置"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.width"
+                label="初始宽度"
+                type="number"
                 hide-details
                 density="compact"
                 variant="outlined"
@@ -455,29 +599,103 @@ function resetDj(): void {
                 variant="outlined"
               />
             </v-col>
-            <v-col cols="8" md="10">
-              <v-row dense>
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="lyricsCfg.bg_color"
-                    label="背景色 (RRGGBBAA)"
-                    placeholder="00000044"
-                    hide-details
-                    density="compact"
-                    variant="outlined"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="lyricsCfg.fg_color"
-                    label="前景色 (RRGGBBAA)"
-                    placeholder="EEEEFFEE"
-                    hide-details
-                    density="compact"
-                    variant="outlined"
-                  />
-                </v-col>
-              </v-row>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.lines_before"
+                label="上方行数"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.lines_after"
+                label="下方行数"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.position_offset_ms"
+                label="位置偏移(ms)"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.card_radius"
+                label="圆角"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.card_padding_y"
+                label="上下留白"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.card_padding_x"
+                label="两侧留白"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+
+            <v-col cols="6" md="3">
+              <v-switch
+                v-model="lyricsCfg.auto_width"
+                color="primary"
+                label="自动扩张宽度"
+                hide-details
+                density="compact"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-switch
+                v-model="lyricsCfg.lock_on_open"
+                color="primary"
+                label="打开即锁定"
+                hide-details
+                density="compact"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-switch
+                v-model="lyricsCfg.show_title"
+                color="primary"
+                label="显示歌曲名"
+                hide-details
+                density="compact"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-switch
+                v-model="lyricsCfg.ignore_empty_lines"
+                color="primary"
+                label="忽略空行"
+                hide-details
+                density="compact"
+              />
             </v-col>
           </v-row>
         </div>

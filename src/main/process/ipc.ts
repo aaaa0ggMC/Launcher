@@ -28,6 +28,8 @@ import {
   setSenderWindowLocked,
   moveWindowBy,
   moveWindowTo,
+  resizeWindowTo,
+  getPrimaryWorkArea,
   type WindowSpec,
   type WindowControlAction
 } from './windows'
@@ -94,6 +96,14 @@ export function registerIpc(): void {
   ipcMain.handle('window:move-to', (e, x: number, y: number) =>
     moveWindowTo(senderWindow(e), Number(x) || 0, Number(y) || 0)
   )
+  // Programmatic resize — used by the lyrics window to auto-expand to fit long
+  // lines (works even when the window was created non-resizable).
+  ipcMain.handle('window:resize', (e, w: number, h: number) =>
+    resizeWindowTo(senderWindow(e), Number(w) || 0, Number(h) || 0)
+  )
+  // Primary display work area — the renderer's window.screen is unreliable on
+  // Wayland, so anchor/center placement queries it from the main process.
+  ipcMain.handle('window:work-area', () => getPrimaryWorkArea())
 
   // Child window manager — BrowserWindows can only be created in the main
   // process; the renderer sends a declarative spec and this owns lifecycle.

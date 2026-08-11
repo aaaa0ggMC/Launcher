@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app, screen } from 'electron'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { writeFile, unlink } from 'fs/promises'
@@ -160,6 +160,11 @@ function applyAlwaysOnTop(win: BrowserWindow, on: boolean): void {
 // ---------------------------------------------------------------------------
 
 function isKdeWayland(): boolean {
+  // Detect the ACTUAL backend, not the session: the app may run on X11/XWayland
+  // (forced via --ozone-platform=x11) inside a Wayland session — then native
+  // setPosition/setAlwaysOnTop work and KWin scripting must NOT run.
+  const forced = app.commandLine.getSwitchValue('ozone-platform')
+  if (forced === 'x11') return false
   return (
     process.platform === 'linux' &&
     (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland' &&
@@ -283,6 +288,24 @@ export function moveWindowTo(win: BrowserWindow | null, x: number, y: number): b
   }
   moveChildWindow(win, px, py)
   return true
+}
+
+/** Resize a child window (works even with `resizable: false`). */
+export function resizeWindowTo(win: BrowserWindow | null, w: number, h: number): boolean {
+  if (!win || win.isDestroyed()) return false
+  try {
+    win.setSize(Math.max(120, Math.round(w)), Math.max(60, Math.round(h)))
+  } catch {
+    return false
+  }
+  return true
+}
+
+/** Primary display work area — the renderer's `window.screen` is unreliable on
+ *  Wayland, so the main process provides the authoritative geometry. */
+export function getPrimaryWorkArea(): { x: number; y: number; width: number; height: number } {
+  const a = screen.getPrimaryDisplay().workArea
+  return { x: a.x, y: a.y, width: a.width, height: a.height }
 }
 
 function makeChild(
@@ -454,6 +477,11 @@ export function controlChildWindow(
  */
 function setChildLocked(entry: { win: BrowserWindow; locked: boolean }, locked: boolean): void {
   entry.locked = locked
+  log.info('setIgnoreMouseEvents', {
+    locked,
+    display: process.env.DISPLAY ?? '',
+    ozone: process.env.ELECTRON_OZONE_PLATFORM_HINT ?? 'unset'
+  })
   try {
     entry.win.setIgnoreMouseEvents(locked, { forward: true })
   } catch {

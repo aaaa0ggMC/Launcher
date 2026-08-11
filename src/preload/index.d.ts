@@ -87,6 +87,8 @@ export interface CockpitApi {
   setWindowLocked: (locked: boolean) => Promise<boolean>
   moveWindowBy: (dx: number, dy: number) => Promise<boolean>
   moveWindowTo: (x: number, y: number) => Promise<boolean>
+  resizeWindow: (w: number, h: number) => Promise<boolean>
+  getWorkArea: () => Promise<{ x: number; y: number; width: number; height: number }>
   createWindow: (
     spec: Record<string, unknown>
   ) => Promise<{ ok: boolean; created?: boolean; error?: string }>

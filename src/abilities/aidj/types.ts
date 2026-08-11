@@ -57,29 +57,102 @@ export interface AidjConfig {
 /**
  * Desktop-lyrics display config, mirroring `vp wshowlyrics -F '<font> <size>' -a
  * <anchor> -m <margin> -b <bg> -f <fg>`. Colors are RRGGBBAA hex (alpha last).
+ *
+ * Styling is split per element — header (track name/artist), current line and
+ * candidate lines (the dim ones before/after the current) each get their own
+ * size, weight and color; typography is rounded out with shadow, letter
+ * spacing and line height.
  */
 export interface LyricsDisplayConfig {
-  /** font family, e.g. "Iansui Regular" */
+  /** shared font family, e.g. "Iansui Regular" */
   font_family: string
-  /** current-line font size in px */
+  /** current-line font size (px) */
   font_size: number
+  /** track-header font size (px) */
+  header_size: number
+  /** non-current (candidate) line font size (px) */
+  candidate_size: number
+  /** backdrop color RRGGBBAA — '00000000' = fully transparent */
+  bg_color: string
+  /** current-line text color RRGGBBAA */
+  fg_color: string
+  /** track-header text color RRGGBBAA */
+  header_color: string
+  /** candidate line text color RRGGBBAA */
+  candidate_color: string
+  /** current-line font weight (400–900) */
+  current_weight: number
+  /** candidate line font weight (400–900) */
+  candidate_weight: number
+  /** header font weight (400–900) */
+  header_weight: number
+  /** current-line text shadow strength 0–1 (0 = none) */
+  shadow: number
+  /** letter spacing (px) */
+  letter_spacing: number
+  /** line-height factor (1.0–2.0) */
+  line_height: number
   /** vertical anchor of the lyrics card within the window */
   anchor: 'top' | 'center' | 'bottom'
   /** gap from the anchor edge, px */
   margin: number
-  /** backdrop color RRGGBBAA — '00000000' = fully transparent */
-  bg_color: string
-  /** text color RRGGBBAA */
-  fg_color: string
+  /** initial window width (px); auto-expands beyond this when `auto_width` */
+  width: number
+  /** auto-expand the window to fit long lines */
+  auto_width: boolean
+  /** lock (mouse passthrough / untouchable) as soon as the window opens */
+  lock_on_open: boolean
+  /** lines shown ABOVE the current line */
+  lines_before: number
+  /** lines shown BELOW the current line */
+  lines_after: number
+  /** show the track name + artist header */
+  show_title: boolean
+  /** empty-timestamp line (instrumental gap): true = keep the last lyric lit;
+   *  false = hide the window fully transparent during the gap */
+  ignore_empty_lines: boolean
+  /** position adjustment in ms. Positive = show lyrics EARLIER (compensate the
+   *  poll lag, ~+200 to match wshowlyrics); negative = later. */
+  position_offset_ms: number
+  /** card corner radius (px) */
+  card_radius: number
+  /** card top/bottom padding (px) */
+  card_padding_y: number
+  /** card left/right padding (px) */
+  card_padding_x: number
+  /** vertical gap between lyric lines, px */
+  line_gap: number
 }
 
 export const DEFAULT_LYRICS_CFG: LyricsDisplayConfig = {
   font_family: 'Iansui Regular',
   font_size: 36,
+  header_size: 13,
+  candidate_size: 22,
+  bg_color: '00000044',
+  fg_color: 'EEEEFFEE',
+  header_color: 'EEEEFF66',
+  candidate_color: 'EEEEFF99',
+  current_weight: 700,
+  candidate_weight: 500,
+  header_weight: 600,
+  shadow: 0.5,
+  letter_spacing: 0,
+  line_height: 1.3,
   anchor: 'top',
   margin: 50,
-  bg_color: '00000044',
-  fg_color: 'EEEEFFEE'
+  width: 560,
+  auto_width: true,
+  lock_on_open: false,
+  lines_before: 0,
+  lines_after: 1,
+  show_title: true,
+  ignore_empty_lines: true,
+  position_offset_ms: 0,
+  card_radius: 12,
+  card_padding_y: 12,
+  card_padding_x: 26,
+  line_gap: 6
 }
 
 /** Built-in DJ persona. Users can override it via `preferences.persona`. */

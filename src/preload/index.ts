@@ -122,6 +122,12 @@ const cockpit = {
   /** Move the current window to an absolute position (anchor/margin placement). */
   moveWindowTo: (x: number, y: number): Promise<boolean> =>
     ipcRenderer.invoke('window:move-to', x, y),
+  /** Resize the current window (auto-expand to fit long content). */
+  resizeWindow: (w: number, h: number): Promise<boolean> =>
+    ipcRenderer.invoke('window:resize', w, h),
+  /** Primary display work area ({x, y, width, height}). */
+  getWorkArea: (): Promise<{ x: number; y: number; width: number; height: number }> =>
+    ipcRenderer.invoke('window:work-area'),
 
   // child window manager (single-instance per id; the panel controls children
   // cross-window via controlWindow)
