@@ -17,6 +17,8 @@ export interface AidjConfig {
     metadata_concurrency: number
     /** Context management mode: discard drops oldest messages, compact summarizes them. */
     context_mode: 'discard' | 'compact'
+    /** Auto-generate the session title via AI after the first AI output (else: use the first user input). */
+    auto_title?: boolean
     /** Max messages kept in the chat history (library prompt is always kept). */
     max_history_length: number
     /** Continuous player: reconnect window in minutes. 0 = exit on disconnect, >0 = retry N min, <0 = never give up. */

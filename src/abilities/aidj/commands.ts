@@ -254,6 +254,46 @@ async function ensureInit(): Promise<{
   return { client, config, session, dbus }
 }
 
+/** Push a playlist into the live session (persist + context + memory), like a
+ *  DJ push. Used by /random, /explore, /ftop. Does NOT touch turnCount so the
+ *  first nextStep still injects the system prompt. */
+async function pushPlaylistToSession(
+  session: DJSession,
+  userText: string,
+  intro: string,
+  playlist: PlaylistEntry[]
+): Promise<string> {
+  if (!_sessionId) {
+    _sessionId = await SessionManager.createSession({
+      title: userText.slice(0, 40),
+      type: 'generate'
+    })
+  }
+  const names = playlist.map((s) => s.name)
+  const raw = `${intro}\n\n${SEPARATOR}\n${names.join('\n')}`
+  const rawMsgs: RawHistoryMessage[] = [
+    { role: 'user', content: userText, ts: Date.now(), type: 'user' },
+    { role: 'assistant', content: raw, ts: Date.now(), type: 'both', playlist }
+  ]
+  await SessionManager.appendMessages(_sessionId, rawMsgs)
+  session.chatHistory.push(
+    { role: 'user', content: userText, timestamp: Date.now() },
+    { role: 'assistant', content: raw, timestamp: Date.now() }
+  )
+  for (const name of names) session.playedSongs.add(name)
+  return raw
+}
+
+/** Deterministic Fisher-Yates sample without replacement. */
+function sampleNames(pool: string[], n: number): string[] {
+  const copy = [...pool]
+  const out: string[] = []
+  for (let i = 0; i < n && copy.length; i++) {
+    out.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0])
+  }
+  return out
+}
+
 const commands: CommandSpec[] = [
   {
     name: 'aidj.generate',
@@ -261,7 +301,7 @@ const commands: CommandSpec[] = [
     usage: 'aidj.generate --prompt <text>',
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
-      const { session } = await ensureInit()
+      const { session, config } = await ensureInit()
       _currentAbort = new AbortController()
       _streamingChars = 0
       _retrying = false
@@ -290,11 +330,13 @@ const commands: CommandSpec[] = [
           }
         )
         if (!_currentAbort?.signal.aborted) {
+          let wasNewSession = false
           if (!_sessionId) {
             _sessionId = await SessionManager.createSession({
               title: prompt.slice(0, 40),
               type: 'generate'
             })
+            wasNewSession = true
           }
           const rawMsgs: RawHistoryMessage[] = []
           if (updated) rawMsgs.push(updated)
@@ -309,6 +351,17 @@ const commands: CommandSpec[] = [
             }
           )
           await SessionManager.appendMessages(_sessionId, rawMsgs)
+          // Auto title: after the first AI output of a new session, fire the
+          // background title job (if enabled). Otherwise the raw prompt slice stays.
+          const produced = playlist.length > 0 || (intro && intro.trim() !== '')
+          if (wasNewSession && produced && config.preferences.auto_title) {
+            startJobByName('aidj.title', {
+              sessionId: _sessionId,
+              name: 'AIDJ 标题生成',
+              description: '自动生成会话标题'
+            })
+            log.info('Auto title job started', { sessionId: _sessionId })
+          }
         }
         const enriched = playlist.map((s) => ({
           ...s,
@@ -340,6 +393,132 @@ const commands: CommandSpec[] = [
         _retryStart = 0
         _retryLastError = ''
       }
+    }
+  },
+  {
+    name: 'aidj.random',
+    description: '随机选取 N 首歌曲，作为 AIDJ 推送计入会话上下文',
+    usage: 'aidj.random --count <number>',
+    run: async (ctx) => {
+      const count = Number(ctx.named.count)
+      if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
+      const { session } = await ensureInit()
+      const keys = [...session.musicPaths.keys()]
+      if (!keys.length) return { ok: false, error: '曲库为空' }
+      const n = Math.min(count, keys.length, 50)
+
+      // Avoid the played-memory (songs the DJ already pushed) when possible;
+      // fall back to the whole library if there aren't enough fresh songs.
+      let pool = keys.filter((k) => !session.playedSongs.has(k))
+      if (pool.length < n) pool = keys
+
+      const picked = sampleNames(pool, n)
+      const playlist = picked.map((name) => ({
+        name,
+        path: session.musicPaths.get(name) || '',
+        meta: session.metadata.get(name) || null
+      }))
+      const intro = `已经找到 ${playlist.length} 首随机歌曲。`
+      await pushPlaylistToSession(session, `/random ${playlist.length}`, intro, playlist)
+      log.info('Random selection pushed', { sessionId: _sessionId, count: playlist.length })
+      return { ok: true, intro, playlist }
+    }
+  },
+  {
+    name: 'aidj.explore',
+    description: '发现未听过/最少播放的歌曲，作为 AIDJ 推送计入会话上下文',
+    usage: 'aidj.explore --count <number>',
+    run: async (ctx) => {
+      const count = Number(ctx.named.count)
+      if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
+      const { session } = await ensureInit()
+      const freq = await loadFrequency()
+      const allNames = [...session.musicPaths.keys()]
+      if (!allNames.length) return { ok: false, error: '曲库为空' }
+      const n = Math.min(count, allNames.length, 50)
+
+      const heard = new Set(freq.keys())
+      let pool = allNames.filter((k) => !heard.has(k) && !session.playedSongs.has(k))
+      let label: string
+      if (pool.length < n) {
+        // All songs have been played (or memory-exhausted) — least-played first.
+        pool = allNames
+          .filter((k) => !session.playedSongs.has(k))
+          .sort((a, b) => (freq.get(a) ?? 0) - (freq.get(b) ?? 0))
+        if (pool.length < n) pool = allNames
+        const picked = pool.slice(0, n)
+        const least = freq.get(picked[0]) ?? 0
+        label = `播放最少的 ${picked.length} 首歌曲 (≥${least}x)`
+        const playlist = picked.map((name) => ({
+          name,
+          path: session.musicPaths.get(name) || '',
+          meta: session.metadata.get(name) || null
+        }))
+        await pushPlaylistToSession(session, `/explore ${playlist.length}`, label, playlist)
+        log.info('Explore (least-played) pushed', { sessionId: _sessionId, count: picked.length })
+        return { ok: true, intro: label, playlist }
+      }
+
+      const picked = sampleNames(pool, n)
+      label = `发现 ${picked.length} 首尚未听过的歌曲。`
+      const playlist = picked.map((name) => ({
+        name,
+        path: session.musicPaths.get(name) || '',
+        meta: session.metadata.get(name) || null
+      }))
+      await pushPlaylistToSession(session, `/explore ${playlist.length}`, label, playlist)
+      log.info('Explore (unheard) pushed', { sessionId: _sessionId, count: picked.length })
+      return { ok: true, intro: label, playlist }
+    }
+  },
+  {
+    name: 'aidj.ftop',
+    description: '推送播放次数 Top N / 倒数 N / 区间 A-B 歌曲',
+    usage: 'aidj.ftop [--count N] [--bottom true] [--from A] [--to B]',
+    run: async (ctx) => {
+      const { session } = await ensureInit()
+      const freq = await loadFrequency()
+      const ranked = [...freq.entries()]
+        .filter(([name]) => session.musicPaths.has(name))
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, times]) => ({ name, times, path: session.musicPaths.get(name) || '' }))
+      if (!ranked.length) return { ok: false, error: '没有可用的播放频率数据' }
+
+      let selected: typeof ranked
+      let label: string
+      const from = Number(ctx.named.from)
+      const to = Number(ctx.named.to)
+      if (Number.isFinite(from) && Number.isFinite(to)) {
+        const a = Math.max(1, Math.min(from, to))
+        const b = Math.max(1, Math.max(from, to))
+        selected = ranked.slice(a - 1, b)
+        label = `播放频率第 ${a}–${b} 名：`
+      } else {
+        const count = Math.max(1, Number(ctx.named.count) || 20)
+        const c = Math.min(count, ranked.length)
+        if (String(ctx.named.bottom) === 'true') {
+          selected = ranked.slice(ranked.length - c)
+          label = `播放次数最少的 ${c} 首歌曲：`
+        } else {
+          selected = ranked.slice(0, c)
+          label = `播放次数最多的 ${c} 首歌曲：`
+        }
+      }
+      if (!selected.length) return { ok: false, error: '没有可用的播放频率数据' }
+
+      const playlist = selected.map((s) => ({
+        name: s.name,
+        path: s.path,
+        meta: session.metadata.get(s.name) || null
+      }))
+      await pushPlaylistToSession(
+        session,
+        (ctx.named.text as string) || `/ftop ${selected.length}`,
+        label,
+        playlist
+      )
+      log.info('Ftop pushed', { sessionId: _sessionId, count: selected.length, label })
+      return { ok: true, intro: label, playlist }
     }
   },
   {
@@ -589,9 +768,10 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.analyse',
     description: '元数据分布分析',
-    usage: 'aidj.analyse --field <language|emotion|genre>',
+    usage: 'aidj.analyse --field <language|emotion|genre|loudness>',
     run: async (ctx) => {
       const field = (ctx.named.field as string) || 'language'
+      await ensureLibraryLoaded()
       const metadata = _metadata
       if (!metadata) return { ok: false, error: '元数据未加载' }
       const counter = new Map<string, number>()

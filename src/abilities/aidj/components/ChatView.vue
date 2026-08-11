@@ -7,7 +7,8 @@ import {
   onMounted,
   onActivated,
   onDeactivated,
-  nextTick
+  nextTick,
+  watch
 } from 'vue'
 import { translate } from '../../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from '../types'
@@ -36,6 +37,23 @@ const overlayStyle = computed(() => ({
   height: expanded.value ? '80%' : `${collapsedH.value}px`
 }))
 
+// The command popup floats ABOVE the input overlay (absolute, out of flow), so
+// it never affects the document layout. bottom is pinned to the overlay's live
+// height (collapsed or expanded) so it always sits just above the input bar.
+const overlayEl = ref<HTMLElement | null>(null)
+const overlayH = ref(132)
+let overlayHRO: ResizeObserver | null = null
+function setupOverlayH(): void {
+  if (overlayHRO || !overlayEl.value) return
+  overlayHRO = new ResizeObserver(() => {
+    overlayH.value = overlayEl.value?.offsetHeight ?? 0
+  })
+  overlayHRO.observe(overlayEl.value)
+}
+const cmdPopupStyle = computed(() => ({
+  bottom: `${overlayH.value + 8}px`
+}))
+
 function setupOverlayMeasure(): void {
   if (overlayRO || !contentRef.value) return
   overlayRO = new ResizeObserver(() => {
@@ -51,6 +69,202 @@ function setupOverlayMeasure(): void {
 let msgSeq = 0
 function makeUid(): number {
   return ++msgSeq
+}
+
+// ---------------------------------------------------------------------------
+// Chat slash-commands — typing a leading `/` shows a hint popup; Tab completes,
+// Up/Down navigate. Commands run without the AI (e.g. `/random N`).
+// ---------------------------------------------------------------------------
+interface ChatCommandDef {
+  name: string
+  args: string
+  descKey: string
+  descFallback: string
+}
+const CHAT_COMMANDS: ChatCommandDef[] = [
+  {
+    name: 'random',
+    args: '<number>',
+    descKey: 'aidj.cmd.random.desc',
+    descFallback: '随机选取 N 首歌曲'
+  },
+  {
+    name: 'explore',
+    args: '<number>',
+    descKey: 'aidj.cmd.explore.desc',
+    descFallback: '发现未听过/最少播放的歌曲'
+  },
+  {
+    name: 'ftop',
+    args: '<N | -N | A B>',
+    descKey: 'aidj.cmd.ftop.desc',
+    descFallback: '推送播放次数 Top/倒数/区间'
+  },
+  {
+    name: 'analyse',
+    args: '<language|emotion|genre|loudness>',
+    descKey: 'aidj.cmd.analyse.desc',
+    descFallback: '元数据分布统计（system 消息）'
+  }
+]
+
+const cmdActive = ref(0)
+const cmdDismissed = ref(false)
+const cmdFiltered = computed(() => {
+  const raw = inputText.value
+  if (!raw.startsWith('/')) return []
+  // The first token is the command name (may be a partial prefix).
+  const first = raw.slice(1).split(/\s+/)[0].toLowerCase()
+  const matched = CHAT_COMMANDS.filter((c) => c.name.startsWith(first))
+  if (matched.length === 0) return []
+  // Once a command is exactly identified (a space follows it — user is typing
+  // its arguments), keep the popup pinned on that command so it can be
+  // referenced while filling in the args.
+  const exact = CHAT_COMMANDS.find((c) => c.name === first)
+  if (exact && /\s/.test(raw.slice(1))) return [exact]
+  return matched
+})
+const cmdVisible = computed(() => !cmdDismissed.value && cmdFiltered.value.length > 0)
+watch(inputText, () => {
+  cmdActive.value = 0
+  cmdDismissed.value = false
+})
+
+function cmdApply(): void {
+  const c = cmdFiltered.value[cmdActive.value]
+  if (c) inputText.value = `/${c.name} `
+}
+
+/** Run a "push playlist" command and render the assistant result (like /random). */
+async function runPushCommand(
+  command: string,
+  args: Record<string, unknown>,
+  userText: string
+): Promise<void> {
+  messages.value.push({ role: 'user', content: userText, timestamp: Date.now(), uid: makeUid() })
+  try {
+    const r = (await window.cockpit.command(command, args)) as {
+      ok?: boolean
+      intro?: string
+      playlist?: { name: string; path: string }[]
+      error?: string
+    }
+    if (r?.ok) {
+      messages.value.push({
+        role: 'assistant',
+        content: r.intro || '',
+        playlist: (r.playlist ?? []) as ChatMessage['playlist'],
+        timestamp: Date.now(),
+        uid: makeUid()
+      })
+    } else {
+      messages.value.push({
+        role: 'assistant',
+        content: `错误: ${r?.error || '请求失败'}`,
+        timestamp: Date.now(),
+        uid: makeUid()
+      })
+    }
+  } catch (e) {
+    messages.value.push({
+      role: 'assistant',
+      content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+      timestamp: Date.now(),
+      uid: makeUid()
+    })
+  }
+  scrollToBottom()
+}
+
+async function handleCommand(text: string): Promise<void> {
+  const parts = text.slice(1).trim().split(/\s+/)
+  const cmd = (parts[0] || '').toLowerCase()
+
+  if (cmd === 'random') {
+    const count = Number(parts[1])
+    if (!Number.isFinite(count) || count <= 0) {
+      showSnack(t('aidj.cmd.random.usage', '/random <number> — 请输入正整数'), 'warning')
+      return
+    }
+    await runPushCommand('aidj.random', { count }, text)
+    return
+  }
+
+  if (cmd === 'explore') {
+    const count = Number(parts[1])
+    if (!Number.isFinite(count) || count <= 0) {
+      showSnack(t('aidj.cmd.explore.usage', '/explore <number> — 请输入正整数'), 'warning')
+      return
+    }
+    await runPushCommand('aidj.explore', { count }, text)
+    return
+  }
+
+  if (cmd === 'ftop') {
+    const a = Number(parts[1])
+    const b = Number(parts[2])
+    let args: Record<string, unknown>
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      args = { from: a, to: b, text }
+    } else if (Number.isFinite(a)) {
+      args = a < 0 ? { count: Math.abs(a), bottom: true, text } : { count: a, text }
+    } else {
+      showSnack(t('aidj.cmd.ftop.usage', '/ftop <N> | -<N> | <A> <B>'), 'warning')
+      return
+    }
+    await runPushCommand('aidj.ftop', args, text)
+    return
+  }
+
+  if (cmd === 'analyse') {
+    const field = (parts[1] || 'language').toLowerCase()
+    if (!['language', 'emotion', 'genre', 'loudness'].includes(field)) {
+      showSnack(
+        t('aidj.cmd.analyse.usage', '/analyse <language|emotion|genre|loudness>'),
+        'warning'
+      )
+      return
+    }
+    messages.value.push({ role: 'user', content: text, timestamp: Date.now(), uid: makeUid() })
+    try {
+      const r = (await window.cockpit.command('aidj.analyse', { field })) as {
+        ok?: boolean
+        total?: number
+        distribution?: { label: string; count: number; pct: number }[]
+        error?: string
+      }
+      if (r?.ok && Array.isArray(r.distribution)) {
+        const lines = [
+          `📊 ${field} 分布（${r.total ?? 0} 首）`,
+          ...r.distribution.map((x) => `- ${x.label}: ${x.count}（${x.pct}%）`)
+        ]
+        messages.value.push({
+          role: 'system',
+          content: lines.join('\n'),
+          timestamp: Date.now(),
+          uid: makeUid()
+        })
+      } else {
+        messages.value.push({
+          role: 'system',
+          content: `错误: ${r?.error || '分析失败'}`,
+          timestamp: Date.now(),
+          uid: makeUid()
+        })
+      }
+    } catch (e) {
+      messages.value.push({
+        role: 'system',
+        content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+        timestamp: Date.now(),
+        uid: makeUid()
+      })
+    }
+    scrollToBottom()
+    return
+  }
+
+  showSnack(`${t('aidj.cmd.unknown', '未知命令')}: /${cmd}`, 'warning')
 }
 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
@@ -152,6 +366,7 @@ onMounted(() => {
   netPollTimer = setInterval(pollNetwork, 15000)
   listenBt()
   setupOverlayMeasure()
+  setupOverlayH()
 })
 
 onActivated(() => {
@@ -167,6 +382,7 @@ onActivated(() => {
   listenBt()
   scrollToBottom()
   setupOverlayMeasure()
+  setupOverlayH()
 })
 
 onDeactivated(() => {
@@ -185,6 +401,10 @@ onDeactivated(() => {
   if (overlayRO) {
     overlayRO.disconnect()
     overlayRO = null
+  }
+  if (overlayHRO) {
+    overlayHRO.disconnect()
+    overlayHRO = null
   }
   if (btUnsub) {
     btUnsub()
@@ -334,6 +554,28 @@ const trackText = computed(() => {
 })
 
 function onKeydown(e: KeyboardEvent): void {
+  if (cmdVisible.value && cmdFiltered.value.length) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      cmdActive.value = (cmdActive.value + 1) % cmdFiltered.value.length
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      cmdActive.value = (cmdActive.value - 1 + cmdFiltered.value.length) % cmdFiltered.value.length
+      return
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      cmdApply()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cmdDismissed.value = true
+      return
+    }
+  }
   if (e.shiftKey && e.key === 'Enter' && !sending.value && !thinking.value) {
     e.preventDefault()
     sendMessage()
@@ -343,6 +585,13 @@ function onKeydown(e: KeyboardEvent): void {
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
   if (!text || sending.value || thinking.value) return
+
+  // Slash-commands run without the AI.
+  if (text.startsWith('/')) {
+    inputText.value = ''
+    await handleCommand(text)
+    return
+  }
 
   pendingText.value = text
   inputText.value = ''
@@ -828,7 +1077,12 @@ defineExpose({ toMarkdown, loadSession })
 
     <v-divider />
 
-    <div class="input-overlay" :class="{ 'input-expanded': expanded }" :style="overlayStyle">
+    <div
+      ref="overlayEl"
+      class="input-overlay"
+      :class="{ 'input-expanded': expanded }"
+      :style="overlayStyle"
+    >
       <div ref="contentRef" class="overlay-content">
         <div class="aidj-status-bar">
           <template v-for="key in visibleStatus" :key="key">
@@ -882,8 +1136,8 @@ defineExpose({ toMarkdown, loadSession })
               variant="flat"
               size="small"
               class="status-chip clickable is-on"
-              @click="memoryConfirm = true"
               :title="'点击清空已播记忆'"
+              @click="memoryConfirm = true"
             >
               <span class="status-label">Memory</span
               ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
@@ -895,8 +1149,8 @@ defineExpose({ toMarkdown, loadSession })
               size="small"
               class="status-chip clickable"
               :class="{ 'is-on': sbVolbal.enabled }"
-              @click="toggleVolbal"
               :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
+              @click="toggleVolbal"
             >
               <span class="status-label">Volbal</span
               ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
@@ -908,8 +1162,8 @@ defineExpose({ toMarkdown, loadSession })
               size="small"
               class="status-chip clickable"
               :class="{ 'is-on': sbRecordFreq }"
-              @click="toggleRecordFreq"
               :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
+              @click="toggleRecordFreq"
             >
               <span class="status-label">RecordFreq</span
               ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
@@ -966,8 +1220,8 @@ defineExpose({ toMarkdown, loadSession })
               variant="text"
               size="small"
               class="expand-btn"
-              @click="expanded = true"
               :title="t('aidj.expand')"
+              @click="expanded = true"
               >&lt;&gt;</v-btn
             >
           </div>
@@ -1019,8 +1273,8 @@ defineExpose({ toMarkdown, loadSession })
             <v-btn
               variant="text"
               class="flex-shrink-0"
-              @click="expanded = false"
               :title="t('aidj.collapse')"
+              @click="expanded = false"
             >
               <v-icon start>mdi-chevron-down</v-icon>
               {{ t('aidj.collapse') }}
@@ -1065,6 +1319,24 @@ defineExpose({ toMarkdown, loadSession })
         </div>
       </div>
     </div>
+
+    <Transition name="cmd-pop">
+      <div v-if="cmdVisible" class="cmd-popup" :style="cmdPopupStyle">
+        <div
+          v-for="(c, i) in cmdFiltered"
+          :key="c.name"
+          class="cmd-item"
+          :class="{ 'is-active': i === cmdActive }"
+          @mousedown.prevent="cmdApply"
+          @mouseenter="cmdActive = i"
+        >
+          <span class="cmd-name"
+            >/{{ c.name }} <span class="cmd-args">{{ c.args }}</span></span
+          >
+          <span class="cmd-desc">{{ t(c.descKey, c.descFallback) }}</span>
+        </div>
+      </div>
+    </Transition>
 
     <v-dialog v-model="memoryConfirm" width="420">
       <v-card rounded="lg">
@@ -1162,6 +1434,60 @@ defineExpose({ toMarkdown, loadSession })
   border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
   transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
+}
+.cmd-popup {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  z-index: 30;
+  max-height: 168px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+}
+.cmd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.cmd-item.is-active {
+  background: rgba(var(--v-theme-primary), 0.15);
+}
+.cmd-name {
+  font-family: monospace;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  white-space: nowrap;
+}
+.cmd-args {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-weight: 400;
+}
+.cmd-desc {
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-pop-enter-active,
+.cmd-pop-leave-active {
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+}
+.cmd-pop-enter-from,
+.cmd-pop-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
 .input-overlay.input-expanded {
   position: absolute;

@@ -20,6 +20,7 @@ const recordFreq = ref(true)
 const metadataConcurrency = ref(8)
 const maxHistoryLength = ref(10)
 const contextMode = ref<'discard' | 'compact'>('discard')
+const autoTitle = ref(false)
 const reconnectMinutes = ref(0)
 const networkRetryMinutes = ref(0)
 const availableModels = ref<string[]>([])
@@ -60,6 +61,7 @@ onMounted(async () => {
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
   contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
+  autoTitle.value = (prefs.auto_title as boolean) ?? false
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
@@ -148,6 +150,7 @@ watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
+watch(autoTitle, (v) => update('preferences.auto_title', v))
 watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
 watch(networkRetryMinutes, (v) => update('preferences.network_retry_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
@@ -438,6 +441,11 @@ function resetDj(): void {
               variant="outlined"
             />
           </v-col>
+          <v-col cols="12" md="4" class="switch-col">
+            <div class="d-flex align-center h-100 switch-align">
+              <v-switch v-model="autoTitle" color="primary" label="自动 AI 生成标题" hide-details />
+            </div>
+          </v-col>
         </v-row>
       </div>
 
@@ -636,5 +644,16 @@ function resetDj(): void {
 }
 .rule-input {
   min-width: 160px;
+}
+/* Center the switch against the outlined select/text-field siblings in the same row. */
+.switch-align {
+  min-height: 44px;
+}
+.switch-align :deep(.v-selection-control) {
+  min-width: 4ch;
+}
+/* Gap between the toggle and the preceding input box (at least 4ch). */
+.switch-col {
+  padding-inline-start: 4ch;
 }
 </style>
