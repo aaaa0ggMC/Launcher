@@ -65,5 +65,17 @@
   "aidj.sessions.empty_hint": "在 Chat 中对话后会在这里出现",
   "aidj.sessions.pin": "置顶",
   "aidj.sessions.unpin": "取消置顶",
-  "aidj.sessions.delete": "删除"
+  "aidj.sessions.delete": "删除",
+  "aidj.sessions.auto_title": "自动生成标题",
+  "aidj.sessions.set_title": "设置标题",
+  "aidj.sessions.set_title_dialog_title": "设置标题",
+  "aidj.sessions.title_placeholder": "输入会话标题…",
+  "aidj.sessions.title_empty": "标题为空，保持不变",
+  "aidj.sessions.title_saved": "标题已更新",
+  "aidj.sessions.title_generated": "标题已生成",
+  "aidj.sessions.title_started": "已开始生成标题…",
+  "aidj.sessions.title_running": "该会话的标题生成任务正在运行中",
+  "aidj.sessions.title_gen_desc": "自动生成会话标题",
+  "aidj.sessions.title_gen_failed": "标题生成失败",
+  "aidj.sessions.save": "保存"
 }

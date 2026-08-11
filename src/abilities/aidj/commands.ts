@@ -28,6 +28,7 @@ import {
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import OpenAI from 'openai'
+import { startJobByName, listTasks } from '../../main/process/background-tasks'
 import type { AidjConfig, SongMeta, ChatMessage, RawHistoryMessage, PlaylistEntry } from './types'
 import { SEPARATOR } from './types'
 import './jobs'
@@ -861,6 +862,44 @@ const commands: CommandSpec[] = [
       const pinned = await SessionManager.togglePin(id)
       if (pinned === null) return { ok: false, error: '会话不存在' }
       return { ok: true, pinned }
+    }
+  },
+  {
+    name: 'aidj.sessions.rename',
+    description: '设置会话标题（空或纯空格则保持不变）',
+    usage: 'aidj.sessions.rename --id <sessionId> --title <title>',
+    run: async (ctx) => {
+      const id = (ctx.named.id as string) || ''
+      const title = (ctx.named.title as string) || ''
+      if (!id) return { ok: false, error: '需要 --id 参数' }
+      const changed = await SessionManager.renameSession(id, title)
+      if (changed === null) return { ok: false, error: '会话不存在' }
+      return { ok: true, changed, title: title.trim() }
+    }
+  },
+  {
+    name: 'aidj.sessions.gen-title',
+    description: '用对话 AI 根据会话上下文异步生成标题',
+    usage: 'aidj.sessions.gen-title --id <sessionId>',
+    run: async (ctx) => {
+      const id = (ctx.named.id as string) || ''
+      if (!id) return { ok: false, error: '需要 --id 参数' }
+      const already = listTasks().some(
+        (tk) =>
+          tk.status === 'running' &&
+          tk.name === 'AIDJ 标题生成' &&
+          (tk.description ?? '').includes(id)
+      )
+      if (already)
+        return { ok: false, alreadyRunning: true, error: '该会话的标题生成任务正在运行中' }
+      const task = startJobByName('aidj.title', {
+        sessionId: id,
+        name: 'AIDJ 标题生成',
+        description: `为会话 ${id} 自动生成标题`
+      })
+      if (!task) return { ok: false, error: '标题生成任务无法启动' }
+      log.info('Session title job started', { id, taskId: task.id })
+      return { ok: true, taskId: task.id }
     }
   },
   {

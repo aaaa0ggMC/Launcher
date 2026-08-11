@@ -65,5 +65,17 @@
   "aidj.sessions.empty_hint": "Conversations in Chat will appear here",
   "aidj.sessions.pin": "Pin",
   "aidj.sessions.unpin": "Unpin",
-  "aidj.sessions.delete": "Delete"
+  "aidj.sessions.delete": "Delete",
+  "aidj.sessions.auto_title": "Auto-generate title",
+  "aidj.sessions.set_title": "Set title",
+  "aidj.sessions.set_title_dialog_title": "Set Title",
+  "aidj.sessions.title_placeholder": "Enter session title…",
+  "aidj.sessions.title_empty": "Title is empty, kept unchanged",
+  "aidj.sessions.title_saved": "Title updated",
+  "aidj.sessions.title_generated": "Title generated",
+  "aidj.sessions.title_started": "Title generation started…",
+  "aidj.sessions.title_running": "A title generation task for this session is already running",
+  "aidj.sessions.title_gen_desc": "Auto-generate session title",
+  "aidj.sessions.title_gen_failed": "Title generation failed",
+  "aidj.sessions.save": "Save"
 }

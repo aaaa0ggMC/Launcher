@@ -1858,6 +1858,27 @@ export class SessionManager {
     })
   }
 
+  /** Update a session's title. Empty/whitespace titles keep the current title.
+   *  Returns `true` when renamed, `false` when left unchanged (empty), `null` when not found. */
+  static async renameSession(sessionId: string, title: string): Promise<boolean | null> {
+    const clean = title.trim()
+    let result: boolean | null = null
+    await withHistoryLock('__index__', async () => {
+      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const s = idx.sessions.find((x) => x.id === sessionId)
+      if (s) {
+        if (clean) {
+          s.title = clean.slice(0, 60)
+          result = true
+          await writeJsonAtomic(SESSIONS_INDEX, idx)
+        } else {
+          result = false
+        }
+      }
+    })
+    return result
+  }
+
   /** Toggle the pinned flag of a session; returns the new state. */
   static async togglePin(sessionId: string): Promise<boolean | null> {
     let result: boolean | null = null

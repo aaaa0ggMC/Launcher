@@ -34,6 +34,20 @@ const ctxMenuOpen = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxTarget = ref<SessionItem | null>(null)
 
+const titleDialogOpen = ref(false)
+const titleTarget = ref<SessionItem | null>(null)
+const titleInput = ref('')
+const genTitleBusy = ref(false)
+const snackOpen = ref(false)
+const snackText = ref('')
+const snackColor = ref('success')
+
+function showSnack(text: string, color = 'success'): void {
+  snackText.value = text
+  snackColor.value = color
+  snackOpen.value = true
+}
+
 const filteredSessions = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return sessions.value
@@ -165,6 +179,83 @@ async function pinSession(s: SessionItem): Promise<void> {
   }
 }
 
+function openTitleDialog(s: SessionItem): void {
+  ctxMenuOpen.value = false
+  titleTarget.value = s
+  titleInput.value = s.title
+  titleDialogOpen.value = true
+}
+
+async function saveTitle(): Promise<void> {
+  const s = titleTarget.value
+  if (!s) return
+  titleDialogOpen.value = false
+  const title = titleInput.value
+  if (!title.trim()) {
+    showSnack(t('aidj.sessions.title_empty', '标题为空，保持不变'), 'info')
+    return
+  }
+  try {
+    const r = (await window.cockpit.command('aidj.sessions.rename', {
+      id: s.id,
+      title
+    })) as { ok?: boolean; changed?: boolean; error?: string }
+    if (r?.ok) {
+      if (r.changed) {
+        const target = sessions.value.find((x) => x.id === s.id)
+        if (target) target.title = title.trim().slice(0, 60)
+        sessions.value = [...sessions.value]
+        showSnack(t('aidj.sessions.title_saved', '标题已更新'))
+      } else {
+        showSnack(t('aidj.sessions.title_empty', '标题为空，保持不变'), 'info')
+      }
+    } else {
+      showSnack(r?.error || '设置标题失败', 'error')
+    }
+  } catch (e) {
+    showSnack(`设置标题失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+  }
+}
+
+async function autoTitleSession(s: SessionItem): Promise<void> {
+  if (genTitleBusy.value) return
+  ctxMenuOpen.value = false
+  genTitleBusy.value = true
+  try {
+    const runningTasks = (await window.cockpit.btList()) as {
+      name?: string
+      description?: string
+      status?: string
+    }[]
+    const alreadyRunning = (runningTasks ?? []).some(
+      (tk) =>
+        tk.status === 'running' &&
+        tk.name === 'AIDJ 标题生成' &&
+        (tk.description ?? '').includes(s.id)
+    )
+    if (alreadyRunning) {
+      showSnack(t('aidj.sessions.title_running', '该会话的标题生成任务正在运行中'), 'info')
+      return
+    }
+    const r = (await window.cockpit.btJob('aidj.title', {
+      sessionId: s.id,
+      name: 'AIDJ 标题生成',
+      description: `${s.id} · ${t('aidj.sessions.title_gen_desc', '自动生成会话标题')}`
+    })) as { ok?: boolean; task?: { id?: string }; error?: string; alreadyRunning?: boolean }
+    if (r?.ok && r.task?.id) {
+      showSnack(t('aidj.sessions.title_started', '已开始生成标题…'))
+    } else if (r?.alreadyRunning) {
+      showSnack(t('aidj.sessions.title_running', '该会话的标题生成任务正在运行中'), 'info')
+    } else {
+      showSnack(r?.error || t('aidj.sessions.title_gen_failed', '标题生成失败'), 'error')
+    }
+  } catch (e) {
+    showSnack(`标题生成失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+  } finally {
+    genTitleBusy.value = false
+  }
+}
+
 function toMarkdown(): string {
   return chatRef.value?.toMarkdown?.() ?? ''
 }
@@ -201,8 +292,26 @@ onDeactivated(() => {
 
 onMounted(() => {
   if (window.cockpit?.on) {
-    btUnsub = window.cockpit.on('cockpit:bt', () => {
-      if (menuStep.value === 'sessions') refreshSessions()
+    btUnsub = window.cockpit.on('cockpit:bt', (event: unknown) => {
+      if (menuStep.value !== 'sessions') return
+      const ev = event as Record<string, unknown>
+      if (ev?.type === 'output') {
+        const msgs = (ev.messages ?? []) as Record<string, unknown>[]
+        for (const msg of msgs) {
+          const data = msg.data as Record<string, unknown> | undefined
+          if (data && typeof data === 'object' && data.type === 'title') {
+            const sid = String(data.sessionId ?? '')
+            const title = String(data.title ?? '')
+            if (sid && title) {
+              const target = sessions.value.find((x) => x.id === sid)
+              if (target) target.title = title.slice(0, 60)
+              sessions.value = [...sessions.value]
+              showSnack(t('aidj.sessions.title_generated', '标题已生成'))
+            }
+          }
+        }
+      }
+      refreshSessions()
     })
   }
 })
@@ -345,6 +454,22 @@ defineExpose({ toMarkdown })
             }}</span>
           </button>
           <button
+            class="aidj-session-ctx-item"
+            :disabled="genTitleBusy"
+            @click="ctxTarget && autoTitleSession(ctxTarget)"
+          >
+            <v-icon
+              :icon="genTitleBusy ? 'mdi-loading' : 'mdi-auto-fix'"
+              size="14"
+              :class="{ 'mdi-spin': genTitleBusy }"
+            />
+            <span>{{ t('aidj.sessions.auto_title', '自动生成标题') }}</span>
+          </button>
+          <button class="aidj-session-ctx-item" @click="ctxTarget && openTitleDialog(ctxTarget)">
+            <v-icon icon="mdi-rename-box-outline" size="14" />
+            <span>{{ t('aidj.sessions.set_title', '设置标题') }}</span>
+          </button>
+          <button
             class="aidj-session-ctx-item is-danger"
             @click="ctxTarget && deleteSession(ctxTarget)"
           >
@@ -354,6 +479,34 @@ defineExpose({ toMarkdown })
         </div>
       </Transition>
     </Teleport>
+
+    <v-dialog v-model="titleDialogOpen" width="440">
+      <v-card>
+        <v-card-title>{{ t('aidj.sessions.set_title_dialog_title', '设置标题') }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="titleInput"
+            :label="t('aidj.sessions.title_placeholder', '输入会话标题…')"
+            variant="outlined"
+            density="compact"
+            hide-details
+            autofocus
+            @keyup.enter="saveTitle"
+          />
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="titleDialogOpen = false">{{
+            t('aidj.cancel', '取消')
+          }}</v-btn>
+          <v-btn color="primary" @click="saveTitle">{{ t('aidj.sessions.save', '保存') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="snackOpen" :color="snackColor" location="top" timeout="2500">
+      {{ snackText }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -519,6 +672,10 @@ defineExpose({ toMarkdown })
 }
 .aidj-session-ctx-item:hover {
   background: rgba(var(--v-theme-primary), 0.15);
+}
+.aidj-session-ctx-item:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .aidj-session-ctx-item.is-danger:hover {
   background: rgba(var(--v-theme-error), 0.18);
