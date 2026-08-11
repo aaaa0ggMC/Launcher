@@ -119,6 +119,7 @@ function toggleMenu(): void {
     menuOpen.value = true
     menuStep.value = 'main'
     refreshSessions()
+    void refreshLyricsOpen()
   }
 }
 
@@ -161,6 +162,22 @@ async function updateMetadata(): Promise<void> {
 function selectChat(): void {
   menuOpen.value = false
   menuStep.value = 'main'
+}
+
+// -- 桌面歌词：绑定当前设置的 DBus，窗口单例（已存在则聚焦，不重复启动） -----
+const lyricsOpen = ref(false)
+
+async function toggleLyricsWindow(): Promise<void> {
+  const res = (await window.cockpit.command('aidj.lyrics-toggle').catch(() => null)) as {
+    open?: boolean
+  } | null
+  if (res && typeof res.open === 'boolean') lyricsOpen.value = res.open
+  menuOpen.value = false
+}
+
+async function refreshLyricsOpen(): Promise<void> {
+  const wins = (await window.cockpit.listWindows().catch(() => [])) as { id: string }[]
+  lyricsOpen.value = wins.some((w) => w.id.startsWith('aidj-lyrics-'))
 }
 
 async function openSession(sessionId: string): Promise<void> {
@@ -439,6 +456,15 @@ defineExpose({ toMarkdown })
             <div class="menu-item" @click="updateMetadata">
               <v-icon size="18">mdi-database-sync-outline</v-icon>
               <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
+            </div>
+            <div class="menu-item" @click="toggleLyricsWindow">
+              <v-icon size="18">mdi-music-note-plus</v-icon>
+              <span>{{
+                lyricsOpen
+                  ? t('aidj.lyrics_close', '关闭桌面歌词')
+                  : t('aidj.lyrics_open', '桌面歌词')
+              }}</span>
+              <v-icon v-if="lyricsOpen" size="14" class="ml-auto">mdi-check</v-icon>
             </div>
           </template>
 

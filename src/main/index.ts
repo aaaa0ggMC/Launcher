@@ -13,6 +13,7 @@ import {
   shutdownBackgroundTasks,
   runningTaskCount
 } from './process/background-tasks'
+import { setMainWindow, setWindowBroadcast, closeAllChildren } from './process/windows'
 import { readJson } from './process/util'
 import { CONFIG_JSON } from './process/paths'
 import { setLogBroadcast, log } from './process/logger'
@@ -94,6 +95,9 @@ async function createWindow(): Promise<void> {
 
   mainWindow.on('maximize', () => broadcast('cockpit:window-maximized', true))
   mainWindow.on('unmaximize', () => broadcast('cockpit:window-maximized', false))
+  // Child windows live and die with the main shell.
+  mainWindow.on('closed', () => closeAllChildren())
+  setMainWindow(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -131,11 +135,15 @@ if (!gotLock) {
     setOutputBroadcast((event) => broadcast('cockpit:proc-output', event))
     setLogBroadcast((entry) => broadcast('cockpit:log', entry))
     setBackgroundBroadcast((event) => broadcast('cockpit:bt', event))
+    setWindowBroadcast((event) => broadcast('cockpit:windows', event))
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
     // Renderer confirmed it's OK to close despite running tasks.
-    ipcMain.handle('window:confirm-close', () => {
+    ipcMain.handle('window:confirm-close', (e) => {
+      // Only the main shell may authorize quitting; a child window must never
+      // trigger it (its own close is sender-scoped via window:close).
+      if (BrowserWindow.fromWebContents(e.sender) !== mainWindow) return
       quitApproved = true
       mainWindow?.close()
     })
@@ -165,4 +173,5 @@ if (!gotLock) {
 // (tasks are attached to this program, not left orphaned).
 app.on('will-quit', () => {
   shutdownBackgroundTasks()
+  closeAllChildren()
 })

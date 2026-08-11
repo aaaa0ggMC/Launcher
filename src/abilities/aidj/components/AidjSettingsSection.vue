@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { DEFAULT_PERSONA } from '../types'
+import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
 
@@ -12,6 +12,9 @@ const ncmBaseUrl = ref('')
 const dbusTarget = ref('vlc')
 const musicFolders = ref<string[]>([])
 const musicFolderInput = ref('')
+const lyricsFolders = ref<string[]>([])
+const lyricsFolderInput = ref('')
+const lyricsCfg = ref({ ...DEFAULT_LYRICS_CFG })
 const autoPlay = ref(true)
 const dynamicBalance = ref(true)
 const adjMethod = ref<'lufs' | 'linear'>('lufs')
@@ -53,6 +56,11 @@ onMounted(async () => {
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
   musicFolders.value = Array.isArray(cfg.music_folders) ? (cfg.music_folders as string[]) : []
+  lyricsFolders.value = Array.isArray(cfg.lyrics_folders) ? (cfg.lyrics_folders as string[]) : []
+  lyricsCfg.value = {
+    ...DEFAULT_LYRICS_CFG,
+    ...((prefs.lyrics as Record<string, unknown>) ?? {})
+  }
   autoPlay.value = (prefs.auto_play as boolean) ?? true
   dynamicBalance.value = (prefs.dynamic_balance_volume as boolean) ?? true
   adjMethod.value = (prefs.sound_adjust_method as 'lufs' | 'linear') || 'lufs'
@@ -135,6 +143,39 @@ async function pickMusicFolder(): Promise<void> {
   const path = await window.cockpit.pickFile({ title: '选择音乐目录', directory: true })
   if (path) musicFolderInput.value = path
 }
+
+async function persistLyricsFolders(): Promise<void> {
+  try {
+    await window.cockpit.command('aidj.update-config', {
+      path: 'lyrics_folders',
+      value: [...lyricsFolders.value]
+    })
+    await window.cockpit.command('aidj.save-config')
+    await window.cockpit.command('aidj.invalidate-library')
+  } catch {
+    /* noop */
+  }
+}
+
+function addLyricsFolder(): void {
+  const p = lyricsFolderInput.value.trim()
+  if (!p || lyricsFolders.value.includes(p)) return
+  lyricsFolders.value = [...lyricsFolders.value, p]
+  lyricsFolderInput.value = ''
+  void persistLyricsFolders()
+}
+
+function removeLyricsFolder(p: string): void {
+  lyricsFolders.value = lyricsFolders.value.filter((x) => x !== p)
+  void persistLyricsFolders()
+}
+
+async function pickLyricsFolder(): Promise<void> {
+  const path = await window.cockpit.pickFile({ title: '选择歌词目录', directory: true })
+  if (path) lyricsFolderInput.value = path
+}
+
+watch(lyricsCfg, (v) => update('preferences.lyrics', { ...v }), { deep: true })
 
 watch(model, (v) => update('preferences.model', v))
 watch(metadataModel, (v) => update('ai_settings.metadata_model', v))
@@ -324,6 +365,121 @@ function resetDj(): void {
               添加
             </v-btn>
           </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-caption text-medium-emphasis mb-2">
+            歌词搜索目录（递归扫描 .lrc 歌词文件，供桌面歌词窗口使用）
+          </div>
+          <div class="mb-2">
+            <template v-for="p in lyricsFolders" :key="p">
+              <v-chip
+                size="small"
+                variant="outlined"
+                closable
+                class="mr-2 mb-1"
+                @click:close="removeLyricsFolder(p)"
+              >
+                {{ p }}
+              </v-chip>
+            </template>
+            <span v-if="lyricsFolders.length === 0" class="text-caption on-surface-variant">
+              未配置歌词目录
+            </span>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <v-text-field
+              v-model="lyricsFolderInput"
+              placeholder="/home/aaaa0ggmc/Music/Lyrics"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="flex-grow-1"
+            >
+              <template #append-inner>
+                <v-btn icon variant="text" size="small" title="选择目录" @click="pickLyricsFolder">
+                  <v-icon>mdi-folder-open</v-icon>
+                </v-btn>
+              </template>
+            </v-text-field>
+            <v-btn color="primary" variant="tonal" height="40" class="px-5" @click="addLyricsFolder">
+              添加
+            </v-btn>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-caption text-medium-emphasis mb-2">桌面歌词显示（等价 vp wshowlyrics 参数）</div>
+          <v-row dense>
+            <v-col cols="12" md="5">
+              <v-text-field
+                v-model="lyricsCfg.font_family"
+                label="字体"
+                placeholder="Iansui Regular"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.font_size"
+                label="字号"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="8" md="5">
+              <v-select
+                v-model="lyricsCfg.anchor"
+                :items="[
+                  { title: '顶部', value: 'top' },
+                  { title: '居中', value: 'center' },
+                  { title: '底部', value: 'bottom' }
+                ]"
+                label="位置"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="4" md="2">
+              <v-text-field
+                v-model.number="lyricsCfg.margin"
+                label="边距"
+                type="number"
+                hide-details
+                density="compact"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="8" md="10">
+              <v-row dense>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="lyricsCfg.bg_color"
+                    label="背景色 (RRGGBBAA)"
+                    placeholder="00000044"
+                    hide-details
+                    density="compact"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="lyricsCfg.fg_color"
+                    label="前景色 (RRGGBBAA)"
+                    placeholder="EEEEFFEE"
+                    hide-details
+                    density="compact"
+                    variant="outlined"
+                  />
+                </v-col>
+              </v-row>
+            </v-col>
+          </v-row>
         </div>
       </div>
 

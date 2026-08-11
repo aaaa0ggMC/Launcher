@@ -1,4 +1,10 @@
-import type { AbilitiesManifest, LaunchResult, BtOutputMessage, BtTaskInfo } from '../shared/types'
+import type {
+  AbilitiesManifest,
+  LaunchResult,
+  BtOutputMessage,
+  BtTaskInfo,
+  ChildWindowInfo
+} from '../shared/types'
 import type { AppEntry } from '../abilities/apps/types'
 import type { AutostartEntry } from '../abilities/autostart/types'
 import type { DisplayOutput } from '../abilities/display/types'
@@ -78,6 +84,16 @@ export interface CockpitApi {
   confirmWindowClose: () => Promise<void>
   isMaximized: () => Promise<boolean>
   getWallpaper: () => Promise<string | null>
+  setWindowLocked: (locked: boolean) => Promise<boolean>
+  moveWindowBy: (dx: number, dy: number) => Promise<boolean>
+  moveWindowTo: (x: number, y: number) => Promise<boolean>
+  createWindow: (
+    spec: Record<string, unknown>
+  ) => Promise<{ ok: boolean; created?: boolean; error?: string }>
+  destroyWindow: (id: string) => Promise<boolean>
+  focusWindow: (id: string) => Promise<boolean>
+  listWindows: () => Promise<ChildWindowInfo[]>
+  controlWindow: (id: string, action: string, patch?: Record<string, unknown>) => Promise<boolean>
   pickFile: (opts?: {
     title?: string
     directory?: boolean

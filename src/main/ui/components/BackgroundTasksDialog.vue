@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { Ref } from 'vue'
-import type { BtOutputMessage, BtTaskInfo, BtStats } from '@shared/types'
+import type { BtOutputMessage, BtTaskInfo, BtStats, ChildWindowInfo } from '@shared/types'
 import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields } from '@ui/composables/search'
 import { resolveBtView } from '@ui/bt-views'
+import BtWindowView from './BackgroundTaskViews/BtWindowView.vue'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -23,25 +24,43 @@ const visible = computed({
 // Task list state
 // ---------------------------------------------------------------------------
 const tasks = shallowRef<BtTaskInfo[]>([])
+const windows = shallowRef<ChildWindowInfo[]>([])
 const selectedId = ref<string | null>(null)
 const messages = shallowRef<Record<string, BtOutputMessage[]>>({})
 const MAX_MESSAGES = 2000
 const searchText = ref('')
-const statusFilter = ref<'' | BtTaskInfo['status']>('')
+const statusFilter = ref<'' | BtTaskInfo['status'] | 'window'>('')
 
-const selected = computed(() => tasks.value.find((x) => x.id === selectedId.value) ?? null)
+/** Display entry — a real task or a managed child window. */
+type Entry = { type: 'task'; task: BtTaskInfo } | { type: 'window'; window: ChildWindowInfo }
+
+const selected = computed<Entry | null>(() => {
+  if (!selectedId.value) return null
+  if (selectedId.value.startsWith(WINDOW_PREFIX)) {
+    const id = selectedId.value.slice(WINDOW_PREFIX.length)
+    const w = windows.value.find((x) => x.id === id)
+    return w ? { type: 'window', window: w } : null
+  }
+  const task = tasks.value.find((x) => x.id === selectedId.value)
+  return task ? { type: 'task', task } : null
+})
 const runningCount = computed(() => tasks.value.filter((x) => x.status === 'running').length)
 const finishedCount = computed(() => tasks.value.filter((x) => x.status !== 'running').length)
 const clearing = ref(false)
 
-/** Status filter options, matching the logs ability's level-select style. */
+/** Window-entry id prefix, kept unique against task ids in the shared list. */
+const WINDOW_PREFIX = 'win:'
+
+/** Status filter options, matching the logs ability's level-select style.
+ *  The trailing 「子窗口」 category narrows the list to managed child windows. */
 const statusOptions = computed(() => [
   { title: t('bt.filterAll'), value: '' },
   { title: t('bt.status.running'), value: 'running' },
   { title: t('bt.status.exited'), value: 'exited' },
   { title: t('bt.status.stopped'), value: 'stopped' },
   { title: t('bt.status.error'), value: 'error' },
-  { title: t('bt.status.cancelled'), value: 'cancelled' }
+  { title: t('bt.status.cancelled'), value: 'cancelled' },
+  { title: t('bt.filterWindows'), value: 'window' }
 ])
 
 /**
@@ -52,6 +71,7 @@ const statusOptions = computed(() => [
  */
 const sortedTasks = computed<BtTaskInfo[]>(() => {
   const filter = statusFilter.value
+  if (filter === 'window') return []
   return [...tasks.value]
     .filter(
       (t) =>
@@ -72,6 +92,29 @@ const sortedTasks = computed<BtTaskInfo[]>(() => {
       if (byName !== 0) return byName
       return a.status.localeCompare(b.status)
     })
+})
+
+/** Window entries, searchable by id / view (no status — an open window). */
+const windowEntries = computed<Entry[]>(() =>
+  windows.value
+    .filter(
+      (w) =>
+        scoreFields(searchText.value, [
+          { text: w.id.toLowerCase(), weight: 3 },
+          { text: w.view.toLowerCase(), weight: 2 }
+        ]) > 0
+    )
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: 'base' }))
+    .map((w) => ({ type: 'window' as const, window: w }))
+)
+
+/** Merged list: windows show up under 「全部」 and 「子窗口」; a specific status
+ *  filter narrows to matching tasks only. */
+const entries = computed<Entry[]>(() => {
+  const filter = statusFilter.value
+  if (filter === 'window') return windowEntries.value
+  const tasksEntries: Entry[] = sortedTasks.value.map((t) => ({ type: 'task' as const, task: t }))
+  return filter === '' ? [...tasksEntries, ...windowEntries.value] : tasksEntries
 })
 
 /** Remove every stopped/finished task from the list at once. */
@@ -124,7 +167,7 @@ function onBtEvent(raw: unknown): void {
         messages.value = next
       }
       if (selectedId.value && !evt.tasks.some((x) => x.id === selectedId.value)) {
-        selectedId.value = null
+        if (!selectedId.value.startsWith(WINDOW_PREFIX)) selectedId.value = null
       }
       return
     }
@@ -142,21 +185,41 @@ function onBtEvent(raw: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
+// Events from the window manager (cockpit:windows)
+// ---------------------------------------------------------------------------
+function onWindowsEvent(raw: unknown): void {
+  try {
+    const evt = raw as { type?: string; windows?: ChildWindowInfo[] } | null
+    if (!evt || evt.type !== 'changed' || !Array.isArray(evt.windows)) return
+    windows.value = evt.windows
+    // a closed window leaves the panel: drop its selection
+    if (selectedId.value?.startsWith(WINDOW_PREFIX)) {
+      const id = selectedId.value.slice(WINDOW_PREFIX.length)
+      if (!evt.windows.some((w) => w.id === id)) selectedId.value = null
+    }
+  } catch {
+    // never let a display bug re-enter the pipeline
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Detail area (renders the task's registered view)
 // ---------------------------------------------------------------------------
 const busy = ref(false)
 
 const selectedMessages = computed(() => messages.value[selectedId.value ?? ''] ?? [])
 
-/** Resolve the view component for the selected task (fallback: log view). */
+/** Resolve the view for the selected task; a child window uses its dedicated
+ *  BtWindowView (rendered directly, no console/view registry involved). */
 const selectedView = computed(() => {
   const sel = selected.value
-  if (!sel) return null
-  return resolveBtView(sel)
+  if (!sel || sel.type !== 'task') return null
+  return resolveBtView(sel.task)
 })
 
-async function selectTask(id: string): Promise<void> {
+async function selectEntry(id: string): Promise<void> {
   selectedId.value = id
+  if (id.startsWith(WINDOW_PREFIX)) return // windows have no output buffer
   // Backfill from the service ring buffer (covers messages emitted while the
   // panel was closed / before mount). Replace only when it's strictly longer,
   // so live messages that raced in are never lost.
@@ -182,9 +245,10 @@ const exportSnackText = ref('')
 async function exportConsole(): Promise<void> {
   const id = selectedId.value
   if (!id) return
+  const selName = selected.value?.type === 'task' ? selected.value.task.name : 'task'
   exporting.value = true
   try {
-    const defaultName = `${(selected.value?.name ?? 'task').replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}-${new Date()
+    const defaultName = `${selName.replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}-${new Date()
       .toISOString()
       .slice(0, 19)
       .replace(/[:T]/g, '-')}.log`
@@ -202,7 +266,7 @@ async function exportConsole(): Promise<void> {
       error?: string
     } | null
     if (!res?.ok) throw new Error(res?.error ?? t('bt.exportFailed'))
-    exportSnackText.value = te('bt.exported', { name: selected.value?.name ?? '' })
+    exportSnackText.value = te('bt.exported', { name: selName })
     exportSnackOpen.value = true
   } catch (e) {
     exportSnackText.value = e instanceof Error ? e.message : String(e)
@@ -302,6 +366,7 @@ function statsChips(s: BtStats): { icon: string; text: string }[] {
 // Lifecycle
 // ---------------------------------------------------------------------------
 let unsub: (() => void) | null = null
+let winUnsub: (() => void) | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 const now = ref(Date.now())
 
@@ -309,11 +374,18 @@ async function refresh(): Promise<void> {
   tasks.value = await window.cockpit.btList()
 }
 
+function refreshWindows(): void {
+  void window.cockpit.listWindows().then((list) => {
+    windows.value = (list as ChildWindowInfo[]) ?? []
+  })
+}
+
 watch(
   () => props.modelValue,
   (open) => {
     if (open) {
       void refresh()
+      refreshWindows()
       clockTimer = setInterval(() => (now.value = Date.now()), 1000)
     } else if (clockTimer) {
       clearInterval(clockTimer)
@@ -325,10 +397,13 @@ watch(
 // subscribe once at mount so live output is never missed even while closed
 onMounted(() => {
   unsub = window.cockpit.on('cockpit:bt', onBtEvent)
+  winUnsub = window.cockpit.on('cockpit:windows', onWindowsEvent)
   void refresh()
+  refreshWindows()
 })
 onBeforeUnmount(() => {
   unsub?.()
+  winUnsub?.()
   if (clockTimer) clearInterval(clockTimer)
 })
 </script>
@@ -381,9 +456,9 @@ onBeforeUnmount(() => {
               flat
               hide-details
               clearable
-              @click:clear="searchText = ''"
               rounded="lg"
               class="flex-grow-1"
+              @click:clear="searchText = ''"
             />
             <v-select
               v-model="statusFilter"
@@ -397,62 +472,100 @@ onBeforeUnmount(() => {
               class="bt-filter"
             />
           </div>
-          <v-list v-if="sortedTasks.length" density="compact" class="pa-2">
-            <v-list-item
-              v-for="task in sortedTasks"
-              :key="task.id"
-              :active="selectedId === task.id"
-              rounded="lg"
-              class="mb-1 px-1"
-              @click="selectTask(task.id)"
+          <v-list v-if="entries.length" density="compact" class="pa-2">
+            <template
+              v-for="entry in entries"
+              :key="entry.type === 'task' ? entry.task.id : 'win:' + entry.window.id"
             >
-              <v-list-item-title class="d-flex align-center ga-2">
-                <span class="text-truncate">{{ task.name }}</span>
-                <v-chip
-                  variant="tonal"
-                  :color="statusColor(task.status)"
-                  class="ml-auto bt-status-chip"
-                >
-                  {{ statusLabel(task.status) }}
-                </v-chip>
-              </v-list-item-title>
-              <v-list-item-subtitle v-if="task.description" class="text-truncate mt-1">
-                {{ task.description }}
-              </v-list-item-subtitle>
-              <v-list-item-subtitle class="d-flex align-center ga-2 mt-1">
-                <span class="text-caption on-surface-variant">{{ kindLabel(task.kind) }}</span>
-                <span v-if="task.pid" class="text-caption on-surface-variant font-family-mono">
-                  pid {{ task.pid }}
-                </span>
-                <span class="text-caption on-surface-variant ml-auto">{{
-                  fmtElapsed(task.startedAt, task.endedAt, now)
-                }}</span>
-              </v-list-item-subtitle>
-              <template v-if="task.status === 'running'" #append>
-                <div class="d-flex flex-column align-end ga-1 mr-1">
+              <v-list-item
+                v-if="entry.type === 'task'"
+                :active="selectedId === entry.task.id"
+                rounded="lg"
+                class="mb-1 px-1"
+                @click="selectEntry(entry.task.id)"
+              >
+                <v-list-item-title class="d-flex align-center ga-2">
+                  <span class="text-truncate">{{ entry.task.name }}</span>
                   <v-chip
-                    v-for="c in statsChips(task.stats)"
-                    :key="c.icon"
-                    variant="flat"
-                    color="secondary-container"
-                    :prepend-icon="c.icon"
-                    class="bt-stat-chip"
+                    variant="tonal"
+                    :color="statusColor(entry.task.status)"
+                    class="ml-auto bt-status-chip"
                   >
-                    {{ c.text }}
+                    {{ statusLabel(entry.task.status) }}
                   </v-chip>
-                </div>
-              </template>
-            </v-list-item>
+                </v-list-item-title>
+                <v-list-item-subtitle v-if="entry.task.description" class="text-truncate mt-1">
+                  {{ entry.task.description }}
+                </v-list-item-subtitle>
+                <v-list-item-subtitle class="d-flex align-center ga-2 mt-1">
+                  <span class="text-caption on-surface-variant">{{
+                    kindLabel(entry.task.kind)
+                  }}</span>
+                  <span
+                    v-if="entry.task.pid"
+                    class="text-caption on-surface-variant font-family-mono"
+                  >
+                    pid {{ entry.task.pid }}
+                  </span>
+                  <span class="text-caption on-surface-variant ml-auto">{{
+                    fmtElapsed(entry.task.startedAt, entry.task.endedAt, now)
+                  }}</span>
+                </v-list-item-subtitle>
+                <template v-if="entry.task.status === 'running'" #append>
+                  <div class="d-flex flex-column align-end ga-1 mr-1">
+                    <v-chip
+                      v-for="c in statsChips(entry.task.stats)"
+                      :key="c.icon"
+                      variant="flat"
+                      color="secondary-container"
+                      :prepend-icon="c.icon"
+                      class="bt-stat-chip"
+                    >
+                      {{ c.text }}
+                    </v-chip>
+                  </div>
+                </template>
+              </v-list-item>
+
+              <v-list-item
+                v-else
+                :active="selectedId === 'win:' + entry.window.id"
+                rounded="lg"
+                class="mb-1 px-1"
+                @click="selectEntry('win:' + entry.window.id)"
+              >
+                <v-list-item-title class="d-flex align-center ga-2">
+                  <v-icon size="small" class="on-surface-variant">mdi-apps</v-icon>
+                  <span class="text-truncate">{{ entry.window.id }}</span>
+                  <v-chip variant="tonal" color="info" class="ml-auto bt-status-chip">
+                    {{ t('bt.kind.window') }}
+                  </v-chip>
+                </v-list-item-title>
+                <v-list-item-subtitle class="d-flex align-center ga-2 mt-1">
+                  <span class="text-caption on-surface-variant">{{ entry.window.view }}</span>
+                  <span class="text-caption on-surface-variant ml-auto"
+                    >{{ entry.window.width }}×{{ entry.window.height }}</span
+                  >
+                </v-list-item-subtitle>
+              </v-list-item>
+            </template>
           </v-list>
           <v-empty-state
-            v-if="tasks.length === 0"
+            v-if="statusFilter === 'window' && windows.length === 0"
+            icon="mdi-apps"
+            :title="t('bt.noWindows')"
+            :text="t('bt.noWindowsText')"
+            class="mt-8"
+          />
+          <v-empty-state
+            v-else-if="tasks.length === 0 && windows.length === 0"
             icon="mdi-tray-full"
             :title="t('bt.empty')"
             :text="t('bt.emptyText')"
             class="mt-8"
           />
           <v-empty-state
-            v-else-if="sortedTasks.length === 0"
+            v-else-if="entries.length === 0"
             icon="mdi-magnify-close"
             :title="t('bt.noMatch')"
             :text="t('bt.noMatchText')"
@@ -465,89 +578,97 @@ onBeforeUnmount(() => {
         <!-- Detail: console + interaction -->
         <div class="bt-detail">
           <template v-if="selected">
-            <div class="d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
-              <span class="text-subtitle-2 font-weight-medium">{{ selected.name }}</span>
-              <v-chip variant="tonal" :color="statusColor(selected.status)">
-                {{ statusLabel(selected.status) }}
-              </v-chip>
-              <v-spacer />
+            <template v-if="selected.type === 'task'">
+              <div class="d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
+                <span class="text-subtitle-2 font-weight-medium">{{ selected.task.name }}</span>
+                <v-chip variant="tonal" :color="statusColor(selected.task.status)">
+                  {{ statusLabel(selected.task.status) }}
+                </v-chip>
+                <v-spacer />
 
-              <!-- view tools (icon-only, compact) -->
-              <div class="d-flex align-center ga-1">
-                <v-tooltip :text="t('bt.clear')" location="bottom">
-                  <template #activator="{ props: tp }">
-                    <v-btn v-bind="tp" size="small" variant="text" icon @click="clearConsole">
-                      <v-icon size="small">mdi-broom</v-icon>
-                    </v-btn>
-                  </template>
-                </v-tooltip>
-                <v-tooltip :text="t('bt.export')" location="bottom">
-                  <template #activator="{ props: tp }">
-                    <v-btn
-                      v-bind="tp"
-                      size="small"
-                      variant="text"
-                      :loading="exporting"
-                      icon
-                      @click="exportConsole"
-                    >
-                      <v-icon size="small">mdi-export</v-icon>
-                    </v-btn>
-                  </template>
-                </v-tooltip>
+                <!-- view tools (icon-only, compact) -->
+                <div class="d-flex align-center ga-1">
+                  <v-tooltip :text="t('bt.clear')" location="bottom">
+                    <template #activator="{ props: tp }">
+                      <v-btn v-bind="tp" size="small" variant="text" icon @click="clearConsole">
+                        <v-icon size="small">mdi-broom</v-icon>
+                      </v-btn>
+                    </template>
+                  </v-tooltip>
+                  <v-tooltip :text="t('bt.export')" location="bottom">
+                    <template #activator="{ props: tp }">
+                      <v-btn
+                        v-bind="tp"
+                        size="small"
+                        variant="text"
+                        :loading="exporting"
+                        icon
+                        @click="exportConsole"
+                      >
+                        <v-icon size="small">mdi-export</v-icon>
+                      </v-btn>
+                    </template>
+                  </v-tooltip>
+                </div>
+
+                <!-- lifecycle actions (text buttons, separated) -->
+                <div class="d-flex align-center ga-2">
+                  <v-btn
+                    v-if="selected.task.status === 'running'"
+                    variant="tonal"
+                    color="warning"
+                    prepend-icon="mdi-stop-circle-outline"
+                    :loading="busy"
+                    @click="stopSelected"
+                  >
+                    {{ selected.task.kind === 'job' ? t('bt.cancel') : t('bt.stop') }}
+                  </v-btn>
+                  <v-btn
+                    v-if="selected.task.kind === 'process' && selected.task.status === 'running'"
+                    variant="tonal"
+                    color="error"
+                    prepend-icon="mdi-close-octagon-outline"
+                    @click="killSelected"
+                  >
+                    {{ t('bt.kill') }}
+                  </v-btn>
+                  <v-btn
+                    v-if="selected.task.status !== 'running'"
+                    variant="tonal"
+                    prepend-icon="mdi-archive-arrow-up-outline"
+                    @click="removeSelected"
+                  >
+                    {{ t('bt.remove') }}
+                  </v-btn>
+                </div>
               </div>
 
-              <!-- lifecycle actions (text buttons, separated) -->
-              <div class="d-flex align-center ga-2">
-                <v-btn
-                  v-if="selected.status === 'running'"
-                  variant="tonal"
-                  color="warning"
-                  prepend-icon="mdi-stop-circle-outline"
-                  :loading="busy"
-                  @click="stopSelected"
-                >
-                  {{ selected.kind === 'job' ? t('bt.cancel') : t('bt.stop') }}
-                </v-btn>
-                <v-btn
-                  v-if="selected.kind === 'process' && selected.status === 'running'"
-                  variant="tonal"
-                  color="error"
-                  prepend-icon="mdi-close-octagon-outline"
-                  @click="killSelected"
-                >
-                  {{ t('bt.kill') }}
-                </v-btn>
-                <v-btn
-                  v-if="selected.status !== 'running'"
-                  variant="tonal"
-                  prepend-icon="mdi-archive-arrow-up-outline"
-                  @click="removeSelected"
-                >
-                  {{ t('bt.remove') }}
-                </v-btn>
+              <div v-if="selected.task.command" class="px-4 pb-3">
+                <span class="text-caption on-surface-variant font-family-mono bt-cmd">{{
+                  selected.task.command
+                }}</span>
               </div>
-            </div>
 
-            <div v-if="selected.command" class="px-4 pb-3">
-              <span class="text-caption on-surface-variant font-family-mono bt-cmd">{{
-                selected.command
-              }}</span>
-            </div>
+              <v-divider />
 
-            <v-divider />
+              <!-- Task view: resolved from the task's `view` id (default: log console).
+                   Wrapped in a flex:1 min-height:0 container so the view fills the
+                   remaining detail area without overflowing the dialog. -->
+              <div v-if="selectedView && selected" class="bt-view">
+                <component
+                  :is="selectedView.component"
+                  :key="selected.task.id"
+                  :task="selected.task"
+                  :messages="selectedMessages"
+                  v-bind="selectedView.props ?? {}"
+                />
+              </div>
+            </template>
 
-            <!-- Task view: resolved from the task's `view` id (default: log console).
-                 Wrapped in a flex:1 min-height:0 container so the view fills the
-                 remaining detail area without overflowing the dialog. -->
-            <div v-if="selectedView && selected" class="bt-view">
-              <component
-                :is="selectedView.component"
-                :key="selected.id"
-                :task="selected"
-                :messages="selectedMessages"
-                v-bind="selectedView.props ?? {}"
-              />
+            <!-- Child window: its own management view (pin / frameless / rounded /
+                 minimize / maximize / close) replaces the task toolbar + console. -->
+            <div v-else class="bt-winview">
+              <BtWindowView :window="selected.window" />
             </div>
           </template>
 
@@ -616,6 +737,12 @@ onBeforeUnmount(() => {
    inside this box (a root with height:100% + internal overflow-y:auto), so
    any view — flex-rooted or plain block — adapts safely here. */
 .bt-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Same bounded container for the child-window management view. */
+.bt-winview {
   flex: 1;
   min-height: 0;
   overflow: hidden;

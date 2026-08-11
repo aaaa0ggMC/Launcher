@@ -16,11 +16,13 @@ import type {
   LoudnessInfo,
   ChatMessage,
   RawHistoryMessage,
-  SessionMeta
+  SessionMeta,
+  LyricPlaybackState
 } from './types'
 import {
   AIDJ_DATA_DIR,
   METADATA_FILE,
+  LYRICS_FILE,
   FREQ_FILE,
   PLAYLISTS_DIR,
   SEPARATOR,
@@ -121,6 +123,10 @@ export function getAidjDir(): string {
 
 export function getMetadataPath(): string {
   return join(AIDJ_DIR, METADATA_FILE)
+}
+
+export function getLyricsPath(): string {
+  return join(AIDJ_DIR, LYRICS_FILE)
 }
 
 export function getFreqPath(): string {
@@ -240,6 +246,104 @@ export async function loadMetadata(): Promise<Map<string, SongMeta>> {
 }
 
 // ---------------------------------------------------------------------------
+// Lyrics store — music_lyrics.jsonl (name → LRC text), append-only like the
+// metadata file. Filled during metadata sync (the NCM lyric search already
+// runs there); consumed by the desktop-lyrics window via `aidj.lyrics`.
+// ---------------------------------------------------------------------------
+
+export async function loadLyrics(): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  // 1. NCM-synced lyrics (music_lyrics.jsonl)
+  try {
+    const raw = await readFile(getLyricsPath(), 'utf-8')
+    for (const line of raw.split('\n').filter(Boolean)) {
+      try {
+        const entry = JSON.parse(line)
+        if (entry.name && typeof entry.lyric === 'string') map.set(entry.name, entry.lyric)
+      } catch {
+        /* noop */
+      }
+    }
+  } catch {
+    /* noop */
+  }
+  // 2. Locally curated .lrc files from the configured lyrics folders — these
+  //    override the NCM result for the same song name (manual beats auto).
+  const config = await loadAidjConfig()
+  const folders = config?.lyrics_folders ?? []
+  const files = await scanLyricFiles(folders)
+  for (const [name, content] of files) {
+    if (content) map.set(name, content)
+  }
+  return map
+}
+
+const LRC_EXT = '.lrc'
+
+/** Recursively scan folders for `.lrc` files, keyed by basename (without ext). */
+export async function scanLyricFiles(folders: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  for (const folder of folders) {
+    try {
+      await walkLyricDir(folder, map)
+    } catch (e) {
+      log.warn('scan lyric folder failed', { folder, error: String(e) })
+    }
+  }
+  return map
+}
+
+async function walkLyricDir(dir: string, map: Map<string, string>): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      await walkLyricDir(full, map)
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(LRC_EXT)) {
+      const name = entry.name.slice(0, -LRC_EXT.length).trim()
+      if (!name || map.has(name)) continue
+      try {
+        map.set(name, await readFile(full, 'utf-8'))
+      } catch {
+        /* skip unreadable */
+      }
+    }
+  }
+}
+
+export async function appendLyric(name: string, lyric: string): Promise<void> {
+  if (!lyric) return
+  await ensureAidjDir()
+  const line = JSON.stringify({ name, lyric }) + '\n'
+  await appendFile(getLyricsPath(), line, 'utf-8')
+}
+
+/**
+ * Resolve LRC text for a DBus-reported track title. Exact name first, then a
+ * few pragmatic fallbacks (strip trailing " - Artist", strip bracket noise),
+ * then a shortest-key substring match so "Song（翻唱）" still finds "Song".
+ */
+export function resolveLyricForTrack(track: string, lyrics: Map<string, string>): string | null {
+  if (!track) return null
+  const t = track.trim()
+  if (lyrics.has(t)) return lyrics.get(t) ?? null
+  const base = t
+    .replace(/\s+-\s+.+$/, '')
+    .replace(/[（）()【】[\]]/g, ' ')
+    .trim()
+  if (base && lyrics.has(base)) return lyrics.get(base) ?? null
+  const compact = base.replace(/\s+/g, '')
+  let best: string | null = null
+  if (compact) {
+    for (const [name, lrc] of lyrics) {
+      const key = name.replace(/\s+/g, '')
+      if (key.includes(compact) && (best === null || key.length < best.length)) best = lrc
+    }
+  }
+  return best
+}
+
+// ---------------------------------------------------------------------------
 // Shared library cache — metadata + music paths are near-constant; every
 // session/job (main page, persistent, chat, ...) should reuse ONE copy instead
 // of scanning + re-reading per session. syncMetadata mutates the cached map in
@@ -250,15 +354,18 @@ export async function loadMetadata(): Promise<Map<string, SongMeta>> {
 let _libraryCache: {
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
+  lyrics: Map<string, string>
 } | null = null
 let _libraryLoading: Promise<{
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
+  lyrics: Map<string, string>
 }> | null = null
 
 export function loadLibrary(): Promise<{
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
+  lyrics: Map<string, string>
 }> {
   if (_libraryCache) return Promise.resolve(_libraryCache)
   if (!_libraryLoading) {
@@ -267,7 +374,8 @@ export function loadLibrary(): Promise<{
       const folders = config?.music_folders ?? []
       const musicPaths = await scanMusicFiles(folders)
       const metadata = await loadMetadata()
-      _libraryCache = { metadata, musicPaths }
+      const lyrics = await loadLyrics()
+      _libraryCache = { metadata, musicPaths, lyrics }
       return _libraryCache
     })().finally(() => {
       _libraryLoading = null
@@ -407,7 +515,8 @@ export async function syncMetadata(
   metadata: Map<string, SongMeta>,
   model: string,
   concurrency: number,
-  onProgress?: (p: MetadataSyncProgress) => void
+  onProgress?: (p: MetadataSyncProgress) => void,
+  lyrics?: Map<string, string>
 ): Promise<{ metadata: Map<string, SongMeta>; counts: MetadataSyncCounts }> {
   const counts: MetadataSyncCounts = { ok: 0, noLyric: 0, failed: 0, networkError: 0 }
   if (!missing.size) return { metadata, counts }
@@ -475,6 +584,13 @@ export async function syncMetadata(
               lyricLen: lyric.length,
               error
             })
+          }
+          // Persist the fetched LRC for the desktop-lyrics window regardless of
+          // whether AI metadata extraction succeeded. A locally curated .lrc
+          // (lyrics_folders) already in the cache wins over the NCM result.
+          if (lyric && (!lyrics || !lyrics.has(name))) {
+            await appendLyric(name, lyric)
+            if (lyrics) lyrics.set(name, lyric)
           }
         }
       })
@@ -654,6 +770,66 @@ export class DBusManager {
     } catch (e) {
       log.warn('getStatus failed', { error: String(e) })
       return { status: 'Unknown', track: '', volume: null, player: '' }
+    }
+  }
+
+  /**
+   * Richer playback snapshot for the desktop-lyrics window: adds artist /
+   * album / position (µs) / length (µs). A single DBus round-trip group.
+   */
+  async getPlaybackDetail(): Promise<{
+    ok: boolean
+    status: PlayerStatus['status']
+    track: string
+    artist: string
+    album: string
+    positionMs: number | null
+    lengthMs: number | null
+  }> {
+    const unreachable = {
+      ok: false,
+      status: 'Unknown' as PlayerStatus['status'],
+      track: '',
+      artist: '',
+      album: '',
+      positionMs: null as number | null,
+      lengthMs: null as number | null
+    }
+    try {
+      if (this._autoMode) {
+        const target = await this.autoDetectPlayer()
+        if (!target) return unreachable
+      } else if (!this.propsProxy) {
+        return unreachable
+      }
+      const props = this.propsProxy as unknown as PropertiesInterface
+      const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus')
+      const metaV = await props.Get('org.mpris.MediaPlayer2.Player', 'Metadata')
+      const posV = await props.Get('org.mpris.MediaPlayer2.Player', 'Position')
+      const rawMeta = metaV.value as Record<string, unknown>
+      const meta: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(rawMeta ?? {})) {
+        meta[k] = unwrapVariant(v)
+      }
+      const artistRaw = meta['xesam:artist']
+      const artist = Array.isArray(artistRaw)
+        ? (artistRaw as unknown[]).map(String).join(' / ')
+        : String(artistRaw ?? '')
+      const album = String(meta['xesam:album'] ?? '')
+      const length = Number(meta['mpris:length'] ?? 0)
+      const position = Number(unwrapVariant(posV.value) ?? 0)
+      return {
+        ok: true,
+        status: statusV.value as string as PlayerStatus['status'],
+        track: this.resolveTrackName(meta),
+        artist,
+        album,
+        positionMs: position > 0 ? Math.round(position / 1000) : null,
+        lengthMs: length > 0 ? Math.round(length / 1000) : null
+      }
+    } catch (e) {
+      log.warn('getPlaybackDetail failed', { error: String(e) })
+      return unreachable
     }
   }
 
@@ -1663,6 +1839,99 @@ export async function initDbusManager(config: AidjConfig): Promise<DBusManager> 
   await dbus.connect()
   setDbusManager(dbus)
   return dbus
+}
+
+// ---------------------------------------------------------------------------
+// Desktop-lyrics playback probe — binds to the AIDJ session's CURRENTLY SET
+// DBus player (the one the user selected / configured), so the lyrics window
+// follows exactly what AIDJ is bound to. The lyrics window polls `aidj.lyrics`
+// (≈1 Hz) and this resolves the LRC text for the current track.
+// ---------------------------------------------------------------------------
+let _lyricsDbus: DBusManager | null = null
+
+async function getLyricsDbus(): Promise<DBusManager | null> {
+  // Prefer the session manager — it carries the user's current DBus binding
+  // (switchPlayer / config.preferences.dbus_target).
+  const session = getDbusManager()
+  if (session) return session
+  if (!_lyricsDbus) {
+    const config = await loadAidjConfig()
+    const dbus = new DBusManager(config?.preferences?.dbus_target ?? 'vlc')
+    await dbus.connect()
+    _lyricsDbus = dbus
+  }
+  return _lyricsDbus
+}
+
+export async function getLyricPlayback(): Promise<LyricPlaybackState> {
+  const empty: LyricPlaybackState = {
+    ok: false,
+    status: 'Unknown',
+    track: '',
+    artist: '',
+    album: '',
+    player: '',
+    positionMs: null,
+    lengthMs: null,
+    lyric: null
+  }
+  try {
+    const dbus = await getLyricsDbus()
+    if (!dbus) return empty
+    const detail = await dbus.getPlaybackDetail()
+    // `ok: false` → the bound DBus player is unreachable (closed the window /
+    // AIDJ never bound). The lyrics window watches this and closes itself.
+    if (!detail.ok) return empty
+    // Player reachable but nothing loaded yet — keep the window, show "waiting".
+    if (!detail.track) {
+      return {
+        ...empty,
+        ok: true,
+        status: detail.status,
+        player: dbus.resolvedPlayerName,
+        positionMs: detail.positionMs,
+        lengthMs: detail.lengthMs
+      }
+    }
+    const lib = await loadLibrary()
+    const lyric = resolveLyricForTrack(detail.track, lib.lyrics)
+    return {
+      ok: true,
+      status: detail.status,
+      track: detail.track,
+      artist: detail.artist,
+      album: detail.album,
+      player: dbus.resolvedPlayerName,
+      positionMs: detail.positionMs,
+      lengthMs: detail.lengthMs,
+      lyric
+    }
+  } catch (e) {
+    log.warn('getLyricPlayback failed', { error: e instanceof Error ? e.message : String(e) })
+    return empty
+  }
+}
+
+/**
+ * Stable key for the desktop-lyrics window per DBus instance: the session's
+ * currently bound player (forces auto mode to resolve once so the key doesn't
+ * flip between polls), else the configured dbus_target. Two players → two
+ * independent lyrics windows, each single-instance.
+ */
+export async function getCurrentPlayerKey(): Promise<string> {
+  const dbus = getDbusManager()
+  if (dbus) {
+    if (dbus.resolvedPlayerName) return dbus.resolvedPlayerName
+    if (dbus.autoMode) {
+      // Bind auto mode once so the key is stable from now on.
+      await dbus.getStatus()
+      if (dbus.resolvedPlayerName) return dbus.resolvedPlayerName
+    }
+    const name = dbus.getPlayerName()
+    if (name && name !== '__auto__') return name
+  }
+  const config = await loadAidjConfig()
+  return config?.preferences?.dbus_target || 'auto'
 }
 
 // ---------------------------------------------------------------------------

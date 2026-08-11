@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import type { Component } from 'vue'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
@@ -6,6 +7,7 @@ import '@mdi/font/css/materialdesignicons.css'
 import 'vuetify/styles'
 import './styles/global.css'
 import App from './App.vue'
+import { windowViews } from './windows'
 import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 
 const vuetify = createVuetify({
@@ -73,4 +75,23 @@ function forwardConsoleErrors(): void {
 
 forwardConsoleErrors()
 
-createApp(App).use(vuetify).mount('#app')
+/**
+ * Root switch: the SAME renderer entry serves both the main shell and every
+ * managed child window. A child window loads with `?view=<key>`; if the key
+ * exists in the windows/ glob registry we mount that component instead of the
+ * full App shell (sidebar / background layers / quit guard are all skipped).
+ */
+async function mountRoot(): Promise<void> {
+  let root: Component = App
+  const view = new URLSearchParams(location.search).get('view')
+  if (view) {
+    const loader = windowViews[`./${view}.vue`]
+    if (loader) {
+      const mod = (await loader()) as { default: Component }
+      root = mod.default
+    }
+  }
+  createApp(root).use(vuetify).mount('#app')
+}
+
+void mountRoot()

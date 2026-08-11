@@ -75,6 +75,8 @@
   "aidj.cmd.analyse.usage": "/analyse <language|emotion|genre|loudness>",
   "aidj.metadata_sync": "Update MetaData",
   "aidj.metadata_sync_desc": "Scan library and update missing song metadata",
+  "aidj.lyrics_open": "Desktop Lyrics",
+  "aidj.lyrics_close": "Close Desktop Lyrics",
   "aidj.metadata_sync_started": "Metadata sync started…",
   "aidj.metadata_sync_failed": "Metadata sync failed",
   "aidj.metadata_sync_done": "Metadata sync finished",

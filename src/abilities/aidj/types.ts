@@ -1,5 +1,7 @@
 export interface AidjConfig {
   music_folders: string[]
+  /** Folders scanned (recursively) for `.lrc` lyric files, shown in the desktop-lyrics window. */
+  lyrics_folders?: string[]
   ncm_base_url: string
   secrets: { api_key: string }
   ai_settings: {
@@ -47,7 +49,37 @@ export interface AidjConfig {
     persona?: string
     /** Extra behavior rules appended to every DJ prompt. Empty = none. */
     extra_rules?: string
+    /** Desktop-lyrics window display settings (mirrors `vp wshowlyrics` flags). */
+    lyrics?: Partial<LyricsDisplayConfig>
   }
+}
+
+/**
+ * Desktop-lyrics display config, mirroring `vp wshowlyrics -F '<font> <size>' -a
+ * <anchor> -m <margin> -b <bg> -f <fg>`. Colors are RRGGBBAA hex (alpha last).
+ */
+export interface LyricsDisplayConfig {
+  /** font family, e.g. "Iansui Regular" */
+  font_family: string
+  /** current-line font size in px */
+  font_size: number
+  /** vertical anchor of the lyrics card within the window */
+  anchor: 'top' | 'center' | 'bottom'
+  /** gap from the anchor edge, px */
+  margin: number
+  /** backdrop color RRGGBBAA — '00000000' = fully transparent */
+  bg_color: string
+  /** text color RRGGBBAA */
+  fg_color: string
+}
+
+export const DEFAULT_LYRICS_CFG: LyricsDisplayConfig = {
+  font_family: 'Iansui Regular',
+  font_size: 36,
+  anchor: 'top',
+  margin: 50,
+  bg_color: '00000044',
+  fg_color: 'EEEEFFEE'
 }
 
 /** Built-in DJ persona. Users can override it via `preferences.persona`. */
@@ -155,5 +187,27 @@ export interface PersistentSessionState {
 export const SEPARATOR = '[---SONG_LIST---]'
 export const AIDJ_DATA_DIR = 'aidj'
 export const METADATA_FILE = 'music_metadata.jsonl'
+export const LYRICS_FILE = 'music_lyrics.jsonl'
 export const FREQ_FILE = 'frequency.csv'
 export const PLAYLISTS_DIR = 'playlists'
+
+/** Desktop-lyrics window id prefix — the full id is `<prefix>-<playerKey>`, so
+ *  each DBus instance (player) gets its own single-instance lyrics window. */
+export const LYRICS_WINDOW_ID = 'aidj-lyrics'
+
+/**
+ * Live DBus playback snapshot for the desktop-lyrics window. `position` /
+ * `length` are in milliseconds; `lyric` is the LRC text resolved for the
+ * current track (null when no lyric is stored for it).
+ */
+export interface LyricPlaybackState {
+  ok: boolean
+  status: PlayerStatus['status']
+  track: string
+  artist: string
+  album: string
+  player: string
+  positionMs: number | null
+  lengthMs: number | null
+  lyric: string | null
+}

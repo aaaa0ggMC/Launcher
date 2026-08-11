@@ -123,3 +123,31 @@ export type BtOutputEvent =
   | { id: string; type: 'line'; stream: 'stdout' | 'stderr'; line: string }
   | { id: string; type: 'message'; message: BtOutputMessage }
   | { id: string; type: 'exit'; code: number | null }
+
+/**
+ * Managed child window snapshot (src/main/process/windows.ts → renderer).
+ *
+ * Child windows are extra BrowserWindows (e.g. a floating lyrics view) created
+ * via `window.create`. They are single-instance per `id`, loaded from the same
+ * renderer with a `?view=` query that picks the root component (windows/ glob),
+ * and surfaced in the background-task panel under the 「子窗口」filter category.
+ */
+export interface ChildWindowInfo {
+  /** unique window id — the single-instance key. */
+  id: string
+  /** renderer view key resolved against the windows/ glob (e.g. `LyricsWindow`). */
+  view: string
+  frameless: boolean
+  rounded: boolean
+  alwaysOnTop: boolean
+  /** mouse passthrough — `setIgnoreMouseEvents(true)`, unlock via the BT panel. */
+  locked: boolean
+  minimized: boolean
+  maximized: boolean
+  width: number
+  height: number
+  startedAt: number
+}
+
+/** Window manager change event (`cockpit:windows` broadcast). */
+export type WindowChangedEvent = { type: 'changed'; windows: ChildWindowInfo[] }

@@ -114,6 +114,26 @@ const cockpit = {
   confirmWindowClose: (): Promise<void> => ipcRenderer.invoke('window:confirm-close'),
   isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
   getWallpaper: (): Promise<string | null> => ipcRenderer.invoke('window:wallpaper'),
+  /** Mouse passthrough for the current window (locked desktop lyrics). */
+  setWindowLocked: (locked: boolean): Promise<boolean> => ipcRenderer.invoke('window:lock', locked),
+  /** Move the current window by a pixel delta (manual drag in a frameless view). */
+  moveWindowBy: (dx: number, dy: number): Promise<boolean> =>
+    ipcRenderer.invoke('window:move', dx, dy),
+  /** Move the current window to an absolute position (anchor/margin placement). */
+  moveWindowTo: (x: number, y: number): Promise<boolean> =>
+    ipcRenderer.invoke('window:move-to', x, y),
+
+  // child window manager (single-instance per id; the panel controls children
+  // cross-window via controlWindow)
+  createWindow: (
+    spec: Record<string, unknown>
+  ): Promise<{ ok: boolean; created?: boolean; error?: string }> =>
+    ipcRenderer.invoke('window:create', spec),
+  destroyWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('window:destroy', id),
+  focusWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('window:focus', id),
+  listWindows: (): Promise<unknown> => ipcRenderer.invoke('window:list'),
+  controlWindow: (id: string, action: string, patch?: Record<string, unknown>): Promise<boolean> =>
+    ipcRenderer.invoke('window:control', id, action, patch),
   pickFile: (opts?: {
     title?: string
     directory?: boolean

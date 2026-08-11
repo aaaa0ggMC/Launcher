@@ -19,11 +19,24 @@ function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 import { makeLogger } from './logger'
+import {
+  createChildWindow,
+  destroyChildWindow,
+  focusChildWindow,
+  controlChildWindow,
+  listChildWindows,
+  setSenderWindowLocked,
+  moveWindowBy,
+  moveWindowTo,
+  type WindowSpec,
+  type WindowControlAction
+} from './windows'
 
 const log = makeLogger('ipc')
 
-function mainWindow(): BrowserWindow | null {
-  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+/** The window that actually sent a request (main or a managed child window). */
+function senderWindow(e: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(e.sender)
 }
 
 /**
@@ -50,21 +63,49 @@ export function registerIpc(): void {
   // App chrome (not an ability operation).
   ipcMain.handle('abilities:manifest', async () => getManifest())
 
-  // Frameless window controls (Linux/Wayland: no native title bar).
-  ipcMain.handle('window:minimize', () => {
-    mainWindow()?.minimize()
+  // Frameless window controls (Linux/Wayland: no native title bar). These are
+  // sender-scoped: a child window (lyrics etc.) controls ITSELF, never the main
+  // shell — the BT panel manages children cross-window via `window:control`.
+  ipcMain.handle('window:minimize', (e) => {
+    senderWindow(e)?.minimize()
   })
-  ipcMain.handle('window:toggle-maximize', () => {
-    const win = mainWindow()
+  ipcMain.handle('window:toggle-maximize', (e) => {
+    const win = senderWindow(e)
     if (!win) return false
     if (win.isMaximized()) win.unmaximize()
     else win.maximize()
     return win.isMaximized()
   })
-  ipcMain.handle('window:close', () => {
-    mainWindow()?.close()
+  ipcMain.handle('window:close', (e) => {
+    senderWindow(e)?.close()
   })
-  ipcMain.handle('window:is-maximized', () => mainWindow()?.isMaximized() ?? false)
+  ipcMain.handle('window:is-maximized', (e) => senderWindow(e)?.isMaximized() ?? false)
+  // Mouse passthrough + manual drag — self-service ops for frameless children
+  // (desktop lyrics). Lock makes the window unclickable; unlock is via the BT
+  // panel (`window:control --action lock`) since the window itself can't.
+  ipcMain.handle('window:lock', (e, locked: boolean) =>
+    setSenderWindowLocked(senderWindow(e), locked === true)
+  )
+  ipcMain.handle('window:move', (e, dx: number, dy: number) =>
+    moveWindowBy(senderWindow(e), Number(dx) || 0, Number(dy) || 0)
+  )
+  // Absolute reposition — a child window re-asserts its configured
+  // anchor/margin placement once mounted (KWin scripting on KDE Wayland).
+  ipcMain.handle('window:move-to', (e, x: number, y: number) =>
+    moveWindowTo(senderWindow(e), Number(x) || 0, Number(y) || 0)
+  )
+
+  // Child window manager — BrowserWindows can only be created in the main
+  // process; the renderer sends a declarative spec and this owns lifecycle.
+  ipcMain.handle('window:create', (_e, spec: WindowSpec) => createChildWindow(spec))
+  ipcMain.handle('window:destroy', (_e, id: string) => destroyChildWindow(id))
+  ipcMain.handle('window:focus', (_e, id: string) => focusChildWindow(id))
+  ipcMain.handle('window:list', () => listChildWindows())
+  ipcMain.handle(
+    'window:control',
+    (_e, id: string, action: WindowControlAction, patch?: Record<string, unknown>) =>
+      controlChildWindow(id, action, patch)
+  )
 
   // Desktop wallpaper for the `wallpaper` background preset.
   ipcMain.handle('window:wallpaper', async () => kdeWallpaperPath())
@@ -90,7 +131,7 @@ export function registerIpc(): void {
         : isDir
           ? ['openDirectory']
           : ['openFile']
-      const res = await dialog.showOpenDialog(mainWindow() ?? undefined!, {
+      const res = await dialog.showOpenDialog(senderWindow(_e) ?? undefined!, {
         title: opts?.title ?? (isDir ? '选择目录' : '选择文件'),
         properties,
         filters: isDir || isAny ? undefined : (opts?.filters ?? [])
@@ -110,7 +151,7 @@ export function registerIpc(): void {
         filters?: { name: string; extensions: string[] }[]
       }
     ) => {
-      const res = await dialog.showSaveDialog(mainWindow() ?? undefined!, {
+      const res = await dialog.showSaveDialog(senderWindow(_e) ?? undefined!, {
         title: opts?.title ?? '保存文件',
         defaultPath: opts?.defaultPath,
         filters: opts?.filters

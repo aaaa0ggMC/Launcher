@@ -1111,24 +1111,32 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
     `发现 ${total} 首歌曲缺少元数据，使用 ${model} 开始同步 (并发 ${concurrency})...`
   )
 
-  const { counts } = await syncMetadata(client, missing, lib.metadata, model, concurrency, (p) => {
-    control.setProgress(Math.round((p.done / p.total) * 100))
-    const marker = `[${p.done}/${p.total}] ${p.name}`
-    if (p.status === 'ok') {
-      control.pushLine(marker)
-      control.pushLine(`    ✓ NCM 命中 id=${p.sid ?? ''}，歌词 ${p.lyricLen ?? 0} 字`)
-      control.pushLine(`    ✓ ${JSON.stringify(p.meta)}`)
-    } else if (p.status === 'noLyric') {
-      control.pushLine(`${marker} ⚠ NCM 未找到匹配`)
-    } else if (p.status === 'networkError') {
-      control.pushLine(`${marker} ✗ ${p.error ?? 'NCM API 连接失败'}`, 'stderr')
-    } else {
-      control.pushLine(
-        `${marker} ✗ AI 提取失败${p.error ? `: ${p.error}` : ''} (NCM id=${p.sid ?? ''})`,
-        'stderr'
-      )
-    }
-  })
+  const { counts } = await syncMetadata(
+    client,
+    missing,
+    lib.metadata,
+    model,
+    concurrency,
+    (p) => {
+      control.setProgress(Math.round((p.done / p.total) * 100))
+      const marker = `[${p.done}/${p.total}] ${p.name}`
+      if (p.status === 'ok') {
+        control.pushLine(marker)
+        control.pushLine(`    ✓ NCM 命中 id=${p.sid ?? ''}，歌词 ${p.lyricLen ?? 0} 字`)
+        control.pushLine(`    ✓ ${JSON.stringify(p.meta)}`)
+      } else if (p.status === 'noLyric') {
+        control.pushLine(`${marker} ⚠ NCM 未找到匹配`)
+      } else if (p.status === 'networkError') {
+        control.pushLine(`${marker} ✗ ${p.error ?? 'NCM API 连接失败'}`, 'stderr')
+      } else {
+        control.pushLine(
+          `${marker} ✗ AI 提取失败${p.error ? `: ${p.error}` : ''} (NCM id=${p.sid ?? ''})`,
+          'stderr'
+        )
+      }
+    },
+    lib.lyrics
+  )
 
   if (counts.networkError > 0) {
     control.pushLine(

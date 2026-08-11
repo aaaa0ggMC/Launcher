@@ -25,14 +25,26 @@ import {
   switchPlayer,
   getCoverArt,
   bumpFrequency,
-  loadFrequency
+  loadFrequency,
+  getLyricPlayback,
+  getCurrentPlayerKey
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
+import { screen } from 'electron'
 import OpenAI from 'openai'
 import { startJobByName, listTasks } from '../../main/process/background-tasks'
-import type { AidjConfig, SongMeta, ChatMessage, RawHistoryMessage, PlaylistEntry } from './types'
-import { SEPARATOR } from './types'
+import { createChildWindow, destroyChildWindow } from '../../main/process/windows'
+import type { WindowSpec } from '../../main/process/windows'
+import type {
+  AidjConfig,
+  SongMeta,
+  ChatMessage,
+  RawHistoryMessage,
+  PlaylistEntry,
+  LyricsDisplayConfig
+} from './types'
+import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG } from './types'
 import './jobs'
 import {
   getContinuousTasks,
@@ -53,6 +65,60 @@ import {
 } from './jobs'
 
 const log = makeLogger('aidj')
+
+/** Per-DBus lyric window id: multiple players → one window each (single-instance
+ *  per player). Keeps the configured dbus_target as a readable suffix. */
+function lyricWindowId(playerKey: string): string {
+  return `${LYRICS_WINDOW_ID}-${playerKey.replace(/[^\w.-]/g, '_')}`
+}
+
+/** Fixed lyrics-window size (fits two lyric lines at the default font size). */
+const LYRICS_WINDOW_W = 560
+const LYRICS_WINDOW_H = 220
+
+/** Place the lyrics window per the anchor/margin display config, on the primary
+ *  display's work area (mirrors `vp wshowlyrics -a <anchor> -m <margin>`). */
+function lyricWindowPosition(cfg: LyricsDisplayConfig, w: number, h: number): { x: number; y: number } {
+  const area = screen.getPrimaryDisplay().workArea
+  const x = area.x + Math.round((area.width - w) / 2)
+  let y: number
+  if (cfg.anchor === 'bottom') y = area.y + area.height - h - cfg.margin
+  else if (cfg.anchor === 'top') y = area.y + cfg.margin
+  else y = area.y + Math.round((area.height - h) / 2)
+  return { x, y }
+}
+
+/** Resolve the effective lyrics display config (defaults merged with user prefs). */
+async function effectiveLyricsCfg(): Promise<LyricsDisplayConfig> {
+  const config = await loadAidjConfig()
+  return { ...DEFAULT_LYRICS_CFG, ...(config?.preferences?.lyrics ?? {}) }
+}
+
+async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: WindowSpec }> {
+  const key = await getCurrentPlayerKey()
+  const id = lyricWindowId(key)
+  const cfg = await effectiveLyricsCfg()
+  const pos = lyricWindowPosition(cfg, LYRICS_WINDOW_W, LYRICS_WINDOW_H)
+  return {
+    id,
+    key,
+    spec: {
+      id,
+      view: 'LyricsWindow',
+      width: LYRICS_WINDOW_W,
+      height: LYRICS_WINDOW_H,
+      x: pos.x,
+      y: pos.y,
+      frameless: true,
+      rounded: true,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      shadow: false
+    }
+  }
+}
 
 let _client: OpenAI | null = null
 let _session: DJSession | null = null
@@ -1587,6 +1653,44 @@ const commands: CommandSpec[] = [
         return { ok: false, error: '需要 --task 和 --base (0-1) 参数' }
       }
       return setContinuousBaseVol(taskId, base)
+    }
+  },
+  {
+    name: 'aidj.lyrics',
+    description: '当前 DBus 播放状态 + 对应歌词（桌面歌词窗口 1Hz 轮询）',
+    usage: 'aidj.lyrics',
+    run: async () => getLyricPlayback()
+  },
+  {
+    name: 'aidj.lyrics-open',
+    description: '打开当前 DBus 播放器的桌面歌词浮窗（透明 · 无边框 · 圆角）',
+    usage: 'aidj.lyrics-open',
+    run: async () => {
+      const { id, key, spec } = await lyricWindowSpec()
+      const res = createChildWindow(spec)
+      return { ...res, windowId: id, player: key }
+    }
+  },
+  {
+    name: 'aidj.lyrics-close',
+    description: '关闭当前 DBus 播放器的桌面歌词浮窗',
+    usage: 'aidj.lyrics-close',
+    run: async () => {
+      const { id, key } = await lyricWindowSpec()
+      const closed = destroyChildWindow(id)
+      return { ok: true, closed, windowId: id, player: key }
+    }
+  },
+  {
+    name: 'aidj.lyrics-toggle',
+    description: '切换当前 DBus 播放器的桌面歌词浮窗开关',
+    usage: 'aidj.lyrics-toggle',
+    run: async () => {
+      const { id, key, spec } = await lyricWindowSpec()
+      const res = createChildWindow(spec)
+      if (res.created) return { ok: true, open: true, windowId: id, player: key }
+      destroyChildWindow(id)
+      return { ok: true, open: false, windowId: id, player: key }
     }
   }
 ]

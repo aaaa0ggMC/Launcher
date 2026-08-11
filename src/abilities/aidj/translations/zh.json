@@ -75,6 +75,8 @@
   "aidj.cmd.analyse.usage": "/analyse <language|emotion|genre|loudness>",
   "aidj.metadata_sync": "更新 MetaData",
   "aidj.metadata_sync_desc": "扫描曲库并更新缺失歌曲元数据",
+  "aidj.lyrics_open": "桌面歌词",
+  "aidj.lyrics_close": "关闭桌面歌词",
   "aidj.metadata_sync_started": "已开始同步元数据…",
   "aidj.metadata_sync_failed": "元数据同步失败",
   "aidj.metadata_sync_done": "元数据同步完成",
