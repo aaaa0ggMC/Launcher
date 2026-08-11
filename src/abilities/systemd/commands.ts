@@ -40,5 +40,3 @@ export default [
     }
   }
 ] satisfies CommandSpec[]
-
-export const platforms = ['linux']

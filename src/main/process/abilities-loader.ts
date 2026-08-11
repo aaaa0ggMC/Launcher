@@ -7,22 +7,31 @@ const log = makeLogger('abilities-loader')
 /**
  * Built-in ability command loader.
  *
- * Every ability owns its commands in `src/abilities/<id>/commands.ts` (a
- * `CommandSpec[]` default export, plus an optional `platforms?: string[]`
- * named export mirroring the ability metadata). This loader globs those files
- * at build time and registers them into the central command registry — so
- * adding/removing an ability is a pure folder operation, no central
- * switchboard to edit.
+ * Ability folder convention:
+ *  - `meta.ts`     — metadata shared by BOTH processes (e.g. `platforms`)
+ *  - `index.ts`    — frontend-only Ability metadata (component / settings)
+ *  - `commands.ts` — backend-only CommandSpec[]
  *
- * Platform filtering happens HERE, before registration: an ability that
- * declares `platforms` excluding the running platform is not loaded at all
- * (same rule the renderer applies to the sidebar), so its commands never
- * enter the registry and stay unreachable on incompatible platforms.
+ * This loader globs `commands.ts` (specs) and `meta.ts` (platforms), joined by
+ * the ability folder id. Platform filtering happens HERE, before registration:
+ * an ability whose `meta.ts` declares `platforms` excluding the running
+ * platform is not loaded at all (same rule the renderer applies to the
+ * sidebar), so its commands never enter the registry and stay unreachable on
+ * incompatible platforms.
  */
-const commandModules = import.meta.glob<{ default?: CommandSpec[]; platforms?: string[] }>(
+const commandModules = import.meta.glob<{ default?: CommandSpec[] }>(
   '../../abilities/*/commands.ts',
   { eager: true }
 )
+
+const metaModules = import.meta.glob<{ platforms?: string[] }>('../../abilities/*/meta.ts', {
+  eager: true
+})
+
+/** Resolve the shared meta for an ability folder id. */
+function abilityMeta(id: string): { platforms?: string[] } {
+  return metaModules[`../../abilities/${id}/meta.ts`] ?? {}
+}
 
 /** Register every built-in ability's commands. Call once at startup. */
 export function registerAbilityCommands(): void {
@@ -38,7 +47,7 @@ export function registerAbilityCommands(): void {
       failed.push(id || key)
       continue
     }
-    const ps = mod.platforms
+    const ps = abilityMeta(id).platforms
     if (ps && ps.length > 0 && !ps.includes(process.platform)) {
       log.info('ability commands skipped (platform mismatch)', { ability: id, platforms: ps })
       ignoredPlatform.push(id)

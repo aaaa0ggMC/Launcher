@@ -9,6 +9,5 @@ export default {
   id: 'display',
   name: '显示',
   icon: 'gi:display',
-  category: '系统',
-  platforms: ['linux']
+  category: '系统'
 } satisfies Ability

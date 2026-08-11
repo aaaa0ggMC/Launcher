@@ -18,9 +18,9 @@ import type { Ability } from './ability'
  *
  * Sidebar injection is self-contained too: abilities are grouped by their
  * `category` and sorted alphabetically inside each category — no external
- * manifest/order dependency. Each ability can declare `platforms`; when the
- * running platform isn't among them the ability is filtered out and reported
- * as ignored in the logs.
+ * manifest/order dependency. Platform filtering reads each ability's `meta.ts`
+ * (`platforms`); incompatible abilities are filtered out and reported as
+ * ignored in the logs.
  */
 
 type AbilityDefault = Ability | Ability[]
@@ -29,7 +29,16 @@ const abilityModules = import.meta.glob<{ default: AbilityDefault }>('../../abil
   eager: true
 })
 
+/**
+ * Ability folder convention: `meta.ts` holds metadata shared by BOTH processes
+ * (e.g. `platforms`), `index.ts` is frontend-only, `commands.ts` backend-only.
+ */
+const metaModules = import.meta.glob<{ platforms?: string[] }>('../../abilities/*/meta.ts', {
+  eager: true
+})
+
 let _modulesCache: Record<string, Ability> | null = null
+let _platformsCache: Record<string, string[] | undefined> | null = null
 
 /** All ability metadata keyed by their id (last duplicate wins). */
 export function loadAbilityModules(): Record<string, Ability> {
@@ -47,6 +56,18 @@ export function loadAbilityModules(): Record<string, Ability> {
     }
   }
   _modulesCache = out
+  return out
+}
+
+/** Shared per-ability metadata (platforms) keyed by ability id. */
+export function loadAbilityMetas(): Record<string, string[] | undefined> {
+  if (_platformsCache) return _platformsCache
+  const out: Record<string, string[] | undefined> = {}
+  for (const key of Object.keys(metaModules)) {
+    const id = key.split('/').at(-2) ?? key
+    out[id] = metaModules[key].platforms
+  }
+  _platformsCache = out
   return out
 }
 
@@ -91,6 +112,7 @@ export interface AbilityLoadReport {
  */
 export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
   const modules = loadAbilityModules()
+  const platforms = loadAbilityMetas()
   const loaded: SidebarAbilityMeta[] = []
   const ignoredPlatform: string[] = []
   const backendOnly: string[] = []
@@ -99,7 +121,7 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
       backendOnly.push(id)
       continue
     }
-    const ps = meta.platforms
+    const ps = platforms[id]
     if (ps && ps.length > 0 && !ps.includes(platform)) {
       ignoredPlatform.push(id)
       continue

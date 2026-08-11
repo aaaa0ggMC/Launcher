@@ -24,13 +24,6 @@ export interface Ability {
   /** Sidebar group label. */
   category: string
   /**
-   * Applicable platforms — `process.platform` values (`'linux' | 'darwin' |
-   * 'win32'`). Omitted / empty means the ability works everywhere. When set,
-   * the ability is only injected on a matching platform; on other platforms it
-   * is filtered out and reported as ignored in the logs.
-   */
-  platforms?: string[]
-  /**
    * Page component. Optional — a backend-only ability (commands but no UI
    * page, e.g. `display`) omits it and stays hidden from the sidebar.
    */

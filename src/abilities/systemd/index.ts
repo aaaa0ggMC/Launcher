@@ -6,7 +6,6 @@ export default {
   name: '服务',
   icon: 'gi:systemd',
   category: '系统',
-  platforms: ['linux'],
   keepAlive: false,
   component: defineAsyncComponent(() => import('./View.vue'))
 } satisfies Ability
