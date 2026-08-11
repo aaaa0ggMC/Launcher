@@ -402,14 +402,22 @@ function resetDj(): void {
                 </v-btn>
               </template>
             </v-text-field>
-            <v-btn color="primary" variant="tonal" height="40" class="px-5" @click="addLyricsFolder">
+            <v-btn
+              color="primary"
+              variant="tonal"
+              height="40"
+              class="px-5"
+              @click="addLyricsFolder"
+            >
               添加
             </v-btn>
           </div>
         </div>
 
         <div class="mt-3">
-          <div class="text-caption text-medium-emphasis mb-2">桌面歌词显示（等价 vp wshowlyrics 参数，按元素定制）</div>
+          <div class="text-caption text-medium-emphasis mb-2">
+            桌面歌词显示（等价 vp wshowlyrics 参数，按元素定制）
+          </div>
           <v-row dense>
             <v-col cols="12" md="6">
               <v-text-field

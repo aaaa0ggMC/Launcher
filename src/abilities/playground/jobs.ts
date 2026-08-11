@@ -53,7 +53,6 @@ async function pollTaskTransforms(
     results: []
   }))
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     if (signal.aborted) throw new DOMException('cancelled', 'AbortError')
     let allDone = true

@@ -26,6 +26,12 @@ export default defineConfig(
     rules: {
       'vue/require-default-prop': 'off',
       'vue/multi-word-component-names': 'off',
+      // Component names `cockpit-<id>` are the keep-alive `include` convention
+      // (App.vue caches pages by these exact names) — not PascalCase by design.
+      'vue/component-definition-name-casing': 'off',
+      // v-html is used deliberately with pre-escaped content (shared/markdown
+      // escapes input first; translations are trusted strings).
+      'vue/no-v-html': 'off',
       'vue/block-lang': [
         'error',
         {

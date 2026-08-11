@@ -141,9 +141,9 @@ defineExpose({ toMarkdown })
         flat
         hide-details
         clearable
-        @click:clear="query = ''"
         rounded="lg"
         class="settings-search"
+        @click:clear="query = ''"
       />
       <v-slide-group
         v-if="sections.length > 1 || searching"

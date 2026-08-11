@@ -85,7 +85,13 @@ export function isChildWindow(win: BrowserWindow | null): boolean {
 
 function snapshot(
   id: string,
-  entry: { win: BrowserWindow; spec: WindowSpec; startedAt: number; locked: boolean; alwaysOnTop: boolean }
+  entry: {
+    win: BrowserWindow
+    spec: WindowSpec
+    startedAt: number
+    locked: boolean
+    alwaysOnTop: boolean
+  }
 ): ChildWindowInfo {
   const b = entry.win.getBounds()
   return {
@@ -224,9 +230,9 @@ async function kwinRunScript(script: string): Promise<void> {
     const { sessionBus } = await import('dbus-next')
     const bus = sessionBus()
     try {
-      const scripting = (
-        await bus.getProxyObject('org.kde.KWin', '/Scripting')
-      ).getInterface('org.kde.kwin.Scripting') as unknown as {
+      const scripting = (await bus.getProxyObject('org.kde.KWin', '/Scripting')).getInterface(
+        'org.kde.kwin.Scripting'
+      ) as unknown as {
         loadScript: (filePath: string) => Promise<number>
         unloadScript: (id: number) => Promise<void>
       }
@@ -234,9 +240,9 @@ async function kwinRunScript(script: string): Promise<void> {
       // KWin returns the script id (int) on Plasma 6 / an object path on older
       // versions — handle both.
       const scriptPath = typeof id === 'number' ? `/Scripting/Script${id}` : String(id)
-      const scriptIface = (
-        await bus.getProxyObject('org.kde.KWin', scriptPath)
-      ).getInterface('org.kde.kwin.Script') as unknown as { run: () => Promise<void> }
+      const scriptIface = (await bus.getProxyObject('org.kde.KWin', scriptPath)).getInterface(
+        'org.kde.kwin.Script'
+      ) as unknown as { run: () => Promise<void> }
       await scriptIface.run()
       try {
         await scripting.unloadScript(id)
@@ -364,7 +370,8 @@ export function centerChildWindow(
   else if (anchor === 'top') y = area.y + margin
   else y = area.y + Math.round((area.height - b.height) / 2)
   const last = lastCenter.get(win)
-  if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height) return false
+  if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height)
+    return false
   lastCenter.set(win, { x, y, w: b.width, h: b.height })
   return moveWindowTo(win, x, y)
 }

@@ -715,8 +715,8 @@ onBeforeUnmount(() => {
           flat
           hide-details
           clearable
-          @click:clear="searchText = ''"
           rounded="lg"
+          @click:clear="searchText = ''"
           @input="scheduleSearchApps"
         />
       </div>

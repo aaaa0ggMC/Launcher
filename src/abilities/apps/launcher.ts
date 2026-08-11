@@ -17,7 +17,9 @@ interface RuntimeConfig {
 
 export type { ProcOutputEvent }
 
-/** Broadcast a streamed output event to every window (`cockpit:proc-output`). */function outputBroadcast(event: ProcOutputEvent): void {
+/** Broadcast a streamed output event to every window (`cockpit:proc-output`). */ function outputBroadcast(
+  event: ProcOutputEvent
+): void {
   getBroadcast()('cockpit:proc-output', event)
 }
 
