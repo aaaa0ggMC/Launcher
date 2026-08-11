@@ -396,6 +396,92 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.curate',
+    description: '从随机候选中 AI 精选成连贯歌单（计入上下文）',
+    usage: 'aidj.curate --count <number>',
+    run: async (ctx) => {
+      const count = Number(ctx.named.count)
+      if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
+      const { session } = await ensureInit()
+      const keys = [...session.musicPaths.keys()]
+      if (!keys.length) return { ok: false, error: '曲库为空' }
+      const n = Math.min(count, keys.length, 50)
+      let pool = keys.filter((k) => !session.playedSongs.has(k))
+      if (pool.length < n) pool = keys
+      const candidates = sampleNames(pool, n)
+
+      _currentAbort = new AbortController()
+      _streamingChars = 0
+      _retrying = false
+      _retryAttempt = 0
+      _retryWaitMs = 0
+      _retryStart = 0
+      _retryLastError = ''
+      try {
+        const prompt =
+          `System Request: I have randomly picked ${candidates.length} candidate songs from the library: ${JSON.stringify(candidates)}.\n` +
+          'Task: Curate a coherent playlist from THIS SPECIFIC LIST.\n' +
+          `Rules: 1. Sort for flow. 2. Filter clashes. 3. Keep at least ${Math.max(1, Math.floor(candidates.length / 2))} songs. 4. No hallucinations. 5. Write the Intro BEFORE the separator, keys AFTER.`
+        const { playlist, intro, raw, updated } = await session.nextStep(
+          prompt,
+          (full: string) => {
+            if (_retrying) {
+              _retrying = false
+              _retryLastError = ''
+            }
+            _streamingChars = full.length
+          },
+          _currentAbort.signal,
+          (attempt, waitMs, err) => {
+            _retrying = true
+            _retryAttempt = attempt
+            _retryWaitMs = waitMs
+            _retryStart = _retryStart || Date.now()
+            _retryLastError = err ? String(err instanceof Error ? err.message : err) : ''
+            _streamingChars = 0
+          }
+        )
+        if (!_currentAbort?.signal.aborted) {
+          if (!_sessionId) {
+            _sessionId = await SessionManager.createSession({
+              title: `/pr ${candidates.length}`,
+              type: 'generate'
+            })
+          }
+          const rawMsgs: RawHistoryMessage[] = []
+          if (updated) rawMsgs.push(updated)
+          rawMsgs.push(
+            { role: 'user', content: `/pr ${candidates.length}`, ts: Date.now(), type: 'user' },
+            {
+              role: 'assistant',
+              content: raw || intro || '',
+              ts: Date.now(),
+              type: 'both',
+              playlist
+            }
+          )
+          await SessionManager.appendMessages(_sessionId, rawMsgs)
+        }
+        const enriched = playlist.map((s) => ({
+          ...s,
+          meta: session.metadata.get(s.name) || null
+        }))
+        if (intro.startsWith('⚠️')) {
+          return { ok: false, error: intro.replace(/^⚠️\s*/, '') }
+        }
+        return { ok: true, intro, playlist: enriched }
+      } finally {
+        _currentAbort = null
+        _streamingChars = 0
+        _retrying = false
+        _retryAttempt = 0
+        _retryWaitMs = 0
+        _retryStart = 0
+        _retryLastError = ''
+      }
+    }
+  },
+  {
     name: 'aidj.random',
     description: '随机选取 N 首歌曲，作为 AIDJ 推送计入会话上下文',
     usage: 'aidj.random --count <number>',

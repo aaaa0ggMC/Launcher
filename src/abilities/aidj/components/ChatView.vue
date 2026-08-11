@@ -89,6 +89,12 @@ const CHAT_COMMANDS: ChatCommandDef[] = [
     descFallback: '随机选取 N 首歌曲'
   },
   {
+    name: 'pr',
+    args: '<number>',
+    descKey: 'aidj.cmd.pr.desc',
+    descFallback: 'AI 从随机候选中精选歌单'
+  },
+  {
     name: 'explore',
     args: '<number>',
     descKey: 'aidj.cmd.explore.desc',
@@ -176,6 +182,81 @@ async function runPushCommand(
   scrollToBottom()
 }
 
+/** /pr — AI curates from random candidates. Shows the pulsing thinking bubble
+ *  while the AI works, then replaces it with the curated intro + playlist. */
+async function runCurateCommand(count: number, userText: string): Promise<void> {
+  messages.value.push({ role: 'user', content: userText, timestamp: Date.now(), uid: makeUid() })
+  const placeholderIdx = messages.value.length
+  messages.value.push({ role: 'assistant', content: '...', timestamp: Date.now(), uid: makeUid() })
+  thinking.value = true
+  sending.value = true
+  scrollToBottom()
+
+  let charTimer: ReturnType<typeof setInterval> | null = null
+  charTimer = setInterval(async () => {
+    if (!sending.value) {
+      if (charTimer) clearInterval(charTimer)
+      return
+    }
+    try {
+      const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
+      if (r?.ok) {
+        const msg = messages.value[placeholderIdx]
+        if (!msg) return
+        if (typeof r.chars === 'number') msg.chars = r.chars as number
+        if (r.retrying === true) {
+          const elapsed = Math.round(((r.retryElapsed as number) ?? 0) / 1000)
+          const err = (r.retryLastError as string) || ''
+          msg.content = `重试中(${String(r.retryAttempt ?? 0)}: 已经${elapsed}s)${err ? `\n⚠️ ${err}` : ''}`
+        }
+      }
+    } catch {
+      /* noop */
+    }
+  }, 200)
+
+  try {
+    const r = (await window.cockpit.command('aidj.curate', { count })) as {
+      ok?: boolean
+      intro?: string
+      playlist?: { name: string; path: string }[]
+      error?: string
+    }
+    if (messages.value[placeholderIdx] == null) return
+    if (r?.ok) {
+      const placeholderUid = messages.value[placeholderIdx]?.uid
+      messages.value[placeholderIdx] = {
+        role: 'assistant',
+        content: r.intro || t('aidj.cmd.pr.done', '精选歌单'),
+        playlist: (r.playlist ?? []) as ChatMessage['playlist'],
+        timestamp: Date.now(),
+        uid: placeholderUid ?? makeUid()
+      }
+    } else {
+      messages.value[placeholderIdx] = {
+        role: 'assistant',
+        content: `错误: ${r?.error || '请求失败'}`,
+        timestamp: Date.now(),
+        uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+      }
+    }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    if (messages.value[placeholderIdx] == null) return
+    messages.value[placeholderIdx] = {
+      role: 'assistant',
+      content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+      timestamp: Date.now(),
+      uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+    }
+  } finally {
+    if (charTimer) clearInterval(charTimer)
+    sending.value = false
+    thinking.value = false
+    scrollToBottom()
+  }
+}
+
 async function handleCommand(text: string): Promise<void> {
   const parts = text.slice(1).trim().split(/\s+/)
   const cmd = (parts[0] || '').toLowerCase()
@@ -187,6 +268,16 @@ async function handleCommand(text: string): Promise<void> {
       return
     }
     await runPushCommand('aidj.random', { count }, text)
+    return
+  }
+
+  if (cmd === 'pr') {
+    const count = Number(parts[1])
+    if (!Number.isFinite(count) || count <= 0) {
+      showSnack(t('aidj.cmd.pr.usage', '/pr <number> — 请输入正整数'), 'warning')
+      return
+    }
+    await runCurateCommand(count, text)
     return
   }
 
