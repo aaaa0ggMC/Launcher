@@ -1,5 +1,4 @@
 import type { Ref } from 'vue'
-import type { AppEntry } from '@shared/types'
 import zh from './translations/zh.json'
 import enUS from './translations/en-US.json'
 import languages from './translations/index.json'
@@ -70,39 +69,13 @@ export function translateTemplate(
   return text
 }
 
-export function localize(
-  entry: AppEntry,
-  field: 'name' | 'description' | 'alias',
-  lang: string
-): string | undefined {
-  // preferred language → en-US fallback → first available → base field
-  const direct = entry.localized?.[lang]?.[field]
-  if (direct) return direct
-  const fallback = entry.localized?.['en-US']?.[field] ?? entry.localized?.['en_US']?.[field]
-  if (fallback) return fallback
-  if (entry.localized) {
-    for (const val of Object.values(entry.localized)) {
-      const v = val[field]
-      if (v) return v
-    }
-  }
-  return entry[field]
-}
-
 export function useI18n(lang: Ref<string>): {
   t: (key: string, fallback?: string) => string
   te: (key: string, vars: Record<string, string>, fallback?: string) => string
-  entryName: (entry: AppEntry) => string
-  entryDescription: (entry: AppEntry) => string
-  entryAlias: (entry: AppEntry) => string
   lang: Ref<string>
 } {
   const t = (key: string, fallback?: string): string => translate(lang.value, key, fallback)
   const te = (key: string, vars: Record<string, string>, fallback?: string): string =>
     translateTemplate(lang.value, key, vars, fallback)
-  const entryName = (entry: AppEntry): string => localize(entry, 'name', lang.value) ?? ''
-  const entryDescription = (entry: AppEntry): string =>
-    localize(entry, 'description', lang.value) ?? ''
-  const entryAlias = (entry: AppEntry): string => localize(entry, 'alias', lang.value) ?? ''
-  return { t, te, entryName, entryDescription, entryAlias, lang }
+  return { t, te, lang }
 }

@@ -45,12 +45,6 @@ const cockpit = {
   removeRoot: (path: string): Promise<unknown> => cockpit.command('apps.remove-root', { path }),
   rescan: (root: string): Promise<unknown> => cockpit.command('apps.rescan', { root }),
 
-  // launcher
-  launch: (root: string, id: string): Promise<unknown> =>
-    cockpit.command('launch.run', { root, id }),
-  launchAction: (root: string, id: string, action: string): Promise<unknown> =>
-    cockpit.command('launch.action', { root, id, action }),
-
   // background tasks (framework-level)
   btList: (): Promise<unknown> => cockpit.command('background.list'),
   btOutput: (id: string): Promise<unknown> => cockpit.command('background.output', { id }),

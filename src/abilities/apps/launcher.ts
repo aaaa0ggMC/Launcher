@@ -2,8 +2,7 @@ import { spawn } from 'child_process'
 import { isAbsolute, dirname, join } from 'path'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
-import type { AppEntry, AppExecSpec, AppAction } from './types'
-import type { LaunchResult, ProcOutputEvent } from '../../shared/types'
+import type { AppEntry, AppExecSpec, AppAction, LaunchResult, ProcOutputEvent } from './types'
 import { CONFIG_JSON, SCRIPTS_DIR } from '../../main/process/paths'
 import { readJson } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
@@ -18,8 +17,7 @@ interface RuntimeConfig {
 
 export type { ProcOutputEvent }
 
-/** Broadcast a streamed output event to every window (`cockpit:proc-output`). */
-function outputBroadcast(event: ProcOutputEvent): void {
+/** Broadcast a streamed output event to every window (`cockpit:proc-output`). */function outputBroadcast(event: ProcOutputEvent): void {
   getBroadcast()('cockpit:proc-output', event)
 }
 

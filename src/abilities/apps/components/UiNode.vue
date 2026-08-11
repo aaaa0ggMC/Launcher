@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { statusColors, type UiNode } from '../transformer'
+import { statusColors, type UiNode } from './transformer'
 
 defineOptions({ name: 'UiNode' })
 

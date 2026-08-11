@@ -114,5 +114,12 @@
   "cli.launch.executed": "已执行 {name}.{action}{pid}",
   "cli.launch.failed": "执行失败: {error}",
   "cli.launch.started": "已启动 {name}{pid}",
-  "cli.launch.failedStart": "启动失败: {error}"
+  "cli.launch.failedStart": "启动失败: {error}",
+  "confirm.title": "确认启动「{name}」？",
+  "confirm.detected": "检测:",
+  "confirm.note": "备注:",
+  "confirm.aboutToLaunch": "即将启动「{name}」",
+  "confirm.ack": "知道了，以后不再提醒",
+  "confirm.cancel": "取消",
+  "confirm.launch": "启动"
 }

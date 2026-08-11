@@ -1,35 +1,21 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
 import type { Ref } from 'vue'
-import type { AppAction, AppEntry, AppExecSpec, RiskLevel } from './types'
+import type { AppAction, AppEntry, AppExecSpec, LaunchResult, RiskLevel } from './types'
 import LoadingBar from '@ui/components/LoadingBar.vue'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
-import { localize, translate, translateTemplate, availableLanguages } from '@ui/i18n'
+import TransformerModal from './components/TransformerModal.vue'
+import { translate, translateTemplate, availableLanguages } from '@ui/i18n'
+import { localize } from './localize'
 import { filterByQuery, fields } from '@ui/composables/search'
-
-interface AbilitiesCtx {
-  configs: Record<string, Record<string, unknown>>
-  launch: (root: string, id: string, entry: AppEntry) => Promise<unknown>
-  launchAction: (
-    root: string,
-    id: string,
-    entry: AppEntry,
-    actionId: string,
-    action: AppAction
-  ) => Promise<unknown>
-}
 
 interface SearchRoot {
   path: string
   watch: boolean
 }
 
-const { launch, launchAction } = inject<AbilitiesCtx>('cockpit:abilities', {
-  configs: {},
-  launch: async () => {},
-  launchAction: async () => {}
-})
 const uiLang = inject<Ref<string>>('cockpit:lang', ref('zh'))
+const openBt = inject<() => void>('cockpit:open-bt', () => {})
 
 const EXEC_TYPES = ['uv', 'python', 'node', 'docker', 'systemd', 'script', 'desktop', 'custom']
 
@@ -504,6 +490,134 @@ async function browseNewIcon(): Promise<void> {
 
 let unsub: (() => void) | null = null
 
+// ---------------------------------------------------------------------------
+// Launch flow — risk confirm + live transformer modal. Owned by this ability:
+// the shell just activates us with a `{ root, id, actionId? }` target and we
+// run the same flow as the card buttons (confirm → launch → transformer).
+// ---------------------------------------------------------------------------
+const confirmOpen = ref(false)
+const ackNow = ref(false)
+const pendingLaunch = shallowRef<{
+  root: string
+  id: string
+  entry: AppEntry
+  actionId?: string
+  action?: AppAction
+} | null>(null)
+
+const RISK_LEVEL: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 }
+
+function riskNeedsConfirm(entry: AppEntry, action?: AppAction): boolean {
+  const level = RISK_LEVEL[action?.risk ?? entry.security?.risk ?? 'low']
+  // Only medium/high risk needs confirmation (unless already acknowledged).
+  return level >= RISK_LEVEL.medium && !entry.security?.acknowledged
+}
+
+function effectiveEntry(entry: AppEntry, action?: AppAction): AppEntry {
+  if (!action?.risk) return entry
+  return { ...entry, security: { ...entry.security, risk: action.risk } }
+}
+
+async function runLaunch(
+  root: string,
+  id: string,
+  entry: AppEntry,
+  action?: AppAction,
+  actionId?: string
+): Promise<void> {
+  const res =
+    actionId && action
+      ? await window.cockpit.command('launch.action', { root, id, action: actionId })
+      : await window.cockpit.command('launch.run', { root, id })
+  openTransformer(res as LaunchResult, entry)
+}
+
+function launchEntry(root: string, id: string, entry: AppEntry): void {
+  if (riskNeedsConfirm(entry)) {
+    pendingLaunch.value = { root, id, entry }
+    ackNow.value = false
+    confirmOpen.value = true
+    return
+  }
+  void runLaunch(root, id, entry)
+}
+
+function launchEntryAction(
+  root: string,
+  id: string,
+  entry: AppEntry,
+  actionId: string,
+  action: AppAction
+): void {
+  if (riskNeedsConfirm(effectiveEntry(entry, action), action)) {
+    pendingLaunch.value = { root, id, entry, actionId, action }
+    ackNow.value = false
+    confirmOpen.value = true
+    return
+  }
+  void runLaunch(root, id, entry, action, actionId)
+}
+
+async function doLaunch(): Promise<void> {
+  const p = pendingLaunch.value
+  if (!p) return
+  confirmOpen.value = false
+  if (ackNow.value) {
+    await window.cockpit.command('apps.update', {
+      root: p.root,
+      id: p.id,
+      patch: { security: { ...(p.entry.security ?? {}), acknowledged: true } }
+    })
+  }
+  await runLaunch(p.root, p.id, p.entry, p.action, p.actionId)
+}
+
+const pendingRisk = computed<RiskLevel>(() => {
+  const p = pendingLaunch.value
+  if (!p) return 'medium'
+  return (p.action?.risk ?? p.entry.security?.risk ?? 'medium') as RiskLevel
+})
+
+const pendingTitle = computed(() => {
+  const p = pendingLaunch.value
+  if (!p) return ''
+  return p.action ? `${p.entry.name} · ${p.action.name}` : p.entry.name
+})
+
+// -- live output transformer modal -----------------------------------------
+const transformerOpen = ref(false)
+const transformerEntry = shallowRef<AppEntry | null>(null)
+const transformerPid = ref<number | null>(null)
+
+function openTransformer(res: LaunchResult | void, entry: AppEntry): void {
+  if (!res || !res.ok) return
+  // A launch converted into a background task → surface the global panel.
+  if (res.taskId) {
+    openBt()
+    return
+  }
+  if (!res.monitor || !entry.transformer || !entry.transformer_display) return
+  transformerEntry.value = entry
+  transformerPid.value = res.pid ?? null
+  transformerOpen.value = true
+}
+
+/** Shell quick-launch entry point: target = `{ root, id, actionId? }`. */
+function onActivate(target: unknown): void {
+  const t = (target ?? {}) as { root?: string; id?: string; actionId?: string }
+  const rootArg = t.root
+  const idArg = t.id
+  if (!rootArg || !idArg) return
+  void window.cockpit.command('apps.get', { root: rootArg, id: idArg }).then((r) => {
+    const entry = r as AppEntry | null
+    if (!entry) return
+    const root = entry.root ?? rootArg
+    const action = t.actionId ? entry.actions?.[t.actionId] : undefined
+    if (t.actionId && action) launchEntryAction(root, idArg, entry, t.actionId, action)
+    else launchEntry(root, idArg, entry)
+  })
+}
+
 onMounted(() => {
   load()
   unsub = window.cockpit.on('cockpit:apps-changed', () => load(true))
@@ -549,7 +663,7 @@ function toMarkdown(): string {
   return lines.join('\n')
 }
 
-defineExpose({ toMarkdown })
+defineExpose({ toMarkdown, onActivate })
 </script>
 
 <template>
@@ -701,7 +815,7 @@ defineExpose({ toMarkdown })
                 :variant="riskBtn(entry).variant"
                 prepend-icon="mdi-play"
                 :disabled="entry.missing"
-                @click="launch(entry.root ?? '', id, entry)"
+                @click="launchEntry(entry.root ?? '', id, entry)"
               >
                 {{ translate(uiLang, 'apps.launch') }}
               </v-btn>
@@ -711,7 +825,7 @@ defineExpose({ toMarkdown })
                 :color="riskBtn(entry, act).color"
                 :variant="riskBtn(entry, act).variant"
                 :disabled="entry.missing"
-                @click="launchAction(entry.root ?? '', id, entry, aid, act)"
+                @click="launchEntryAction(entry.root ?? '', id, entry, aid, act)"
               >
                 <template v-if="act.icon" #prepend>
                   <AbilityIcon :icon="act.icon" :size="16" />
@@ -1284,6 +1398,62 @@ defineExpose({ toMarkdown })
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Confirm-before-launch dialog -->
+    <v-dialog v-model="confirmOpen" width="480">
+      <v-card rounded="lg">
+        <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
+          <v-icon color="warning">mdi-shield-alert-outline</v-icon>
+          {{ translateTemplate(uiLang, 'confirm.title', { name: pendingTitle }) }}
+        </v-card-title>
+        <v-card-text>
+          <v-alert
+            v-if="pendingLaunch?.entry.security?.auto_note || pendingLaunch?.entry.security?.note"
+            :type="pendingRisk === 'high' ? 'error' : 'warning'"
+            variant="tonal"
+            class="mb-3"
+            density="compact"
+          >
+            <template v-if="pendingLaunch?.entry.security?.auto_note">
+              {{ translate(uiLang, 'confirm.detected') }}
+              {{ pendingLaunch.entry.security.auto_note }}
+            </template>
+            <template v-if="pendingLaunch?.entry.security?.note">
+              <div>
+                {{ translate(uiLang, 'confirm.note') }} {{ pendingLaunch.entry.security.note }}
+              </div>
+            </template>
+          </v-alert>
+          <div class="text-body-2 mb-2">
+            {{ translateTemplate(uiLang, 'confirm.aboutToLaunch', { name: pendingTitle }) }}
+            <v-chip
+              size="x-small"
+              :color="pendingRisk === 'high' ? 'error' : 'warning'"
+              variant="tonal"
+              class="ml-1"
+            >
+              {{ pendingRisk }}
+            </v-chip>
+          </div>
+          <v-checkbox
+            v-model="ackNow"
+            :label="translate(uiLang, 'confirm.ack')"
+            density="compact"
+            hide-details
+          />
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="confirmOpen = false">{{
+            translate(uiLang, 'confirm.cancel')
+          }}</v-btn>
+          <v-btn color="primary" @click="doLaunch">{{ translate(uiLang, 'confirm.launch') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Live output transformer modal -->
+    <TransformerModal v-model="transformerOpen" :entry="transformerEntry" :pid="transformerPid" />
   </div>
 </template>
 

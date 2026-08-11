@@ -1,4 +1,4 @@
-import type { LaunchResult, BtOutputMessage, BtTaskInfo, ChildWindowInfo } from '../shared/types'
+import type { BtOutputMessage, BtTaskInfo, ChildWindowInfo } from '../shared/types'
 import type { AppEntry } from '../abilities/apps/types'
 import type { AutostartEntry } from '../abilities/autostart/types'
 import type { DisplayOutput } from '../abilities/display/types'
@@ -38,8 +38,6 @@ export interface CockpitApi {
   removeRoot: (path: string) => Promise<AppsConfig['searchRoots']>
   appsConfig: () => Promise<AppsConfig>
   rescan: (root: string) => Promise<unknown>
-  launch: (root: string, id: string) => Promise<LaunchResult>
-  launchAction: (root: string, id: string, action: string) => Promise<LaunchResult>
   btList: () => Promise<BtTaskInfo[]>
   btOutput: (id: string) => Promise<{ ok: boolean; id: string; messages: BtOutputMessage[] }>
   btStart: (

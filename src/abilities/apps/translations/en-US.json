@@ -114,5 +114,12 @@
   "cli.launch.executed": "Executed {name}.{action}{pid}",
   "cli.launch.failed": "Failed: {error}",
   "cli.launch.started": "Launched {name}{pid}",
-  "cli.launch.failedStart": "Launch failed: {error}"
+  "cli.launch.failedStart": "Launch failed: {error}",
+  "confirm.title": "Launch \"{name}\"?",
+  "confirm.detected": "Detected:",
+  "confirm.note": "Note:",
+  "confirm.aboutToLaunch": "About to launch \"{name}\"",
+  "confirm.ack": "Got it — don't ask again",
+  "confirm.cancel": "Cancel",
+  "confirm.launch": "Launch"
 }

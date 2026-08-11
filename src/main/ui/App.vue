@@ -13,19 +13,16 @@ import { useTheme } from 'vuetify'
 import type { Ability } from '@abilities/types'
 import { getAbilityModules, resolveSidebarAbilities, buildSettingsSections } from '@abilities'
 import type { SettingsCategory } from '@abilities'
-import type { LaunchResult } from '@shared/types'
-import type { AppAction, AppEntry, RiskLevel } from '@shared/types'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
-import TransformerModal from './components/TransformerModal.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
-import { translate, translateTemplate, localize } from './i18n'
+import { translate, translateTemplate } from './i18n'
 import { resolveSchemeId } from './color_schemes'
 import { filterByQuery, scoreFields, fields } from './composables/search'
-import { getEntryActions, type EntryAction } from './entry-actions'
+import { getAllQuickActions, type QuickAction } from './quick-actions'
 import { PAGE_TRANSITIONS } from './animations'
 
 // ---------------------------------------------------------------------------
@@ -100,7 +97,11 @@ const sidebarIconSize = computed(() => (rail.value ? 32 : 28))
 // ---------------------------------------------------------------------------
 // Copy current view as markdown (for pasting into an AI etc.)
 // ---------------------------------------------------------------------------
-const abilityRef = ref<{ $el?: Element; toMarkdown?: () => string } | null>(null)
+const abilityRef = ref<{
+  $el?: Element
+  toMarkdown?: () => string
+  onActivate?: (target: unknown) => void
+} | null>(null)
 const copySnackOpen = ref(false)
 const copySnackText = ref('')
 const commandErrorOpen = ref(false)
@@ -456,157 +457,65 @@ function subscribeCommandErrors(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Shared launch flow (used by search quick-launch + abilities)
+// Ability activation — quick-launch is generic. Clicking a quick action just
+// navigates to the owning ability page and hands its view an opaque `target`
+// (the ability's `onActivate` decides what it means and owns its own
+// confirm/transformer UI). The shell never interprets ability payloads.
 // ---------------------------------------------------------------------------
-interface PendingLaunch {
-  root: string
-  id: string
-  entry: AppEntry
-  actionId?: string
-  action?: AppAction
+const pendingActivate = ref<{ ability: string; target: Record<string, unknown> } | null>(null)
+
+function deliverActivate(
+  inst: { onActivate?: (target: unknown) => void } | null,
+  target: Record<string, unknown>
+): void {
+  inst?.onActivate?.(target)
 }
 
-const pendingLaunch = shallowRef<PendingLaunch | null>(null)
-const confirmOpen = ref(false)
-const ackNow = ref(false)
-
-const RISK_LEVEL = { low: 0, medium: 1, high: 2 }
-
-function riskNeedsConfirm(entry: AppEntry): boolean {
-  const level = RISK_LEVEL[entry.security?.risk ?? 'low']
-  // Only medium/high risk needs confirmation (unless already acknowledged).
-  // Low risk always launches directly, even with confirmBeforeLaunch enabled.
-  if (level >= RISK_LEVEL.medium && !entry.security?.acknowledged) return true
-  return false
-}
-
-async function launchApp(root: string, id: string, entry: AppEntry): Promise<LaunchResult | void> {
-  if (riskNeedsConfirm(entry)) {
-    pendingLaunch.value = { root, id, entry }
-    ackNow.value = false
-    confirmOpen.value = true
+function activate(abilityId: string, target: Record<string, unknown>): void {
+  if (currentId.value !== abilityId) {
+    pendingActivate.value = { ability: abilityId, target }
+    currentId.value = abilityId
     return
   }
-  const res = await window.cockpit.launch(root, id)
-  openTransformer(res, entry)
-  return res
+  deliverActivate(abilityRef.value, target)
 }
 
-/** Launch a clustered action; per-action risk overrides entry-level risk. */
-async function launchActionApp(
-  root: string,
-  id: string,
-  entry: AppEntry,
-  actionId: string,
-  action: AppAction
-): Promise<LaunchResult | void> {
-  const risk = action.risk ?? entry.security?.risk ?? 'low'
-  const effective: AppEntry = { ...entry, security: { ...entry.security, risk } }
-  if (riskNeedsConfirm(effective)) {
-    pendingLaunch.value = { root, id, entry, actionId, action }
-    ackNow.value = false
-    confirmOpen.value = true
-    return
+// Deliver a pending activation once the target ability's view has mounted.
+watch(abilityRef, (inst) => {
+  const p = pendingActivate.value
+  if (p && currentId.value === p.ability) {
+    pendingActivate.value = null
+    deliverActivate(inst, p.target)
   }
-  const res = await window.cockpit.launchAction(root, id, actionId)
-  openTransformer(res, entry)
-  return res
-}
-
-async function doLaunch(): Promise<void> {
-  const p = pendingLaunch.value
-  if (!p) return
-  confirmOpen.value = false
-  if (ackNow.value) {
-    await window.cockpit.updateEntry(p.root, p.id, {
-      security: { ...(p.entry.security ?? {}), acknowledged: true } as AppEntry['security']
-    })
-  }
-  const res =
-    p.actionId && p.action
-      ? await window.cockpit.launchAction(p.root, p.id, p.actionId)
-      : await window.cockpit.launch(p.root, p.id)
-  openTransformer(res, p.entry)
-}
-
-// -- live output transformer modal -----------------------------------------
-const transformerOpen = ref(false)
-const transformerEntry = shallowRef<AppEntry | null>(null)
-const transformerPid = ref<number | null>(null)
-let winUnsub: (() => void) | null = null
-
-function openTransformer(res: LaunchResult | void, entry: AppEntry): void {
-  if (!res || !res.ok) return
-  // A launch converted into a background task → surface the global panel.
-  if (res.taskId) {
-    btOpen.value = true
-    return
-  }
-  if (!res.monitor || !entry.transformer || !entry.transformer_display) return
-  transformerEntry.value = entry
-  transformerPid.value = res.pid ?? null
-  transformerOpen.value = true
-}
-
-const pendingRisk = computed(() => {
-  const p = pendingLaunch.value
-  if (!p) return 'medium'
-  return (p.action?.risk ?? p.entry.security?.risk ?? 'medium') as RiskLevel
-})
-
-const pendingTitle = computed(() => {
-  const p = pendingLaunch.value
-  if (!p) return ''
-  return p.action ? `${p.entry.name} · ${p.action.name}` : p.entry.name
 })
 
 // ---------------------------------------------------------------------------
-// Search: also quick-launch registry apps by name/alias/tag
+// Search: filter sidebar abilities + surface ability-registered quick actions
 // ---------------------------------------------------------------------------
-interface SearchApp {
-  id: string
-  root: string
-  entry: AppEntry
-}
-
-const searchApps = shallowRef<SearchApp[]>([])
+const searchQuick = shallowRef<QuickAction[]>([])
 const searchBusy = ref(false)
 
-// -- quick-launch context menu: right-click a search result to pick any action
+// -- quick-launch context menu: right-click a search result to pick an action
 const ctxMenuOpen = ref(false)
 const ctxMenuEl = ref<HTMLElement | null>(null)
-const ctxApp = shallowRef<SearchApp | null>(null)
+const ctxAction = shallowRef<QuickAction | null>(null)
 
-function openCtxMenu(e: MouseEvent, app: SearchApp): void {
+function openCtxMenu(e: MouseEvent, action: QuickAction): void {
   ctxMenuEl.value = e.currentTarget as HTMLElement
-  ctxApp.value = app
+  ctxAction.value = action
   ctxMenuOpen.value = true
-  // 快搜索数据可能是老快照（apps.json 可能已变更）——右键时重新拉取该条目
-  // 最新数据，确保 action 列表/风险是最新的，而不是沿用搜索时的缓存。
-  void window.cockpit.getEntry(app.root, app.id).then((fresh) => {
-    if (fresh && ctxApp.value?.id === app.id) {
-      ctxApp.value = { ...app, entry: fresh }
-    }
-  })
 }
-const ctxActions = computed<EntryAction[]>(() => {
-  const app = ctxApp.value
-  if (!app) return []
-  const list: EntryAction[] = [{ kind: 'launch', id: '__launch', label: t('search.ctxLaunch') }]
-  return list.concat(getEntryActions(app))
+
+/** Menu items: the action itself (main launch) + any registered children. */
+const ctxMenuItems = computed<QuickAction[]>(() => {
+  const a = ctxAction.value
+  if (!a) return []
+  return [a, ...(a.children ?? [])]
 })
 
-function ctxRun(action: EntryAction): void {
-  const app = ctxApp.value
-  if (!app) return
+function runQuickAction(action: QuickAction): void {
   ctxMenuOpen.value = false
-  if (action.kind === 'launch') {
-    void launchApp(app.root, app.id, app.entry)
-  } else if (action.kind === 'action') {
-    void launchActionApp(app.root, app.id, app.entry, action.id, action.action)
-  } else {
-    void window.cockpit.command(action.command, action.args ?? {})
-  }
+  activate(action.ability, action.target)
 }
 
 /**
@@ -620,45 +529,35 @@ const SEARCH_DEBOUNCE_MS = 200
 function scheduleSearchApps(): void {
   if (searchDebounce) clearTimeout(searchDebounce)
   searchDebounce = setTimeout(() => {
-    void loadSearchApps()
+    void loadSearchQuick()
     searchDebounce = null
   }, SEARCH_DEBOUNCE_MS)
 }
 
-async function loadSearchApps(): Promise<void> {
+async function loadSearchQuick(): Promise<void> {
   if (!searchText.value.trim()) {
-    searchApps.value = []
+    searchQuick.value = []
     return
   }
   searchBusy.value = true
   try {
-    const res = await window.cockpit.listApps()
-    const scored: { app: SearchApp; score: number }[] = []
-    for (const [id, entry] of Object.entries(res.apps)) {
-      if (!entry || entry.missing) continue
-      const locName = localize(entry, 'name', lang.value) ?? entry.name
-      const locAlias = localize(entry, 'alias', lang.value) ?? ''
-      const locDesc = localize(entry, 'description', lang.value) ?? ''
-      const tags = [...(entry.tags ?? []), ...(entry.tags_auto ?? [])]
-      // tags 作为 weight-1 字段并入 AND 打分，保持联合语义：
-      // "music bilibili" 不会因为单个 tag 命中就放行。
-      const score = scoreFields(searchText.value, [
-        ...fields(locName, locAlias, locDesc),
-        ...(tags.length ? [{ text: tags.join(' ').toLowerCase(), weight: 1 }] : [])
-      ])
-      if (score > 0) scored.push({ app: { id, root: entry.root ?? '', entry }, score })
+    const all = await getAllQuickActions()
+    const scored: { q: QuickAction; score: number }[] = []
+    for (const q of all) {
+      const score = scoreFields(searchText.value, fields(q.label, q.description ?? '', q.id))
+      if (score > 0) scored.push({ q, score })
     }
-    searchApps.value = scored
+    searchQuick.value = scored
       .sort((x, y) => y.score - x.score)
       .slice(0, 12)
-      .map((x) => x.app)
+      .map((x) => x.q)
   } finally {
     searchBusy.value = false
   }
 }
 
 // ---------------------------------------------------------------------------
-// Provide ability context (config + launch helper)
+// Provide ability context (config + cross-ability activation)
 // ---------------------------------------------------------------------------
 const abilityConfigs = computed(() => {
   const m: Record<string, Record<string, unknown>> = {}
@@ -673,13 +572,12 @@ provide('cockpit:open-bt', (): void => {
   btOpen.value = true
 })
 // Cross-scope exposure: every ability can reach the full loaded registry
-// (sidebar list, configs, launch helpers, command list) via this single key.
+// (sidebar list, configs, activation, command list) via this single key.
 provide('cockpit:abilities', {
   list: abilities,
   current: currentAbility,
   configs: abilityConfigs,
-  launch: launchApp,
-  launchAction: launchActionApp,
+  activate,
   listCommands: (): Promise<{ name: string; description: string; usage?: string }[]> =>
     window.cockpit.listCommands()
 })
@@ -688,6 +586,7 @@ provide('cockpit:abilities', {
 // Lifecycle
 // ---------------------------------------------------------------------------
 let unsub: (() => void) | null = null
+let winUnsub: (() => void) | null = null
 let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
 
@@ -706,7 +605,7 @@ onMounted(async () => {
       clearTimeout(searchDebounce)
       searchDebounce = null
     }
-    void loadSearchApps()
+    void loadSearchQuick()
   })
   window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
@@ -803,22 +702,22 @@ onBeforeUnmount(() => {
       <v-list v-if="!rail && searchText.trim()" density="compact" class="px-2">
         <v-list-subheader>{{ t('search.appsHeader') }}</v-list-subheader>
         <v-list-item
-          v-for="app in searchApps"
-          :key="app.id"
-          :title="localize(app.entry, 'name', lang) || app.entry.name"
-          :subtitle="localize(app.entry, 'description', lang) || app.entry.description"
+          v-for="qa in searchQuick"
+          :key="qa.id"
+          :title="qa.label"
+          :subtitle="qa.description"
           :append-icon="'mdi-play'"
           density="compact"
           rounded="lg"
-          @click="launchApp(app.root, app.id, app.entry)"
-          @contextmenu.prevent="openCtxMenu($event, app)"
+          @click="runQuickAction(qa)"
+          @contextmenu.prevent="openCtxMenu($event, qa)"
         />
-        <v-list-item v-if="searchApps.length === 0 && !searchBusy">
+        <v-list-item v-if="searchQuick.length === 0 && !searchBusy">
           <v-list-item-subtitle>{{ t('search.noMatch') }}</v-list-item-subtitle>
         </v-list-item>
       </v-list>
 
-      <!-- Quick-launch context menu: main launch + any ability-injected actions -->
+      <!-- Quick-launch context menu: the action itself + ability-registered children -->
       <v-menu
         v-model="ctxMenuOpen"
         :activator="ctxMenuEl ?? undefined"
@@ -827,15 +726,12 @@ onBeforeUnmount(() => {
         offset="0"
       >
         <v-list density="compact" class="pa-1">
-          <v-list-subheader v-if="ctxApp" class="px-3">
-            {{ localize(ctxApp.entry, 'name', lang) || ctxApp.entry.name }}
-          </v-list-subheader>
           <v-list-item
-            v-for="action in ctxActions"
+            v-for="action in ctxMenuItems"
             :key="action.id"
             density="compact"
             rounded="lg"
-            @click="ctxRun(action)"
+            @click="runQuickAction(action)"
           >
             <template #prepend>
               <AbilityIcon :icon="action.icon ?? null" :size="16" />
@@ -971,52 +867,6 @@ onBeforeUnmount(() => {
         </div>
       </v-container>
     </v-main>
-
-    <!-- Confirm-before-launch dialog -->
-    <v-dialog v-model="confirmOpen" width="480">
-      <v-card rounded="lg">
-        <v-card-title class="d-flex align-center ga-2 text-subtitle-1">
-          <v-icon color="warning">mdi-shield-alert-outline</v-icon>
-          {{ te('confirm.title', { name: pendingTitle }) }}
-        </v-card-title>
-        <v-card-text>
-          <v-alert
-            v-if="pendingLaunch?.entry.security?.auto_note || pendingLaunch?.entry.security?.note"
-            :type="pendingRisk === 'high' ? 'error' : 'warning'"
-            variant="tonal"
-            class="mb-3"
-            density="compact"
-          >
-            <template v-if="pendingLaunch?.entry.security?.auto_note">
-              {{ t('confirm.detected') }} {{ pendingLaunch.entry.security.auto_note }}
-            </template>
-            <template v-if="pendingLaunch?.entry.security?.note">
-              <div>{{ t('confirm.note') }} {{ pendingLaunch.entry.security.note }}</div>
-            </template>
-          </v-alert>
-          <div class="text-body-2 mb-2">
-            {{ te('confirm.aboutToLaunch', { name: pendingTitle }) }}
-            <v-chip
-              size="x-small"
-              :color="pendingRisk === 'high' ? 'error' : 'warning'"
-              variant="tonal"
-              class="ml-1"
-            >
-              {{ pendingRisk }}
-            </v-chip>
-          </div>
-          <v-checkbox v-model="ackNow" :label="t('confirm.ack')" density="compact" hide-details />
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4 pt-2">
-          <v-spacer />
-          <v-btn variant="text" @click="confirmOpen = false">{{ t('confirm.cancel') }}</v-btn>
-          <v-btn color="primary" @click="doLaunch">{{ t('confirm.launch') }}</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- Live output transformer modal -->
-    <TransformerModal v-model="transformerOpen" :entry="transformerEntry" :pid="transformerPid" />
 
     <!-- Background tasks panel (framework-level) -->
     <BackgroundTasksDialog v-model="btOpen" />
