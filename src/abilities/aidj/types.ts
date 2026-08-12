@@ -331,7 +331,10 @@ export const LYRICS_WINDOW_ID = 'aidj-lyrics'
  * `length` are in milliseconds; `lyric` is the LRC text resolved for the
  * current track (null when no lyric is stored for it); `path` is the resolved
  * library file path of the current track (null when unknown — used for cover
- * art).
+ * art). `karaokeLyric` is the same song in inline-timestamp LRC form (from
+ * Netease YRC) when available — null otherwise. It's decoupled from `lyric`
+ * so the desktop window keeps using the plain LRC while the in-app page can
+ * do real word-by-word karaoke.
  */
 export interface LyricPlaybackState {
   ok: boolean
@@ -343,5 +346,6 @@ export interface LyricPlaybackState {
   positionMs: number | null
   lengthMs: number | null
   lyric: string | null
+  karaokeLyric?: string | null
   path?: string | null
 }

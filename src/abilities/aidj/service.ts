@@ -278,15 +278,28 @@ export async function loadMetadata(): Promise<Map<string, SongMeta>> {
 // runs there); consumed by the desktop-lyrics window via `aidj.lyrics`.
 // ---------------------------------------------------------------------------
 
-export async function loadLyrics(): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
+/** Lyrics store — `music_lyrics.jsonl` lines carry the raw LRC (`lyric`) and,
+ *  when the NCM hit had enhanced karaoke data, an inline-timestamp LRC built
+ *  from YRC (`karaoke`) — the same words with word-level sub-timestamps, so the
+ *  in-app lyrics page can do real per-word karaoke fills. The desktop window
+ *  keeps using the raw `lyric` (its parser treats multi-timestamp lines as
+ *  duplicates), so the two stay decoupled.
+ */
+export async function loadLyrics(): Promise<{
+  lyrics: Map<string, string>
+  karaoke: Map<string, string>
+}> {
+  const lyrics = new Map<string, string>()
+  const karaoke = new Map<string, string>()
   // 1. NCM-synced lyrics (music_lyrics.jsonl)
   try {
     const raw = await readFile(getLyricsPath(), 'utf-8')
     for (const line of raw.split('\n').filter(Boolean)) {
       try {
         const entry = JSON.parse(line)
-        if (entry.name && typeof entry.lyric === 'string') map.set(entry.name, entry.lyric)
+        if (entry.name && typeof entry.lyric === 'string') lyrics.set(entry.name, entry.lyric)
+        if (entry.name && typeof entry.karaoke === 'string' && entry.karaoke)
+          karaoke.set(entry.name, entry.karaoke)
       } catch {
         /* noop */
       }
@@ -300,9 +313,12 @@ export async function loadLyrics(): Promise<Map<string, string>> {
   const folders = config?.lyrics_folders ?? []
   const files = await scanLyricFiles(folders)
   for (const [name, content] of files) {
-    if (content) map.set(name, content)
+    if (content) {
+      lyrics.set(name, content)
+      karaoke.delete(name)
+    }
   }
-  return map
+  return { lyrics, karaoke }
 }
 
 const LRC_EXT = '.lrc'
@@ -338,10 +354,58 @@ async function walkLyricDir(dir: string, map: Map<string, string>): Promise<void
   }
 }
 
-export async function appendLyric(name: string, lyric: string): Promise<void> {
+/** `[mm:ss.xx]` LRC tag for a millisecond time (2-digit centiseconds). */
+function msToLrcTime(ms: number): string {
+  const total = Math.max(0, Math.round(ms))
+  const s = Math.floor(total / 1000)
+  const m = Math.floor(s / 60)
+  const frac = Math.floor((total % 1000) / 10)
+  return `${m}:${String(s % 60).padStart(2, '0')}.${String(frac).padStart(2, '0')}`
+}
+
+/**
+ * Convert Netease's YRC (karaoke) data into an inline-timestamp LRC. YRC is one
+ * JSON object per line — `{ "t": <lineStartMs>, "c": [{ "t": <wordStartMs>, "c": "字" }, ...] }`.
+ * Each word gets its own `[mm:ss.xx]` tag so the renderer can fill word-by-word.
+ * Returns '' when nothing usable (some songs have no enhanced lyrics).
+ */
+export function yrcToInlineLrc(yrc: string): string {
+  const out: string[] = []
+  for (const raw of yrc.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    let parsed: { t?: unknown; c?: unknown }
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const lineMs = Number(parsed.t)
+    if (!Number.isFinite(lineMs) || !Array.isArray(parsed.c)) continue
+    const words = parsed.c.filter(
+      (w): w is { t?: unknown; c?: unknown } => w !== null && typeof w === 'object'
+    )
+    const text = words.map((w) => (typeof w.c === 'string' ? w.c : '')).join('')
+    if (!text) continue
+    let buf = `[${msToLrcTime(lineMs)}]`
+    for (const w of words) {
+      const wt = Number(w.t)
+      const ch = typeof w.c === 'string' ? w.c : ''
+      if (ch) buf += Number.isFinite(wt) ? `[${msToLrcTime(wt)}]${ch}` : ch
+    }
+    out.push(buf)
+  }
+  return out.join('\n')
+}
+
+export async function appendLyric(
+  name: string,
+  lyric: string,
+  karaoke?: string | null
+): Promise<void> {
   if (!lyric) return
   await ensureAidjDir()
-  const line = JSON.stringify({ name, lyric }) + '\n'
+  const line = JSON.stringify({ name, lyric, ...(karaoke ? { karaoke } : {}) }) + '\n'
   await appendFile(getLyricsPath(), line, 'utf-8')
 }
 
@@ -382,17 +446,20 @@ let _libraryCache: {
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
   lyrics: Map<string, string>
+  karaoke: Map<string, string>
 } | null = null
 let _libraryLoading: Promise<{
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
   lyrics: Map<string, string>
+  karaoke: Map<string, string>
 }> | null = null
 
 export function loadLibrary(): Promise<{
   metadata: Map<string, SongMeta>
   musicPaths: Map<string, string>
   lyrics: Map<string, string>
+  karaoke: Map<string, string>
 }> {
   if (_libraryCache) return Promise.resolve(_libraryCache)
   if (!_libraryLoading) {
@@ -401,8 +468,8 @@ export function loadLibrary(): Promise<{
       const folders = config?.music_folders ?? []
       const musicPaths = await scanMusicFiles(folders)
       const metadata = await loadMetadata()
-      const lyrics = await loadLyrics()
-      _libraryCache = { metadata, musicPaths, lyrics }
+      const { lyrics, karaoke } = await loadLyrics()
+      _libraryCache = { metadata, musicPaths, lyrics, karaoke }
       return _libraryCache
     })().finally(() => {
       _libraryLoading = null
@@ -442,7 +509,7 @@ export function setNcmBaseUrl(url: string): void {
 
 export async function searchNcmApi(
   keywords: string
-): Promise<{ sid: number | null; lyric: string; networkError: boolean }> {
+): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
   const started = Date.now()
   try {
     const sRes = await fetch(
@@ -458,23 +525,30 @@ export async function searchNcmApi(
         code: sData.code,
         latencyMs: Date.now() - started
       })
-      return { sid: null, lyric: '', networkError: false }
+      return { sid: null, lyric: '', karaoke: '', networkError: false }
     }
     const sid = sData.result.songs[0].id
     const lRes = await fetch(`${ncmBaseUrl}/lyric?id=${sid}`)
-    const lData = (await lRes.json()) as { code: number; lrc: { lyric: string } }
+    const lData = (await lRes.json()) as {
+      code: number
+      lrc: { lyric: string }
+      yrc?: { lyric: string }
+    }
     const lyric = lData.code === 200 ? (lData.lrc?.lyric ?? '') : ''
+    const yrc = lData.code === 200 && lData.yrc?.lyric ? lData.yrc.lyric : ''
+    const karaoke = yrc ? yrcToInlineLrc(yrc) : ''
     log.debug('NCM search ok', {
       keywords,
       sid,
       songCount: sData.result.songCount,
       lyricLen: lyric.length,
+      karaokeLen: karaoke.length,
       latencyMs: Date.now() - started
     })
-    return { sid, lyric, networkError: false }
+    return { sid, lyric, karaoke, networkError: false }
   } catch (e) {
     log.warn('NCM search failed', { keywords, error: String(e) })
-    return { sid: null, lyric: '', networkError: true }
+    return { sid: null, lyric: '', karaoke: '', networkError: true }
   }
 }
 
@@ -561,7 +635,7 @@ export async function syncMetadata(
       Array.from({ length: workers }, async (_, i) => {
         for (let j = i; j < entries.length; j += workers) {
           const [name] = entries[j]
-          const { sid, lyric, networkError } = await searchNcmApi(name)
+          const { sid, lyric, karaoke, networkError } = await searchNcmApi(name)
           if (sid === null) {
             if (networkError) {
               counts.networkError++
@@ -616,8 +690,9 @@ export async function syncMetadata(
           // whether AI metadata extraction succeeded. A locally curated .lrc
           // (lyrics_folders) already in the cache wins over the NCM result.
           if (lyric && (!lyrics || !lyrics.has(name))) {
-            await appendLyric(name, lyric)
+            await appendLyric(name, lyric, karaoke)
             if (lyrics) lyrics.set(name, lyric)
+            if (karaoke && _libraryCache?.karaoke) _libraryCache.karaoke.set(name, karaoke)
           }
         }
       })
@@ -2041,6 +2116,7 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
     }
     const lib = await loadLibrary()
     const lyric = resolveLyricForTrack(detail.track, lib.lyrics)
+    const karaokeLyric = resolveLyricForTrack(detail.track, lib.karaoke) ?? null
     const path = resolveTrackPath(detail, lib.musicPaths)
     return {
       ok: true,
@@ -2052,7 +2128,8 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
       positionMs: detail.positionMs,
       lengthMs: detail.lengthMs,
       path,
-      lyric
+      lyric,
+      karaokeLyric
     }
   } catch (e) {
     log.warn('getLyricPlayback failed', { error: e instanceof Error ? e.message : String(e) })

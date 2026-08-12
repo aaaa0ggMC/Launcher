@@ -28,6 +28,7 @@ interface PlaybackState {
   positionMs?: number | null
   lengthMs?: number | null
   lyric?: string | null
+  karaokeLyric?: string | null
   path?: string | null
 }
 
@@ -112,9 +113,76 @@ let busy = false
 
 const hasTrack = computed(() => Boolean(state.value.track))
 const playing = computed(() => state.value.status === 'Playing')
-const positionMs = computed(
-  () => (state.value.positionMs ?? 0) + (cfg.value.position_offset_ms ?? 0)
-)
+
+// Smooth playback position: `aidj.lyrics` polls every 600ms, so between polls we
+// advance the last-known position by wall-clock time on a rAF loop. Without this
+// the karaoke fill (and progress bar) would jump in 600ms steps instead of
+// gliding. Player positions are also QUANTIZED (VLC & co. update their counter
+// on a coarse timer), so 1:1 interpolation can run slightly AHEAD of the raw
+// value. The loop therefore only ever moves FORWARD — it holds the max reached
+// so far instead of rolling back — and a genuinely large backward raw delta is
+// treated as a real reset (track change / backward seek) and snapped.
+const smoothPos = ref(0)
+let lastRawAt = 0
+let lastRawPos = 0
+let rafId = 0
+
+/** A raw-position backward move larger than this (ms) is a real reset
+ *  (track change / backward seek), not player quantization jitter. */
+const BACK_SEEK_MS = 500
+
+/** Anchor the rAF interpolation to a freshly polled raw position. */
+function anchorPosition(pos: number | null | undefined): void {
+  const now = performance.now()
+  if (pos == null) {
+    lastRawPos = 0
+    lastRawAt = now
+    smoothPos.value = 0
+    return
+  }
+  if (!lastRawAt) {
+    lastRawPos = pos
+    lastRawAt = now
+    smoothPos.value = pos
+    return
+  }
+  const rawDelta = pos - lastRawPos
+  if (rawDelta < -BACK_SEEK_MS) {
+    // Real reset: snap, don't animate backward.
+    lastRawPos = pos
+    lastRawAt = now
+    smoothPos.value = pos
+    return
+  }
+  lastRawPos = pos
+  lastRawAt = now
+  // Normal case: never let the displayed position roll back below what the
+  // previous interpolation already reached (quantization overshoot).
+  if (pos > smoothPos.value) smoothPos.value = pos
+}
+
+function smoothLoop(): void {
+  if (playing.value && lastRawAt) {
+    const p = lastRawPos + (performance.now() - lastRawAt)
+    if (p > smoothPos.value) smoothPos.value = p
+  } else {
+    smoothPos.value = lastRawPos
+  }
+  rafId = requestAnimationFrame(smoothLoop)
+}
+
+// Re-anchor on pause→play so the wall-clock advance never includes the paused
+// span (a stale lastRawAt would otherwise jump the position forward on resume).
+watch(playing, (v) => {
+  if (v) {
+    lastRawAt = performance.now()
+  } else {
+    lastRawAt = 0
+    smoothPos.value = lastRawPos
+  }
+})
+
+const positionMs = computed(() => smoothPos.value + (cfg.value.position_offset_ms ?? 0))
 const durationMs = computed(() => state.value.lengthMs ?? 0)
 
 const statusText = computed(() => {
@@ -131,13 +199,25 @@ const statusColor = computed(() => {
   return 'grey'
 })
 
+// Memoized by content string: every 600ms poll hands back a freshly serialized
+// (same-content) lyric string, which would otherwise re-parse the whole LRC and
+// re-render the entire list each tick. Caching on the raw string keeps the array
+// identity stable so Vue patches nothing between polls.
+let lastLyricText = ''
+let lastLyricParsed: LyricLine[] = []
 const lrcLines = computed<LyricLine[]>(() => {
-  const lyric = state.value.lyric
-  if (!lyric) return []
-  return parseLyrics(lyric)
+  // Prefer the inline-timestamp karaoke LRC (from Netease YRC) when a song has
+  // one — each word then carries its own time and real karaoke fills work.
+  // Otherwise fall back to the plain LRC (fill window spans to the next line).
+  const lyric = state.value.karaokeLyric ?? state.value.lyric ?? ''
+  if (lyric !== lastLyricText) {
+    lastLyricText = lyric
+    lastLyricParsed = parseLyrics(lyric)
+  }
+  return lastLyricParsed
 })
 const plainLyric = computed<string>(() => {
-  const lyric = state.value.lyric ?? ''
+  const lyric = state.value.karaokeLyric ?? state.value.lyric ?? ''
   return lrcLines.value.length ? '' : stripLrcTags(lyric)
 })
 
@@ -153,17 +233,36 @@ const currentIdx = computed(() => {
   return idx
 })
 
-/** Within the current line, last chunk whose time ≤ playback position. */
-const activeChunkIdx = computed(() => {
-  const line = lrcLines.value[currentIdx.value]
-  if (!line) return -1
-  let idx = -1
-  for (let i = 0; i < line.chunks.length; i++) {
-    if (line.chunks[i].time <= positionMs.value) idx = i
-    else break
-  }
-  return idx
+/** End of the last lyric line (fallback for fill timing on the final line). */
+const lyricEndMs = computed(() => {
+  const lines = lrcLines.value
+  if (!lines.length) return 0
+  const last = lines[lines.length - 1].time
+  return Math.max(durationMs.value, last + 5000)
 })
+
+/**
+ * Karaoke fill percentage (0–100) for the current line. The whole line is drawn
+ * with a `background-clip: text` gradient mask whose hard stop sits at this
+ * percent — no per-word elements, no text-shadow, so updating it each frame is
+ * a single cheap repaint. The fill window is `[line.time, end)`: real inline
+ * timestamps use the last word's time, plain lines spread to the next line.
+ */
+const fillPercent = computed(() => {
+  const lines = lrcLines.value
+  const line = lines[currentIdx.value]
+  if (!line || !cfg.value.karaoke) return 0
+  const end =
+    line.chunks.length > 1
+      ? line.chunks[line.chunks.length - 1].time
+      : currentIdx.value + 1 < lines.length
+        ? lines[currentIdx.value + 1].time
+        : lyricEndMs.value
+  const span = Math.max(1, end - line.time)
+  return Math.min(100, Math.max(0, ((positionMs.value - line.time) / span) * 100))
+})
+
+const maskStyle = computed(() => ({ '--lyr-kfill': `${fillPercent.value.toFixed(2)}%` }))
 
 const scrollMode = computed(() => cfg.value.scroll_follow !== false)
 
@@ -330,7 +429,11 @@ async function poll(): Promise<void> {
       5000,
       null
     )) as PlaybackState | null
-    if (res && typeof res === 'object') state.value = res
+    if (res && typeof res === 'object') {
+      state.value = res
+      // Anchor the rAF interpolation at this poll's position (forward-only).
+      anchorPosition(res.positionMs)
+    }
   } catch {
     /* keep last state */
   } finally {
@@ -391,6 +494,7 @@ onMounted(async () => {
   })
   pollTimer = setInterval(() => void poll(), 600)
   playersTimer = setInterval(() => void pollPlayers(), 10000)
+  rafId = requestAnimationFrame(smoothLoop)
   unsub = window.cockpit.on('cockpit:windows', () => {
     void refreshLyricsOpen()
   })
@@ -400,6 +504,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (playersTimer) clearInterval(playersTimer)
+  cancelAnimationFrame(rafId)
   unsub?.()
   window.removeEventListener('resize', onResize)
 })
@@ -542,14 +647,8 @@ defineExpose({ toMarkdown })
               'is-dim': cfg.dim_candidates !== false && i !== currentIdx && !playing
             }"
           >
-            <template v-if="i === currentIdx && cfg.karaoke && line.chunks.length > 1">
-              <span
-                v-for="(chunk, ci) in line.chunks"
-                :key="ci"
-                class="karaoke-chunk"
-                :class="{ 'is-active': ci <= activeChunkIdx }"
-                >{{ chunk.text }}</span
-              >
+            <template v-if="i === currentIdx && cfg.karaoke && line.text">
+              <span class="karaoke-mask" :style="maskStyle">{{ line.text }}</span>
             </template>
             <span v-else>{{ line.text }}</span>
           </div>
@@ -565,16 +664,8 @@ defineExpose({ toMarkdown })
               'is-dim': cfg.dim_candidates !== false && visibleStart + j !== currentIdx && !playing
             }"
           >
-            <template
-              v-if="visibleStart + j === currentIdx && cfg.karaoke && line.chunks.length > 1"
-            >
-              <span
-                v-for="(chunk, ci) in line.chunks"
-                :key="ci"
-                class="karaoke-chunk"
-                :class="{ 'is-active': ci <= activeChunkIdx }"
-                >{{ chunk.text }}</span
-              >
+            <template v-if="visibleStart + j === currentIdx && cfg.karaoke && line.text">
+              <span class="karaoke-mask" :style="maskStyle">{{ line.text }}</span>
             </template>
             <span v-else>{{ line.text }}</span>
           </div>
@@ -778,14 +869,19 @@ defineExpose({ toMarkdown })
   opacity: 0.5;
 }
 
-/* -- karaoke: per-word fill on the current line ---------------------------- */
-.lyric-line.is-current .karaoke-chunk {
-  color: rgba(var(--v-theme-on-surface-variant), 0.55);
-  transition: color 0.05s linear;
-}
-.lyric-line.is-current .karaoke-chunk.is-active {
-  color: rgb(var(--v-theme-primary));
-  text-shadow: 0 0 12px rgba(var(--v-theme-primary), 0.45);
+/* -- karaoke: single text-clipped gradient mask, fill % driven by a CSS var.
+      No per-word spans and no text-shadow → updating --lyr-kfill each frame is
+      one cheap repaint, so the fill stays smooth at 60fps. ------------------- */
+.lyric-line.is-current .karaoke-mask {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--v-theme-primary)) var(--lyr-kfill),
+    rgba(var(--v-theme-on-surface-variant), 0.55) var(--lyr-kfill)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 .lyric-plain {
