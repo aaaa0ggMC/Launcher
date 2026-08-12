@@ -36,6 +36,7 @@ export interface CockpitApi {
   deleteEntry: (root: string, id: string) => Promise<void>
   addRoot: (path: string) => Promise<AppsConfig['searchRoots']>
   removeRoot: (path: string) => Promise<AppsConfig['searchRoots']>
+  moveRoot: (path: string, dir: -1 | 1) => Promise<AppsConfig['searchRoots']>
   appsConfig: () => Promise<AppsConfig>
   rescan: (root: string) => Promise<unknown>
   btList: () => Promise<BtTaskInfo[]>

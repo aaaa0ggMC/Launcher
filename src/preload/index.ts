@@ -43,6 +43,8 @@ const cockpit = {
     cockpit.command('apps.delete', { root, id }),
   addRoot: (path: string): Promise<unknown> => cockpit.command('apps.add-root', { path }),
   removeRoot: (path: string): Promise<unknown> => cockpit.command('apps.remove-root', { path }),
+  moveRoot: (path: string, dir: -1 | 1): Promise<unknown> =>
+    cockpit.command('apps.move-root', { path, dir }),
   rescan: (root: string): Promise<unknown> => cockpit.command('apps.rescan', { root }),
 
   // background tasks (framework-level)

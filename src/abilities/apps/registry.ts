@@ -57,6 +57,24 @@ export async function removeSearchRoot(path: string): Promise<SearchRoot[]> {
   return next
 }
 
+/**
+ * Move a search root one position up (-1) or down (+1). The order is the
+ * search order — `listAllApps` iterates roots in config order, so reordering
+ * here is reflected by quick-launch search tie-breaks naturally.
+ */
+export async function moveSearchRoot(path: string, dir: -1 | 1): Promise<SearchRoot[]> {
+  const { searchRoots, confirmBeforeLaunch } = await getAppsConfig()
+  const i = searchRoots.findIndex((r) => r.path === path)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= searchRoots.length) return searchRoots
+  const next = [...searchRoots]
+  ;[next[i], next[j]] = [next[j], next[i]]
+  await saveAppsConfig({ searchRoots: next, confirmBeforeLaunch })
+  log.info('search root moved', { path, dir })
+  getBroadcast()('cockpit:apps-changed', 'roots', null)
+  return next
+}
+
 function appsJsonPath(root: string): string {
   return join(root, 'apps.json')
 }

@@ -9,6 +9,7 @@ import {
   deleteEntry,
   addSearchRoot,
   removeSearchRoot,
+  moveSearchRoot,
   getAppsConfig,
   writeRegistry
 } from './registry'
@@ -103,6 +104,21 @@ export default [
     run: async (ctx) => {
       const path = String(ctx.named.path ?? '')
       const r = await removeSearchRoot(path)
+      return r
+    }
+  },
+  {
+    name: 'apps.move-root',
+    description: '调整搜索目录顺序 (--path --dir -1|1)',
+    usage: 'apps.move-root --path /home/aaaa0ggmc/Apps --dir 1',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      const dir = Number(ctx.named.dir ?? 0)
+      if (!path || (dir !== -1 && dir !== 1)) {
+        log.warn('apps.move-root invalid args', { path, dir })
+        return { ok: false, error: '需要 --path 与 --dir（-1 上移 / 1 下移）' }
+      }
+      const r = await moveSearchRoot(path, dir as -1 | 1)
       return r
     }
   },

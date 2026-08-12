@@ -3,7 +3,7 @@ defineOptions({ name: 'cockpit-apps-search-roots' })
 
 import { ref, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
-import { translate } from '@ui/i18n'
+import { translate, translateTemplate } from '@ui/i18n'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
@@ -32,6 +32,12 @@ async function removeRoot(p: string): Promise<void> {
   roots.value = list
 }
 
+/** Move one root up (-1) / down (+1); search order follows this list. */
+async function moveRoot(p: string, dir: -1 | 1): Promise<void> {
+  const list = (await window.cockpit.moveRoot(p, dir)) as { path: string; watch: boolean }[]
+  roots.value = list
+}
+
 /** Pick a directory via the native dialog and fill the input with it. */
 async function pickDirectory(): Promise<void> {
   const path = await window.cockpit.pickFile({
@@ -50,30 +56,62 @@ async function pickDirectory(): Promise<void> {
       <div class="text-caption on-surface-variant mb-3">
         {{ translate(uiLang, 'apps.searchRootsDesc') }}
       </div>
-      <div class="mb-3">
-        <template v-for="r in roots" :key="r.path">
-          <v-chip
-            size="small"
+      <div v-if="roots.length > 0" class="d-flex flex-column ga-2 rules-list">
+        <div v-for="(r, i) in roots" :key="r.path" class="d-flex align-center ga-2 flex-wrap">
+          <v-text-field
+            :model-value="r.path"
+            :label="translateTemplate(uiLang, 'apps.rootRow', { n: String(i + 1) })"
+            readonly
+            density="compact"
             variant="outlined"
-            closable
-            class="mr-2 mb-1"
-            @click:close="removeRoot(r.path)"
-          >
-            {{ r.path }}
-          </v-chip>
-        </template>
-        <span v-if="roots.length === 0" class="text-caption on-surface-variant">{{
-          translate(uiLang, 'apps.unconfigured')
-        }}</span>
+            hide-details
+            class="flex-grow-1 rule-input"
+          />
+          <div class="d-flex ga-1">
+            <v-btn
+              icon
+              size="small"
+              variant="flat"
+              :disabled="i === 0"
+              :title="translate(uiLang, 'apps.moveUp')"
+              @click="moveRoot(r.path, -1)"
+            >
+              <v-icon size="small">mdi-arrow-up</v-icon>
+            </v-btn>
+            <v-btn
+              icon
+              size="small"
+              variant="flat"
+              :disabled="i === roots.length - 1"
+              :title="translate(uiLang, 'apps.moveDown')"
+              @click="moveRoot(r.path, 1)"
+            >
+              <v-icon size="small">mdi-arrow-down</v-icon>
+            </v-btn>
+            <v-btn
+              icon
+              size="small"
+              variant="flat"
+              color="error"
+              :title="translate(uiLang, 'apps.removeRoot')"
+              @click="removeRoot(r.path)"
+            >
+              <v-icon size="small">mdi-close</v-icon>
+            </v-btn>
+          </div>
+        </div>
       </div>
-      <div class="d-flex align-center ga-2">
+      <div v-else class="text-caption on-surface-variant d-flex align-center ga-2 rules-empty">
+        <span>{{ translate(uiLang, 'apps.unconfigured') }}</span>
+      </div>
+      <div class="d-flex align-center ga-2 mt-2 flex-wrap">
         <v-text-field
           v-model="searching"
           placeholder="/home/aaaa0ggmc/Apps"
           variant="outlined"
           density="compact"
           hide-details
-          class="flex-grow-1"
+          class="flex-grow-1 rule-input"
         >
           <template #append-inner>
             <v-btn
@@ -94,3 +132,16 @@ async function pickDirectory(): Promise<void> {
     </v-card-text>
   </v-card>
 </template>
+
+<style scoped>
+.rules-list {
+  overflow-y: auto;
+  padding: 10px 6px 8px 2px;
+}
+.rules-empty {
+  min-height: 44px;
+}
+.rule-input {
+  min-width: 160px;
+}
+</style>

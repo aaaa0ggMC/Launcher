@@ -175,6 +175,28 @@ async function pickLyricsFolder(): Promise<void> {
   if (path) lyricsFolderInput.value = path
 }
 
+/** Move a music folder one position up (-1) / down (+1). Earlier folders win
+ * song-name collisions in the library scan, so order is meaningful. */
+function moveMusicFolder(i: number, dir: -1 | 1): void {
+  const j = i + dir
+  if (j < 0 || j >= musicFolders.value.length) return
+  const arr = [...musicFolders.value]
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  musicFolders.value = arr
+  void persistMusicFolders()
+}
+
+/** Move a lyrics folder one position up (-1) / down (+1); earlier folders win
+ * `.lrc` name collisions. */
+function moveLyricsFolder(i: number, dir: -1 | 1): void {
+  const j = i + dir
+  if (j < 0 || j >= lyricsFolders.value.length) return
+  const arr = [...lyricsFolders.value]
+  ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  lyricsFolders.value = arr
+  void persistLyricsFolders()
+}
+
 watch(lyricsCfg, (v) => update('preferences.lyrics', { ...v }), { deep: true })
 
 watch(model, (v) => update('preferences.model', v))
@@ -330,30 +352,60 @@ function resetDj(): void {
           <div class="text-caption text-medium-emphasis mb-2">
             搜索目录（递归扫描目录下所有音乐文件）
           </div>
-          <div class="mb-2">
-            <template v-for="p in musicFolders" :key="p">
-              <v-chip
-                size="small"
+          <div v-if="musicFolders.length > 0" class="d-flex flex-column ga-2 rules-list">
+            <div v-for="(p, i) in musicFolders" :key="p" class="d-flex align-center ga-2 flex-wrap">
+              <v-text-field
+                :model-value="p"
+                :label="`音乐目录 ${i + 1}`"
+                readonly
+                density="compact"
                 variant="outlined"
-                closable
-                class="mr-2 mb-1"
-                @click:close="removeMusicFolder(p)"
-              >
-                {{ p }}
-              </v-chip>
-            </template>
-            <span v-if="musicFolders.length === 0" class="text-caption on-surface-variant">
-              未配置音乐目录
-            </span>
+                hide-details
+                class="flex-grow-1 rule-input"
+              />
+              <div class="d-flex ga-1">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  :disabled="i === 0"
+                  title="上移"
+                  @click="moveMusicFolder(i, -1)"
+                >
+                  <v-icon size="small">mdi-arrow-up</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  :disabled="i === musicFolders.length - 1"
+                  title="下移"
+                  @click="moveMusicFolder(i, 1)"
+                >
+                  <v-icon size="small">mdi-arrow-down</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  color="error"
+                  title="删除该目录"
+                  @click="removeMusicFolder(p)"
+                >
+                  <v-icon size="small">mdi-close</v-icon>
+                </v-btn>
+              </div>
+            </div>
           </div>
-          <div class="d-flex align-center ga-2">
+          <div v-else class="text-caption on-surface-variant rules-empty">未配置音乐目录</div>
+          <div class="d-flex align-center ga-2 mt-2 flex-wrap">
             <v-text-field
               v-model="musicFolderInput"
               placeholder="/home/aaaa0ggmc/Music"
               variant="outlined"
               density="compact"
               hide-details
-              class="flex-grow-1"
+              class="flex-grow-1 rule-input"
             >
               <template #append-inner>
                 <v-btn icon variant="text" size="small" title="选择目录" @click="pickMusicFolder">
@@ -371,30 +423,64 @@ function resetDj(): void {
           <div class="text-caption text-medium-emphasis mb-2">
             歌词搜索目录（递归扫描 .lrc 歌词文件，供桌面歌词窗口使用）
           </div>
-          <div class="mb-2">
-            <template v-for="p in lyricsFolders" :key="p">
-              <v-chip
-                size="small"
+          <div v-if="lyricsFolders.length > 0" class="d-flex flex-column ga-2 rules-list">
+            <div
+              v-for="(p, i) in lyricsFolders"
+              :key="p"
+              class="d-flex align-center ga-2 flex-wrap"
+            >
+              <v-text-field
+                :model-value="p"
+                :label="`歌词目录 ${i + 1}`"
+                readonly
+                density="compact"
                 variant="outlined"
-                closable
-                class="mr-2 mb-1"
-                @click:close="removeLyricsFolder(p)"
-              >
-                {{ p }}
-              </v-chip>
-            </template>
-            <span v-if="lyricsFolders.length === 0" class="text-caption on-surface-variant">
-              未配置歌词目录
-            </span>
+                hide-details
+                class="flex-grow-1 rule-input"
+              />
+              <div class="d-flex ga-1">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  :disabled="i === 0"
+                  title="上移"
+                  @click="moveLyricsFolder(i, -1)"
+                >
+                  <v-icon size="small">mdi-arrow-up</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  :disabled="i === lyricsFolders.length - 1"
+                  title="下移"
+                  @click="moveLyricsFolder(i, 1)"
+                >
+                  <v-icon size="small">mdi-arrow-down</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="flat"
+                  color="error"
+                  title="删除该目录"
+                  @click="removeLyricsFolder(p)"
+                >
+                  <v-icon size="small">mdi-close</v-icon>
+                </v-btn>
+              </div>
+            </div>
           </div>
-          <div class="d-flex align-center ga-2">
+          <div v-else class="text-caption on-surface-variant rules-empty">未配置歌词目录</div>
+          <div class="d-flex align-center ga-2 mt-2 flex-wrap">
             <v-text-field
               v-model="lyricsFolderInput"
               placeholder="/home/aaaa0ggmc/Music/Lyrics"
               variant="outlined"
               density="compact"
               hide-details
-              class="flex-grow-1"
+              class="flex-grow-1 rule-input"
             >
               <template #append-inner>
                 <v-btn icon variant="text" size="small" title="选择目录" @click="pickLyricsFolder">
@@ -1026,6 +1112,11 @@ function resetDj(): void {
 }
 .rule-input {
   min-width: 160px;
+}
+.rules-empty {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
 }
 /* Center the switch against the outlined select/text-field siblings in the same row. */
 .switch-align {
