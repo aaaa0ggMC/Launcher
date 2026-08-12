@@ -1,5 +1,5 @@
 import { readFile, readdir, mkdir, appendFile, writeFile, rename, rm } from 'fs/promises'
-import { join, extname } from 'path'
+import { join, extname, basename } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import OpenAI from 'openai'
@@ -318,6 +318,18 @@ export async function loadLyrics(): Promise<{
       karaoke.delete(name)
     }
   }
+  // 3. Local .yrc karaoke — word-level beats NCM karaoke, and provides the
+  //    plain lyric when the song has no .lrc. Handle both the bracket format
+  //    and the pure-JSON (NCM API) format.
+  for (const [name, yrc] of await scanKaraokeFiles(folders)) {
+    if (!yrc) continue
+    const inline = localYrcToInlineLrc(yrc) || yrcToInlineLrc(yrc)
+    if (inline) karaoke.set(name, inline)
+    if (!lyrics.has(name)) {
+      const plain = localYrcToLrc(yrc)
+      if (plain) lyrics.set(name, plain)
+    }
+  }
   return { lyrics, karaoke }
 }
 
@@ -336,6 +348,42 @@ export async function scanLyricFiles(folders: string[]): Promise<Map<string, str
     }
   }
   return map
+}
+
+const YRC_EXT = '.yrc'
+
+/** Recursively scan folders for `.yrc` karaoke files (same keying as `.lrc`). */
+export async function scanKaraokeFiles(folders: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  for (const folder of folders) {
+    try {
+      await walkKaraokeDir(folder, map)
+    } catch (e) {
+      log.warn('scan karaoke folder failed', { folder, error: String(e) })
+    }
+  }
+  return map
+}
+
+async function walkKaraokeDir(dir: string, map: Map<string, string>): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      await walkKaraokeDir(full, map)
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(YRC_EXT)) {
+      const name = entry.name.slice(0, -YRC_EXT.length).trim()
+      if (!name) continue
+      let content = ''
+      try {
+        content = await readFile(full, 'utf-8')
+      } catch {
+        continue // skip unreadable
+      }
+      const prev = map.get(name)
+      if (prev === undefined || content.length > prev.length) map.set(name, content)
+    }
+  }
 }
 
 async function walkLyricDir(dir: string, map: Map<string, string>): Promise<void> {
@@ -403,6 +451,62 @@ export function yrcToInlineLrc(yrc: string): string {
   return out.join('\n')
 }
 
+/**
+ * Local Netease `.yrc` files use a different (non-JSON) karaoke format:
+ * `[lineStart,lineDur](wordStart,wordDur,vol)word (wordStart2,...)word2`
+ * (JSON metadata lines starting with `{` are skipped). Convert to the same
+ * inline-timestamp LRC the NCM `yrcToInlineLrc` produces, so the lyrics page
+ * can render word-by-word karaoke from local files too.
+ */
+export function localYrcToInlineLrc(yrc: string): string {
+  const out: string[] = []
+  for (const raw of yrc.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('{')) continue
+    const m = line.match(/^\[(\d+),\d+\]([\s\S]*)$/)
+    if (!m) continue
+    const lineMs = Number(m[1])
+    if (!Number.isFinite(lineMs)) continue
+    const rest = m[2]
+    let buf = `[${msToLrcTime(lineMs)}]`
+    const re = /\((\d+),\d+,\d+\)/g
+    let last = 0
+    let wm: RegExpExecArray | null
+    let hasWord = false
+    while ((wm = re.exec(rest))) {
+      const text = rest.slice(last, wm.index)
+      last = wm.index + wm[0].length
+      if (text) {
+        hasWord = true
+        buf += `[${msToLrcTime(Number(wm[1]))}]${text}`
+      }
+    }
+    const tail = rest.slice(last)
+    if (tail) {
+      hasWord = true
+      buf += tail
+    }
+    if (hasWord) out.push(buf)
+  }
+  return out.join('\n')
+}
+
+/** Plain LRC (line timestamps only) from a local `.yrc` — used when a song has
+ *  a `.yrc` but no `.lrc`. */
+export function localYrcToLrc(yrc: string): string {
+  const out: string[] = []
+  for (const raw of yrc.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('{')) continue
+    const m = line.match(/^\[(\d+),\d+\]([\s\S]*)$/)
+    if (!m) continue
+    const text = m[2].replace(/\(\d+,\d+,\d+\)/g, '').trim()
+    if (!text) continue
+    out.push(`[${msToLrcTime(Number(m[1]))}]${text}`)
+  }
+  return out.join('\n')
+}
+
 export async function appendLyric(
   name: string,
   lyric: string,
@@ -428,15 +532,43 @@ export function resolveLyricForTrack(track: string, lyrics: Map<string, string>)
     .replace(/[（）()【】[\]]/g, ' ')
     .trim()
   if (base && lyrics.has(base)) return lyrics.get(base) ?? null
-  const compact = base.replace(/\s+/g, '')
+  // Aggressive fold: drop every non-letter/number (dashes, brackets, full-width
+  // punctuation) so "EarnedIt(FiftyShadesOfGrey)" hits
+  // "The Weeknd - Earned It (Fifty Shades Of Grey)".
+  const compact = base.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
   let best: string | null = null
   if (compact) {
     for (const [name, lrc] of lyrics) {
-      const key = name.replace(/\s+/g, '')
+      const key = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
       if (key.includes(compact) && (best === null || key.length < best.length)) best = lrc
     }
   }
   return best
+}
+
+/**
+ * Resolve LRC text by the ON-DISK track path (from MPRIS `xesam:url`) — the
+ * lyric scan keys are the `.lrc` basenames, which usually equal the audio
+ * basename, so this is an exact hit even when the DBus title drops the artist
+ * prefix ("Earned It ..." vs "The Weeknd - Earned It ..."). Falls back to the
+ * title-based resolver when the path is unknown.
+ */
+export function resolveLyricForTrackPath(
+  path: string | null,
+  track: string,
+  lyrics: Map<string, string>
+): string | null {
+  if (path) {
+    const name = basename(path)
+      .replace(/\.[^.]+$/, '')
+      .trim()
+    if (name && lyrics.has(name)) return lyrics.get(name) ?? null
+    // "Artist - Title.lrc" names: also try the bare title part.
+    const titleOnly = name.replace(/^.+?\s+-\s+/, '').trim()
+    if (titleOnly && titleOnly !== name && lyrics.has(titleOnly))
+      return lyrics.get(titleOnly) ?? null
+  }
+  return resolveLyricForTrack(track, lyrics)
 }
 
 // ---------------------------------------------------------------------------
@@ -2184,9 +2316,9 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
       }
     }
     const lib = await loadLibrary()
-    const lyric = resolveLyricForTrack(detail.track, lib.lyrics)
-    const karaokeLyric = resolveLyricForTrack(detail.track, lib.karaoke) ?? null
     const path = resolveTrackPath(detail, lib.musicPaths)
+    const lyric = resolveLyricForTrackPath(path, detail.track, lib.lyrics)
+    const karaokeLyric = resolveLyricForTrackPath(path, detail.track, lib.karaoke) ?? null
     return {
       ok: true,
       status: detail.status,
