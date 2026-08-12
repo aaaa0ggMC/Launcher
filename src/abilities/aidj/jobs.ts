@@ -18,7 +18,8 @@ import {
   SessionManager,
   DBusManager,
   LoudnessCache,
-  bumpFrequency
+  bumpFrequency,
+  getCurrentPlayerKey
 } from './service'
 import OpenAI from 'openai'
 import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
@@ -646,15 +647,16 @@ export function getChatTasks(): ChatTaskState[] {
   return [...chatTasks.values()]
 }
 
-/** Live-switch the player a chat session pushes songs to. */
-export function setChatPlayer(taskId: string, player: string): { ok: boolean; error?: string } {
+/** Live-switch the player a chat session pushes songs to. `__auto__` resolves
+ *  to the currently active/bound player so the chat keeps pushing to the same
+ *  continuous task. */
+export async function setChatPlayer(
+  taskId: string,
+  player: string
+): Promise<{ ok: boolean; error?: string }> {
   const st = chatTasks.get(taskId)
   if (!st) return { ok: false, error: '持续会话未运行' }
-  if (!player || player === '__auto__') {
-    st.player = '__auto__'
-  } else {
-    st.player = player
-  }
+  st.player = !player || player === '__auto__' ? await getCurrentPlayerKey() : player
   return { ok: true }
 }
 
@@ -670,9 +672,23 @@ export function chatResendPlaylist(
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Player identity is expressed two ways across the codebase: the short
+ * configured name (`vlc`, `config.preferences.dbus_target`) and the resolved
+ * MPRIS bus name (`org.mpris.MediaPlayer2.vlc`). Continuous tasks are keyed by
+ * the resolved name, but chat's `st.player` may carry either form (or the
+ * `__auto__` sentinel) — so every player→task lookup must compare both.
+ */
+function samePlayer(a: string, b: string): boolean {
+  if (!a || !b) return a === b
+  if (a === b) return true
+  const short = (n: string): string => n.replace(/^org\.mpris\.MediaPlayer2\./, '')
+  return short(a) === short(b)
+}
+
 /** Immediate lookup of a continuous task bound to `player`. */
 function findContinuousByPlayer(player: string): ContinuousTaskState | undefined {
-  return [...continuousTasks.values()].find((s) => s.playerKey === player)
+  return [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
 }
 
 /** Push a playlist to the player: enqueue to an existing continuous task, else create one. */
@@ -681,7 +697,7 @@ function ensureContinuousPlayer(
   songs: PlaylistEntry[]
 ): { ok: boolean; taskId?: string; queueLen?: number; error?: string } {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  const existing = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     const r = enqueueContinuousSongs(existing.control.id, songs)
     return r.ok ? { ok: true, taskId: existing.control.id, queueLen: r.queueLen } : r
@@ -693,7 +709,7 @@ function ensureContinuousPlayer(
 
 /** /discard_follows: drop queued-but-unplayed songs; keep the current track playing. */
 export function clearContinuousPending(player: string): void {
-  const st = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  const st = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (!st) return
   st.queue = st.current ? [st.current] : []
   st.index = st.queue.length
@@ -709,7 +725,7 @@ export function replaceContinuousQueue(
   songs: PlaylistEntry[]
 ): { ok: boolean; error?: string; taskId?: string; queueLen?: number } {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  const existing = [...continuousTasks.values()].find((s) => s.playerKey === player)
+  const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     existing.queue = songs
     existing.index = 0
@@ -764,8 +780,12 @@ registerJobHandler('aidj.chat', async (control, args) => {
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url
   })
+  // Resolve __auto__ / empty to the currently active player so the push
+  // matches the existing continuous task (which is keyed by the concrete name).
   const player =
-    playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
+    playerArg && playerArg !== '__auto__'
+      ? playerArg
+      : await getCurrentPlayerKey().catch(() => config.preferences.dbus_target || 'vlc')
 
   const sessionId = await SessionManager.createSession({
     title: initialPrompt.slice(0, 40),

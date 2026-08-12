@@ -323,7 +323,9 @@ export async function loadLyrics(): Promise<{
 
 const LRC_EXT = '.lrc'
 
-/** Recursively scan folders for `.lrc` files, keyed by basename (without ext). */
+/** Recursively scan folders for `.lrc` files, keyed by basename (without ext).
+ *  On a same-name collision across folders the LONGEST file wins — a complete
+ *  lyric beats a stub/placeholder regardless of folder order. */
 export async function scanLyricFiles(folders: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   for (const folder of folders) {
@@ -344,12 +346,15 @@ async function walkLyricDir(dir: string, map: Map<string, string>): Promise<void
       await walkLyricDir(full, map)
     } else if (entry.isFile() && entry.name.toLowerCase().endsWith(LRC_EXT)) {
       const name = entry.name.slice(0, -LRC_EXT.length).trim()
-      if (!name || map.has(name)) continue
+      if (!name) continue
+      let content = ''
       try {
-        map.set(name, await readFile(full, 'utf-8'))
+        content = await readFile(full, 'utf-8')
       } catch {
-        /* skip unreadable */
+        continue // skip unreadable
       }
+      const prev = map.get(name)
+      if (prev === undefined || content.length > prev.length) map.set(name, content)
     }
   }
 }

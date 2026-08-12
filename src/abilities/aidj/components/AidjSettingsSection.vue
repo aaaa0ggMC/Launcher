@@ -186,8 +186,8 @@ function moveMusicFolder(i: number, dir: -1 | 1): void {
   void persistMusicFolders()
 }
 
-/** Move a lyrics folder one position up (-1) / down (+1); earlier folders win
- * `.lrc` name collisions. */
+/** Move a lyrics folder one position up (-1) / down (+1). Same-name `.lrc`
+ * collisions keep the longest file, so the order is organizational only. */
 function moveLyricsFolder(i: number, dir: -1 | 1): void {
   const j = i + dir
   if (j < 0 || j >= lyricsFolders.value.length) return
