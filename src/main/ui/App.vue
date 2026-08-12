@@ -238,7 +238,34 @@ function restoreUiState(): void {
   }
 }
 
+/** Sidebar sort rules — `config.json` `sidebar.sort`: 'alpha' (default,
+ * category+name), 'frequency' (use count desc), 'recent' (last-used desc). */
+type SidebarSort = 'alpha' | 'frequency' | 'recent'
+const sortMode = computed<SidebarSort>(() => {
+  const s = (runtimeConfig.value.sidebar as { sort?: string } | undefined)?.sort
+  return s === 'frequency' || s === 'recent' ? s : 'alpha'
+})
+
+/** Per-entry usage stats from apps.csv (sidebar frequency / recent rules). */
+const usageStats = ref<Record<string, { count: number; lastUsed: number }>>({})
+async function loadUsage(): Promise<void> {
+  const r = (await window.cockpit.command('stats.list')) as {
+    ok?: boolean
+    stats?: Record<string, { count: number; lastUsed: number }>
+  } | null
+  usageStats.value = r?.stats ?? {}
+}
+/** Record a sidebar-entry open / app launch; used by frequency + recent sorts. */
+function recordOpen(id: string): void {
+  void window.cockpit.command('stats.record', { id })
+}
+
 const abilities = computed<SidebarAbility[]>(() => {
+  const mode = sortMode.value
+  const score = (a: SidebarAbility): number => {
+    const u = usageStats.value[a.id]
+    return mode === 'recent' ? (u?.lastUsed ?? 0) : (u?.count ?? 0)
+  }
   return sidebarReport.loaded
     .map((meta) => ({
       id: meta.id,
@@ -250,6 +277,10 @@ const abilities = computed<SidebarAbility[]>(() => {
       comp: meta.component
     }))
     .sort((a, b) => {
+      if (mode !== 'alpha') {
+        const d = score(b) - score(a)
+        if (d !== 0) return d
+      }
       const c = a.category.localeCompare(b.category, lang.value)
       return c !== 0 ? c : a.name.localeCompare(b.name, lang.value)
     })
@@ -306,7 +337,17 @@ const groups = computed<Group[]>(() => {
     list.push(a)
     map.set(a.category, list)
   }
-  return [...map.entries()].map(([label, items]) => ({ label, items }))
+  const arr = [...map.entries()].map(([label, items]) => ({ label, items }))
+  if (sortMode.value !== 'alpha') {
+    // Keep category grouping; order the groups by their entries' usage.
+    const score = (g: Group): number => {
+      if (sortMode.value === 'recent')
+        return Math.max(0, ...g.items.map((a) => usageStats.value[a.id]?.lastUsed ?? 0))
+      return g.items.reduce((s, a) => s + (usageStats.value[a.id]?.count ?? 0), 0)
+    }
+    arr.sort((x, y) => score(y) - score(x))
+  }
+  return arr
 })
 
 // ---------------------------------------------------------------------------
@@ -475,8 +516,16 @@ function deliverActivate(
   inst?.onActivate?.(target)
 }
 
+/** Navigate to an ability from the sidebar; records the open for frequency /
+ * recent sorting. */
+function openAbility(id: string): void {
+  if (id !== currentId.value) recordOpen(id)
+  currentId.value = id
+}
+
 function activate(abilityId: string, target: Record<string, unknown>): void {
   if (currentId.value !== abilityId) {
+    recordOpen(abilityId)
     pendingActivate.value = { ability: abilityId, target }
     currentId.value = abilityId
     // Fallback: if the ref-watch missed the mount (transition timing), retry
@@ -611,12 +660,13 @@ let unsub: (() => void) | null = null
 let winUnsub: (() => void) | null = null
 let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
+let usageUnsub: (() => void) | null = null
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
   onConfigChanged(cfg)
   // Default page comes from config.json (sidebar.default); fall back to the
-  // first alphabetical ability when missing/invalid (or no config at all).
+  // first ability in the active sort order when missing/invalid (or no config).
   const def = (cfg as Record<string, unknown> | null)?.sidebar?.['default'] ?? null
   const fallback = abilities.value[0]?.id ?? null
   const valid = (id: string | null): boolean => !!id && abilities.value.some((a) => a.id === id)
@@ -629,6 +679,10 @@ onMounted(async () => {
     }
     void loadSearchQuick()
   })
+  // Usage stats drive the sidebar frequency / recent sort; reload on change
+  // so a click re-sorts the sidebar live.
+  usageUnsub = window.cockpit.on('cockpit:usage-changed', () => void loadUsage())
+  void loadUsage()
   window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
     isMaximized.value = Boolean(v)
@@ -657,6 +711,7 @@ watch(rail, () => persistUiState())
 
 onBeforeUnmount(() => {
   unsub?.()
+  usageUnsub?.()
   winUnsub?.()
   configUnsub?.()
   commandErrorUnsub?.()
@@ -776,7 +831,7 @@ onBeforeUnmount(() => {
               density="compact"
               :active="currentId === a.id"
               rounded="lg"
-              @click="currentId = a.id"
+              @click="openAbility(a.id)"
             >
               <template #prepend>
                 <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
@@ -796,7 +851,7 @@ onBeforeUnmount(() => {
                 :active="currentId === a.id"
                 density="compact"
                 rounded="lg"
-                @click="currentId = a.id"
+                @click="openAbility(a.id)"
               >
                 <template #prepend>
                   <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
@@ -856,7 +911,7 @@ onBeforeUnmount(() => {
         }}</span>
       </v-app-bar-title>
       <v-spacer />
-      <v-btn icon="mdi-cog-outline" variant="text" @click="currentId = 'settings'" />
+      <v-btn icon="mdi-cog-outline" variant="text" @click="openAbility('settings')" />
       <template v-if="isFrameless">
         <v-btn icon="mdi-window-minimize" variant="text" @click="winMinimize" />
         <v-btn

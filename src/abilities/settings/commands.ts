@@ -3,6 +3,7 @@ import type { CommandSpec } from '../../main/process/commands/types'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { CONFIG_JSON } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
+import { loadUsageStats, recordUsage, clearUsageStats } from '../../main/process/usage-stats'
 
 const log = makeLogger('settings')
 
@@ -52,6 +53,35 @@ export default [
         }
       }
       return await applyConfigPatch(patch ?? {})
+    }
+  },
+  {
+    name: 'stats.record',
+    description: '记录一次使用 (--id)',
+    usage: 'stats.record --id apps',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      await recordUsage(id)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'stats.list',
+    description: '读取使用频次统计 (apps.csv)',
+    usage: 'stats.list',
+    run: async () => {
+      const stats = await loadUsageStats()
+      return { ok: true, stats }
+    }
+  },
+  {
+    name: 'stats.clear',
+    description: '清空使用频次统计 (apps.csv)',
+    usage: 'stats.clear',
+    run: async () => {
+      await clearUsageStats()
+      return { ok: true }
     }
   }
 ] satisfies CommandSpec[]

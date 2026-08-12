@@ -8,6 +8,7 @@ import { readJson } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
 import { startProcessTask } from '../../main/process/background-tasks'
 import { getBroadcast } from '../../main/process/broadcast'
+import { recordUsage } from '../../main/process/usage-stats'
 
 const log = makeLogger('apps-launcher')
 
@@ -242,6 +243,10 @@ export async function launchSpec(
   const eff = opts.monitor ? { ...spec, terminal: false } : spec
   const cwd = expandCwd(entry, eff)
   const env: NodeJS.ProcessEnv = { ...process.env, ...(eff.env ?? {}) }
+
+  // Frequency statistic — every successful launch (foreground, background task
+  // or multi-step action) counts once in apps.csv, keyed by `app:<root>:<path>`.
+  void recordUsage(`app:${entry.root}:${entry.path}`)
 
   // Background task mode → hand off to the framework service. It keeps the
   // child attached to the app (not detached), pipes stdio into a ring buffer,

@@ -81,6 +81,14 @@ export default {
           component: defineAsyncComponent(() => import('./items/LanguageSection.vue'))
         },
         {
+          key: 'sidebar',
+          label: '侧边栏',
+          icon: 'mdi-view-dashboard-outline',
+          description: '侧栏排序规则：字母序 / 使用频次 / 最近使用',
+          keywords: ['侧边栏', '排序', '顺序', '频次', '最近', 'sidebar', 'sort', 'frequency'],
+          component: defineAsyncComponent(() => import('./items/SidebarSection.vue'))
+        },
+        {
           key: 'launch',
           label: '启动',
           icon: 'mdi-rocket-launch-outline',

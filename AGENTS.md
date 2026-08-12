@@ -130,9 +130,20 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 
 `theme` 的取值来自 `src/main/ui/color_schemes/*.json`（见 §9「主题」）；未知 id 自动回落 `dark`，不会弄坏 UI。
 
-### config.json 的 `sidebar` — 初始页面
+### config.json 的 `sidebar` — 初始页面与排序
 
 侧栏**不再**由 yaml 文件驱动能力清单/顺序——Ability 自注入（见 §9「Ability 动态加载」）：扫描 `src/abilities/*/index.ts`，按 `category` 字母序分组、组内按名称字母序排序，`platforms` 过滤平台。`config.json` 里的 `sidebar.default` 只指定初始页面（缺失/无效时回落第一个能力）。各能力的专属配置独立存放在 `~/.config/LinuxCockpit/<ability-id>/config.json`（如 AIDJ 的 `aidj/config.json` 存曲库路径、API 密钥、模型与播放偏好）。
+
+`sidebar.sort` 控制侧栏排列规则（`App.vue` 消费，设置页可改）：
+
+```jsonc
+"sidebar": {
+  "default": "cli",        // 初始页面
+  "sort": "alpha"          // alpha 字母序（默认）| frequency 使用频次 | recent 最近使用
+}
+```
+
+使用频次/最近使用来自 `~/.config/LinuxCockpit/apps.csv`（`src/main/process/usage-stats.ts` 读写，CSV：`id,count,last_used`）。**每次点开侧栏条目**记一次（`stats.record`，id = ability id），**每次启动应用**也记一次（apps launcher 的 `launchSpec`，id = `app:<root>:<id>`）。改动用 `cockpit:usage-changed` 广播即时反映到侧栏排序；设置页「清空使用记录」调 `stats.clear` 归零。
 
 ### ~/Apps/apps.json — 应用注册表
 
