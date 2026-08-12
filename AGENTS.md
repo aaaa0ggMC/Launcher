@@ -238,7 +238,8 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 
 - 渲染端: `src/abilities/index.ts` 的 Vite `import.meta.glob` → `loadAbilityModules()` 拍平成 `Record<id, Ability>`；首次显示时 async `import()` 页面组件 (code-split)
 - **自注入排序**：侧栏直接由能力元数据驱动，**不再读 yaml 顺序**——按 `category` 字母序分组、组内按 `name` 字母序排序（`App.vue` 用翻译后文本排序，`resolveSidebarAbilities` 也有 raw 兜底排序）
-- **平台过滤**：`Ability` 可声明 `platforms?: string[]`（`process.platform` 值），未给/空 = 全平台可用；给了且不包含当前平台 → 侧栏过滤掉，并在日志中报告。`resolveSidebarAbilities(platform)` 返回 `{ loaded, ignoredPlatform, backendOnly }`，通过 `logs.post`（scope `abilities`）输出「加载了哪些 / 平台不符忽略了哪些 / 纯后端不进侧栏哪些」
+- **平台过滤**：`Ability` 可声明 `platforms?: string[]`（`process.platform` 值），未给/空 = 全平台可用；给了且不包含当前平台 → 侧栏过滤掉，并在日志中报告。`resolveSidebarAbilities(platform)` 返回 `{ loaded, ignoredPlatform, ignoredDependency, backendOnly }`，通过 `logs.post`（scope `abilities`）输出「加载了哪些 / 平台不符忽略了哪些 / 依赖缺失忽略了哪些 / 纯后端不进侧栏哪些」
+- **能力依赖（能力辞典）**：`meta.ts` 可声明 `provides?: string[]`（本能力向系统提供的能力，如 `background` 提供 `['background-tasks']`）与 `dependencies?: string[]`（要求的能力，AIDJ/playground/apps 都 `dependencies: ['background-tasks']`）。依赖的是**能力名**而非 ability id——提供者改名/替换不影响依赖方。前后端加载器（`resolveSidebarAbilities` + `registerAbilityCommands`）按路径式可满足判定解析：要求的能力必须由某个平台合格且自身也可满足的能力提供。**环直接忽略**——这只是 cmd 依赖（命令注册顺序无关）不是初始化依赖，A↔B 互赖也照样注册。能力缺失/提供者被平台过滤/被移除 → 该能力命令不注册、侧栏不显示，并在日志中警告「missing capabilities」，删除提供者（如 `background`）会自动禁用所有建立在它上面的能力。主进程按**依赖序**注册（提供者先于依赖方，环成员兜底排最后）
 - **一文件夹多 Ability**：`index.ts` 可 default-export `Ability | Ability[]`——一个能力注册多个侧栏条目（如 AIDJ 注册 `aidj` 主页面 + `aidj-lyrics` 歌词页），`id` 必须唯一
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
 - 增删能力 = 增删 `src/abilities/<id>` 文件夹即可，无需改任何 yaml/注册表
@@ -337,6 +338,7 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 4. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
 5. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
 6. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
+7. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
 
 **无需改任何 yaml/注册表**——侧栏按 `category`/`name` 字母序自注入（见上）。
 

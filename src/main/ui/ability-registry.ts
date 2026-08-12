@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import type { Component } from 'vue'
 import type { Ability } from './ability'
+import type { AbilityMeta } from '../../shared/types'
 
 /**
  * Ability loader — the single source of truth for what's loaded. Framework
@@ -31,24 +32,28 @@ const abilityModules = import.meta.glob<{ default: AbilityDefault }>('../../abil
 
 /**
  * Ability folder convention: `meta.ts` holds metadata shared by BOTH processes
- * (e.g. `platforms`), `index.ts` is frontend-only, `commands.ts` backend-only.
+ * (e.g. `platforms`, `provides`, `dependencies`), `index.ts` is frontend-only,
+ * `commands.ts` backend-only.
  */
-const metaModules = import.meta.glob<{ platforms?: string[] }>('../../abilities/*/meta.ts', {
-  eager: true
-})
+const metaModules = import.meta.glob<AbilityMeta>('../../abilities/*/meta.ts', { eager: true })
 
 interface AbilityEntry {
   ability: Ability
   /** folder-level platforms from meta.ts (applies to every ability in the folder). */
   platforms: string[] | undefined
+  /** folder-level capability lexicon (`provides`) from meta.ts. */
+  provides: string[] | undefined
+  /** folder-level required capabilities (`dependencies`) from meta.ts. */
+  dependencies: string[] | undefined
 }
 
 let _registry: Record<string, AbilityEntry> | null = null
 
 /**
- * Build the full registry keyed by ability id. Platforms come from the ability
- * FOLDER's `meta.ts` and apply to every ability it exports — so a folder that
- * registers several abilities (e.g. aidj + aidj-lyrics) shares one label.
+ * Build the full registry keyed by ability id. Platforms and the capability
+ * lexicon (`provides` / `dependencies`) come from the ability FOLDER's
+ * `meta.ts` and apply to every ability it exports — so a folder that registers
+ * several abilities (e.g. aidj + aidj-lyrics) shares one label.
  */
 function loadRegistry(): Record<string, AbilityEntry> {
   if (_registry) return _registry
@@ -58,16 +63,40 @@ function loadRegistry(): Record<string, AbilityEntry> {
     const mod = abilityModules[key]
     const def = mod?.default
     if (!def) continue
-    const platforms = metaModules[`../../abilities/${folder}/meta.ts`]?.platforms
+    const folderMeta = metaModules[`../../abilities/${folder}/meta.ts`]
+    const platforms = folderMeta?.platforms
+    const provides = folderMeta?.provides
+    const dependencies = folderMeta?.dependencies
     for (const a of Array.isArray(def) ? def : [def]) {
       if (out[a.id]) {
         console.warn(`[abilities] duplicate ability id "${a.id}" — overriding (${key})`)
       }
-      out[a.id] = { ability: a, platforms }
+      out[a.id] = { ability: a, platforms, provides, dependencies }
     }
   }
+  validateDependencies(out)
   _registry = out
   return out
+}
+
+/**
+ * Registry-wide capability contract check (independent of platform): every
+ * required capability must be provided by at least one ability in the registry.
+ * Unprovided capabilities are reported through the main log + console; they
+ * also make the dependent ability unavailable in `resolveSidebarAbilities`.
+ */
+function validateDependencies(registry: Record<string, AbilityEntry>): void {
+  const allProvided = new Set<string>()
+  for (const entry of Object.values(registry)) {
+    for (const cap of entry.provides ?? []) allProvided.add(cap)
+  }
+  for (const [id, entry] of Object.entries(registry)) {
+    const missing = (entry.dependencies ?? []).filter((cap) => !allProvided.has(cap))
+    if (!missing.length) continue
+    const message = `ability "${id}" requires unprovided capabilities: ${missing.join(', ')}`
+    console.warn(`[abilities] ${message}`)
+    postAbilityLog('warn', message)
+  }
 }
 
 /** All ability metadata keyed by their id (last duplicate wins). */
@@ -106,28 +135,106 @@ export interface AbilityLoadReport {
   loaded: SidebarAbilityMeta[]
   /** ids filtered out because they don't support the current platform */
   ignoredPlatform: string[]
+  /** ids filtered out because a declared dependency is unavailable/missing */
+  ignoredDependency: string[]
   /** backend-only abilities (commands but no sidebar page) */
   backendOnly: string[]
+}
+
+/** Platform eligibility of an ability folder. */
+function platformOk(platforms: string[] | undefined, platform: string): boolean {
+  return !(platforms && platforms.length > 0 && !platforms.includes(platform))
+}
+
+/**
+ * Path-based satisfiability with cycle-ignore, mirroring the main-process
+ * loader: an ability resolves on this platform when every required capability
+ * has at least one *resolvable* provider. Following a dependency back into the
+ * current path (a cycle) is treated as satisfied — command-only deps make
+ * cycles harmless. Shared (backend-only) abilities like `background` resolve
+ * normally even though they never enter the sidebar.
+ */
+function resolveAvailable(
+  registry: Record<string, AbilityEntry>,
+  platform: string
+): { available: Set<string>; resolvable: (id: string) => boolean } {
+  const allIds = Object.keys(registry)
+  const memo = new Map<string, boolean>()
+  const path = new Set<string>()
+  const canResolve = (id: string): boolean => {
+    if (memo.has(id)) return memo.get(id)!
+    if (!platformOk(registry[id].platforms, platform)) {
+      memo.set(id, false)
+      return false
+    }
+    if (path.has(id)) return true // cycle — cmd-only dep, ignore
+    path.add(id)
+    const entry = registry[id]
+    const ok = (entry.dependencies ?? []).every((cap) => {
+      const providers = allIds.filter(
+        (p) =>
+          p !== id &&
+          platformOk(registry[p].platforms, platform) &&
+          (registry[p].provides ?? []).includes(cap)
+      )
+      return providers.some((p) => canResolve(p))
+    })
+    path.delete(id)
+    memo.set(id, ok)
+    return ok
+  }
+  for (const id of allIds) canResolve(id)
+  return { available: new Set(allIds.filter((id) => memo.get(id))), resolvable: canResolve }
+}
+
+/** Unsatisfied capabilities of an ability (for the warning message). */
+function missingCaps(
+  registry: Record<string, AbilityEntry>,
+  platform: string,
+  id: string,
+  resolvable: (id: string) => boolean
+): string[] {
+  return (registry[id].dependencies ?? []).filter((cap) => {
+    const providers = Object.keys(registry).filter(
+      (p) =>
+        p !== id &&
+        platformOk(registry[p].platforms, platform) &&
+        (registry[p].provides ?? []).includes(cap)
+    )
+    return !providers.some((p) => resolvable(p))
+  })
 }
 
 /**
  * Resolve the sidebar list for a platform. Backend-only abilities (no
  * `component`) never enter the sidebar; abilities whose `platforms` list
- * excludes the running platform are filtered out. Both the loaded and the
- * ignored sets are reported through the main log (`logs.post`).
+ * excludes the running platform are filtered out; abilities whose required
+ * capabilities have no resolvable provider (missing, platform-filtered, or
+ * transitively unsatisfied) are filtered out as well. All sets are reported
+ * through the main log (`logs.post`).
  */
 export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
   const registry = loadRegistry()
   const loaded: SidebarAbilityMeta[] = []
   const ignoredPlatform: string[] = []
+  const ignoredDependency: string[] = []
   const backendOnly: string[] = []
+
+  const { available, resolvable } = resolveAvailable(registry, platform)
+
   for (const [id, { ability: meta, platforms }] of Object.entries(registry)) {
     if (!meta.component) {
       backendOnly.push(id)
       continue
     }
-    if (platforms && platforms.length > 0 && !platforms.includes(platform)) {
+    if (!platformOk(platforms, platform)) {
       ignoredPlatform.push(id)
+      continue
+    }
+    if (!available.has(id)) {
+      const caps = missingCaps(registry, platform, id, resolvable)
+      postAbilityLog('warn', `ability "${id}" ignored (missing capabilities: ${caps.join(', ')})`)
+      ignoredDependency.push(id)
       continue
     }
     loaded.push({
@@ -150,13 +257,19 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
   if (ignoredPlatform.length) {
     postAbilityLog('warn', `abilities ignored (platform mismatch): ${ignoredPlatform.join(', ')}`)
   }
+  if (ignoredDependency.length) {
+    postAbilityLog(
+      'warn',
+      `abilities ignored (missing capabilities): ${ignoredDependency.join(', ')}`
+    )
+  }
   if (backendOnly.length) {
     postAbilityLog(
       'info',
       `backend-only abilities (commands, no sidebar page): ${backendOnly.join(', ')}`
     )
   }
-  return { loaded, ignoredPlatform, backendOnly }
+  return { loaded, ignoredPlatform, ignoredDependency, backendOnly }
 }
 
 // ---------------------------------------------------------------------------

@@ -151,3 +151,39 @@ export interface LogQueryResult {
   entries: LogEntry[]
   total: number
 }
+
+// ---------------------------------------------------------------------------
+// Ability meta contract (`abilities/<id>/meta.ts`).
+// Shared by the main-process command loader (src/main/process/abilities-loader.ts)
+// and the renderer ability loader (src/main/ui/ability-registry.ts), so both
+// processes agree on the same shape. Everything is optional — an empty
+// `meta.ts` means "no constraints".
+// ---------------------------------------------------------------------------
+
+export interface AbilityMeta {
+  /**
+   * Restrict the ability to these platforms (`process.platform` values:
+   * 'linux' / 'darwin' / 'win32' ...). Omitted or empty = every platform.
+   */
+  platforms?: string[]
+  /**
+   * Capabilities (能力辞典) this ability offers to the system. Free-form names,
+   * e.g. `['background-tasks']` — the contract is the name, not the owning
+   * ability id. Other abilities requiring the same name satisfy their
+   * dependency against ANY ability that provides it, so a provider can be
+   * renamed/replaced without touching its dependents.
+   */
+  provides?: string[]
+  /**
+   * Capabilities this ability requires. Each entry must be provided by some
+   * available ability (its `provides` list) — never by the ability's id.
+   *
+   * Loaders enforce the contract with a fixed-point resolution: an ability is
+   * unavailable when a required capability is missing, only provided by a
+   * platform-filtered ability, or removed together with its provider. Both
+   * loaders report the violation and skip the dependent ability, so removing
+   * the provider (e.g. the `background` ability behind `background-tasks`)
+   * automatically disables everything built on it.
+   */
+  dependencies?: string[]
+}
