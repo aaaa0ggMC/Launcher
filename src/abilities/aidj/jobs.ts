@@ -20,9 +20,9 @@ import {
   DBusManager,
   LoudnessCache,
   bumpFrequency,
-  getCurrentPlayerKey,
-  getOpenAIClient
+  getCurrentPlayerKey
 } from './service'
+import OpenAI from 'openai'
 import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
 import { SEPARATOR } from './types'
 
@@ -47,7 +47,6 @@ registerJobHandler('aidj.persistent', async (control, args) => {
   setNcmBaseUrl(config.ncm_base_url)
   await ensureAidjDir()
 
-  const OpenAI = await getOpenAIClient()
   const client = new OpenAI({
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url
@@ -846,8 +845,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const missing = await findMissingSongs(lib.musicPaths, lib.metadata)
   if (missing.size > 0) {
     control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)
-    const syncOpenAI = await getOpenAIClient()
-    const syncClient = new syncOpenAI({
+    const syncClient = new OpenAI({
       apiKey: config.secrets.api_key,
       baseURL: config.ai_settings.base_url
     })
@@ -860,7 +858,6 @@ registerJobHandler('aidj.chat', async (control, args) => {
     )
   }
 
-  const OpenAI = await getOpenAIClient()
   const client = new OpenAI({
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url
@@ -1155,7 +1152,6 @@ registerJobHandler('aidj.title', async (control, args) => {
 
   control.pushLine(`正在为会话生成标题 (${raw.length} 条记录)...`)
 
-  const OpenAI = await getOpenAIClient()
   const client = new OpenAI({
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url
@@ -1240,7 +1236,6 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
   setNcmBaseUrl(config.ncm_base_url)
   await ensureAidjDir()
 
-  const OpenAI = await getOpenAIClient()
   const client = new OpenAI({
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url

@@ -33,13 +33,12 @@ import {
   saveLyricsPageConfig,
   getLyricPlayerBinding,
   switchLyricsPlayer,
-  activateAidjDbus,
-  getOpenAIClient
+  activateAidjDbus
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { screen } from 'electron'
-import type OpenAI from 'openai'
+import OpenAI from 'openai'
 import { startJobByName, listTasks } from '../../main/process/background-tasks'
 import { parseFilterCommand, evaluateFilter, FilterParseError } from './parser/filterGrammar'
 import { cachedVariantHaystack, setVariantCacheCapacity } from './parser/chineseVariants'
@@ -312,7 +311,6 @@ async function ensureInit(): Promise<{
 
   let client = _client
   if (!client) {
-    const OpenAI = await getOpenAIClient()
     client = new OpenAI({
       apiKey: config.secrets.api_key,
       baseURL: config.ai_settings.base_url

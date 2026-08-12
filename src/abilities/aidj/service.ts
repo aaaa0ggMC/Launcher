@@ -2,19 +2,10 @@ import { readFile, readdir, mkdir, appendFile, writeFile, rename, rm } from 'fs/
 import { join, extname, basename } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type OpenAI from 'openai'
+import OpenAI from 'openai'
 import { makeLogger } from '../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../main/process/paths'
 import { readJson, writeJsonAtomic, writeTextFile } from '../../main/process/util'
-
-let _OpenAI: typeof import('openai').default | null = null
-/** Lazy OpenAI SDK — parsing `openai` costs ~250ms at module load, so pull it
- *  in only when an actual API call is being prepared (AIDJ boots fast even if
- *  you never open it). */
-export async function getOpenAIClient(): Promise<typeof import('openai').default> {
-  if (!_OpenAI) _OpenAI = (await import('openai')).default
-  return _OpenAI
-}
 import type {
   AidjConfig,
   SongMeta,

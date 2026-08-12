@@ -255,12 +255,6 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
 - 增删能力 = 增删 `src/abilities/<id>` 文件夹即可，无需改任何 yaml/注册表
 
-**启动性能范式（懒加载）**——两个加载器（渲染端 `index.ts` glob + 主进程 `commands.ts` glob）都是 **eager**，任何 ability 的模块在启动时都会被拉进内存。因此：
-
-- **重视图必须懒**：`index.ts` 里除 `defineAsyncComponent` 外不得顶层 `import` 任何 `.vue`；`registerBtView` 注册的工厂里也要 `markRaw(defineAsyncComponent(() => import('./XxxView.vue')))`——AIDJ/playground 的 BT 视图曾因顶层 import 导致每次启动都拉进 ContinuousView/SongGrid 等一大坨（renderer bundle −77KB）。
-- **重依赖懒加载**：主进程 `commands.ts` 顶层 import 的链子决定启动开销，重 SDK（如 `openai` ~250ms 解析）要延迟到真正用时再 `await import`——AIDJ 用 `service.ts` 里的 `getOpenAIClient()` 统一懒加载（`import type OpenAI from 'openai'` 只留类型，值在首次调用时拉）。
-- 判断基准：`pnpm dev` 启动 ≈ 1s 构建 + Electron 拉起 + renderer 非打包引导，都是 dev 固有；**让能力自身的模块只在其真正被用时加载**，别在启动时把所有能力全量预热。
-
 ### 图标
 
 图标统一走 `AbilityIcon.vue` → `parseIcon`（`src/main/ui/icon.ts`）解析，来源优先级：
@@ -308,7 +302,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
   - **作业任务** `startJobTask({ name, description, onCancel, view? })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `push` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
 - **命名作业**：`registerJobHandler(name, handler)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
   - **⚠️ IPC 参数必须是可克隆的普通对象**：Electron 的 structured clone 无法序列化 Vue reactive proxy（会抛 `An object could not be cloned.`）。渲染端调用 `btJob`/`command` 传参前，**只要参数来自 `ref`/`computed` 的取值（数组/对象），必须先深拷贝**：`JSON.parse(JSON.stringify(data))`。尤其注意嵌套在消息里的 `playlist`/`songs` 等数组字段——`{ name, path }` 单层手动展开不一定够，统一用 JSON 深拷贝最稳妥。
-- **可定制 View**：任务带 `view` id，全局面板按 `view` 渲染详情区（`src/main/ui/bt-views.ts` 注册表）。`log`（默认控制台 + stdin 输入）内置；任意能力可 `registerBtView('custom', factory)` 注册自定义展示（如结构化 response 视图）。**终止/移除等生命周期按钮属于面板，不属于 view**。注册工厂里用 `markRaw(defineAsyncComponent(() => import('./XxxView.vue')))` 懒加载视图（见「Ability 动态加载」的启动性能范式）。
+- **可定制 View**：任务带 `view` id，全局面板按 `view` 渲染详情区（`src/main/ui/bt-views.ts` 注册表）。`log`（默认控制台 + stdin 输入）内置；任意能力可 `registerBtView('custom', factory)` 注册自定义展示（如结构化 response 视图）。**终止/移除等生命周期按钮属于面板，不属于 view**。
 - **消息类型**：输出不仅是文本行——`JobControl.push({ line | data, label?, encoding?, mime?, progress? })` 支持结构化数据与 base64 二进制。`BtOutputMessage` 的 `line` 渲染为控制台行，`data` 由 view 按需渲染。
 - 广播：`cockpit:bt` 事件（`changed` 全量列表 / `output` **实时消息** / `exit`）。**输出（日志/结构化消息）实时推送**——同一次同步突发经 `queueMicrotask` 合并为一次 IPC，跨 tick 立即送达，无人工延迟；**状态（`changed`/进度）100ms 节流合并**，避免高频 `setProgress` 打爆 IPC。渲染端侧栏按钮徽标只计运行中任务（上限 `99+`）。
 - 生命周期：任务**依附于本程序**，退出时 `will-quit` 统一 SIGKILL，不留孤儿；退出前若有运行中任务，主进程拦截 `close` 广播 `cockpit:confirm-quit`，渲染端弹确认（可"以后不再提醒"，localStorage `cockpit-bt-quit-suppress`）。
