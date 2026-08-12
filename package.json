@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:lts": "node scripts/dev-lts.mjs",
     "build": "npm run typecheck && electron-vite build"
   },
   "dependencies": {

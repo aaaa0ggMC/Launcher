@@ -146,5 +146,7 @@
   "aidj.lyrics_page.play": "播放 / 暂停",
   "aidj.lyrics_page.stop": "停止",
   "aidj.lyrics_page.desktop": "桌面歌词",
+  "aidj.lyrics_page.yrc": "YRC",
+  "aidj.lyrics_page.lrc": "LRC",
   "aidj.lyrics_page.lock": "锁定"
 }

@@ -146,5 +146,7 @@
   "aidj.lyrics_page.play": "Play / Pause",
   "aidj.lyrics_page.stop": "Stop",
   "aidj.lyrics_page.desktop": "Desktop lyrics",
+  "aidj.lyrics_page.yrc": "YRC",
+  "aidj.lyrics_page.lrc": "LRC",
   "aidj.lyrics_page.lock": "Lock"
 }

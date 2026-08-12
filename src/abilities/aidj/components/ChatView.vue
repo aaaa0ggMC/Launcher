@@ -164,7 +164,11 @@ watch(inputText, () => {
 
 function cmdApply(): void {
   const c = cmdFiltered.value[cmdActive.value]
-  if (c) inputText.value = `/${c.name} `
+  if (!c) return
+  // Replace only the leading `/token` — keep whatever was typed after it
+  // (args / a pasted prompt) instead of wiping the whole input.
+  const rest = inputText.value.replace(/^\/\S*/, '')
+  inputText.value = `/${c.name}${rest || ' '}`
 }
 
 /** Run a "push playlist" command and render the assistant result (like /random). */
@@ -1015,10 +1019,9 @@ function handleReorder(msgIdx: number, songs: { name: string; path: string }[]):
  *  player). The forked session shows up in the session list; the persistent
  *  task's live chat lives in the background panel. */
 async function runPersistCommand(prompt: string): Promise<void> {
-  // Show the clean prompt as the user message — the raw `/persist ...` command
-  // text must not appear in the chat, and the prompt must not be counted into
-  // the AI context twice (it's in `history` once).
-  messages.value.push({ role: 'user', content: prompt, timestamp: Date.now(), uid: makeUid() })
+  // The conversation (including this prompt) lives in the forked PersistSession
+  // shown in the background panel — the main chat stays untouched, and the
+  // prompt is counted into the AI context exactly once (the last history line).
   try {
     // Fork the backend's current session (named `(Copy) <orig>`); when there's
     // no session yet (fresh chat) the chat job falls back to a new one.
@@ -1043,13 +1046,16 @@ async function runPersistCommand(prompt: string): Promise<void> {
       }
     }
 
-    // The conversation, including the prompt just pushed — exactly once.
-    const history: ChatMessage[] = messages.value.map((m) => ({
-      role: m.role,
-      content: m.content,
-      playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
-      timestamp: m.timestamp
-    }))
+    // The conversation so far + the persist prompt (exactly once).
+    const history: ChatMessage[] = [
+      ...messages.value.map((m) => ({
+        role: m.role,
+        content: m.content,
+        playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
+        timestamp: m.timestamp
+      })),
+      { role: 'user', content: prompt, timestamp: Date.now() }
+    ]
 
     const result = (await window.cockpit.btJob('aidj.chat', {
       prompt,

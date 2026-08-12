@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ref, inject, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ref,
+  inject,
+  computed,
+  watch,
+  onMounted,
+  onActivated,
+  onBeforeUnmount,
+  nextTick
+} from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '../../main/ui/i18n'
 import { DEFAULT_LYRICS_PAGE_CFG } from './types'
@@ -71,7 +80,7 @@ function parseLyrics(lrc: string): LyricLine[] {
     let pendingTime = 0
     let pendingText = ''
     const flush = (): void => {
-      const text = pendingText.trim()
+      const text = pendingText.trimStart()
       if (text) chunks.push({ text, time: pendingTime + offset })
       pendingText = ''
     }
@@ -221,6 +230,31 @@ const plainLyric = computed<string>(() => {
   return lrcLines.value.length ? '' : stripLrcTags(lyric)
 })
 
+/**
+ * Source of the lyric currently shown: `yrc` when the inline-timestamp karaoke
+ * LRC (Netease YRC) is used, `lrc` when falling back to the plain LRC, or ''
+ * when no lyric is available.
+ */
+const lyricSource = computed<'yrc' | 'lrc' | ''>(() => {
+  if (state.value.karaokeLyric) return 'yrc'
+  if (state.value.lyric) return 'lrc'
+  return ''
+})
+const lyricSourceLabel = computed(() =>
+  lyricSource.value === 'yrc'
+    ? t('aidj.lyrics_page.yrc', 'YRC')
+    : lyricSource.value === 'lrc'
+      ? t('aidj.lyrics_page.lrc', 'LRC')
+      : ''
+)
+
+/**
+ * Immersive mode: when enabled AND a cover is available, paint the cover as a
+ * full-page background instead of the user-configured one. Without a cover the
+ * page falls back to the normal (transparent) background.
+ */
+const immerseActive = computed(() => Boolean(cfg.value.immerse_mode && coverUrl))
+
 /** Index of the current line (last whose start time ≤ playback position). */
 const currentIdx = computed(() => {
   const lines = lrcLines.value
@@ -304,8 +338,72 @@ const lyricStyle = computed(() => {
 // -- scroll-follow ----------------------------------------------------------
 const scrollEl = ref<HTMLElement | null>(null)
 const padPx = ref(0)
+/** True while a recenter settle loop is running — coalesces resize bursts. */
+let recenterActive = false
+
+/**
+ * Keeps the current line vertically centered. Resize is observed on the scroll
+ * CONTAINER itself (not just `window`): after a maximize→restore the nested
+ * absolute `.v-main--scrollable` chain can lag one layout pass behind the
+ * window resize event, so measuring `clientHeight` synchronously there reads
+ * the stale (maximized) height — the scroll area then stays oversized and its
+ * text spills under the header. Re-measuring on the next animation frame
+ * guarantees the settled post-resize height.
+ *
+ * A SINGLE frame still isn't enough for a maximize→restore: the container and
+ * its inner content settle over a couple of layout passes, so the first
+ * `clientHeight`/`offsetTop` pair can keep describing the previous (maximized)
+ * geometry and the current line lands off-center. This loop therefore keeps
+ * re-measuring and re-centering on consecutive frames until two measurements
+ * agree — the exact thing that "just dragging the window a little" does by
+ * accident afterwards, minus the manual part.
+ *
+ * `padPx` is reactive: the new padding only lands in the DOM on the next Vue
+ * flush, so `followCurrent` must NOT read `offsetTop` in the same tick as
+ * `computePad` — it would compute the center against the OLD padding. Await
+ * the flush (`nextTick`) in between.
+ */
+function recenter(): void {
+  if (!scrollMode.value || recenterActive) return
+  recenterActive = true
+  let lastH = -1
+  let lastTop = -1
+  const tick = (): void => {
+    if (!scrollMode.value || !scrollEl.value) {
+      recenterActive = false
+      return
+    }
+    const h = scrollEl.value.clientHeight
+    computePad()
+    nextTick(() => {
+      if (!scrollMode.value || !scrollEl.value?.isConnected) {
+        recenterActive = false
+        return
+      }
+      const top = followCurrent()
+      if (top === lastTop && h === lastH) {
+        recenterActive = false
+        return
+      }
+      lastTop = top
+      lastH = h
+      requestAnimationFrame(tick)
+    })
+  }
+  requestAnimationFrame(tick)
+}
+
+let padRO: ResizeObserver | null = null
 function setScrollEl(el: unknown): void {
-  scrollEl.value = (el as HTMLElement | null) ?? null
+  const next = (el as HTMLElement | null) ?? null
+  if (scrollEl.value === next) return
+  scrollEl.value = next
+  padRO?.disconnect()
+  padRO = null
+  if (next) {
+    padRO = new ResizeObserver(() => recenter())
+    padRO.observe(next)
+  }
 }
 
 /** Half the viewport height as top/bottom padding so the first/last lines can
@@ -315,25 +413,23 @@ function computePad(): void {
   padPx.value = el ? Math.max(60, Math.round(el.clientHeight / 2)) : 0
 }
 
-function followCurrent(): void {
+/** Scroll the current line to the vertical center. Returns the scrollTop it
+ *  targeted (−1 when there's nothing to center, e.g. no lyrics yet). */
+function followCurrent(): number {
   const idx = currentIdx.value
   const el = scrollEl.value
-  if (idx < 0 || !el) return
+  if (idx < 0 || !el) return -1
   const target = el.querySelector(`[data-line-idx="${idx}"]`) as HTMLElement | null
-  if (!target) return
+  if (!target) return -1
   const cH = el.clientHeight
-  el.scrollTo({ top: Math.max(0, target.offsetTop - cH / 2 + target.offsetHeight / 2) })
+  const top = Math.max(0, target.offsetTop - cH / 2 + target.offsetHeight / 2)
+  el.scrollTo({ top })
+  return top
 }
 
 watch(
   () => [currentIdx.value, scrollMode.value],
-  () =>
-    void nextTick(() => {
-      if (scrollMode.value) {
-        computePad()
-        followCurrent()
-      }
-    }),
+  () => recenter(),
   { flush: 'post' }
 )
 
@@ -469,10 +565,7 @@ function toMarkdown(): string {
 }
 
 function onResize(): void {
-  if (scrollMode.value) {
-    computePad()
-    followCurrent()
-  }
+  recenter()
 }
 
 onMounted(async () => {
@@ -486,12 +579,7 @@ onMounted(async () => {
     loadConfig(),
     withTimeout(window.cockpit.command('aidj.activate'), 5000, null).catch(() => null)
   ])
-  void nextTick(() => {
-    if (scrollMode.value) {
-      computePad()
-      followCurrent()
-    }
-  })
+  recenter()
   pollTimer = setInterval(() => void poll(), 600)
   playersTimer = setInterval(() => void pollPlayers(), 10000)
   rafId = requestAnimationFrame(smoothLoop)
@@ -501,10 +589,16 @@ onMounted(async () => {
   window.addEventListener('resize', onResize)
 })
 
+// The page is keep-alive'd: a window resize that happened while it was
+// deactivated never reached the container observer, so re-measure on return.
+onActivated(() => recenter())
+
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (playersTimer) clearInterval(playersTimer)
   cancelAnimationFrame(rafId)
+  padRO?.disconnect()
+  padRO = null
   unsub?.()
   window.removeEventListener('resize', onResize)
 })
@@ -513,7 +607,13 @@ defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div class="aidj-lyrics-page" :style="lyricStyle">
+  <div class="aidj-lyrics-page" :class="{ 'is-immerse': immerseActive }" :style="lyricStyle">
+    <!-- immersive background: blurred + dimmed cover behind everything -->
+    <div v-if="immerseActive" class="lyrics-immerse-bg" aria-hidden="true">
+      <div class="lyrics-immerse-bg-img" :style="{ backgroundImage: `url(${coverUrl})` }"></div>
+      <div class="lyrics-immerse-bg-scrim"></div>
+    </div>
+
     <!-- header: track + player + controls -->
     <template v-if="cfg.show_header !== false">
       <div class="lyrics-header">
@@ -529,6 +629,15 @@ defineExpose({ toMarkdown })
             }}</span>
             <v-chip size="small" :color="statusColor" variant="tonal" class="lyrics-chip">
               {{ statusText }}
+            </v-chip>
+            <v-chip
+              v-if="lyricSource"
+              size="small"
+              variant="flat"
+              color="primary"
+              class="lyrics-chip lyrics-source-chip"
+            >
+              {{ lyricSourceLabel }}
             </v-chip>
           </div>
           <div v-if="state.artist || state.album" class="lyrics-track-sub">
@@ -703,6 +812,36 @@ defineExpose({ toMarkdown })
   min-height: 0;
   padding: 16px 20px;
   overflow: hidden;
+  /* Contain the immersive cover's stacking so it stays behind the page content. */
+  isolation: isolate;
+}
+
+/* -- immersive mode --------------------------------------------------------- */
+/* Blurred + dimmed cover fills the page (the app's background/fuse layers sit
+   at fixed z-index -2/-1, so this z-index:-1 child replaces what's visible in
+   the lyrics area while staying above those layers). */
+.lyrics-immerse-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.lyrics-immerse-bg-img {
+  position: absolute;
+  inset: -32px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(32px);
+  /* Overscan so the blur never exposes a fringe at the edges. */
+  transform: scale(1.1);
+}
+.lyrics-immerse-bg-scrim {
+  position: absolute;
+  inset: 0;
+  /* Theme-tinted dimmer: dark in dark themes, light in light themes, so text
+     stays readable regardless of how bright/busy the cover is. */
+  background: rgba(var(--v-theme-background), 0.55);
 }
 
 .lyrics-header {
@@ -741,6 +880,10 @@ defineExpose({ toMarkdown })
 .lyrics-chip {
   padding-block: 4px;
   min-height: 24px;
+}
+.lyrics-source-chip {
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 .lyrics-track-sub {
   font-size: 0.85rem;
@@ -783,20 +926,26 @@ defineExpose({ toMarkdown })
 }
 
 .lyrics-body {
+  position: relative;
   flex-grow: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 /* -- scroll mode ---------------------------------------------------------- */
+/* Absolute fill of the (flex-bounded) body instead of `height: 100%` inside a
+   `justify-content: center` flex — after a maximize→restore the percentage
+   height could resolve against a stale (maximized) body box and leave the
+   scroll area oversized, so its text spilled under the header. Absolute inset
+   + the body's overflow:hidden clip it to the real area every time. */
 .lyric-scroll {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   overflow-y: auto;
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;

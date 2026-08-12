@@ -193,6 +193,9 @@ export interface AidjLyricsPageConfig {
   dim_candidates: boolean
   /** show the track/player header + playback controls */
   show_header: boolean
+  /** immersive mode: overlay the (blurred + dimmed) cover as the page
+   *  background instead of the user-configured one (only when a cover exists) */
+  immerse_mode: boolean
 }
 
 export const DEFAULT_LYRICS_PAGE_CFG: AidjLyricsPageConfig = {
@@ -210,7 +213,8 @@ export const DEFAULT_LYRICS_PAGE_CFG: AidjLyricsPageConfig = {
   lines_before: 2,
   lines_after: 3,
   dim_candidates: true,
-  show_header: true
+  show_header: true,
+  immerse_mode: false
 }
 
 /** Built-in DJ persona. Users can override it via `preferences.persona`. */

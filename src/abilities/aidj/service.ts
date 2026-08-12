@@ -469,22 +469,25 @@ export function localYrcToInlineLrc(yrc: string): string {
     if (!Number.isFinite(lineMs)) continue
     const rest = m[2]
     let buf = `[${msToLrcTime(lineMs)}]`
+    // Each `(wordStart,wordDur,vol)` group belongs to the word TEXT that
+    // FOLLOWS it (`(t,d,v)word (t2,d2,v2)word2 …`), so slice every group's text
+    // as the span until the next group. The previous implementation paired each
+    // group with the PRECEDING text — shifting every word onto the next word's
+    // timestamp and dropping the final word's tag entirely.
     const re = /\((\d+),\d+,\d+\)/g
-    let last = 0
+    const groups: { start: number; end: number; time: number }[] = []
     let wm: RegExpExecArray | null
-    let hasWord = false
     while ((wm = re.exec(rest))) {
-      const text = rest.slice(last, wm.index)
-      last = wm.index + wm[0].length
+      groups.push({ start: wm.index, end: wm.index + wm[0].length, time: Number(wm[1]) })
+    }
+    let hasWord = false
+    for (let i = 0; i < groups.length; i++) {
+      const end = i + 1 < groups.length ? groups[i + 1].start : undefined
+      const text = rest.slice(groups[i].end, end)
       if (text) {
         hasWord = true
-        buf += `[${msToLrcTime(Number(wm[1]))}]${text}`
+        buf += `[${msToLrcTime(groups[i].time)}]${text}`
       }
-    }
-    const tail = rest.slice(last)
-    if (tail) {
-      hasWord = true
-      buf += tail
     }
     if (hasWord) out.push(buf)
   }

@@ -106,6 +106,16 @@ function resetAll(): void {
               density="compact"
             />
           </v-col>
+          <v-col cols="6" md="3">
+            <v-switch
+              v-model="cfg.immerse_mode"
+              color="primary"
+              label="沉浸模式"
+              hint="有封面时用模糊暗化的封面叠加背景，替代用户设置的背景"
+              hide-details
+              density="compact"
+            />
+          </v-col>
         </v-row>
         <v-row dense class="mt-2">
           <v-col cols="6" md="3">
