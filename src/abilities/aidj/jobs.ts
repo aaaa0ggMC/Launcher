@@ -4,6 +4,7 @@ import {
   startJobByName
 } from '../../main/process/background-tasks'
 import { makeLogger } from '../../main/process/logger'
+import { t, te } from '../../main/process/i18n'
 import {
   loadAidjConfig,
   ensureAidjDir,
@@ -467,7 +468,7 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     if (connected && player) {
       const playerKey = mgr.resolvedPlayerName || player
       if (playerBindings.has(playerKey)) {
-        control.pushLine(`播放器 ${playerKey} 已有连续播放任务`, 'stderr')
+        control.pushLine(te('aidj.continuous.playerBusy', { player: playerKey }), 'stderr')
         release()
         control.finish('error')
         return
@@ -479,9 +480,9 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     }
     attempts++
     if (attempts === 1) {
-      control.pushLine('无法连接 MPRIS 播放器，每 10 秒重试…', 'stderr')
+      control.pushLine(t('aidj.continuous.connectRetry'), 'stderr')
     } else {
-      control.pushLine(`连接 MPRIS 失败(第 ${attempts} 次)，10 秒后重试…`, 'stderr')
+      control.pushLine(te('aidj.continuous.connectAttempt', { n: String(attempts) }), 'stderr')
     }
     try {
       mgr.disconnect()
@@ -492,7 +493,7 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   }
   if (ac.signal.aborted || !st.dbus) {
     release()
-    control.pushLine('已取消连接 MPRIS', 'stderr')
+    control.pushLine(t('aidj.continuous.connectCancelled'), 'stderr')
     control.finish('cancelled')
     return
   }
@@ -501,7 +502,12 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   // tracks ONE MPRIS object, not whichever happens to be playing.
   await st.dbus.switchToPlayer(st.playerKey)
 
-  control.pushLine(`连续播放已启动 → ${st.playerKey} (${st.total} 首)`)
+  control.pushLine(
+    te('aidj.continuous.started', {
+      player: st.playerKey,
+      total: String(st.total)
+    })
+  )
   control.push({
     data: { type: 'state', message: 'started', player: st.playerKey, total: st.total }
   })
@@ -522,16 +528,22 @@ registerJobHandler('aidj.continuous', async (control, args) => {
           const now = Date.now()
           if (disconnectSince === null) {
             disconnectSince = now
-            control.pushLine(`播放器 ${st.playerKey} 已断开，尝试重连...`, 'stderr')
+            control.pushLine(te('aidj.continuous.disconnected', { player: st.playerKey }), 'stderr')
           }
           if (reconnectMinutes === 0) {
-            control.pushLine(`播放器 ${st.playerKey} 已断开，任务结束`, 'stderr')
+            control.pushLine(
+              te('aidj.continuous.disconnectedEnd', { player: st.playerKey }),
+              'stderr'
+            )
             control.finish('error')
             break
           }
           if (reconnectMinutes > 0 && now - disconnectSince > reconnectMinutes * 60_000) {
             control.pushLine(
-              `播放器 ${st.playerKey} 断开超过 ${reconnectMinutes} 分钟，任务结束`,
+              te('aidj.continuous.disconnectedTimeout', {
+                player: st.playerKey,
+                minutes: String(reconnectMinutes)
+              }),
               'stderr'
             )
             control.finish('error')
@@ -541,7 +553,7 @@ registerJobHandler('aidj.continuous', async (control, args) => {
           const rebound = await dbus.switchToPlayer(st.playerKey).catch(() => false)
           if (rebound) {
             disconnectSince = null
-            control.pushLine('播放器已恢复', 'stdout')
+            control.pushLine(t('aidj.continuous.reconnected'), 'stdout')
           } else {
             await new Promise((resolve) => setTimeout(resolve, 2000))
             continue
@@ -1039,12 +1051,15 @@ registerJobHandler('aidj.chat', async (control, args) => {
                 control.push({
                   data: {
                     type: 'system',
-                    content: `推送歌单失败: ${r.error ?? '未知错误'}，每 10 秒重试直到成功…`
+                    content: te('aidj.push.retry', { error: r.error ?? '未知错误' })
                   }
                 })
               }
               control.pushLine(
-                `推送失败(第 ${attempts} 次): ${r.error ?? ''}，10 秒后重试…`,
+                te('aidj.push.attempt', {
+                  n: String(attempts),
+                  error: r.error ?? ''
+                }),
                 'stderr'
               )
               await cancellableWait(10_000, ac.signal)
@@ -1052,16 +1067,19 @@ registerJobHandler('aidj.chat', async (control, args) => {
               r = push()
             }
             if (ac.signal.aborted) {
-              control.pushLine('推送已取消', 'stderr')
+              control.pushLine(t('aidj.push.cancelled'), 'stderr')
               break
             }
             if (r.ok) {
               if (attempts > 0) {
                 control.push({
-                  data: { type: 'system', content: `推送成功（重试 ${attempts} 次后）` }
+                  data: {
+                    type: 'system',
+                    content: te('aidj.push.retriedOk', { n: String(attempts) })
+                  }
                 })
               }
-              control.pushLine(`推送 ${batch.length} 首到连续播放`)
+              control.pushLine(te('aidj.push.ok', { n: String(batch.length) }))
             }
           } else if (session.lastIntro) {
             if (session.lastIntro.startsWith('⚠️')) {
