@@ -96,12 +96,41 @@ DBus 模式渗透进 UI 的现状点：
 4. **切换瞬间续播**：DBus → Web 切换时当前歌停止，需用户手动续播；或 WebPlayerBackend 激活时把当前 track 加载进内置播放器继续。前者简单，后者才是真无缝。
 5. **事件源切换**：DBus 轮询 vs Web `timeupdate`，切换瞬间解绑旧源、绑定新源，避免双源同时推状态导致 position 跳变。
 
+## 6.5 内置播放器功能清单（候选，按优先级）
+
+> **技术基础**：所有音频处理都依赖把 `<audio>` 接入 `AudioContext`（`MediaElementAudioSourceNode` → 处理链 → `destination`）。`<audio>` 本身不支持 EQ，但接入 Web Audio 图后，EQ / crossfade / 频谱 / 响度归一全部成立——这是 WebPlayerBackend 的核心管线，M2 就应搭好。
+
+**音频处理（最契合 AI 歌单定位）**
+
+1. **交叉淡化（crossfade）**：淡入淡出的完整形态——上一首尾部与下一首头部重叠过渡（`GainNode` 双路交叉 + 预加载下一首）。AI 串歌单故事感最强体现。
+2. **情绪感知过渡**：复用 `emotion` 元数据，上一首 loud → 下一首 soft 用长 fade、同情绪短 fade，歌单衔接更有设计感。
+3. **EQ**：5~10 段 `BiquadFilter` 级联（预设：流行 / 摇滚 / 古典 / 人声 / 平直）。
+4. **响度归一**：播放前按 LoudnessCache（ffprobe 预分析）调 `GainNode`，DBus 模式做不到的实时级。
+
+**可视化**
+
+5. **实时频谱**：`AnalyserNode` 直接白拿，可联动 ft 能力（歌词页嵌一条频谱）。
+6. **波形预览条**：`decodeAudioData` 拿 buffer 画波形，进度条升级为「可拖波形」。
+
+**播放体验**
+
+7. **精确 seek + 倍速**（0.5~2x）：`currentTime` + `playbackRate`，DBus 模式无法做到。
+8. **AB 循环**：练歌 / 学歌片段循环。
+9. **睡眠定时**：AI 歌单自动停。
+10. **无缝接歌（gapless）**：下一首缓冲预加载。
+
+**本地增强**
+
+11. **封面本地读取**：曲目同目录图片 / ID3 标签，DBus 模式拿不到的资源这里能拿。
+
+**推荐落地顺序**：crossfade + 情绪感知过渡（灵魂）→ 频谱（联动 ft）→ EQ / 响度归一 → 其余按需。
+
 ## 7. 里程碑
 
 1. **M1**：`PlayerBackend` 接口 + `aidj.player-mode` 命令 + 后端热切换流程（含 BT 标记清理）。Linux 默认仍 DBus，Web 后端可切。
 2. **M2**：`WebPlayerBackend`（HTML5 audio 封装 + 状态填充）+ 顶栏播放器条组件 v-if 分叉 + `aidj.send` 双语义。
 3. **M3**：桌面歌词窗口绑定重指向内置播放器；`meta.ts` 移除 `platforms: ['linux']`，aidj 全平台可用。
-4. **M4**（可选）：Web Audio 频谱联动 ft；ffmpeg 转码；Linux MPRIS server（媒体键）。
+4. **M4**（可选）：crossfade + 情绪感知过渡；频谱联动 ft；EQ / 响度归一；倍速 / AB 循环 / 睡眠定时；ffmpeg 转码；Linux MPRIS server（媒体键）。
 5. **M5**（远期）：Windows SMTC / macOS Now Playing 媒体键。
 
 ## 8. 明确不做（本期范围外）
