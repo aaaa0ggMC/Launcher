@@ -72,6 +72,7 @@ src/
     types.ts                # Ability / AbilitySetting 契约
     <id>/                   # 每个能力一个文件夹
       index.ts              # 统筹加载：Ability 元数据
+      meta.ts               # 前后端共享元数据：platforms / provides（能力辞典）/ dependencies（要求的能力）
       View.vue              # 页面（可省略 → 纯后端能力）
       commands.ts           # 主进程命令（可省略）
       types.ts              # 领域类型
@@ -119,11 +120,12 @@ CLI: mirror.toggle --name USTC --enable true
 
 ```
 渲染端:  abilities/index.ts  globs abilities/*/index.ts（仅元数据，View 懒加载 code-split）
-          └→ App.vue 侧栏自注入：按 category/name 字母序排序，platforms 平台过滤，keep-alive 缓存
-主进程:  process/abilities-loader.ts  globs abilities/*/commands.ts → registerAll
+          └→ App.vue 侧栏自注入：按 category/name 字母序排序，platforms 平台过滤，能力依赖解析，keep-alive 缓存
+主进程:  process/abilities-loader.ts  globs abilities/*/commands.ts → registerAll（依赖序注册）
 ```
 
 - 侧栏由能力元数据自注入（`platforms` 过滤 + `category`/`name` 字母序），不再依赖任何 yaml/manifest；`config.json` 的 `sidebar.default` 只指定初始页面（缺失/无效时回落第一个能力）。
+- **能力依赖（能力辞典）**：每个 `meta.ts` 同时导出 `provides`（提供的能力名，如 `background` → `['background-tasks']`）与 `dependencies`（要求的能力，如 `aidj`/`apps`/`playground` → `['background-tasks']`）。依赖的是**能力名**而非 ability id；前后端加载器按路径式可满足判定解析，**环直接忽略**（只是 cmd 依赖，不是初始化依赖）。要求的能力无提供者 / 提供者被平台过滤 → 该能力命令不注册、侧栏不显示并告警；删除提供者会自动禁用所有建立在它上面的能力。
 - 加载到的一切通过 `App.vue` 的 `provide('cockpit:*')` 暴露给单个能力，实现跨范围控制（能力列表、当前能力、configs、launch、命令列表、设置聚合等）。
 
 ### 3.3 日志流
@@ -237,12 +239,12 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 | `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                          |
 | `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                                   |
 | `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url`           |
-| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等。**实际注册两个 ability**：`aidj`（聊天/持续播放页）+ `aidj-lyrics`（整页卡拉OK歌词）。播放层依赖 DBus/MPRIS，实质 Linux-only（未声明 platforms） |
+| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等。**实际注册两个 ability**：`aidj`（聊天/持续播放页）+ `aidj-lyrics`（整页卡拉OK歌词）。播放层依赖 DBus/MPRIS，`platforms: ['linux']`，`dependencies: ['background-tasks']` |
 | `ft` 傅里叶变换       | Canvas2D 天体/傅里叶可视化（无 GPU 依赖，规避 radeonsi 崩溃）：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机，画布配色跟随当前主题                                                                                 |
 | `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                                  |
 | `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 界面缩放 / 窗口 / 界面动画 / 语言 / 启动 / 关于）                                                                                                             |
 
-另有纯后端能力（无页面）：`display`（壁纸列出/应用、显示输出查询）与 `background`（后台任务命令 `background.*`，由全局面板驱动）。
+另有纯后端能力（无页面）：`display`（壁纸列出/应用、显示输出查询）与 `background`（后台任务命令 `background.*`，由全局面板驱动）。`background` 提供 `background-tasks` 能力，`aidj` / `apps` / `playground` 都依赖它。
 
 ## 5. Backgrounds（当前 3 个）
 
