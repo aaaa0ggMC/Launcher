@@ -165,7 +165,8 @@ registerJobHandler('aidj.persistent', async (control, args) => {
 // ---------------------------------------------------------------------------
 
 export interface ContinuousTaskState {
-  dbus: DBusManager
+  /** null until the MPRIS connection retry succeeds. */
+  dbus: DBusManager | null
   control: JobControl
   queue: PlaylistEntry[]
   current: PlaylistEntry | null
@@ -269,7 +270,7 @@ export function setContinuousVolbal(
 /** Re-apply volbal to the currently playing track (anchor if none yet). */
 async function applyCurrentVolume(st: ContinuousTaskState): Promise<void> {
   const track = st.current
-  if (!track) return
+  if (!track || !st.dbus) return
   if (!st.volbalEnabled) {
     await st.dbus.setVolume(0.5)
     return
@@ -311,7 +312,7 @@ export function clearContinuousMemory(taskId: string): { ok: boolean; error?: st
 
 export async function getContinuousVolume(taskId: string): Promise<number | null> {
   const st = continuousTasks.get(taskId)
-  if (!st) return null
+  if (!st || !st.dbus) return null
   return st.dbus.getVolume()
 }
 
@@ -320,7 +321,7 @@ export async function setContinuousVolume(
   vol: number
 ): Promise<{ ok: boolean; error?: string }> {
   const st = continuousTasks.get(taskId)
-  if (!st) return { ok: false, error: '任务不存在或已结束' }
+  if (!st || !st.dbus) return { ok: false, error: '任务不存在或尚未连接' }
   const ok = await st.dbus.setVolume(Math.max(0, Math.min(1, vol)))
   return ok ? { ok: true } : { ok: false, error: '设置音量失败' }
 }
@@ -407,15 +408,39 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   const target =
     playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
 
+  // Register the task IMMEDIATELY (before the connection retry) with the
+  // requested target as a provisional key — otherwise every new chat batch
+  // during a DBus outage spawns another task because the connecting one can't
+  // be found. Once connected, playerKey resolves to the real bus name.
+  const queue = [...songs]
+  const st: ContinuousTaskState = {
+    dbus: null,
+    control,
+    queue,
+    current: null,
+    index: 0,
+    playerKey: target,
+    total: queue.length,
+    volbalEnabled: config.preferences.dynamic_balance_volume,
+    recordFreq: config.preferences.record_freq,
+    method: config.preferences.sound_adjust_method,
+    curve: config.preferences.volume_curve,
+    sentFirst: false,
+    volCache: new LoudnessCache(
+      config.preferences.sound_adjust_method,
+      config.preferences.volume_curve
+    ),
+    volbal: null
+  }
+  continuousTasks.set(control.id, st)
+
   const ac = new AbortController()
-  let dbus: DBusManager | null = null
-  let playerKey = ''
   const release = (): void => {
     continuousTasks.delete(control.id)
-    if (playerKey) playerBindings.delete(playerKey)
-    if (dbus) {
+    if (st.playerKey) playerBindings.delete(st.playerKey)
+    if (st.dbus) {
       try {
-        dbus.disconnect()
+        st.dbus.disconnect()
       } catch {
         /* noop */
       }
@@ -440,8 +465,16 @@ registerJobHandler('aidj.continuous', async (control, args) => {
       player = status?.player ?? ''
     }
     if (connected && player) {
-      playerKey = mgr.resolvedPlayerName || player
-      dbus = mgr
+      const playerKey = mgr.resolvedPlayerName || player
+      if (playerBindings.has(playerKey)) {
+        control.pushLine(`播放器 ${playerKey} 已有连续播放任务`, 'stderr')
+        release()
+        control.finish('error')
+        return
+      }
+      st.dbus = mgr
+      st.playerKey = playerKey
+      playerBindings.set(playerKey, control.id)
       break
     }
     attempts++
@@ -457,43 +490,16 @@ registerJobHandler('aidj.continuous', async (control, args) => {
     }
     await cancellableWait(10_000, ac.signal)
   }
-  if (ac.signal.aborted || !dbus || !playerKey) {
+  if (ac.signal.aborted || !st.dbus) {
+    release()
     control.pushLine('已取消连接 MPRIS', 'stderr')
     control.finish('cancelled')
     return
   }
-  if (playerBindings.has(playerKey)) {
-    control.pushLine(`播放器 ${playerKey} 已有连续播放任务`, 'stderr')
-    control.finish('error')
-    return
-  }
-
-  const queue = [...songs]
-  const st: ContinuousTaskState = {
-    dbus,
-    control,
-    queue,
-    current: null,
-    index: 0,
-    playerKey,
-    total: queue.length,
-    volbalEnabled: config.preferences.dynamic_balance_volume,
-    recordFreq: config.preferences.record_freq,
-    method: config.preferences.sound_adjust_method,
-    curve: config.preferences.volume_curve,
-    sentFirst: false,
-    volCache: new LoudnessCache(
-      config.preferences.sound_adjust_method,
-      config.preferences.volume_curve
-    ),
-    volbal: null
-  }
-  continuousTasks.set(control.id, st)
-  playerBindings.set(playerKey, control.id)
 
   // Pin the manager to the resolved player (exit auto-detect) so the loop
   // tracks ONE MPRIS object, not whichever happens to be playing.
-  await dbus.switchToPlayer(playerKey)
+  await st.dbus.switchToPlayer(st.playerKey)
 
   control.pushLine(`连续播放已启动 → ${st.playerKey} (${st.total} 首)`)
   control.push({
@@ -501,6 +507,7 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   })
 
   try {
+    const dbus = st.dbus
     const reconnectMinutes = config.preferences.reconnect_minutes ?? 0
     let lastStateKey = ''
     let lastSendAt = 0

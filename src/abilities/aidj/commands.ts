@@ -1677,6 +1677,7 @@ const commands: CommandSpec[] = [
         (t) => t.playerKey === player && t.control.id !== taskId
       )
       if (taken) return { ok: false, error: `播放器 ${player} 已被其他连续播放任务绑定` }
+      if (!st.dbus) return { ok: false, error: '连续播放任务尚未连接播放器' }
       const ok = await st.dbus.switchToPlayer(player)
       if (!ok) return { ok: false, error: `切换到 ${player} 失败` }
       const r = switchContinuousPlayer(taskId, player)
