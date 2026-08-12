@@ -672,6 +672,22 @@ export function chatResendPlaylist(
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** Sleep that resolves early (aborting the wait) when the signal aborts. */
+function cancellableWait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 /**
  * Player identity is expressed two ways across the codebase: the short
  * configured name (`vlc`, `config.preferences.dbus_target`) and the resolved
@@ -959,18 +975,46 @@ registerJobHandler('aidj.chat', async (control, args) => {
             control.push({ data: { type: 'playlist', songs: batch } })
             // A user-directed /discard_follows generation REPLACES the pending
             // queue once the new songs are ready (never clears it beforehand).
-            const r = st.replaceQueueOnNext
-              ? replaceContinuousQueue(st.player, batch)
-              : ensureContinuousPlayer(st.player, batch)
+            const mode = st.replaceQueueOnNext ? 'replace' : 'enqueue'
             st.replaceQueueOnNext = false
-            if (r.ok) {
-              control.pushLine(`推送 ${batch.length} 首到连续播放`)
-            } else {
-              control.push({
-                data: { type: 'system', content: `推送歌单失败: ${r.error ?? '未知错误'}` }
-              })
-              control.pushLine(`推送歌单失败: ${r.error ?? ''}`, 'stderr')
+            const push = (): { ok: boolean; error?: string } =>
+              mode === 'replace'
+                ? replaceContinuousQueue(st.player, batch)
+                : ensureContinuousPlayer(st.player, batch)
+            let r = push()
+            let attempts = 0
+            // A failed push (e.g. the player isn't up yet) must NOT be dropped
+            // for the next cycle — keep retrying every 10s until it lands or
+            // the user cancels.
+            while (!r.ok && !ac.signal.aborted) {
+              attempts++
+              if (attempts === 1) {
+                control.push({
+                  data: {
+                    type: 'system',
+                    content: `推送歌单失败: ${r.error ?? '未知错误'}，每 10 秒重试直到成功…`
+                  }
+                })
+              }
+              control.pushLine(
+                `推送失败(第 ${attempts} 次): ${r.error ?? ''}，10 秒后重试…`,
+                'stderr'
+              )
+              await cancellableWait(10_000, ac.signal)
+              if (ac.signal.aborted) break
+              r = push()
+            }
+            if (ac.signal.aborted) {
+              control.pushLine('推送已取消', 'stderr')
               break
+            }
+            if (r.ok) {
+              if (attempts > 0) {
+                control.push({
+                  data: { type: 'system', content: `推送成功（重试 ${attempts} 次后）` }
+                })
+              }
+              control.pushLine(`推送 ${batch.length} 首到连续播放`)
             }
           } else if (session.lastIntro) {
             if (session.lastIntro.startsWith('⚠️')) {
