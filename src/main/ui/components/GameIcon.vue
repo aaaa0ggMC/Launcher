@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 
 /**
  * Renders an SVG icon by name. Sources, in priority order:
  *   1. curated sidebar set  (assets/icons, eager, tiny)
- *   2. game-icon-pack       (assets/game-icon-pack/svg, lazy, padding/no-padding)
+ *   2. game-icon-pack       (assets/game-icon-pack/svg, eager, no-padding/padding)
  * Icons use `fill="currentColor"` — color inherits from surrounding text color.
+ *
+ * Both sources are eager so the SVG string is already in the bundle: the first
+ * paint shows the real icon, never a fallback flash.
  *
  * Usage: <GameIcon name="boss" :padding="true" :size="20" />
  */
@@ -26,20 +29,22 @@ const curated = import.meta.glob('../assets/icons/*.svg', {
 }) as Record<string, string>
 
 const pack = import.meta.glob('../assets/game-icon-pack/svg/**/*.svg', {
+  eager: true,
   query: '?raw',
   import: 'default'
-}) as Record<string, () => Promise<string>>
+}) as Record<string, string>
 
 const raw = ref('')
 const missing = ref(false)
 
-async function load(): Promise<void> {
-  missing.value = false
+/** Resolve the SVG synchronously — both sources are in the bundle already. */
+function resolve(): void {
   const name = props.name
   // 1. curated set (no padding variant)
   const curatedKey = Object.keys(curated).find((k) => k.endsWith(`/${name}.svg`))
   if (curatedKey) {
     raw.value = curated[curatedKey]
+    missing.value = false
     return
   }
   // 2. game-icon-pack
@@ -47,12 +52,12 @@ async function load(): Promise<void> {
   const packKey = Object.keys(pack).find(
     (k) => k.includes(`/${folder}/`) && k.endsWith(`/${name}.svg`)
   )
-  raw.value = packKey ? ((await pack[packKey]()) ?? '') : ''
+  raw.value = packKey ? pack[packKey] : ''
   missing.value = !packKey
 }
 
-watch(() => [props.name, props.padding], load)
-onMounted(load)
+resolve()
+watch(() => [props.name, props.padding], resolve)
 </script>
 
 <template>
