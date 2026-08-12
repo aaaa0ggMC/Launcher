@@ -399,7 +399,7 @@ async function handleCommand(text: string): Promise<void> {
 
   if (cmd === 'persist' || cmd === 'pc') {
     const msg = text.slice(cmd === 'pc' ? 3 : 8).trim()
-    await runPersistCommand(msg, text)
+    await runPersistCommand(msg)
     return
   }
 
@@ -1014,8 +1014,11 @@ function handleReorder(msgIdx: number, songs: { name: string; path: string }[]):
  *  persistently in the background (auto-generates and pushes to the continuous
  *  player). The forked session shows up in the session list; the persistent
  *  task's live chat lives in the background panel. */
-async function runPersistCommand(prompt: string, userText: string): Promise<void> {
-  messages.value.push({ role: 'user', content: userText, timestamp: Date.now(), uid: makeUid() })
+async function runPersistCommand(prompt: string): Promise<void> {
+  // Show the clean prompt as the user message — the raw `/persist ...` command
+  // text must not appear in the chat, and the prompt must not be counted into
+  // the AI context twice (it's in `history` once).
+  messages.value.push({ role: 'user', content: prompt, timestamp: Date.now(), uid: makeUid() })
   try {
     // Fork the backend's current session (named `(Copy) <orig>`); when there's
     // no session yet (fresh chat) the chat job falls back to a new one.
@@ -1040,15 +1043,13 @@ async function runPersistCommand(prompt: string, userText: string): Promise<void
       }
     }
 
-    const history: ChatMessage[] = [
-      ...messages.value.map((m) => ({
-        role: m.role,
-        content: m.content,
-        playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
-        timestamp: m.timestamp
-      })),
-      { role: 'user', content: prompt, timestamp: Date.now() }
-    ]
+    // The conversation, including the prompt just pushed — exactly once.
+    const history: ChatMessage[] = messages.value.map((m) => ({
+      role: m.role,
+      content: m.content,
+      playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
+      timestamp: m.timestamp
+    }))
 
     const result = (await window.cockpit.btJob('aidj.chat', {
       prompt,
