@@ -122,9 +122,9 @@ const CHAT_COMMANDS: ChatCommandDef[] = [
   },
   {
     name: 'filter',
-    args: '[--count] [--compare] [--ignorecase] <表达式>',
+    args: '[--count] [--compare] [--ignorecase] <表达式>  [字段:值]',
     descKey: 'aidj.cmd.filter.desc',
-    descFallback: '按表达式过滤曲库（title/lyrics/all）'
+    descFallback: '按表达式过滤曲库（title/lyrics/all + [字段:值] 元数据筛选）'
   },
   {
     name: 'persist',
@@ -391,7 +391,7 @@ async function handleCommand(text: string): Promise<void> {
       showSnack(
         t(
           'aidj.cmd.filter.usage',
-          '/filter [--count=100] [--compare=title|lyrics|all] [--ignorecase] <表达式>'
+          '/filter [--count=100] [--compare=title|lyrics|all] [--ignorecase] <表达式>  [字段:值]'
         ),
         'warning'
       )

@@ -661,8 +661,10 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.filter',
-    description: '按表达式过滤曲库（--query 完整表达式，compare=title/lyrics/all）',
-    usage: 'aidj.filter --query --compare=title ("The Weeknd" and "Justin Bieber") or ("Taylor")',
+    description:
+      '按表达式过滤曲库（--query 完整表达式，compare=title/lyrics/all，支持 [字段:值] 元数据筛选）',
+    usage:
+      'aidj.filter --query --compare=title ("The Weeknd" and "Justin Bieber") or ("Taylor") [emotion:孤独]',
     run: async (ctx) => {
       const query = String(ctx.named.query ?? '')
       if (!query) return { ok: false, error: '需要 --query 过滤表达式' }
@@ -699,7 +701,16 @@ const commands: CommandSpec[] = [
             haystack =
               fq.compare === 'title' ? name : fq.compare === 'all' ? `${name}\n${lrc}` : lrc
           }
-          if (evaluateFilter(fq.expr, haystack, fq.ignoreCase)) {
+          if (
+            evaluateFilter(
+              fq.expr,
+              {
+                haystack,
+                meta: (lib.metadata.get(name) ?? {}) as Record<string, unknown>
+              },
+              fq.ignoreCase
+            )
+          ) {
             results.push({ name, path })
             if (fq.count > 0 && results.length >= fq.count) break
           }

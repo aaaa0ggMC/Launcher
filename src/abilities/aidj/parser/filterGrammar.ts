@@ -1,3 +1,5 @@
+import { cachedVariantHaystack } from './chineseVariants'
+
 /**
  * `/filter` expression grammar — small boolean-expression parser.
  *
@@ -14,7 +16,8 @@
  *   or    := and ( 'or' and )*
  *   and   := unary ( 'and' unary )*
  *   unary := 'not' unary | '(' expr ')' | term
- *   term  := "quoted segment" | 'quoted segment' | bareword
+ *   term  := "quoted segment" | 'quoted segment' | bareword | field
+ *   field := '[' <metadata-field> ':' <value> ']'
  *
  * Keywords are case-insensitive (`AND`/`OR`/`NOT`). With `--ignorecase` on
  * (default) a `term` is a case-insensitive substring match against the compare
@@ -24,6 +27,17 @@
  *
  * matches songs whose title contains ("the weeknd" AND "justin bieber")
  * OR contains "taylor".
+ *
+ * A `field` term matches a song's SYNCED METADATA (not title/lyrics) by the
+ * same substring rule, and combines freely with the boolean operators:
+ *
+ *   /filter [emotion:孤独]                       — songs tagged with 孤独
+ *   /filter [language:粤语] and ("周杰伦")         — 粤语 songs titled 周杰伦…
+ *   /filter not [genre:古典]                     — everything not tagged 古典
+ *
+ * The value may contain spaces (the `[`…`]` bounds the whole token, so no
+ * inner quotes are needed): `[emotion:very sad]`. The first `:` splits
+ * field/value. Supported fields are the synced `SongMeta` keys.
  *
  * Chinese is matched variant-agnostically: the haystack is expanded to BOTH
  * simplified and traditional forms (`chineseVariants.ts`), so 「周杰伦」hits
@@ -38,6 +52,11 @@ export type FilterNode =
   | { type: 'or'; left: FilterNode; right: FilterNode }
   | { type: 'not'; operand: FilterNode }
   | { type: 'match'; text: string }
+  | { type: 'field'; field: string; value: string }
+
+/** Metadata fields usable in `[field:value]` terms (SongMeta keys). */
+export const FILTER_FIELDS = ['language', 'emotion', 'genre', 'loudness', 'review'] as const
+export type FilterField = (typeof FILTER_FIELDS)[number]
 
 export interface FilterQuery {
   /** Result cap. 0 = default 100; negative = all matches. */
@@ -48,9 +67,17 @@ export interface FilterQuery {
   expr: FilterNode
 }
 
+/** Per-song evaluation context passed to `evaluateFilter`. */
+export interface FilterContext {
+  /** The compare-selected haystack (`match` terms test against this). */
+  haystack: string
+  /** The song's metadata (`[field:value]` terms read from this). */
+  meta: Record<string, unknown>
+}
+
 export class FilterParseError extends Error {}
 
-/** Tokenize the expression: parens, quoted segments, bare words. */
+/** Tokenize the expression: parens, quoted segments, bare words, `[field:value]`. */
 function tokenize(src: string): string[] {
   const tokens: string[] = []
   let i = 0
@@ -63,6 +90,13 @@ function tokenize(src: string): string[] {
     if (c === '(' || c === ')') {
       tokens.push(c)
       i++
+      continue
+    }
+    if (c === '[') {
+      const close = src.indexOf(']', i + 1)
+      if (close < 0) throw new FilterParseError('未闭合的 [，应形如 [字段:值]')
+      tokens.push(src.slice(i, close + 1))
+      i = close + 1
       continue
     }
     if (c === '"' || c === "'") {
@@ -177,6 +211,20 @@ export function parseFilterExpression(src: string): FilterNode {
     if (t === ')') throw new FilterParseError('多余的右括号 )')
     if (kw(t, 'and') || kw(t, 'or') || kw(t, 'not'))
       throw new FilterParseError(`运算符 "${t}" 缺少操作数`)
+    const fieldMatch = /^\[(.+)\]$/.exec(t)
+    if (fieldMatch) {
+      const inner = fieldMatch[1]
+      const colon = inner.indexOf(':')
+      if (colon < 0) throw new FilterParseError('字段项格式应为 [字段:值]，缺少冒号')
+      const field = inner.slice(0, colon).trim()
+      const value = inner.slice(colon + 1).trim()
+      if (!field) throw new FilterParseError('字段项缺少字段名（如 [emotion:孤独]）')
+      if (!value) throw new FilterParseError(`字段项 [${field}] 缺少值（如 [${field}:xxx]）`)
+      if (!(FILTER_FIELDS as readonly string[]).includes(field)) {
+        throw new FilterParseError(`未知字段 "${field}" — 可用: ${FILTER_FIELDS.join(' / ')}`)
+      }
+      return { type: 'field', field, value }
+    }
     return { type: 'match', text: t }
   }
 
@@ -185,23 +233,48 @@ export function parseFilterExpression(src: string): FilterNode {
   return node
 }
 
-/** Evaluate a parsed node against a haystack. `ignoreCase=false` disables the
- *  term lowercasing — the haystack must already be the raw (un-normalized) text. */
-export function evaluateFilter(node: FilterNode, haystack: string, ignoreCase = true): boolean {
+/** Normalize a metadata value to one searchable string. Arrays are joined with
+ *  a newline so each element stays independently matchable. */
+function fieldValueText(value: unknown): string {
+  if (value == null) return ''
+  if (Array.isArray(value))
+    return value.filter((v): v is string => typeof v === 'string').join('\n')
+  return String(value)
+}
+
+/** Match a `[field:value]` term against one song's metadata. Same substring +
+ *  (ignoreCase) variant-agnostic semantics as a plain `match` term. Songs with
+ *  no metadata for the field never match. */
+function matchField(
+  node: { field: string; value: string },
+  meta: Record<string, unknown>,
+  ignoreCase: boolean
+): boolean {
+  const raw = fieldValueText(meta[node.field])
+  if (!raw) return false
+  const needle = ignoreCase ? node.value.toLowerCase() : node.value
+  if (!needle) return false
+  const hay = ignoreCase ? cachedVariantHaystack(`meta:${node.field}:${raw}`, raw) : raw
+  return hay.includes(needle)
+}
+
+/** Evaluate a parsed node against a context. `ignoreCase=false` disables term
+ *  lowercasing — the haystack must already be the raw (un-normalized) text. */
+export function evaluateFilter(node: FilterNode, ctx: FilterContext, ignoreCase = true): boolean {
   switch (node.type) {
     case 'and':
       return (
-        evaluateFilter(node.left, haystack, ignoreCase) &&
-        evaluateFilter(node.right, haystack, ignoreCase)
+        evaluateFilter(node.left, ctx, ignoreCase) && evaluateFilter(node.right, ctx, ignoreCase)
       )
     case 'or':
       return (
-        evaluateFilter(node.left, haystack, ignoreCase) ||
-        evaluateFilter(node.right, haystack, ignoreCase)
+        evaluateFilter(node.left, ctx, ignoreCase) || evaluateFilter(node.right, ctx, ignoreCase)
       )
     case 'not':
-      return !evaluateFilter(node.operand, haystack, ignoreCase)
+      return !evaluateFilter(node.operand, ctx, ignoreCase)
     case 'match':
-      return haystack.includes(ignoreCase ? node.text.toLowerCase() : node.text)
+      return ctx.haystack.includes(ignoreCase ? node.text.toLowerCase() : node.text)
+    case 'field':
+      return matchField(node, ctx.meta, ignoreCase)
   }
 }
