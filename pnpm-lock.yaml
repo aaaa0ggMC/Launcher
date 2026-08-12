@@ -32,6 +32,9 @@ importers:
       openai:
         specifier: ^7.4.0
         version: 7.4.0
+      opencc-js:
+        specifier: ^1.4.1
+        version: 1.4.1
       pidusage:
         specifier: ^4.0.1
         version: 4.0.1
@@ -2159,6 +2162,9 @@ packages:
         optional: true
       zod:
         optional: true
+
+  opencc-js@1.4.1:
+    resolution: {integrity: sha512-2lPLcrg7cnh1ATSduOxhnk/jq6KlR6w+5Ihl4wF7Z5e5Rva4vxTyugV5rZ7EiUCOZl+EDOLetIix+BhgYDCC+A==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -4943,6 +4949,8 @@ snapshots:
       fn.name: 1.1.0
 
   openai@7.4.0: {}
+
+  opencc-js@1.4.1: {}
 
   optionator@0.9.4:
     dependencies:

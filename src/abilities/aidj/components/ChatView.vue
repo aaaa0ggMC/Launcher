@@ -111,6 +111,12 @@ const CHAT_COMMANDS: ChatCommandDef[] = [
     args: '<language|emotion|genre|loudness>',
     descKey: 'aidj.cmd.analyse.desc',
     descFallback: '元数据分布统计（system 消息）'
+  },
+  {
+    name: 'filter',
+    args: '[--count] [--compare] [--ignorecase] <表达式>',
+    descKey: 'aidj.cmd.filter.desc',
+    descFallback: '按表达式过滤曲库（title/lyrics/all）'
   }
 ]
 
@@ -355,7 +361,92 @@ async function handleCommand(text: string): Promise<void> {
     return
   }
 
+  if (cmd === 'filter') {
+    const query = text.slice('/filter'.length).trim()
+    if (!query) {
+      showSnack(
+        t(
+          'aidj.cmd.filter.usage',
+          '/filter [--count=100] [--compare=title|lyrics|all] [--ignorecase] <表达式>'
+        ),
+        'warning'
+      )
+      return
+    }
+    await runFilterCommand(query, text)
+    return
+  }
+
   showSnack(`${t('aidj.cmd.unknown', '未知命令')}: /${cmd}`, 'warning')
+}
+
+/**
+ * /filter — boolean-expression library filter (title / lyrics / all).
+ * Lyrics queries are slow (full lyric text scan), so like the AI thinking
+ * bubble it first shows a 「系统正在查询…」system message, then replaces it
+ * with the matching playlist (or an error / empty result).
+ */
+async function runFilterCommand(query: string, userText: string): Promise<void> {
+  messages.value.push({ role: 'user', content: userText, timestamp: Date.now(), uid: makeUid() })
+  const placeholderIdx = messages.value.length
+  messages.value.push({
+    role: 'system',
+    content: t('aidj.cmd.filter.querying', '系统正在查询…'),
+    timestamp: Date.now(),
+    uid: makeUid()
+  })
+  thinking.value = true
+  sending.value = true
+  scrollToBottom()
+  try {
+    const r = (await window.cockpit.command('aidj.filter', { query })) as {
+      ok?: boolean
+      results?: { name: string; path: string }[]
+      total?: number
+      error?: string
+    }
+    if (messages.value[placeholderIdx] == null) return
+    const uid = messages.value[placeholderIdx]?.uid
+    if (r?.ok) {
+      const pl = (r.results ?? []) as { name: string; path: string }[]
+      messages.value[placeholderIdx] = pl.length
+        ? {
+            role: 'assistant',
+            content: t('aidj.cmd.filter.result', '筛选结果：{n} 首').replace(
+              '{n}',
+              String(pl.length)
+            ),
+            playlist: pl,
+            timestamp: Date.now(),
+            uid: uid ?? makeUid()
+          }
+        : {
+            role: 'system',
+            content: t('aidj.cmd.filter.empty', '没有匹配的歌曲'),
+            timestamp: Date.now(),
+            uid: uid ?? makeUid()
+          }
+    } else {
+      messages.value[placeholderIdx] = {
+        role: 'system',
+        content: `错误: ${r?.error || '查询失败'}`,
+        timestamp: Date.now(),
+        uid: uid ?? makeUid()
+      }
+    }
+  } catch (e) {
+    if (messages.value[placeholderIdx] == null) return
+    messages.value[placeholderIdx] = {
+      role: 'system',
+      content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+      timestamp: Date.now(),
+      uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+    }
+  } finally {
+    sending.value = false
+    thinking.value = false
+    scrollToBottom()
+  }
 }
 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
@@ -1066,7 +1157,28 @@ async function loadSession(sessionId: string): Promise<boolean> {
   }
 }
 
-defineExpose({ toMarkdown, loadSession })
+/** New chat (page-menu 「新建会话」): stop any running persistent task, reset
+ *  the backend session so the next message starts a fresh conversation, and
+ *  clear the view. The new conversation is persisted as a new session and
+ *  shows up in the session list afterwards. */
+async function newChat(): Promise<void> {
+  if (persistentTaskId.value) {
+    await window.cockpit.command('background.stop', { id: persistentTaskId.value }).catch(() => {})
+    persistentTaskId.value = ''
+  }
+  await window.cockpit.command('aidj.session-new').catch(() => {})
+  messages.value = []
+  inputText.value = ''
+  pendingText.value = ''
+  expanded.value = false
+  mode.value = 'immediate'
+  sending.value = false
+  thinking.value = false
+  scrollToBottom()
+  showSnack(t('aidj.chat_new', '已新建会话'))
+}
+
+defineExpose({ toMarkdown, loadSession, newChat })
 </script>
 
 <template>

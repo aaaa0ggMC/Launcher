@@ -39,6 +39,8 @@ import { join } from 'path'
 import { screen } from 'electron'
 import OpenAI from 'openai'
 import { startJobByName, listTasks } from '../../main/process/background-tasks'
+import { parseFilterCommand, evaluateFilter, FilterParseError } from './parser/filterGrammar'
+import { cachedVariantHaystack, setVariantCacheCapacity } from './parser/chineseVariants'
 import { createChildWindow, destroyChildWindow, listChildWindows } from '../../main/process/windows'
 import type { WindowSpec } from '../../main/process/windows'
 import type {
@@ -71,6 +73,12 @@ import {
 } from './jobs'
 
 const log = makeLogger('aidj')
+
+/** Variant-cache sizing for `aidj.filter` — one entry ≈ 2× lyric text + title.
+ *  Budget ~80MB of resident haystacks; beyond that the cache can't fit the
+ *  whole library, so it's disabled instead of build+clear-thrashing. */
+const MAX_VARIANT_CACHE_BYTES = 80 * 1024 * 1024
+const AVG_VARIANT_ENTRY_BYTES = 4500
 
 /** Per-DBus lyric window id: multiple players → one window each (single-instance
  *  per player). Keeps the configured dbus_target as a readable suffix. */
@@ -649,6 +657,59 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.filter',
+    description: '按表达式过滤曲库（--query 完整表达式，compare=title/lyrics/all）',
+    usage: 'aidj.filter --query --compare=title ("The Weeknd" and "Justin Bieber") or ("Taylor")',
+    run: async (ctx) => {
+      const query = String(ctx.named.query ?? '')
+      if (!query) return { ok: false, error: '需要 --query 过滤表达式' }
+      try {
+        const fq = parseFilterCommand(query)
+        const lib = await loadLibrary()
+        // Size the variant cache to the library (title + lyrics = 2 entries per
+        // song). If the whole library fits the memory budget the cache survives
+        // the run and every later filter is instant; if it can't fit, caching is
+        // disabled (capacity 0) so we never build+clear-thrash — a cache that
+        // gets wiped mid-run would waste the conversion CPU and hold memory
+        // without ever being reused.
+        const songCount = lib.musicPaths.size
+        const needed = songCount * 2 + 100
+        setVariantCacheCapacity(
+          needed * AVG_VARIANT_ENTRY_BYTES <= MAX_VARIANT_CACHE_BYTES ? needed : 0
+        )
+        const results: { name: string; path: string }[] = []
+        for (const [name, path] of lib.musicPaths) {
+          // ignorecase ON (default): variant-agnostic, lowercased, cached —
+          // 「周杰伦」matches 「周杰倫」, "The Weeknd" matches "the weeknd".
+          // OFF: raw exact substring match, no normalization, no cache.
+          let haystack: string
+          if (fq.ignoreCase) {
+            const title = cachedVariantHaystack(`t:${name}`, name)
+            if (fq.compare === 'title') {
+              haystack = title
+            } else {
+              const lrc = cachedVariantHaystack(`l:${name}`, lib.lyrics.get(name) ?? '')
+              haystack = fq.compare === 'all' ? `${title}\n${lrc}` : lrc
+            }
+          } else {
+            const lrc = lib.lyrics.get(name) ?? ''
+            haystack =
+              fq.compare === 'title' ? name : fq.compare === 'all' ? `${name}\n${lrc}` : lrc
+          }
+          if (evaluateFilter(fq.expr, haystack, fq.ignoreCase)) {
+            results.push({ name, path })
+            if (fq.count > 0 && results.length >= fq.count) break
+          }
+        }
+        return { ok: true, results, total: results.length, compare: fq.compare }
+      } catch (e) {
+        if (e instanceof FilterParseError) return { ok: false, error: `语法错误: ${e.message}` }
+        log.warn('aidj.filter failed', { error: String(e) })
+        return { ok: false, error: String(e) }
+      }
+    }
+  },
+  {
     name: 'aidj.ftop',
     description: '推送播放次数 Top N / 倒数 N / 区间 A-B 歌曲',
     usage: 'aidj.ftop [--count N] [--bottom true] [--from A] [--to B]',
@@ -1022,13 +1083,13 @@ const commands: CommandSpec[] = [
       const taskId = ctx.named.task as string
       const player = ctx.named.player as string
       if (!taskId || !player) return { ok: false, error: '需要 --task 和 --player 参数' }
-      const r = setChatPlayer(taskId, player)
+      const r = await setChatPlayer(taskId, player)
       if (!r.ok) return { ok: false, error: r.error }
       const st = getChatTask(taskId)
       if (st) {
-        st.control.pushLine(`发送目标已切换 → ${player}`)
+        st.control.pushLine(`发送目标已切换 → ${st.player}`)
       }
-      return { ok: true, player }
+      return { ok: true, player: st?.player ?? player }
     }
   },
   {
@@ -1330,6 +1391,15 @@ const commands: CommandSpec[] = [
     description: '中止当前 AI 请求',
     run: async () => {
       abortCurrentRequest()
+      return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.session-new',
+    description: '新建会话：中止当前请求并清空会话上下文，下次生成从全新会话开始',
+    run: async () => {
+      abortCurrentRequest()
+      _sessionId = ''
       return { ok: true }
     }
   },

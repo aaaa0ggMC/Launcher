@@ -159,9 +159,12 @@ async function updateMetadata(): Promise<void> {
   }
 }
 
-function selectChat(): void {
+/** Page-menu 「新建会话」— clears the current conversation in the chat view
+ *  and resets the backend session so the next message starts fresh. */
+function newChat(): void {
   menuOpen.value = false
   menuStep.value = 'main'
+  void chatRef.value?.newChat?.()
 }
 
 // -- 桌面歌词：绑定当前设置的 DBus，窗口单例（已存在则聚焦，不重复启动） -----
@@ -441,14 +444,13 @@ defineExpose({ toMarkdown })
       <Transition name="menu-pop">
         <div v-if="menuOpen" class="page-menu-pop" :class="{ 'is-wide': menuStep === 'freq' }">
           <template v-if="menuStep === 'main'">
-            <div class="menu-item" @click="selectChat">
-              <v-icon size="18">mdi-comment-text-multiple-outline</v-icon>
-              <span>{{ t('aidj.subpage.chat', 'Chat') }}</span>
-              <v-icon size="14" class="ml-auto">mdi-check</v-icon>
+            <div class="menu-item" @click="newChat">
+              <v-icon size="18">mdi-message-plus-outline</v-icon>
+              <span>{{ t('aidj.subpage.newchat', '新建会话') }}</span>
             </div>
             <div class="menu-item" @click="enterSessions">
               <v-icon size="18">mdi-history</v-icon>
-              <span>{{ t('aidj.subpage.sessions', 'Chat Sessions') }}</span>
+              <span>{{ t('aidj.subpage.sessions', '会话记录') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
             <div class="menu-item" @click="menuStep = 'freq'">
