@@ -1305,7 +1305,7 @@ const commands: CommandSpec[] = [
       if (!_sessionId) return { ok: false, error: '当前没有会话可分支' }
       const keep = Number(ctx.named.keep)
       let keepN: number | undefined
-      if (Number.isFinite(keep) && keep > 0) {
+      if (Number.isFinite(keep) && keep >= 0) {
         const raw = await SessionManager.readRawHistory(_sessionId)
         keepN = computeRawKeep(raw, Math.floor(keep))
       }

@@ -1171,14 +1171,15 @@ async function doRevert(): Promise<void> {
   scrollToBottom()
 }
 
-/** Context-menu 「从此处分支」— fork the current session, keeping only the
- *  conversation up to (not including) the clicked message, and switch to it. */
+/** Context-menu 「从此处分支」— fork the current session, keeping the
+ *  conversation UP TO AND INCLUDING the clicked message (the branch diverges
+ *  from there), and switch to it. */
 async function doFork(): Promise<void> {
   const idx = ctxMsgIndex.value
   if (idx < 0) return
   ctxMenu.value = false
   let keep = 0
-  for (let i = 0; i < idx && i < messages.value.length; i++) {
+  for (let i = 0; i <= idx && i < messages.value.length; i++) {
     const m = messages.value[i]
     if (
       (m.role === 'user' || m.role === 'assistant') &&
@@ -1186,6 +1187,10 @@ async function doFork(): Promise<void> {
     ) {
       keep++
     }
+  }
+  if (keep <= 0) {
+    showSnack('无法从此处分支：该消息之前没有可保留的对话', 'warning')
+    return
   }
   const r = (await window.cockpit.command('aidj.session-fork', {
     keep,

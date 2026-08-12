@@ -2471,8 +2471,13 @@ export class SessionManager {
     const src = await this.getSession(sessionId)
     if (!src) return null
     const raw = await this.readRawHistory(sessionId)
-    const kept = opts?.keep && opts.keep > 0 ? raw.slice(0, opts.keep) : raw
-    const base = (src.title || '').replace(/^\s*\(Copy\)\s*/, '')
+    // keep is explicit when given: 0 = empty branch, N = first N raw lines.
+    // Absent = copy everything.
+    const kept = opts?.keep !== undefined && opts.keep >= 0 ? raw.slice(0, opts.keep) : raw
+    const base = (src.title || '')
+      .replace(/^\s*\(Copy\)\s*/, '')
+      .replace(/\s+\[(持续|生成)\]$/, '')
+      .trim()
     const newId = await this.createSession({
       title: opts?.title ?? `(Copy) ${base}`.trim(),
       type: src.type
