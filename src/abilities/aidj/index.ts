@@ -1,11 +1,16 @@
 import { defineAsyncComponent, markRaw } from 'vue'
 import type { Ability } from '../../main/ui/ability'
 import { registerBtView } from '../../main/ui/bt-views'
-import ContinuousView from './components/ContinuousView.vue'
-import BtChatView from './components/BtChatView.vue'
 
-registerBtView('continuous', () => ({ component: markRaw(ContinuousView) }))
-registerBtView('chat', () => ({ component: markRaw(BtChatView) }))
+// Lazy-load the BT views — index.ts is eagerly globbed at renderer boot, so
+// importing these heavy components eagerly would pay their cost even when the
+// first page isn't AIDJ. They load only when the background panel shows them.
+registerBtView('continuous', () => ({
+  component: markRaw(defineAsyncComponent(() => import('./components/ContinuousView.vue')))
+}))
+registerBtView('chat', () => ({
+  component: markRaw(defineAsyncComponent(() => import('./components/BtChatView.vue')))
+}))
 
 /**
  * AIDJ registers TWO abilities from one folder:

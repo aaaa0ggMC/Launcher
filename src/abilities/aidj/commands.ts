@@ -33,12 +33,13 @@ import {
   saveLyricsPageConfig,
   getLyricPlayerBinding,
   switchLyricsPlayer,
-  activateAidjDbus
+  activateAidjDbus,
+  getOpenAIClient
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { screen } from 'electron'
-import OpenAI from 'openai'
+import type OpenAI from 'openai'
 import { startJobByName, listTasks } from '../../main/process/background-tasks'
 import { parseFilterCommand, evaluateFilter, FilterParseError } from './parser/filterGrammar'
 import { cachedVariantHaystack, setVariantCacheCapacity } from './parser/chineseVariants'
@@ -311,6 +312,7 @@ async function ensureInit(): Promise<{
 
   let client = _client
   if (!client) {
+    const OpenAI = await getOpenAIClient()
     client = new OpenAI({
       apiKey: config.secrets.api_key,
       baseURL: config.ai_settings.base_url
@@ -1070,6 +1072,10 @@ const commands: CommandSpec[] = [
       }
       if (content) {
         st.session.injectUserMessage(content)
+        // A regular user message must wake the DJ up too — without this, the
+        // next batch only generates once the continuous queue drains below the
+        // refill threshold, so a message mid-queue appears "lost".
+        st.forceFetch = true
         st.control.push({ data: { type: 'user', content } })
       }
       return {
