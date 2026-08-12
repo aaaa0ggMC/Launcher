@@ -175,8 +175,9 @@ async function loadCoverIfNeeded(path: string): Promise<void> {
 // instead of ffprobe-ing every song in a long playlist up front (which stalls
 // the main chat / continuous view for a while).
 let coverObserver: IntersectionObserver | null = null
-function coverObserve(el: HTMLElement, path: string): void {
-  if (!props.showCovers) return
+function coverObserve(el: HTMLElement | null, path: string): void {
+  // Vue calls ref callbacks with null when the element unmounts — bail out.
+  if (!el || !props.showCovers) return
   el.dataset.path = path
   if (!coverObserver) {
     coverObserver = new IntersectionObserver(
