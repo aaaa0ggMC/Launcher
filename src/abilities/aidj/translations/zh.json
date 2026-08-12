@@ -61,6 +61,7 @@
   "aidj.subpage.sessions": "会话记录",
   "aidj.subpage.freq": "歌曲频率",
   "aidj.chat_new": "已新建会话",
+  "aidj.session_loading": "正在载入会话，解析歌单中…",
   "aidj.freq.sort": "切换排序",
   "aidj.freq.empty": "暂无频率数据",
   "aidj.freq.played": "已发送到播放器",

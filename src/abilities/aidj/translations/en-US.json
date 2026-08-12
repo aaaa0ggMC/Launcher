@@ -61,6 +61,7 @@
   "aidj.subpage.sessions": "Chat Sessions",
   "aidj.subpage.freq": "Song Frequency",
   "aidj.chat_new": "New conversation started",
+  "aidj.session_loading": "Loading session, parsing playlists…",
   "aidj.freq.sort": "Toggle sort",
   "aidj.freq.empty": "No frequency data",
   "aidj.freq.played": "Sent to player",

@@ -1298,6 +1298,23 @@ export class LoudnessCache {
   }
 }
 
+/** Tokenize a song name the same way tokenSortRatio compares (punctuation →
+ *  whitespace, then words). Used to build bestMatch's candidate index. */
+function splitNameTokens(text: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const t of text
+    .toLowerCase()
+    .split(/[\s,，、。.\-()（）]+/)
+    .filter(Boolean)) {
+    if (!seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out
+}
+
 export class DJSession {
   client: OpenAI
   metadata: Map<string, SongMeta>
@@ -1317,6 +1334,10 @@ export class DJSession {
   /** Memoized validKeys() result + its library-size signature. */
   private _validKeysCache: string[] | null = null
   private _validKeysSig = ''
+  /** Token index for bestMatch: lowercased-name → canonical, token → names. */
+  private _nameMap: Map<string, string> = new Map()
+  private _tokenIndex: Map<string, string[]> = new Map()
+  private _tokenSig = ''
 
   constructor(
     client: OpenAI,
@@ -1378,6 +1399,23 @@ export class DJSession {
     return this._validKeysCache
   }
 
+  /** (Re)build the name/token index used by bestMatch when the library grows. */
+  private ensureTokenIndex(): void {
+    const sig = `${this.musicPaths.size}:${this.metadata.size}`
+    if (this._tokenSig === sig) return
+    this._nameMap = new Map()
+    this._tokenIndex = new Map()
+    for (const name of this.validKeys()) {
+      this._nameMap.set(name.toLowerCase(), name)
+      for (const tok of splitNameTokens(name)) {
+        const list = this._tokenIndex.get(tok)
+        if (list) list.push(name)
+        else this._tokenIndex.set(tok, [name])
+      }
+    }
+    this._tokenSig = sig
+  }
+
   /** token_sort_ratio: split+sort tokens, then Levenshtein ratio 0-100. */
   tokenSortRatio(a: string, b: string): number {
     const ta = a
@@ -1413,11 +1451,27 @@ export class DJSession {
     return dp[m][n]
   }
 
-  /** Find best fuzzy match for `query` among `candidates`, returns matched name or null. */
+  /** Find best match for `query` among `candidates`. Fast path: exact
+   *  lowercased lookup, then a shared-token candidate pool (usually a handful
+   *  of names) instead of scoring every library key — a session load with
+   *  hundreds of playlist lines otherwise blocks the main process for seconds. */
   private bestMatch(query: string, candidates: string[]): string | null {
+    this.ensureTokenIndex()
+    const ql = query.toLowerCase().trim()
+    const exact = this._nameMap.get(ql)
+    if (exact) return exact
+
+    const pool = new Set<string>()
+    for (const tok of splitNameTokens(ql)) {
+      const list = this._tokenIndex.get(tok)
+      if (!list) continue
+      for (const n of list) pool.add(n)
+    }
+    const scope = pool.size > 0 ? [...pool] : candidates
+
     let best: string | null = null
     let bestScore = 0
-    for (const c of candidates) {
+    for (const c of scope) {
       const score = this.tokenSortRatio(query, c)
       if (score > bestScore) {
         bestScore = score

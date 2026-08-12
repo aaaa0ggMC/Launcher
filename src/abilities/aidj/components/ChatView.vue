@@ -27,8 +27,16 @@ const thinking = ref(false)
 const persistentTaskId = ref('')
 const sending = ref(false)
 const pendingText = ref('')
-const chatContainer = ref<HTMLElement | null>(null)
 const expanded = ref(false)
+const chatContainer = ref<HTMLElement | null>(null)
+
+// Session-load animation + sliding window: only the trailing `windowSize`
+// messages are rendered; scrolling to the top loads older ones incrementally.
+const loadingSession = ref(false)
+const sessionProgress = ref(0)
+const windowSize = ref(60)
+const windowLoading = ref(false)
+const visibleMessages = computed(() => messages.value.slice(-windowSize.value))
 const contentRef = ref<HTMLElement | null>(null)
 let overlayRO: ResizeObserver | null = null
 
@@ -1085,6 +1093,22 @@ function scrollToBottom(): void {
   })
 }
 
+/** Scrolling near the top of the chat area expands the rendered window
+ *  upward (load older messages) while keeping the visible position stable. */
+async function onChatScroll(): Promise<void> {
+  const el = chatContainer.value
+  if (!el || windowLoading.value) return
+  if (el.scrollTop > 48 || windowSize.value >= messages.value.length) return
+  windowLoading.value = true
+  const h0 = el.scrollHeight
+  const st0 = el.scrollTop
+  windowSize.value = Math.min(messages.value.length, windowSize.value + 60)
+  await nextTick()
+  // Content prepended above → the previous viewport shifted down by the delta.
+  el.scrollTop = st0 + (el.scrollHeight - h0)
+  windowLoading.value = false
+}
+
 const ctxMenu = ref(false)
 const ctxPos = ref({ x: 0, y: 0 })
 const ctxTarget = ref('')
@@ -1178,6 +1202,7 @@ async function doFork(): Promise<void> {
     return
   }
   messages.value = (r.messages ?? []).map((m) => ({ ...m, uid: makeUid() }))
+  windowSize.value = 60
   inputText.value = ''
   sending.value = false
   scrollToBottom()
@@ -1211,8 +1236,18 @@ function toMarkdown(): string {
   return lines.join('\n').trim() + '\n'
 }
 
-/** Load a saved session into the active chat. Exposed to the shell View. */
+/** Load a saved session into the active chat. Exposed to the shell View.
+ *  Parsing a long history is slow on the main process, so show a centered
+ *  animated loader + parse progress bar instead of a frozen list. */
 async function loadSession(sessionId: string): Promise<boolean> {
+  loadingSession.value = true
+  sessionProgress.value = 0
+  const unsub = window.cockpit.on('cockpit:aidj-session-progress', (evt) => {
+    const e = evt as { id?: string; done?: number; total?: number }
+    if (e.id === sessionId && e.total) {
+      sessionProgress.value = Math.round(((e.done ?? 0) / e.total) * 100)
+    }
+  })
   try {
     const result = (await window.cockpit.command('aidj.sessions.open', {
       id: sessionId
@@ -1225,6 +1260,7 @@ async function loadSession(sessionId: string): Promise<boolean> {
       ...m,
       uid: makeUid()
     }))
+    windowSize.value = 60
     sending.value = false
     inputText.value = ''
     expanded.value = false
@@ -1234,6 +1270,10 @@ async function loadSession(sessionId: string): Promise<boolean> {
   } catch (e) {
     showSnack(`会话加载失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
     return false
+  } finally {
+    unsub()
+    loadingSession.value = false
+    sessionProgress.value = 0
   }
 }
 
@@ -1248,6 +1288,7 @@ async function newChat(): Promise<void> {
   }
   await window.cockpit.command('aidj.session-new').catch(() => {})
   messages.value = []
+  windowSize.value = 60
   inputText.value = ''
   pendingText.value = ''
   expanded.value = false
@@ -1331,6 +1372,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
     <div
       ref="chatContainer"
       class="chat-area d-flex flex-column flex-grow-1 overflow-y-auto px-4 py-3"
+      @scroll="onChatScroll"
     >
       <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
         <div
@@ -1344,17 +1386,32 @@ defineExpose({ toMarkdown, loadSession, newChat })
         </div>
 
         <ChatMessageVue
-          v-for="(msg, idx) in messages"
+          v-for="(msg, idx) in visibleMessages"
           :key="msg.uid ?? msg.timestamp"
           :message="msg"
-          :index="idx"
+          :index="messages.length - visibleMessages.length + idx"
           @play-all="handlePlayAll"
           @play-one="handlePlayOne"
-          @reorder="(songs: any) => handleReorder(idx, songs)"
+          @reorder="
+            (songs: any) => handleReorder(messages.length - visibleMessages.length + idx, songs)
+          "
           @context-menu="handleContextMenu"
           @continuous="handleContinuous"
         />
       </TransitionGroup>
+
+      <!-- Session-loading overlay: centered three-dot pulse + parse progress. -->
+      <div v-if="loadingSession" class="session-loading">
+        <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="text-caption text-medium-emphasis mt-2">{{ t('aidj.session_loading') }}</div>
+        <v-progress-linear
+          :model-value="sessionProgress"
+          color="primary"
+          class="mt-3 session-progress"
+          height="4"
+          rounded
+        />
+      </div>
     </div>
 
     <v-divider />
@@ -1802,6 +1859,50 @@ defineExpose({ toMarkdown, loadSession, newChat })
 }
 .model-select-inline {
   width: 180px;
+}
+.session-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--v-theme-surface), 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 5;
+}
+.loading-dots {
+  display: flex;
+  gap: 8px;
+}
+.loading-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(var(--v-theme-primary));
+  animation: aidj-dot-bounce 1.1s infinite ease-in-out;
+}
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes aidj-dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+.session-progress {
+  width: min(280px, 60%);
 }
 .textarea-wrap {
   position: relative;

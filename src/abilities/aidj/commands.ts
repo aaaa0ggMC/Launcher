@@ -1,6 +1,7 @@
 import type { CommandSpec } from '../../main/process/commands/types'
 import { makeLogger } from '../../main/process/logger'
 import { t } from '../../main/process/i18n'
+import { getBroadcast } from '../../main/process/broadcast'
 import {
   loadAidjConfig,
   saveAidjConfig,
@@ -180,10 +181,12 @@ let _sessionId = ''
 // ---------------------------------------------------------------------------
 function rawToChatHistory(
   raw: RawHistoryMessage[],
-  parse?: (rawText: string) => { intro: string; playlist: PlaylistEntry[] }
+  parse?: (rawText: string) => { intro: string; playlist: PlaylistEntry[] },
+  onProgress?: (done: number, total: number) => void
 ): ChatMessage[] {
   const out: ChatMessage[] = []
   for (let i = 0; i < raw.length; i++) {
+    if (onProgress) onProgress(i + 1, raw.length)
     const m = raw[i]
     const keep =
       m.type === 'user' || m.type === 'both' || (m.type === 'updated' && m.content !== '')
@@ -1259,7 +1262,16 @@ const commands: CommandSpec[] = [
       if (!raw.length) return { ok: false, error: '会话为空或不存在' }
 
       const sysPrompt = session.buildSystemPrompt()
-      const uiMessages = rawToChatHistory(raw, (rawText) => session.parseRawPlaylist(rawText, 'AI'))
+      const uiMessages = rawToChatHistory(
+        raw,
+        (rawText) => session.parseRawPlaylist(rawText, 'AI'),
+        (done, total) => {
+          // Parsing every assistant playlist is the slow part of a session
+          // load — stream progress to the renderer so it can animate instead
+          // of appearing frozen.
+          getBroadcast()('cockpit:aidj-session-progress', { id, done, total })
+        }
+      )
       // AI context keeps EVERY persisted line: raw assistant text (separator
       // included), user requests, and `updated` system markers (compact/drop
       // hints) — exactly what a live session would carry, so manageContext and
