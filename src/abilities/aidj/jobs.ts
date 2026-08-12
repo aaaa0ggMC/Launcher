@@ -356,9 +356,16 @@ export function switchContinuousPlayer(
   if (playerBindings.get(playerKey) && playerBindings.get(playerKey) !== taskId) {
     return { ok: false, error: `播放器 ${playerKey} 已被其他连续播放任务绑定` }
   }
-  playerBindings.delete(st.playerKey)
+  const oldKey = st.playerKey
+  playerBindings.delete(oldKey)
   playerBindings.set(playerKey, taskId)
   st.playerKey = playerKey
+  // Chat tasks that were pushing to the old player now follow the switch, so
+  // their next push enqueues into THIS task instead of spawning a duplicate
+  // on the abandoned player.
+  for (const ct of chatTasks.values()) {
+    if (samePlayer(ct.player, oldKey)) ct.player = playerKey
+  }
   return { ok: true }
 }
 
