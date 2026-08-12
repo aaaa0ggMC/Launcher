@@ -787,10 +787,18 @@ registerJobHandler('aidj.chat', async (control, args) => {
       ? playerArg
       : await getCurrentPlayerKey().catch(() => config.preferences.dbus_target || 'vlc')
 
-  const sessionId = await SessionManager.createSession({
-    title: initialPrompt.slice(0, 40),
-    type: 'chat'
-  })
+  const sessionArg = (args.sessionId as string) || ''
+  // /persist forks a session up front and passes it in — reuse it so the
+  // persistent conversation lives in the forked (Copy) session; otherwise
+  // create a fresh chat session from the seeded history.
+  const sessionId =
+    sessionArg && (await SessionManager.getSession(sessionArg))
+      ? sessionArg
+      : await SessionManager.createSession({
+          title: initialPrompt.slice(0, 40),
+          type: 'chat'
+        })
+  const isForked = sessionId === sessionArg
   const session = new PersistentSession(
     client,
     lib.metadata,
@@ -802,19 +810,33 @@ registerJobHandler('aidj.chat', async (control, args) => {
   session.sessionId = sessionId
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
-    // Persist seeded history as raw lines (user → type='user', assistant → type='both' with playlist).
-    await SessionManager.appendMessages(
-      sessionId,
-      history
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({
-          role: m.role,
-          content: m.content,
-          ts: m.timestamp,
-          type: m.role === 'assistant' ? 'both' : 'user',
-          playlist: m.playlist
-        }))
-    )
+    // When the session was pre-forked (/persist), its history lines are ALREADY
+    // persisted by the fork — only append the new user message (the /persist
+    // prompt), otherwise every line would be duplicated in the session file.
+    if (isForked) {
+      const last = history[history.length - 1]
+      if (last?.role === 'user') {
+        await SessionManager.appendMessage(sessionId, {
+          role: 'user',
+          content: last.content,
+          ts: last.timestamp,
+          type: 'user'
+        })
+      }
+    } else {
+      await SessionManager.appendMessages(
+        sessionId,
+        history
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => ({
+            role: m.role,
+            content: m.content,
+            ts: m.timestamp,
+            type: m.role === 'assistant' ? 'both' : 'user',
+            playlist: m.playlist
+          }))
+      )
+    }
   }
   if (Array.isArray(rollingHistoryArg) && rollingHistoryArg.length) {
     session.rollingHistory = rollingHistoryArg.slice(0, 100)

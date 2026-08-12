@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
+import ModelSelect from './ModelSelect.vue'
 
 defineOptions({ name: 'AidjBtChatView' })
 
@@ -239,6 +240,7 @@ watch(
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
       <span class="text-body-2 font-weight-medium">持续模式</span>
       <v-spacer />
+      <ModelSelect class="chat-model-select" />
       <v-select
         :model-value="targetPlayer"
         :items="[
@@ -425,6 +427,22 @@ watch(
   /* No smooth scroll: programmatic scroll-to-bottom on a long history would
      animate the whole distance and take seconds. Instant jump instead. */
   scroll-behavior: auto;
+}
+.chat-model-select {
+  width: 150px;
+  max-width: 180px;
+  flex-shrink: 0;
+}
+.chat-model-select :deep(.v-field) {
+  font-size: 0.78rem;
+  min-height: 28px;
+  background: rgba(var(--v-theme-surface), 0.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+}
+.chat-model-select :deep(.v-select__selection) {
+  font-size: 0.78rem;
 }
 .chat-player-select {
   width: 160px;

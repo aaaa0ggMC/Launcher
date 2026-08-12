@@ -83,6 +83,8 @@
   "aidj.cmd.filter.querying": "系统正在查询…",
   "aidj.cmd.filter.result": "筛选结果：{n} 首",
   "aidj.cmd.filter.empty": "没有匹配的歌曲",
+  "aidj.cmd.persist.desc": "分支当前会话为持久会话并后台自动播放",
+  "aidj.cmd.persistStop.desc": "停止运行中的持久会话",
   "aidj.metadata_sync": "更新 MetaData",
   "aidj.metadata_sync_desc": "扫描曲库并更新缺失歌曲元数据",
   "aidj.lyrics_open": "桌面歌词",

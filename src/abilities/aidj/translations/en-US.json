@@ -83,6 +83,8 @@
   "aidj.cmd.filter.querying": "System querying…",
   "aidj.cmd.filter.result": "Filter results: {n} songs",
   "aidj.cmd.filter.empty": "No matching songs",
+  "aidj.cmd.persist.desc": "Fork the current conversation into a persistent session and keep playing",
+  "aidj.cmd.persistStop.desc": "Stop the running persistent session",
   "aidj.metadata_sync": "Update MetaData",
   "aidj.metadata_sync_desc": "Scan library and update missing song metadata",
   "aidj.lyrics_open": "Desktop Lyrics",

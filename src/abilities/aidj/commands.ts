@@ -1286,6 +1286,44 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.session-fork',
+    description: '将当前会话分支为新会话 (--keep <n> 截断；--become true 载入为新会话)',
+    usage: 'aidj.session-fork [--keep <n>] [--become true]',
+    run: async (ctx) => {
+      if (!_sessionId) return { ok: false, error: '当前没有会话可分支' }
+      const keep = Number(ctx.named.keep)
+      let keepN: number | undefined
+      if (Number.isFinite(keep) && keep > 0) {
+        const raw = await SessionManager.readRawHistory(_sessionId)
+        keepN = computeRawKeep(raw, Math.floor(keep))
+      }
+      const newId = await SessionManager.forkSession(_sessionId, { keep: keepN })
+      if (!newId) return { ok: false, error: '源会话不存在' }
+      const meta = await SessionManager.getSession(newId)
+      const base = { ok: true, sessionId: newId, title: meta?.title ?? '' }
+      if (ctx.named.become !== true) return base
+
+      // Become the current session (mirror sessions.open) so the branch is live.
+      const raw = await SessionManager.readRawHistory(newId)
+      const { session } = await ensureInit()
+      const sysPrompt = session.buildSystemPrompt()
+      const uiMessages = rawToChatHistory(raw, (rawText) => session.parseRawPlaylist(rawText, 'AI'))
+      const rebuilt = rawToChatHistory(raw)
+      session.chatHistory = [
+        { role: 'system', content: sysPrompt, timestamp: Date.now() },
+        ...rebuilt
+      ]
+      session.playedSongs = new Set(rawToRollingHistory(raw))
+      session.turnCount = Math.max(1, raw.filter((m) => m.type === 'both').length)
+      session.promptTokens = 0
+      session.completionTokens = 0
+      _session = session
+      _sessionId = newId
+      abortCurrentRequest()
+      return { ...base, messages: uiMessages }
+    }
+  },
+  {
     name: 'aidj.sessions.delete',
     description: '删除一个已保存的会话及其历史',
     usage: 'aidj.sessions.delete --id <sessionId>',

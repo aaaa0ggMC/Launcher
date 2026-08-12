@@ -14,6 +14,7 @@ import { translate } from '../../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
 import ContextMenu from './ContextMenu.vue'
+import ModelSelect from './ModelSelect.vue'
 
 defineOptions({ name: 'cockpit-aidj-chat' })
 
@@ -22,7 +23,6 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
-const mode = ref<'immediate' | 'persistent'>('immediate')
 const thinking = ref(false)
 const persistentTaskId = ref('')
 const sending = ref(false)
@@ -117,6 +117,18 @@ const CHAT_COMMANDS: ChatCommandDef[] = [
     args: '[--count] [--compare] [--ignorecase] <表达式>',
     descKey: 'aidj.cmd.filter.desc',
     descFallback: '按表达式过滤曲库（title/lyrics/all）'
+  },
+  {
+    name: 'persist',
+    args: '<消息>',
+    descKey: 'aidj.cmd.persist.desc',
+    descFallback: '分支当前会话为持久会话并后台自动播放'
+  },
+  {
+    name: 'persist-stop',
+    args: '',
+    descKey: 'aidj.cmd.persistStop.desc',
+    descFallback: '停止运行中的持久会话'
   }
 ]
 
@@ -374,6 +386,17 @@ async function handleCommand(text: string): Promise<void> {
       return
     }
     await runFilterCommand(query, text)
+    return
+  }
+
+  if (cmd === 'persist' || cmd === 'pc') {
+    const msg = text.slice(cmd === 'pc' ? 3 : 8).trim()
+    await runPersistCommand(msg, text)
+    return
+  }
+
+  if (cmd === 'persist-stop' || cmd === 'pc-stop') {
+    await stopPersistent()
     return
   }
 
@@ -787,98 +810,90 @@ async function sendMessage(): Promise<void> {
   })
   scrollToBottom()
 
-  if (mode.value === 'immediate') {
-    sending.value = true
-    let charTimer: ReturnType<typeof setInterval> | null = null
-    charTimer = setInterval(async () => {
-      if (!sending.value) {
-        if (charTimer) clearInterval(charTimer)
-        return
-      }
-      try {
-        const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
-        if (r?.ok) {
-          const msg = messages.value[placeholderIdx]
-          if (!msg) return
-          if (typeof r.chars === 'number') msg.chars = r.chars as number
-          if (r.retrying === true) {
-            const elapsed = Math.round(((r.retryElapsed as number) ?? 0) / 1000)
-            const err = (r.retryLastError as string) || ''
-            msg.content = `重试中(${String(r.retryAttempt ?? 0)}: 已经${elapsed}s)${err ? `\n⚠️ ${err}` : ''}`
-          }
-        }
-      } catch {
-        /* noop */
-      }
-    }, 200)
+  sending.value = true
+  let charTimer: ReturnType<typeof setInterval> | null = null
+  charTimer = setInterval(async () => {
+    if (!sending.value) {
+      if (charTimer) clearInterval(charTimer)
+      return
+    }
     try {
-      const result = (await window.cockpit.command('aidj.generate', {
-        prompt: text
-      })) as Record<string, unknown>
-      if (messages.value[placeholderIdx] == null) return
-      if (result?.ok) {
-        if (result.tokens)
-          lastTokens.value = result.tokens as { prompt: number; completion: number }
-        if (result.context)
-          lastContext.value = result.context as { prompt: number; completion: number }
-        const pl = result.playlist as { name: string; path: string }[] | undefined
-        const placeholderUid = messages.value[placeholderIdx]?.uid
-        if (pl && pl.length > 0) {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: (result.intro as string) || '推荐歌单',
-            playlist: pl as ChatMessage['playlist'],
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
-        } else if (result.intro) {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: result.intro as string,
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
-          messages.value.push({
-            role: 'system',
-            content: t('aidj.no_match_hint'),
-            timestamp: Date.now(),
-            uid: makeUid()
-          })
-        } else {
-          messages.value[placeholderIdx] = {
-            role: 'assistant',
-            content: '（AI 无输出）',
-            timestamp: Date.now(),
-            uid: placeholderUid ?? makeUid()
-          }
+      const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
+      if (r?.ok) {
+        const msg = messages.value[placeholderIdx]
+        if (!msg) return
+        if (typeof r.chars === 'number') msg.chars = r.chars as number
+        if (r.retrying === true) {
+          const elapsed = Math.round(((r.retryElapsed as number) ?? 0) / 1000)
+          const err = (r.retryLastError as string) || ''
+          msg.content = `重试中(${String(r.retryAttempt ?? 0)}: 已经${elapsed}s)${err ? `\n⚠️ ${err}` : ''}`
         }
+      }
+    } catch {
+      /* noop */
+    }
+  }, 200)
+  try {
+    const result = (await window.cockpit.command('aidj.generate', {
+      prompt: text
+    })) as Record<string, unknown>
+    if (messages.value[placeholderIdx] == null) return
+    if (result?.ok) {
+      if (result.tokens) lastTokens.value = result.tokens as { prompt: number; completion: number }
+      if (result.context)
+        lastContext.value = result.context as { prompt: number; completion: number }
+      const pl = result.playlist as { name: string; path: string }[] | undefined
+      const placeholderUid = messages.value[placeholderIdx]?.uid
+      if (pl && pl.length > 0) {
+        messages.value[placeholderIdx] = {
+          role: 'assistant',
+          content: (result.intro as string) || '推荐歌单',
+          playlist: pl as ChatMessage['playlist'],
+          timestamp: Date.now(),
+          uid: placeholderUid ?? makeUid()
+        }
+      } else if (result.intro) {
+        messages.value[placeholderIdx] = {
+          role: 'assistant',
+          content: result.intro as string,
+          timestamp: Date.now(),
+          uid: placeholderUid ?? makeUid()
+        }
+        messages.value.push({
+          role: 'system',
+          content: t('aidj.no_match_hint'),
+          timestamp: Date.now(),
+          uid: makeUid()
+        })
       } else {
         messages.value[placeholderIdx] = {
           role: 'assistant',
-          content: `错误: ${(result?.error as string) || '请求失败'}`,
+          content: '（AI 无输出）',
           timestamp: Date.now(),
-          uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+          uid: placeholderUid ?? makeUid()
         }
       }
-    } catch (e: unknown) {
-      if (e instanceof DOMException && e.name === 'AbortError') return
-      if (messages.value[placeholderIdx] == null) return
+    } else {
       messages.value[placeholderIdx] = {
         role: 'assistant',
-        content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+        content: `错误: ${(result?.error as string) || '请求失败'}`,
         timestamp: Date.now(),
         uid: messages.value[placeholderIdx]?.uid ?? makeUid()
       }
-    } finally {
-      if (charTimer) clearInterval(charTimer)
-      sending.value = false
-      scrollToBottom()
     }
-  } else {
-    // persistent mode → start a background chat session, then return to immediate
-    messages.value.pop()
-    messages.value.pop()
-    await startPersistentChat(text)
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    if (messages.value[placeholderIdx] == null) return
+    messages.value[placeholderIdx] = {
+      role: 'assistant',
+      content: `错误: ${e instanceof Error ? e.message : String(e)}`,
+      timestamp: Date.now(),
+      uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+    }
+  } finally {
+    if (charTimer) clearInterval(charTimer)
+    sending.value = false
+    scrollToBottom()
   }
 }
 
@@ -987,8 +1002,22 @@ function handleReorder(msgIdx: number, songs: { name: string; path: string }[]):
 }
 
 /** Persistent mode: start a background chat session with the current conversation copied in. */
-async function startPersistentChat(prompt: string): Promise<void> {
+/** /persist — fork the current conversation into a `(Copy)` session and run it
+ *  persistently in the background (auto-generates and pushes to the continuous
+ *  player). The forked session shows up in the session list; the persistent
+ *  task's live chat lives in the background panel. */
+async function runPersistCommand(prompt: string, userText: string): Promise<void> {
+  messages.value.push({ role: 'user', content: userText, timestamp: Date.now(), uid: makeUid() })
   try {
+    // Fork the backend's current session (named `(Copy) <orig>`); when there's
+    // no session yet (fresh chat) the chat job falls back to a new one.
+    let sessionId = ''
+    const fork = (await window.cockpit.command('aidj.session-fork')) as {
+      ok?: boolean
+      sessionId?: string
+    } | null
+    if (fork?.ok && fork.sessionId) sessionId = fork.sessionId
+
     const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
     const status = statusRes?.status as { player?: string } | undefined
     const resolved = status?.player || ''
@@ -1017,19 +1046,34 @@ async function startPersistentChat(prompt: string): Promise<void> {
       prompt,
       history: JSON.parse(JSON.stringify(history)),
       rollingHistory,
+      sessionId,
       player: player || '__auto__',
       view: 'chat'
     })) as Record<string, unknown>
     if (result?.task || result?.ok) {
       const task = result.task as { id?: string } | undefined
       if (task?.id) persistentTaskId.value = task.id
-      mode.value = 'immediate'
-      showSnack('已在后台启动持续会话，可打开后台面板继续对话')
+      showSnack(
+        sessionId
+          ? '已分支当前会话并启动持久播放（可在后台面板继续对话）'
+          : '已在后台启动持续会话，可打开后台面板继续对话'
+      )
     } else {
       showSnack(`启动持续会话失败: ${(result?.error as string) || '未知错误'}`, 'error')
     }
   } catch (e: unknown) {
     showSnack(`启动持续会话失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+  }
+}
+
+/** /persist-stop — stop the running persistent chat task. */
+async function stopPersistent(): Promise<void> {
+  if (persistentTaskId.value) {
+    await window.cockpit.command('background.stop', { id: persistentTaskId.value }).catch(() => {})
+    persistentTaskId.value = ''
+    showSnack('已停止持久会话')
+  } else {
+    showSnack('没有运行中的持久会话', 'warning')
   }
 }
 
@@ -1103,6 +1147,43 @@ async function doRevert(): Promise<void> {
   scrollToBottom()
 }
 
+/** Context-menu 「从此处分支」— fork the current session, keeping only the
+ *  conversation up to (not including) the clicked message, and switch to it. */
+async function doFork(): Promise<void> {
+  const idx = ctxMsgIndex.value
+  if (idx < 0) return
+  ctxMenu.value = false
+  let keep = 0
+  for (let i = 0; i < idx && i < messages.value.length; i++) {
+    const m = messages.value[i]
+    if (
+      (m.role === 'user' || m.role === 'assistant') &&
+      !(m.role === 'assistant' && m.content.startsWith('▶ 播放'))
+    ) {
+      keep++
+    }
+  }
+  const r = (await window.cockpit.command('aidj.session-fork', {
+    keep,
+    become: true
+  })) as {
+    ok?: boolean
+    sessionId?: string
+    title?: string
+    messages?: ChatMessage[]
+    error?: string
+  }
+  if (!r?.ok) {
+    showSnack(r?.error || '分支失败', 'error')
+    return
+  }
+  messages.value = (r.messages ?? []).map((m) => ({ ...m, uid: makeUid() }))
+  inputText.value = ''
+  sending.value = false
+  scrollToBottom()
+  showSnack(`已分支为「${r.title || 'Copy'}」，从此处继续`)
+}
+
 // ---------------------------------------------------------------------------
 // Markdown export — dump the current conversation (messages + playlists).
 // App.vue's copyCurrentView calls toMarkdown() for the copy-view shortcut.
@@ -1144,7 +1225,6 @@ async function loadSession(sessionId: string): Promise<boolean> {
       ...m,
       uid: makeUid()
     }))
-    mode.value = 'immediate'
     sending.value = false
     inputText.value = ''
     expanded.value = false
@@ -1171,7 +1251,6 @@ async function newChat(): Promise<void> {
   inputText.value = ''
   pendingText.value = ''
   expanded.value = false
-  mode.value = 'immediate'
   sending.value = false
   thinking.value = false
   scrollToBottom()
@@ -1387,22 +1466,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
         </div>
 
         <div v-if="!expanded" class="input-bar d-flex ga-2 align-center px-4 pb-3">
-          <v-btn-toggle
-            v-model="mode"
-            mandatory
-            color="primary"
-            variant="outlined"
-            divided
-            class="mode-toggle flex-shrink-0"
-            style="white-space: nowrap"
-          >
-            <v-btn value="immediate" class="px-3">
-              {{ t('aidj.mode_immediate') }}
-            </v-btn>
-            <v-btn value="persistent" class="px-3">
-              {{ t('aidj.mode_persistent') }}
-            </v-btn>
-          </v-btn-toggle>
+          <ModelSelect class="model-select-inline flex-shrink-0" />
 
           <div class="textarea-wrap flex-grow-1">
             <v-textarea
@@ -1454,22 +1518,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
 
         <div v-else class="expanded-panel d-flex flex-column flex-grow-1">
           <div class="d-flex align-center ga-2 px-4 pt-1">
-            <v-btn-toggle
-              v-model="mode"
-              mandatory
-              color="primary"
-              variant="outlined"
-              divided
-              class="mode-toggle flex-shrink-0"
-              style="white-space: nowrap"
-            >
-              <v-btn value="immediate" class="px-3">
-                {{ t('aidj.mode_immediate') }}
-              </v-btn>
-              <v-btn value="persistent" class="px-3">
-                {{ t('aidj.mode_persistent') }}
-              </v-btn>
-            </v-btn-toggle>
+            <ModelSelect class="model-select-inline flex-shrink-0" />
 
             <v-spacer />
 
@@ -1604,6 +1653,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
       :songs="ctxSongs"
       :can-revert="ctxMsgIndex >= 0"
       @revert="doRevert"
+      @fork="doFork"
     />
   </div>
 </template>
@@ -1750,8 +1800,8 @@ defineExpose({ toMarkdown, loadSession, newChat })
   padding-block: 4px;
   min-height: 24px;
 }
-.mode-toggle {
-  flex: 0 0 auto;
+.model-select-inline {
+  width: 180px;
 }
 .textarea-wrap {
   position: relative;

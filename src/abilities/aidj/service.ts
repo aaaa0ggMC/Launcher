@@ -1314,6 +1314,9 @@ export class DJSession {
   lastPromptTokens: number
   /** Per-request context: the completion (output) tokens of the most recent request. */
   lastCompletionTokens: number
+  /** Memoized validKeys() result + its library-size signature. */
+  private _validKeysCache: string[] | null = null
+  private _validKeysSig = ''
 
   constructor(
     client: OpenAI,
@@ -1365,7 +1368,14 @@ export class DJSession {
   }
 
   private validKeys(): string[] {
-    return [...this.metadata.keys()].filter((k) => this.musicPaths.has(k))
+    // Rebuilding the filtered key list per parseRawPlaylist call re-allocates a
+    // 3k+ array on every message — during sessions.open that's ~30×. Memoize by
+    // library size (additions always change the size) to keep session loads fast.
+    const sig = `${this.musicPaths.size}:${this.metadata.size}`
+    if (this._validKeysCache && this._validKeysSig === sig) return this._validKeysCache
+    this._validKeysCache = [...this.metadata.keys()].filter((k) => this.musicPaths.has(k))
+    this._validKeysSig = sig
+    return this._validKeysCache
   }
 
   /** token_sort_ratio: split+sort tokens, then Levenshtein ratio 0-100. */
@@ -2393,6 +2403,29 @@ export class SessionManager {
         await writeJsonAtomic(SESSIONS_INDEX, idx)
       }
     })
+  }
+
+  /**
+   * Fork a session into a new one, named `(Copy) <original>`. Optionally keep
+   * only the first `n` raw history lines (branch-from-message). Returns the new
+   * session id, or null when the source doesn't exist.
+   */
+  static async forkSession(
+    sessionId: string,
+    opts?: { keep?: number; title?: string }
+  ): Promise<string | null> {
+    const src = await this.getSession(sessionId)
+    if (!src) return null
+    const raw = await this.readRawHistory(sessionId)
+    const kept = opts?.keep && opts.keep > 0 ? raw.slice(0, opts.keep) : raw
+    const base = (src.title || '').replace(/^\s*\(Copy\)\s*/, '')
+    const newId = await this.createSession({
+      title: opts?.title ?? `(Copy) ${base}`.trim(),
+      type: src.type
+    })
+    if (kept.length) await this.appendMessages(newId, kept)
+    log.info('Session forked', { from: sessionId, id: newId, kept: kept.length })
+    return newId
   }
 
   /** Remove a session from the index and delete its history directory. */

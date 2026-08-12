@@ -14,7 +14,11 @@ const props = defineProps<{
   canRevert?: boolean
 }>()
 
-const emit = defineEmits<{ 'update:modelValue': [v: boolean]; revert: [] }>()
+const emit = defineEmits<{
+  'update:modelValue': [v: boolean]
+  revert: []
+  fork: []
+}>()
 
 const pos = ref({ x: props.x, y: props.y })
 const el = ref<HTMLElement | null>(null)
@@ -53,6 +57,11 @@ function copyRaw(): void {
 function doRevert(): void {
   close()
   emit('revert')
+}
+
+function doFork(): void {
+  close()
+  emit('fork')
 }
 
 watch(
@@ -100,6 +109,10 @@ watch(
         <button v-if="canRevert" class="aidj-ctx-item" @click="doRevert">
           <v-icon icon="mdi-undo" size="14" />
           <span>回退到此处</span>
+        </button>
+        <button class="aidj-ctx-item" @click="doFork">
+          <v-icon icon="mdi-source-branch" size="14" />
+          <span>从此处分支 (Fork)</span>
         </button>
       </div>
     </Transition>

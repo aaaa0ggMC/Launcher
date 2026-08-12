@@ -34,6 +34,18 @@ let mainWindow: BrowserWindow | null = null
 // next close request is allowed to proceed without re-prompting.
 let quitApproved = false
 
+// Capture main-process crashes (uncaught exceptions / rejections) into the log
+// pipeline instead of dying silently — an unhandled `ERR_STREAM_WRITE_AFTER_END`
+// and friends otherwise terminate Electron with no trace in logs/.
+process.on('uncaughtException', (err) => {
+  log.error('uncaughtException', { error: err?.stack ?? String(err) })
+})
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandledRejection', {
+    error: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
+  })
+})
+
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, ...args)

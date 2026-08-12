@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import type { PlaylistEntry } from '../types'
 
 /**
@@ -64,16 +64,6 @@ async function fetchCover(path: string): Promise<string | null> {
     return null
   } finally {
     loadingCovers.delete(path)
-  }
-}
-
-async function loadCovers(): Promise<void> {
-  if (!props.showCovers) return
-  const loaded = new Set(Object.keys(covers.value))
-  for (const song of props.songs) {
-    if (loaded.has(song.path)) continue
-    const url = await fetchCover(song.path)
-    if (url) covers.value[song.path] = url
   }
 }
 
@@ -175,9 +165,41 @@ function cleanupDrag(): void {
   scrollParent = null
 }
 
-onMounted(loadCovers)
-watch(() => props.songs, loadCovers)
-onBeforeUnmount(cleanupDrag)
+async function loadCoverIfNeeded(path: string): Promise<void> {
+  if (covers.value[path] !== undefined) return
+  const url = await fetchCover(path)
+  if (url) covers.value[path] = url
+}
+
+// Lazy covers: fetch cover art only for rows that actually enter the viewport,
+// instead of ffprobe-ing every song in a long playlist up front (which stalls
+// the main chat / continuous view for a while).
+let coverObserver: IntersectionObserver | null = null
+function coverObserve(el: HTMLElement, path: string): void {
+  if (!props.showCovers) return
+  el.dataset.path = path
+  if (!coverObserver) {
+    coverObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          coverObserver?.unobserve(entry.target)
+          const p = (entry.target as HTMLElement).dataset.path ?? ''
+          if (p) void loadCoverIfNeeded(p)
+        }
+      },
+      { rootMargin: '120px 0px' }
+    )
+  }
+  coverObserver.observe(el)
+}
+
+onMounted(cleanupDrag)
+onBeforeUnmount(() => {
+  cleanupDrag()
+  coverObserver?.disconnect()
+  coverObserver = null
+})
 </script>
 
 <template>
@@ -212,6 +234,7 @@ onBeforeUnmount(cleanupDrag)
 
       <div
         v-if="showCovers"
+        :ref="(el: any) => coverObserve(el, song.path)"
         class="cover-wrap d-flex align-center justify-center flex-shrink-0"
         @click.stop="emit('playOne', song)"
       >
