@@ -406,18 +406,60 @@ registerJobHandler('aidj.continuous', async (control, args) => {
 
   const target =
     playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
-  const dbus = new DBusManager(target)
-  await dbus.connect()
-  if (!(await dbus.getStatus()).player) {
-    control.pushLine('错误: 无法连接 MPRIS 播放器', 'stderr')
-    control.finish('error')
-    return
-  }
 
-  const playerKey = dbus.resolvedPlayerName
-  if (!playerKey) {
-    control.pushLine('错误: 无法解析 MPRIS 播放器', 'stderr')
-    control.finish('error')
+  const ac = new AbortController()
+  let dbus: DBusManager | null = null
+  let playerKey = ''
+  const release = (): void => {
+    continuousTasks.delete(control.id)
+    if (playerKey) playerBindings.delete(playerKey)
+    if (dbus) {
+      try {
+        dbus.disconnect()
+      } catch {
+        /* noop */
+      }
+    }
+  }
+  control.setCancel(() => {
+    ac.abort()
+    release()
+  })
+
+  // Connect with retry: the MPRIS player (or the DBus daemon itself) may be
+  // down — keep retrying every 10s until it comes up, the push lands, or the
+  // user cancels. Never die silently and never hand the chat a "pushed OK"
+  // that wasn't actually delivered.
+  let attempts = 0
+  while (!ac.signal.aborted) {
+    const mgr = new DBusManager(target)
+    const connected = await withTimeout(mgr.connect(), 4000, false)
+    let player = ''
+    if (connected) {
+      const status = await withTimeout<{ player?: string } | null>(mgr.getStatus(), 4000, null)
+      player = status?.player ?? ''
+    }
+    if (connected && player) {
+      playerKey = mgr.resolvedPlayerName || player
+      dbus = mgr
+      break
+    }
+    attempts++
+    if (attempts === 1) {
+      control.pushLine('无法连接 MPRIS 播放器，每 10 秒重试…', 'stderr')
+    } else {
+      control.pushLine(`连接 MPRIS 失败(第 ${attempts} 次)，10 秒后重试…`, 'stderr')
+    }
+    try {
+      mgr.disconnect()
+    } catch {
+      /* noop */
+    }
+    await cancellableWait(10_000, ac.signal)
+  }
+  if (ac.signal.aborted || !dbus || !playerKey) {
+    control.pushLine('已取消连接 MPRIS', 'stderr')
+    control.finish('cancelled')
     return
   }
   if (playerBindings.has(playerKey)) {
@@ -452,23 +494,6 @@ registerJobHandler('aidj.continuous', async (control, args) => {
   // Pin the manager to the resolved player (exit auto-detect) so the loop
   // tracks ONE MPRIS object, not whichever happens to be playing.
   await dbus.switchToPlayer(playerKey)
-
-  const ac = new AbortController()
-
-  const release = (): void => {
-    continuousTasks.delete(control.id)
-    playerBindings.delete(st.playerKey)
-    try {
-      dbus.disconnect()
-    } catch {
-      /* noop */
-    }
-  }
-
-  control.setCancel(() => {
-    ac.abort()
-    release()
-  })
 
   control.pushLine(`连续播放已启动 → ${st.playerKey} (${st.total} 首)`)
   control.push({
@@ -685,6 +710,21 @@ function cancellableWait(ms: number, signal: AbortSignal): Promise<void> {
       resolve()
     }, ms)
     signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/** Resolve a promise to a fallback after `ms` — dbus-next can hang forever
+ *  when the session bus is gone, so every DBus probe must be raced. */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    p.then((v) => {
+      clearTimeout(timer)
+      resolve(v)
+    }).catch(() => {
+      clearTimeout(timer)
+      resolve(fallback)
+    })
   })
 }
 
