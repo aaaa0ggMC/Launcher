@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { inject } from 'vue'
 import type { Ref } from 'vue'
 import FreqRow from './FreqRow.vue'
@@ -15,6 +15,16 @@ defineOptions({ name: 'AidjFreqList' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
 
 const rows = ref<FreqRowData[]>([])
 const sortDesc = ref(true)
@@ -45,7 +55,11 @@ async function handlePlay(path: string): Promise<void> {
       snackColor.value = 'error'
     }
   } catch (e) {
-    snackText.value = `播放失败: ${e instanceof Error ? e.message : String(e)}`
+    snackText.value = tt(
+      'aidj.freq.play_failed_msg',
+      { err: e instanceof Error ? e.message : String(e) },
+      '播放失败: {err}'
+    )
     snackColor.value = 'error'
   }
   snackOpen.value = true

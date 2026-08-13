@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, inject, onMounted, onBeforeUnmount, type Ref } from 'vue'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { getAbilityModules, setAbilityEnabled } from '../../../main/ui/ability-registry'
 
 defineOptions({ name: 'cockpit-settings-abilities' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string>, fallback?: string): string =>
+  translateTemplate(uiLang.value, key, vars, fallback)
 
 const modules = getAbilityModules()
 const ids = Object.keys(modules).sort()
@@ -37,10 +39,20 @@ async function toggle(id: string, enabled: boolean): Promise<void> {
     } else {
       disabled.value = [...disabled.value, id]
     }
-    snackText.value = enabled ? `${name(id)} 已启用` : `${name(id)} 已禁用（侧边栏与命令即时隐藏）`
+    snackText.value = enabled
+      ? tt('settings.ability.enabled', { name: name(id) }, `${name(id)} 已启用`)
+      : tt(
+          'settings.ability.disabled',
+          { name: name(id) },
+          `${name(id)} 已禁用（侧边栏与命令即时隐藏）`
+        )
     snackColor.value = 'success'
   } else {
-    snackText.value = `${name(id)} 无法禁用（受保护）`
+    snackText.value = tt(
+      'settings.ability.disabledProtected',
+      { name: name(id) },
+      `${name(id)} 无法禁用（受保护）`
+    )
     snackColor.value = 'warning'
   }
   snackOpen.value = true
@@ -72,10 +84,15 @@ onBeforeUnmount(() => {
   <v-card rounded="lg" variant="tonal" class="card-fill">
     <v-card-title>
       <v-icon start>mdi-puzzle-outline</v-icon>
-      能力开关
+      {{ t('settings.ability.title', '能力开关') }}
     </v-card-title>
     <v-card-text class="text-caption text-medium-emphasis">
-      运行时启用/禁用能力（仅当前会话，不持久化）。禁用后该能力的侧边栏入口与命令即时隐藏。
+      {{
+        t(
+          'settings.ability.description',
+          '运行时启用/禁用能力（仅当前会话，不持久化）。禁用后该能力的侧边栏入口与命令即时隐藏。'
+        )
+      }}
     </v-card-text>
     <v-divider />
     <v-card-text class="d-flex flex-column ga-1 py-2">

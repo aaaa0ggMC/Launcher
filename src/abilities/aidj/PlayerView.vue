@@ -10,12 +10,22 @@ import {
   type Ref,
   computed
 } from 'vue'
-import { translate } from '../../main/ui/i18n'
+import { translate, translateTemplate } from '../../main/ui/i18n'
 
 defineOptions({ name: 'cockpit-aidj-player' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
 
 // -- state (shared commands + unified player-state, works in dbus & web) ------
 const mode = ref<'dbus' | 'web'>('dbus')
@@ -335,9 +345,9 @@ const hasTrack = computed(() => track.value !== '')
                 t('aidj.player.queue', '播放队列')
               }}</span>
               <v-spacer />
-              <span v-if="queueTotal > 0" class="text-caption text-medium-emphasis"
-                >{{ queueTotal }} 首</span
-              >
+              <span v-if="queueTotal > 0" class="text-caption text-medium-emphasis">{{
+                tt('aidj.player.count', { n: queueTotal }, '{n} 首')
+              }}</span>
             </div>
             <div v-if="queueTracks.length === 0" class="menu-empty text-body-2">
               {{ t('aidj.player.queue_empty', '队列为空') }}

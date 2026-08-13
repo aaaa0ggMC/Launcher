@@ -125,5 +125,19 @@
   "confirm.aboutToLaunch": "即将启动「{name}」",
   "confirm.ack": "知道了，以后不再提醒",
   "confirm.cancel": "取消",
-  "confirm.launch": "启动"
+  "confirm.launch": "启动",
+  "apps.transformer.output": "输出",
+  "apps.transformer.exited": "已退出 ({code})",
+  "apps.transformer.running": "运行中",
+  "apps.transformer.viewComponents": "组件视图",
+  "apps.transformer.rawOutput": "原始输出",
+  "apps.transformer.autoScroll": "自动滚动",
+  "apps.transformer.clear": "清空",
+  "apps.transformer.close": "关闭",
+  "apps.transformer.loadFailed": "transformer 加载失败",
+  "apps.transformer.waiting": "等待程序输出…",
+  "apps.transformer.noRaw": "暂无原始输出",
+  "apps.transformer.noConstructor": "transformer 未导出构造函数",
+  "apps.transformer.error": "transformer 错误: {msg}",
+  "apps.multilang": "多语言 / Multi-language"
 }

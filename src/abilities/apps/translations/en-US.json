@@ -125,5 +125,19 @@
   "confirm.aboutToLaunch": "About to launch \"{name}\"",
   "confirm.ack": "Got it — don't ask again",
   "confirm.cancel": "Cancel",
-  "confirm.launch": "Launch"
+  "confirm.launch": "Launch",
+  "apps.transformer.output": "Output",
+  "apps.transformer.exited": "Exited ({code})",
+  "apps.transformer.running": "Running",
+  "apps.transformer.viewComponents": "Component view",
+  "apps.transformer.rawOutput": "Raw output",
+  "apps.transformer.autoScroll": "Auto-scroll",
+  "apps.transformer.clear": "Clear",
+  "apps.transformer.close": "Close",
+  "apps.transformer.loadFailed": "Transformer failed to load",
+  "apps.transformer.waiting": "Waiting for program output…",
+  "apps.transformer.noRaw": "No raw output yet",
+  "apps.transformer.noConstructor": "Transformer did not export a constructor",
+  "apps.transformer.error": "Transformer error: {msg}",
+  "apps.multilang": "Multi-language / 多语言"
 }

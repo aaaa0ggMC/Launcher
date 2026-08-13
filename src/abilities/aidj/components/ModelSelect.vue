@@ -1,7 +1,12 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-aidj-model-select' })
 
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../main/ui/i18n'
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 /**
  * Temporary model switcher — fetch `/v1/models` (via `aidj.get-models`), let the
@@ -70,7 +75,9 @@ onMounted(async () => {
     hide-details
     :disabled="locked"
     :loading="loading"
-    :placeholder="locked ? '模型不可用' : '模型'"
+    :placeholder="
+      locked ? t('aidj.modelselect.unavailable', '模型不可用') : t('aidj.modelselect.model', '模型')
+    "
     class="model-select"
     @update:model-value="selectModel"
   />

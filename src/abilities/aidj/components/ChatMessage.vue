@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject, ref } from 'vue'
+import type { Ref } from 'vue'
 import type { ChatMessage, PlaylistEntry } from '../types'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import SongGrid from './SongGrid.vue'
 
 defineOptions({ name: 'AidjChatMessage' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
 
 const props = defineProps<{
   message: ChatMessage
@@ -89,8 +104,10 @@ function roleLabel(msg: ChatMessage): string {
     >
       <div v-if="isThinking(message)" class="d-flex align-center ga-2 text-body-2">
         <v-progress-circular indeterminate size="16" width="2" />
-        <span class="thinking-text">思考中</span>
-        <span class="text-caption text-medium-emphasis">{{ message.chars ?? 0 }} 字符</span>
+        <span class="thinking-text">{{ t('aidj.msg.thinking', '思考中') }}</span>
+        <span class="text-caption text-medium-emphasis">{{
+          tt('aidj.msg.chars', { n: message.chars ?? 0 }, '{n} 字符')
+        }}</span>
       </div>
       <div
         v-else-if="!isUser(message) && !isSystem(message)"
@@ -109,7 +126,7 @@ function roleLabel(msg: ChatMessage): string {
             prepend-icon="mdi-play-circle-outline"
             @click="emit('playAll', message.playlist!)"
           >
-            播放全部
+            {{ t('aidj.msg.play_all', '播放全部') }}
           </v-btn>
           <v-btn
             v-if="continuousEnabled"
@@ -118,7 +135,7 @@ function roleLabel(msg: ChatMessage): string {
             prepend-icon="mdi-send-clock-outline"
             @click="emit('continuous', message.playlist!)"
           >
-            推送到后台
+            {{ t('aidj.msg.push_background', '推送到后台') }}
           </v-btn>
         </v-card-actions>
 

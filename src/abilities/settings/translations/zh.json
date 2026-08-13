@@ -97,5 +97,10 @@
   "animation.slideUp": "上滑",
   "animation.zoom": "缩放",
   "animation.flip": "翻转",
-  "settings.mdHeading": "## 设置"
+  "settings.mdHeading": "## 设置",
+  "settings.ability.title": "能力开关",
+  "settings.ability.description": "运行时启用/禁用能力（仅当前会话，不持久化）。禁用后该能力的侧边栏入口与命令即时隐藏。",
+  "settings.ability.enabled": "{name} 已启用",
+  "settings.ability.disabled": "{name} 已禁用（侧边栏与命令即时隐藏）",
+  "settings.ability.disabledProtected": "{name} 无法禁用（受保护）"
 }

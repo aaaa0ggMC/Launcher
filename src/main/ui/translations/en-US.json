@@ -75,5 +75,8 @@
   "sidebar.collapse": "Collapse sidebar",
   "commandError.notFound": "Command \"{name}\" no longer exists",
   "cli.help.allCmds": "  All ability commands (Tab to complete):",
-  "cli.error.unknown": "Unknown command: {cmd} (type help for all commands)"
+  "cli.error.unknown": "Unknown command: {cmd} (type help for all commands)",
+  "app.fallback.title": "Child window failed to load",
+  "app.fallback.viewMissing": "View {view} does not exist or failed to load",
+  "app.fallback.reasons": "The window view code may be broken, a component registration is missing, or the view file was moved or renamed"
 }

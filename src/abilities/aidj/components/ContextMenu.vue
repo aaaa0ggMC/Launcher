@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, inject } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 
 defineOptions({ name: 'AidjContextMenu' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const props = defineProps<{
   modelValue: boolean
@@ -100,7 +105,7 @@ watch(
       >
         <button class="aidj-ctx-item" @click="copyRendered">
           <v-icon icon="mdi-content-copy" size="14" />
-          <span>复制</span>
+          <span>{{ t('aidj.contextmenu.copy', '复制') }}</span>
         </button>
         <button v-if="isAi" class="aidj-ctx-item" @click="copyRaw">
           <v-icon icon="mdi-code-tags" size="14" />
@@ -108,11 +113,11 @@ watch(
         </button>
         <button v-if="canRevert" class="aidj-ctx-item" @click="doRevert">
           <v-icon icon="mdi-undo" size="14" />
-          <span>回退到此处</span>
+          <span>{{ t('aidj.contextmenu.revert', '回退到此处') }}</span>
         </button>
         <button class="aidj-ctx-item" @click="doFork">
           <v-icon icon="mdi-source-branch" size="14" />
-          <span>从此处分支 (Fork)</span>
+          <span>{{ t('aidj.contextmenu.fork', '从此处分支 (Fork)') }}</span>
         </button>
       </div>
     </Transition>

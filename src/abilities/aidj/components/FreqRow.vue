@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
+import { translate } from '../../../main/ui/i18n'
 
 interface FreqRowData {
   name: string
@@ -8,6 +10,9 @@ interface FreqRowData {
 }
 
 defineOptions({ name: 'AidjFreqRow' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const props = defineProps<{ data: FreqRowData; index: number }>()
 
@@ -50,7 +55,7 @@ onMounted(async () => {
     <span class="freq-idx text-caption text-medium-emphasis flex-shrink-0">{{ index + 1 }}</span>
     <div
       class="freq-cover d-flex align-center justify-center flex-shrink-0"
-      :title="data.path ? '点击播放' : ''"
+      :title="data.path ? t('aidj.freq.play_hint', '点击播放') : ''"
       @click.stop="data.path && emit('play', data.path)"
     >
       <img v-if="coverUrl" :src="coverUrl" class="freq-cover-img" alt="" />

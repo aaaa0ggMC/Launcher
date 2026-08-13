@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import SongGrid from './SongGrid.vue'
 import type { PlaylistEntry } from '../types'
 
 defineOptions({ name: 'AidjContinuousView' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
 
 const props = defineProps<{
   task?: BtTaskInfo | null
@@ -248,7 +263,9 @@ onUnmounted(() => {
       <!-- Row 1: [icon] 连续播放 [combo box right-aligned] -->
       <div class="d-flex align-center ga-2 cv-header">
         <v-icon size="18" color="primary">mdi-send-clock-outline</v-icon>
-        <span class="text-body-2 font-weight-medium flex-shrink-0">连续播放</span>
+        <span class="text-body-2 font-weight-medium flex-shrink-0">{{
+          t('aidj.continuous.title', '连续播放')
+        }}</span>
         <v-spacer />
         <v-select
           :model-value="info?.player ?? null"
@@ -258,14 +275,16 @@ onUnmounted(() => {
           variant="outlined"
           hide-details
           :loading="switching"
-          placeholder="选择播放器"
+          :placeholder="t('aidj.continuous.player_placeholder', '选择播放器')"
           class="cv-player-select"
           :menu-props="{ contentClass: 'continuous-player-menu' }"
           @update:model-value="switchPlayer"
         >
           <template #append-item>
             <v-divider />
-            <div class="text-caption text-medium-emphasis pa-2">已被其他任务绑定的播放器置灰</div>
+            <div class="text-caption text-medium-emphasis pa-2">
+              {{ t('aidj.continuous.player_hint', '已被其他任务绑定的播放器置灰') }}
+            </div>
           </template>
         </v-select>
         <v-chip size="small" variant="flat" color="primary" class="flex-shrink-0">
@@ -277,19 +296,31 @@ onUnmounted(() => {
       <div class="d-flex flex-wrap ga-2 align-center cv-status">
         <span class="d-flex align-center ga-1">
           <v-icon size="14" color="success">mdi-play</v-icon>
-          <span class="text-caption text-medium-emphasis flex-shrink-0">正在播放</span>
+          <span class="text-caption text-medium-emphasis flex-shrink-0">{{
+            t('aidj.continuous.now_playing', '正在播放')
+          }}</span>
           <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.current || '—' }}</span>
         </span>
         <span class="d-flex align-center ga-1">
           <v-icon size="14" color="info">mdi-skip-next</v-icon>
-          <span class="text-caption text-medium-emphasis flex-shrink-0">下一首</span>
+          <span class="text-caption text-medium-emphasis flex-shrink-0">{{
+            t('aidj.continuous.next', '下一首')
+          }}</span>
           <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.next || '—' }}</span>
         </span>
         <v-spacer />
         <span class="d-flex align-center ga-1">
           <v-icon size="14">mdi-queue-music</v-icon>
-          <span class="text-caption text-medium-emphasis flex-shrink-0">队列</span>
-          <span class="text-body-2">{{ (info?.total ?? 0) - (info?.played ?? 0) }} 首待播</span>
+          <span class="text-caption text-medium-emphasis flex-shrink-0">{{
+            t('aidj.continuous.queue', '队列')
+          }}</span>
+          <span class="text-body-2">{{
+            tt(
+              'aidj.continuous.pending',
+              { n: (info?.total ?? 0) - (info?.played ?? 0) },
+              '{n} 首待播'
+            )
+          }}</span>
         </span>
       </div>
 
@@ -311,7 +342,7 @@ onUnmounted(() => {
       <div class="cv-statusbar d-flex flex-wrap ga-2 align-center mt-2">
         <span class="cv-status-label">
           <v-icon size="13" color="primary">mdi-tune</v-icon>
-          <span class="ml-1">会话设置</span>
+          <span class="ml-1">{{ t('aidj.continuous.session_settings', '会话设置') }}</span>
         </span>
 
         <v-chip
@@ -319,7 +350,11 @@ onUnmounted(() => {
           size="small"
           class="status-chip clickable"
           :class="{ 'is-on': info?.volbal?.enabled }"
-          :title="info?.volbal?.enabled ? '点击关闭响度平衡' : '点击开启响度平衡 (lufs)'"
+          :title="
+            info?.volbal?.enabled
+              ? t('aidj.continuous.volbal_off', '点击关闭响度平衡')
+              : t('aidj.continuous.volbal_on', '点击开启响度平衡 (lufs)')
+          "
           @click="cycleVolbal"
         >
           <span class="status-label">Volbal</span
@@ -330,7 +365,7 @@ onUnmounted(() => {
           variant="flat"
           size="small"
           class="status-chip clickable"
-          :title="'点击重置已播记忆（从头重播）'"
+          :title="t('aidj.continuous.memory_reset', '点击重置已播记忆（从头重播）')"
           @click="memoryConfirm = true"
         >
           <span class="status-label">Memory</span
@@ -342,7 +377,11 @@ onUnmounted(() => {
           size="small"
           class="status-chip clickable"
           :class="{ 'is-on': info?.recordFreq }"
-          :title="info?.recordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
+          :title="
+            info?.recordFreq
+              ? t('aidj.continuous.freq_off', '点击关闭频率记录')
+              : t('aidj.continuous.freq_on', '点击开启频率记录')
+          "
           @click="toggleRecordFreq"
         >
           <span class="status-label">RecordFreq</span
@@ -359,7 +398,7 @@ onUnmounted(() => {
               size="small"
               class="status-chip clickable"
               :prepend-icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
-              :title="'点击调整音量'"
+              :title="t('aidj.continuous.volume', '点击调整音量')"
             >
               <span class="status-label">Vol</span
               ><span class="status-value"
@@ -370,7 +409,7 @@ onUnmounted(() => {
           <v-card width="220" rounded="lg">
             <v-card-text class="pa-3">
               <div class="text-caption text-medium-emphasis mb-1">
-                音量（松手后重新校准响度基准）
+                {{ t('aidj.continuous.volume_hint', '音量（松手后重新校准响度基准）') }}
               </div>
               <v-slider
                 :model-value="tmpVolume"
@@ -392,15 +431,24 @@ onUnmounted(() => {
       <v-card rounded="lg">
         <v-card-title class="text-subtitle-1">
           <v-icon start>mdi-delete-sweep</v-icon>
-          重置已播记忆
+          {{ t('aidj.continuous.reset_title', '重置已播记忆') }}
         </v-card-title>
         <v-card-text class="text-body-2">
-          确定要重置该会话的已播记忆吗？队列将从头（第 1 首）重新播放。
+          {{
+            t(
+              'aidj.continuous.reset_text',
+              '确定要重置该会话的已播记忆吗？队列将从头（第 1 首）重新播放。'
+            )
+          }}
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
-          <v-btn variant="text" @click="memoryConfirm = false">取消</v-btn>
-          <v-btn color="primary" @click="clearMemory">重置</v-btn>
+          <v-btn variant="text" @click="memoryConfirm = false">{{
+            t('aidj.cancel', '取消')
+          }}</v-btn>
+          <v-btn color="primary" @click="clearMemory">{{
+            t('aidj.continuous.reset', '重置')
+          }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

@@ -1021,7 +1021,7 @@ defineExpose({ toMarkdown, onActivate })
           <v-expansion-panels variant="accordion" class="mt-2">
             <v-expansion-panel>
               <v-expansion-panel-title class="text-subtitle-2">
-                多语言 / Multi-language
+                {{ translate(uiLang, 'apps.multilang') }}
               </v-expansion-panel-title>
               <v-expansion-panel-text>
                 <div v-for="lang in availableLanguages" :key="lang.code" class="mb-2">
@@ -1364,7 +1364,7 @@ defineExpose({ toMarkdown, onActivate })
           <v-expansion-panels variant="accordion" class="mt-2">
             <v-expansion-panel>
               <v-expansion-panel-title class="text-subtitle-2">
-                多语言 / Multi-language
+                {{ translate(uiLang, 'apps.multilang') }}
               </v-expansion-panel-title>
               <v-expansion-panel-text>
                 <div v-for="lang in availableLanguages" :key="lang.code" class="mb-2">

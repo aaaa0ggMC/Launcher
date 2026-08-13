@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { AppEntry, ProcOutputEvent } from '../types'
 import UiNode from './UiNode.vue'
 import { createUi, type UiNode as UiNodeDesc, type UiApi } from './transformer'
+import { translate, translateTemplate } from '@ui/i18n'
 import { ansiToHtml } from '@ui/ansi'
 
 const props = defineProps<{
@@ -12,6 +14,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const te = (key: string, vars: Record<string, string>, fallback?: string): string =>
+  translateTemplate(uiLang.value, key, vars, fallback)
 
 const buffer = ref<UiNodeDesc[]>([])
 const rawLines = ref<{ text: string; stream: 'stdout' | 'stderr' }[]>([])
@@ -42,7 +49,8 @@ function buildTransformer(src: string): void {
   try {
     const make = new Function(`${src};return Transformer;`) as () => unknown
     const ctor = make()
-    if (typeof ctor !== 'function') throw new Error('transformer 未导出构造函数')
+    if (typeof ctor !== 'function')
+      throw new Error(t('apps.transformer.noConstructor', 'transformer 未导出构造函数'))
     transformer = new (ctor as new () => { onNewLine?: (e: string, ui: UiApi) => unknown })()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -75,7 +83,8 @@ function processEvent(evt: ProcOutputEvent): void {
     else buffer.value.push(ret as UiNodeDesc)
     cap()
   } catch (e) {
-    ui?.add({ t: 'error', v: `transformer 错误: ${e instanceof Error ? e.message : String(e)}` })
+    const msg = e instanceof Error ? e.message : String(e)
+    ui?.add({ t: 'error', v: te('apps.transformer.error', { msg }, `transformer 错误: ${msg}`) })
     cap()
   }
 }
@@ -147,7 +156,7 @@ onBeforeUnmount(() => unsub?.())
     <v-card class="transform-dialog" rounded="lg">
       <v-card-title class="d-flex align-center ga-3 text-subtitle-1 px-4 py-2">
         <v-icon color="primary">mdi-radar</v-icon>
-        <span class="text-truncate">{{ entry?.name ?? '输出' }}</span>
+        <span class="text-truncate">{{ entry?.name ?? t('apps.transformer.output', '输出') }}</span>
         <v-chip size="x-small" variant="tonal">pid {{ pid ?? '—' }}</v-chip>
         <v-chip
           v-if="exited"
@@ -155,13 +164,21 @@ onBeforeUnmount(() => unsub?.())
           variant="tonal"
           :color="exitCode === 0 ? 'success' : 'error'"
         >
-          已退出 ({{ exitCode ?? '?' }})
+          {{
+            te(
+              'apps.transformer.exited',
+              { code: String(exitCode ?? '?') },
+              `已退出 (${exitCode ?? '?'})`
+            )
+          }}
         </v-chip>
-        <v-chip v-else size="x-small" variant="tonal" color="primary">运行中</v-chip>
+        <v-chip v-else size="x-small" variant="tonal" color="primary">{{
+          t('apps.transformer.running', '运行中')
+        }}</v-chip>
         <v-spacer />
 
         <div class="d-flex align-center ga-1">
-          <v-tooltip text="组件视图" location="bottom">
+          <v-tooltip :text="t('apps.transformer.viewComponents', '组件视图')" location="bottom">
             <template #activator="{ props: tp }">
               <v-btn
                 v-bind="tp"
@@ -175,7 +192,7 @@ onBeforeUnmount(() => unsub?.())
               </v-btn>
             </template>
           </v-tooltip>
-          <v-tooltip text="原始输出" location="bottom">
+          <v-tooltip :text="t('apps.transformer.rawOutput', '原始输出')" location="bottom">
             <template #activator="{ props: tp }">
               <v-btn
                 v-bind="tp"
@@ -189,7 +206,7 @@ onBeforeUnmount(() => unsub?.())
               </v-btn>
             </template>
           </v-tooltip>
-          <v-tooltip text="自动滚动" location="bottom">
+          <v-tooltip :text="t('apps.transformer.autoScroll', '自动滚动')" location="bottom">
             <template #activator="{ props: tp }">
               <v-btn
                 v-bind="tp"
@@ -203,14 +220,14 @@ onBeforeUnmount(() => unsub?.())
               </v-btn>
             </template>
           </v-tooltip>
-          <v-tooltip text="清空" location="bottom">
+          <v-tooltip :text="t('apps.transformer.clear', '清空')" location="bottom">
             <template #activator="{ props: tp }">
               <v-btn v-bind="tp" size="small" variant="flat" icon @click="clearOutput">
                 <v-icon size="small">mdi-broom</v-icon>
               </v-btn>
             </template>
           </v-tooltip>
-          <v-tooltip text="关闭" location="bottom">
+          <v-tooltip :text="t('apps.transformer.close', '关闭')" location="bottom">
             <template #activator="{ props: tp }">
               <v-btn v-bind="tp" size="small" variant="text" icon @click="visible = false">
                 <v-icon size="small">mdi-close</v-icon>
@@ -228,7 +245,7 @@ onBeforeUnmount(() => unsub?.())
           type="error"
           variant="tonal"
           class="mb-3"
-          title="transformer 加载失败"
+          :title="t('apps.transformer.loadFailed', 'transformer 加载失败')"
           :text="error"
         />
         <div
@@ -236,7 +253,7 @@ onBeforeUnmount(() => unsub?.())
           class="d-flex align-center ga-2 on-surface-variant"
         >
           <v-progress-circular indeterminate size="18" />
-          <span class="text-caption">等待程序输出…</span>
+          <span class="text-caption">{{ t('apps.transformer.waiting', '等待程序输出…') }}</span>
         </div>
         <!-- eslint-disable vue/no-v-html -- content escaped by ansiToHtml -->
         <template v-if="showRaw">
@@ -248,7 +265,7 @@ onBeforeUnmount(() => unsub?.())
             v-html="ansiToHtml(l.text)"
           ></div>
           <div v-if="rawLines.length === 0 && !error" class="on-surface-variant text-caption">
-            暂无原始输出
+            {{ t('apps.transformer.noRaw', '暂无原始输出') }}
           </div>
         </template>
         <!-- eslint-enable vue/no-v-html -->

@@ -7,6 +7,15 @@
  */
 defineOptions({ name: 'cockpit-fallback-window' })
 
+import { inject, ref } from 'vue'
+import type { Ref } from 'vue'
+import { translate, translateTemplate } from '@ui/i18n'
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string>, fallback?: string): string =>
+  translateTemplate(uiLang.value, key, vars, fallback)
+
 const viewKey = new URLSearchParams(location.search).get('view') ?? ''
 </script>
 
@@ -14,12 +23,13 @@ const viewKey = new URLSearchParams(location.search).get('view') ?? ''
   <div class="fallback-shell">
     <div class="fallback-card">
       <v-icon size="56" color="error" class="mb-4">mdi-alert-octagon-outline</v-icon>
-      <div class="text-h6 mb-2">子窗口加载失败</div>
-      <div class="text-body-2 text-medium-emphasis mb-1">
-        视图 <code>{{ viewKey || '?' }}</code> 不存在或加载出错
-      </div>
+      <div class="text-h6 mb-2">{{ t('app.fallback.title') }}</div>
+      <div
+        class="text-body-2 text-medium-emphasis mb-1"
+        v-html="tt('app.fallback.viewMissing', { view: '<code>' + (viewKey || '?') + '</code>' })"
+      ></div>
       <div class="text-caption text-medium-emphasis">
-        可能是窗口视图代码有问题、组件注册缺失，或视图文件被移动/重命名
+        {{ t('app.fallback.reasons') }}
       </div>
     </div>
   </div>

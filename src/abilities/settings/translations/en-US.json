@@ -97,5 +97,10 @@
   "animation.slideUp": "Slide Up",
   "animation.zoom": "Zoom",
   "animation.flip": "Flip",
-  "settings.mdHeading": "## Settings"
+  "settings.mdHeading": "## Settings",
+  "settings.ability.title": "Ability Toggle",
+  "settings.ability.description": "Enable/disable abilities at runtime (current session only, not persisted). Disabled abilities' sidebar entries and commands are hidden immediately.",
+  "settings.ability.enabled": "{name} enabled",
+  "settings.ability.disabled": "{name} disabled (sidebar entry and commands hidden immediately)",
+  "settings.ability.disabledProtected": "{name} cannot be disabled (protected)"
 }

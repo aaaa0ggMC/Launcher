@@ -75,5 +75,8 @@
   "sidebar.collapse": "收起侧边栏",
   "commandError.notFound": "功能「{name}」不存在或已被移除",
   "cli.help.allCmds": "  所有能力命令均可直接输入 (Tab 补全):",
-  "cli.error.unknown": "未知命令: {cmd} (输入 help 查看全部命令)"
+  "cli.error.unknown": "未知命令: {cmd} (输入 help 查看全部命令)",
+  "app.fallback.title": "子窗口加载失败",
+  "app.fallback.viewMissing": "视图 {view} 不存在或加载出错",
+  "app.fallback.reasons": "可能是窗口视图代码有问题、组件注册缺失，或视图文件被移动/重命名"
 }

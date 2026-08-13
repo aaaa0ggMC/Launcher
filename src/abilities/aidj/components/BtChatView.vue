@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
+import { translate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
 import ModelSelect from './ModelSelect.vue'
 
 defineOptions({ name: 'AidjBtChatView' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const props = defineProps<{
   task?: BtTaskInfo | null
@@ -261,30 +266,30 @@ watch(
   <div class="d-flex flex-column" style="height: 100%">
     <div class="d-flex align-center ga-2 px-4 pt-3 pb-2">
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
-      <span class="text-body-2 font-weight-medium">持续模式</span>
+      <span class="text-body-2 font-weight-medium">{{ t('aidj.btchat.title', '持续模式') }}</span>
       <v-spacer />
       <ModelSelect class="chat-model-select" />
       <v-select
         v-if="mode === 'dbus'"
         :model-value="targetPlayer"
         :items="[
-          { title: '当前激活', value: '__auto__' },
+          { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
           ...players.map((p) => ({ title: shortPlayer(p), value: p }))
         ]"
         density="compact"
         variant="outlined"
         hide-details
         class="chat-player-select"
-        :placeholder="'发送目标'"
+        :placeholder="t('aidj.btchat.target', '发送目标')"
         @update:model-value="selectTarget"
       />
       <v-chip v-else size="small" variant="flat" class="chat-player-chip">
         <v-icon start size="14">mdi-music</v-icon>
-        <span>内置播放器</span>
+        <span>{{ t('aidj.player_mode.web', '内置播放器') }}</span>
       </v-chip>
       <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
         <v-progress-circular indeterminate size="12" width="2" />
-        <span class="ml-1">AI DJ</span>
+        <span class="ml-1">{{ t('aidj.heading', 'AI DJ') }}</span>
       </v-chip>
     </div>
 
@@ -323,7 +328,11 @@ watch(
           <div v-else-if="it.kind === 'playlist'" class="d-flex flex-column align-start w-100">
             <div class="d-flex align-start ga-2 w-100">
               <span class="text-caption text-medium-emphasis flex-grow-1">
-                {{ it.history ? '主界面歌单' : '推荐歌单' }}
+                {{
+                  it.history
+                    ? t('aidj.btchat.main_playlist', '主界面歌单')
+                    : t('aidj.playlist_title', '推荐歌单')
+                }}
               </span>
               <v-btn
                 v-if="!it.history"
@@ -335,7 +344,7 @@ watch(
                 @click="resendPlaylist(it.songs ?? [])"
               >
                 <v-icon size="12" start>mdi-refresh</v-icon>
-                重新发送
+                {{ t('aidj.btchat.resend', '重新发送') }}
               </v-btn>
             </div>
             <v-card variant="tonal" rounded="lg" class="playlist-card w-100 mt-1">
@@ -360,13 +369,18 @@ watch(
         </template>
 
         <div v-if="items.length === 0 && !thinking" class="text-caption text-medium-emphasis pa-2">
-          AI 正在生成首个歌单…
+          {{ t('aidj.btchat.generating', 'AI 正在生成首个歌单…') }}
         </div>
       </div>
     </div>
 
     <div class="aidj-status-bar">
-      <v-chip variant="flat" size="small" class="status-chip" :title="'累计所有请求的 tokens 总和'">
+      <v-chip
+        variant="flat"
+        size="small"
+        class="status-chip"
+        :title="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
+      >
         <span class="status-label">Tokens</span
         ><span class="status-value">{{ formatTokens(chatStatus.tokens) }}</span>
       </v-chip>
@@ -374,12 +388,17 @@ watch(
         variant="flat"
         size="small"
         class="status-chip"
-        :title="'单次请求的上下文输入 tokens'"
+        :title="t('aidj.chat.title_context', '单次请求的上下文输入 tokens')"
       >
         <span class="status-label">Context</span
         ><span class="status-value">{{ formatTokens(chatStatus.context) }}</span>
       </v-chip>
-      <v-chip variant="flat" size="small" class="status-chip" :title="'单次请求的输出 tokens'">
+      <v-chip
+        variant="flat"
+        size="small"
+        class="status-chip"
+        :title="t('aidj.chat.title_output_tokens', '单次请求的输出 tokens')"
+      >
         <span class="status-label">Completion</span
         ><span class="status-value">{{ formatTokens(chatStatus.contextCompletion) }}</span>
       </v-chip>
@@ -387,7 +406,7 @@ watch(
         variant="flat"
         size="small"
         class="status-chip clickable"
-        :title="'点击清空已播记忆'"
+        :title="t('aidj.chat.title_clear_memory', '点击清空已播记忆')"
         @click="memoryConfirm = true"
       >
         <span class="status-label">Memory</span
@@ -404,7 +423,9 @@ watch(
         :max-rows="3"
         auto-grow
         no-resize
-        placeholder="输入消息，回车发送 (/discard_follows 丢弃后续待播)"
+        :placeholder="
+          t('aidj.btchat.input_placeholder', '输入消息，回车发送 (/discard_follows 丢弃后续待播)')
+        "
         hide-details
         variant="outlined"
         class="chat-input"
@@ -419,7 +440,7 @@ watch(
         @click="send"
       >
         <v-icon start>mdi-send</v-icon>
-        发送
+        {{ t('aidj.send', '发送') }}
       </v-btn>
     </div>
 
@@ -435,14 +456,22 @@ watch(
 
     <v-dialog v-model="memoryConfirm" max-width="400">
       <v-card>
-        <v-card-title class="text-body-1 font-weight-medium">清空已播记忆</v-card-title>
+        <v-card-title class="text-body-1 font-weight-medium">{{
+          t('aidj.clear_memory_title', '清空已播记忆')
+        }}</v-card-title>
         <v-card-text class="text-body-2">
-          清空后 AI 将不再记住已推荐过的歌曲，可能重复推荐。
+          {{
+            t('aidj.btchat.clear_memory_text', '清空后 AI 将不再记住已推荐过的歌曲，可能重复推荐。')
+          }}
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-0 ga-2">
           <v-spacer />
-          <v-btn variant="text" @click="memoryConfirm = false">取消</v-btn>
-          <v-btn variant="tonal" color="primary" @click="clearMemory">确认清空</v-btn>
+          <v-btn variant="text" @click="memoryConfirm = false">{{
+            t('aidj.cancel', '取消')
+          }}</v-btn>
+          <v-btn variant="tonal" color="primary" @click="clearMemory">{{
+            t('aidj.btchat.confirm_clear', '确认清空')
+          }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
