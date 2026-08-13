@@ -488,7 +488,7 @@ async function runFilterCommand(query: string, userText: string): Promise<void> 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
 const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
 const lastContext = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
-const sbTracks = ref(0)
+const sbTracks = ref<number | null>(null)
 const sbMemory = ref(0)
 const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
 const sbRecordFreq = ref(false)
@@ -737,6 +737,7 @@ async function pollStatus(): Promise<void> {
     }
     if (result?.ok) {
       if (typeof result.tracks === 'number') sbTracks.value = result.tracks
+      else if (result.tracks === null) sbTracks.value = null
       if (typeof result.memory === 'number') sbMemory.value = result.memory
       if (result.volbal) sbVolbal.value = result.volbal as { enabled: boolean; method: string }
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
@@ -1531,7 +1532,9 @@ defineExpose({ toMarkdown, loadSession, newChat })
               class="status-chip is-on"
             >
               <span class="status-label">Tracks</span
-              ><span class="status-value">{{ sbTracks.toLocaleString() }}</span>
+              ><span class="status-value">{{
+                sbTracks === null ? '…' : sbTracks.toLocaleString()
+              }}</span>
             </v-chip>
 
             <v-chip

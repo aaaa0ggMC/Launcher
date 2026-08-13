@@ -9,6 +9,7 @@ import {
   loadLibrary,
   scanMusicFiles,
   invalidateLibrary,
+  isLibraryLoading,
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
@@ -914,10 +915,14 @@ const commands: CommandSpec[] = [
         ? [...session.metadata.keys()].filter((k) => session.musicPaths.has(k)).length
         : _metadata && _musicPaths
           ? [..._metadata.keys()].filter((k) => _musicPaths!.has(k)).length
-          : 0
+          : isLibraryLoading()
+            ? null
+            : 0
       const base = {
         ok: true,
-        tracks: librarySize,
+        // null = library still loading (first background scan/read in flight) —
+        // the UI shows "…" instead of a misleading 0.
+        tracks: librarySize as number | null,
         memory: _session?.playedSongs.size ?? 0,
         volbal: {
           enabled: _config?.preferences.dynamic_balance_volume ?? false,

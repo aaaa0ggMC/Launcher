@@ -655,6 +655,12 @@ export function invalidateLibrary(): void {
   _libraryCache = null
 }
 
+/** True while the library is being built for the first time (no cache yet and
+ *  a scan/read is in flight). Consumers can show "…" instead of a misleading 0. */
+export function isLibraryLoading(): boolean {
+  return !_libraryCache && _libraryLoading !== null
+}
+
 export async function appendMetadata(name: string, meta: SongMeta): Promise<void> {
   await ensureAidjDir()
   const line = JSON.stringify({ name, metadata: meta }) + '\n'
