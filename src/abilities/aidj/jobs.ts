@@ -809,14 +809,22 @@ function isWebTarget(player: string): boolean {
   return player === 'web' || player === '__auto__'
 }
 
-/** Push a playlist to the engine (replaces its queue — the engine plays on). */
-async function pushToWebEngine(songs: PlaylistEntry[]): Promise<{
+/** Push a playlist to the engine. `append` (default) ENQUEUES onto the existing
+ *  queue so the current track keeps playing; `append:false` replaces it (used by
+ *  /discard_follows). */
+async function pushToWebEngine(
+  songs: PlaylistEntry[],
+  append = true
+): Promise<{
   ok: boolean
   queueLen?: number
   error?: string
 }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  const ok = await getWebPlayerBackend().sendFiles(songs.map((s) => s.path))
+  const ok = await getWebPlayerBackend().sendFiles(
+    songs.map((s) => s.path),
+    { append }
+  )
   return ok ? { ok: true, queueLen: songs.length } : { ok: false, error: '内置播放器未就绪' }
 }
 
@@ -834,7 +842,9 @@ async function ensureContinuousPlayer(
   songs: PlaylistEntry[]
 ): Promise<{ ok: boolean; taskId?: string; queueLen?: number; error?: string }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  if (isWebTarget(player)) return pushToWebEngine(songs)
+  // Normal refill/initial push: ENQUEUE — the current track keeps playing and
+  // the batch joins the tail (mirrors the dbus enqueue-to-existing-task path).
+  if (isWebTarget(player)) return pushToWebEngine(songs, true)
   const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     const r = enqueueContinuousSongs(existing.control.id, songs)
@@ -874,8 +884,8 @@ export async function replaceContinuousQueue(
   songs: PlaylistEntry[]
 ): Promise<{ ok: boolean; error?: string; taskId?: string; queueLen?: number }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  // Web engine: sending replaces its queue — exactly the discard semantics.
-  if (isWebTarget(player)) return pushToWebEngine(songs)
+  // /discard_follows: REPLACE the whole queue (drop pending, new batch next).
+  if (isWebTarget(player)) return pushToWebEngine(songs, false)
   const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     existing.queue = songs

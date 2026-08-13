@@ -9,6 +9,8 @@
 > 与 PK_Result 的关系：
 > - **独立版**：2026-07-22 后无任何提交（仓库最后 commit `fcf477a`），PK_Result 里第一章描述仍然准确，本节基本照搬并复核。
 > - **Launcher 内嵌版**：PK_Result 之后又有一批大更新（`git log a360964..HEAD` 约 30 个文件、+4000 行），集中在**播放后端抽象 + 内置播放器**、**内置网易云访问（免外部服务）**、**跨平台支持**。第二章整体重写。
+>
+> 2026-08-13 16:36 补充：内嵌版又合入 9 个 patch（`git log 71d9f6a..HEAD`）——web 播放器**播放历史 + 追加队列 + trim-after-cursor**、桌面歌词卡拉OK **rAF 平滑 + 配色修复**、歌词/卡拉OK **匹配安全**、**悬浮标题**。本报告已并入。
 
 ---
 
@@ -84,15 +86,21 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 
 **web 模式（内置播放器，跨平台）**：`PlayerView.vue` + `web-player/engine.ts`：
 - 隐藏 `<audio>` 元素 + 自带队列（`queue/next/prev` 自动播放、`ended` 自动推进）
+- **播放历史**（新）：已播栈去重、上限 50，`prev` 能跨「队列整体替换」回退到上一首——engine 的队列只整换不 splice，历史单独存活
+- **追加 vs 替换**（新）：web 模式下「播放全部」/`aidj.send --append` 把批次**追加到队列尾部**（当前曲不打断，`enqueue` 命令，未加载时才开播）；dbus MPRIS 仍为整体替换
+- **trim-after-cursor**（新）：`trim` 命令只清光标后未播的歌曲，保留当前曲 + 播放历史（`/discard_follows` 在 web 模式不再 no-op，改为 trim；chat 推送的全量换歌仍是独立替换）
 - 进度条 seek 滑块（拖动本地值、松手才提交）、音量弹窗、播放/暂停/上下首
 - `navigator.mediaSession` → 系统媒体键（SMTC / Now Playing / MPRIS 映射），跨平台媒体键统一方案
 - 响度平衡在 web 端有独立实现：`player-volbal` / `player-rebase`（把当前音量设为新基准），`WebPlayerBackend` 监听引擎上报的曲目变化自动调 `audio.volume`（曲线固定 1.0 = 真线性，因 HTML5 volume 本身线性）
-- **已实现**：基础播放 + 队列 + 媒体键 + 音量 + seek + volbal；**计划中（M2，未实现）**：crossfade、EQ、频谱、倍速（`engine.ts` 头注释明确说明，Web Audio 管线方案见 `docs/abilities/aidj/` 设计稿）
+- **已实现**：基础播放 + 队列 + 播放历史 + 追加/trim + 媒体键 + 音量 + seek + volbal；**计划中（M2，未实现）**：crossfade、EQ、频谱、倍速（`engine.ts` 头注释明确说明，Web Audio 管线方案见 `docs/abilities/aidj/` 设计稿）
 - 状态回传：引擎经 `aidj.web-player-report` 上报 → `WebPlayerBackend.report()` 统一状态模型；播放器页/歌词浮窗对后端无感知
 
 ### 2.4 歌词（双端：桌面浮窗 + 歌词页 + 内置播放器）
 
 - **桌面歌词浮窗**（`LyricsWindow.vue`）：透明 · 无边框 · 圆角 · alwaysOnTop · skipTaskbar；1Hz 轮询 + rAF 插值；**卡拉OK 逐字高亮**（YRC 内联时间戳 LRC，`preferences.lyrics.karaoke` 可开关）；封面模糊沉浸背景；锁定/鼠标穿透；多播放器独立单例窗口；全套排版配置
+  - 卡拉OK 填充做**平滑**（新）：以每次轮询为锚、按 wall-clock 推进、只前进 + 回跳 snap，不再按 600ms 轮询步进跳变（Windows 上曾卡顿）
+  - 卡拉OK 配色（新）：已填字用完整文字色、未播用候选色 55% 变暗，去掉 mask 的 text-shadow 与叠加 alpha——白字主题不再被洗灰，所有当前行动画恢复
+- **歌词匹配安全**（新）：`resolveLyricForTrackPath` 对 `Artist - Title` 文件名锚定最后一个 `' - '` 段（标题）做模糊匹配，不再误伤歌手名；**卡拉OK 解析关闭模糊回退**（`fuzzy: false`）——不精确的标题匹配可能串到另一首歌的 YRC，宁缺毋错
 - **歌词页**（`aidj-lyrics`，`LyricsView.vue`）：卡拉OK 逐字填充 / 滚动跟随两档、前后行数、候选行变暗、播放控制条、播放器绑定切换、沉浸模式
 - `aidj.lyrics` 现在是**后端无关**的：dbus 走 MPRIS 状态 + 库歌词，web 走 `getWebLyricPlayback()` 从引擎上报状态构造同一 `LyricPlaybackState`——浮窗/页面在两种模式下都能用
 - **GBK 编码回退**：本地 `.lrc`/`.yrc` 先严格 UTF-8 解码，失败自动按 GBK 解码（`readTextAuto`），中文 locale 的常见乱码文件不再读错
@@ -132,6 +140,7 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 
 - `ChatView.vue`：消息气泡 / 流式思考气泡、`/` 命令补全、`/random /pr /explore /ftop /analyse /filter /persist /pc /persist-stop /pc-stop` 斜杠命令、播放器状态栏徽标（tokens/context/memory/tracks/volbal/record_freq 可定制显隐顺序）、会话操作入口
 - `SongGrid.vue` / `FreqList.vue` / `FreqRow.vue` / `ContextMenu.vue` / `ModelSelect.vue` / `BtChatView.vue` / `ContinuousView.vue`、**新增 `PlayerView.vue`（内置播放器页）**
+- **悬浮标题**（新）：所有被截断的歌名都带 `:title`，长名悬停显示全名（SongGrid 歌单行、PlayerView 队列+当前曲、ContinuousView 当前/下一首、BtChatView 歌单行；FreqRow 与 ChatView now-playing 此前已有）——避免「歌手前缀截断后看着都一样」
 - 设置页 `AidjSettingsSection.vue` + 歌词页 `LyricsPageSettingsSection.vue`：新增 **播放模式（外部 MPRIS / 内置播放器）**、**歌词来源（auto/external/builtin）**、**桌面歌词卡拉OK开关** 等
 - i18n 双语（zh / en-US），剩余硬编码字符串已全部翻译化（08-13 的 i18n 收尾 commit）
 
@@ -153,7 +162,7 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 | **上下文管理** | discard / compact（AI 摘要）双模式 + 可配历史长度——独立版 pc 仅粗暴剪到 10 条 |
 | **网络可靠** | `withNetworkRetry`、`network_retry_minutes` / `reconnect_minutes` 断线重连、推送失败每 10s 重推——独立版失败即报错 |
 | **歌词能力** | 桌面浮窗 + 歌词页 + 内置播放器三端、卡拉OK 逐字（YRC）、封面沉浸、锁定/鼠标穿透、多播放器多窗口——独立版只有终端内滚动 LRC |
-| **内置播放器（新）** | web 后端跨平台直出声音、自带队列/seek/音量/媒体键、与 volbal 联动——独立版必须依赖外部 MPRIS 播放器 |
+| **内置播放器（新）** | web 后端跨平台直出声音、自带队列/播放历史（prev 跨替换回退）/追加与 trim/seek/音量/媒体键、与 volbal 联动——独立版必须依赖外部 MPRIS 播放器 |
 | **内置网易云（新）** | 进程内直连网易拿 LRC+YRC，`ncm_mode` 三档自动兜底——**不再强依赖外部 NeteaseCloudMusicApi 服务**（独立版仍然依赖） |
 | **跨平台（新）** | `platforms: []`，非 Linux 走内置播放器、dbus 命令自动门控不暴露——独立版 Windows 仍需改代码 |
 | **播放后端热切换（新）** | `aidj.player-mode` 运行期切 dbus/web，自动停 playback 任务、持久化、UI 即时反映 |
