@@ -381,6 +381,23 @@ export async function scanKaraokeFiles(folders: string[]): Promise<Map<string, s
   return map
 }
 
+/** Read a text file with encoding fallback: strict UTF-8 first, then GBK.
+ *  Local lyric files (.lrc/.yrc) on Chinese-locale Windows are most commonly
+ *  GBK/GB2312 — reading them as UTF-8 silently garbles both the lyrics display
+ *  and the AI metadata extraction. Valid UTF-8 is never touched. */
+async function readTextAuto(filepath: string): Promise<string> {
+  const buf = await readFile(filepath)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    try {
+      return new TextDecoder('gbk').decode(buf)
+    } catch {
+      return buf.toString('utf-8')
+    }
+  }
+}
+
 async function walkKaraokeDir(dir: string, map: Map<string, string>): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true })
   for (const entry of entries) {
@@ -392,7 +409,7 @@ async function walkKaraokeDir(dir: string, map: Map<string, string>): Promise<vo
       if (!name) continue
       let content = ''
       try {
-        content = await readFile(full, 'utf-8')
+        content = await readTextAuto(full)
       } catch {
         continue // skip unreadable
       }
@@ -413,7 +430,7 @@ async function walkLyricDir(dir: string, map: Map<string, string>): Promise<void
       if (!name) continue
       let content = ''
       try {
-        content = await readFile(full, 'utf-8')
+        content = await readTextAuto(full)
       } catch {
         continue // skip unreadable
       }
