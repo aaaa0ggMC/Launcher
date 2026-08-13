@@ -5,7 +5,13 @@ import { promisify } from 'util'
 import OpenAI from 'openai'
 import { makeLogger } from '../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../main/process/paths'
-import { readJson, readOrCreateJson, writeJsonAtomic, writeTextFile } from '../../main/process/util'
+import {
+  readJson,
+  readOrCreateJson,
+  writeJsonAtomic,
+  writeJsonAtomicSerialized,
+  writeTextFile
+} from '../../main/process/util'
 import type {
   AidjConfig,
   SongMeta,
@@ -37,6 +43,12 @@ const execFileAsync = promisify(execFile)
 const AIDJ_DIR = join(USER_CONFIG_DIR, AIDJ_DATA_DIR)
 const SESSIONS_DIR = join(AIDJ_DIR, 'sessions')
 const SESSIONS_INDEX = join(SESSIONS_DIR, 'main.json')
+
+/** Session index — auto-created with an empty list on first read (deep mkdir)
+ *  so a fresh install doesn't log an ENOENT warn at every session access. */
+async function loadSessionsIndex(): Promise<{ sessions: SessionMeta[] }> {
+  return readOrCreateJson(SESSIONS_INDEX, () => ({ sessions: [] }))
+}
 
 /** True for transport-level failures (offline, refused, timeout) and transient server errors (500-504). */
 export function isNetworkError(e: unknown): boolean {
@@ -108,10 +120,13 @@ export async function loadAidjConfig(): Promise<AidjConfig | null> {
   return readOrCreateJson(abilityConfigPath('aidj'), () => DEFAULT_AIDJ_CONFIG)
 }
 
-/** Persist the current AIDJ config to ~/.config/LinuxCockpit/aidj/config.json. */
+/** Persist the current AIDJ config to ~/.config/LinuxCockpit/aidj/config.json.
+ *  Serialized: the settings page fires a watcher per field on mount, so many
+ *  saves can hit the same file in one tick — on Windows concurrent renames to
+ *  the same target EPERM, and even elsewhere last-writer-wins must be ordered. */
 export async function saveAidjConfig(config: AidjConfig): Promise<{ ok: boolean; error?: string }> {
   try {
-    await writeJsonAtomic(abilityConfigPath('aidj'), config)
+    await writeJsonAtomicSerialized(abilityConfigPath('aidj'), config)
     return { ok: true }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
@@ -2556,7 +2571,7 @@ export class SessionManager {
       updated_at: now
     }
     await withHistoryLock('__index__', async () => {
-      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const idx = await loadSessionsIndex()
       idx.sessions.push(meta)
       await writeJsonAtomic(SESSIONS_INDEX, idx)
     })
@@ -2628,8 +2643,8 @@ export class SessionManager {
   }
 
   static async listSessions(): Promise<SessionMeta[]> {
-    const idx = await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)
-    return idx?.sessions ?? []
+    const idx = await loadSessionsIndex()
+    return idx.sessions
   }
 
   static async getSession(sessionId: string): Promise<SessionMeta | null> {
@@ -2639,7 +2654,7 @@ export class SessionManager {
 
   static async touchSession(sessionId: string): Promise<void> {
     await withHistoryLock('__index__', async () => {
-      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const idx = await loadSessionsIndex()
       const s = idx.sessions.find((x) => x.id === sessionId)
       if (s) {
         s.updated_at = Date.now()
@@ -2679,7 +2694,7 @@ export class SessionManager {
   /** Remove a session from the index and delete its history directory. */
   static async deleteSession(sessionId: string): Promise<boolean> {
     return withHistoryLock('__index__', async () => {
-      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const idx = await loadSessionsIndex()
       const before = idx.sessions.length
       idx.sessions = idx.sessions.filter((s) => s.id !== sessionId)
       if (idx.sessions.length === before) return false
@@ -2696,7 +2711,7 @@ export class SessionManager {
     const clean = title.trim()
     let result: boolean | null = null
     await withHistoryLock('__index__', async () => {
-      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const idx = await loadSessionsIndex()
       const s = idx.sessions.find((x) => x.id === sessionId)
       if (s) {
         if (clean) {
@@ -2715,7 +2730,7 @@ export class SessionManager {
   static async togglePin(sessionId: string): Promise<boolean | null> {
     let result: boolean | null = null
     await withHistoryLock('__index__', async () => {
-      const idx = (await readJson<{ sessions: SessionMeta[] }>(SESSIONS_INDEX)) ?? { sessions: [] }
+      const idx = await loadSessionsIndex()
       const s = idx.sessions.find((x) => x.id === sessionId)
       if (s) {
         s.pinned = !s.pinned

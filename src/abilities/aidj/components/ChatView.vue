@@ -957,17 +957,22 @@ async function handlePlayAll(songs: { name: string; path: string }[]): Promise<v
   try {
     const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
     const status = statusRes?.status as { player?: string } | undefined
+    const mode = statusRes?.mode as string | undefined
     const resolved = status?.player || ''
     const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
 
-    const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
-    const tasks = (list?.tasks ?? []) as { player: string }[]
-    const occupied = player ? tasks.some((t) => t.player === player) : false
+    // MPRIS-only occupancy check — the built-in web player owns its queue, and
+    // the dbus-gated query would just log "unknown command" in web mode.
+    if (mode !== 'web') {
+      const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
+      const tasks = (list?.tasks ?? []) as { player: string }[]
+      const occupied = player ? tasks.some((t) => t.player === player) : false
 
-    if (occupied) {
-      pendingPlayAll.value = songs
-      playAllConfirm.value = true
-      return
+      if (occupied) {
+        pendingPlayAll.value = songs
+        playAllConfirm.value = true
+        return
+      }
     }
   } catch {
     /* fall through to direct send */
@@ -1000,8 +1005,18 @@ async function handleContinuous(songs: { name: string; path: string }[]): Promis
   try {
     const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
     const status = statusRes?.status as { player?: string } | undefined
+    const mode = statusRes?.mode as string | undefined
     const resolved = status?.player || ''
     const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
+
+    // Web backend: the built-in engine auto-advances its queue, so "continuous"
+    // is just sending — there is no MPRIS continuous task to manage in web mode.
+    if (mode === 'web') {
+      await window.cockpit.command('aidj.send', { path: songs.map((s) => s.path) })
+      showSnack(`已加入内置播放器队列 (${songs.length} 首)`)
+      pollStatus()
+      return
+    }
 
     const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
     const tasks = (list?.tasks ?? []) as { taskId: string; player: string }[]

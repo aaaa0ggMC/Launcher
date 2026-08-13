@@ -4,6 +4,7 @@ import {
   provide,
   ref,
   shallowRef,
+  markRaw,
   onMounted,
   onBeforeUnmount,
   watch,
@@ -277,7 +278,7 @@ const abilities = computed<SidebarAbility[]>(() => {
       icon: meta.icon ?? null,
       category: t(`ability.${meta.id}.category`, meta.category),
       keepAlive: meta.keepAlive !== false,
-      comp: meta.component
+      comp: meta.component ? markRaw(meta.component) : undefined
     }))
     .sort((a, b) => {
       if (mode !== 'alpha') {

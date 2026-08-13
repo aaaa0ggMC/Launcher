@@ -55,6 +55,25 @@ export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
 }
 
 /**
+ * Serialized atomic JSON write — same as `writeJsonAtomic`, but writes to the
+ * same target are queued. On Windows, concurrent renames to one destination
+ * race (MoveFileEx REPLACE_EXISTING can EPERM when another replace is mid-way),
+ * so bursts like the settings page firing a watcher per field can fail the
+ * trailing write. Queuing guarantees last-writer-wins deterministically.
+ */
+const writeQueues = new Map<string, Promise<void>>()
+
+export async function writeJsonAtomicSerialized(p: string, data: unknown): Promise<void> {
+  const prev = writeQueues.get(p) ?? Promise.resolve()
+  const task = prev.then(() => writeJsonAtomic(p, data))
+  writeQueues.set(
+    p,
+    task.catch(() => {})
+  )
+  return task
+}
+
+/**
  * Write arbitrary text to a file (exported console logs, sessions, ...).
  * Shared by every ability's export command so file-writing stays in one place
  * instead of each ability re-implementing writeFile.
