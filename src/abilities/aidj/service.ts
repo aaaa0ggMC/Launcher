@@ -564,20 +564,23 @@ export function resolveLyricForTrack(track: string, lyrics: Map<string, string>)
   if (!track) return null
   const t = track.trim()
   if (lyrics.has(t)) return lyrics.get(t) ?? null
-  const base = t
-    .replace(/\s+-\s+.+$/, '')
-    .replace(/[（）()【】[\]]/g, ' ')
-    .trim()
-  if (base && lyrics.has(base)) return lyrics.get(base) ?? null
-  // Aggressive fold: drop every non-letter/number (dashes, brackets, full-width
-  // punctuation) so "EarnedIt(FiftyShadesOfGrey)" hits
-  // "The Weeknd - Earned It (Fifty Shades Of Grey)".
-  const compact = base.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+  const cleaned = t.replace(/[（）()【】[\]]/g, ' ')
+  // "Artist - Title" → anchor the fuzzy match on the LAST segment (the title).
+  // Anchoring on the artist would make "The Weeknd - Acquainted" match every
+  // Weeknd song's karaoke (Starboy / Stargirl Interlude), showing wrong lyrics.
+  const parts = cleaned.split(/\s+-\s+/).filter(Boolean)
+  const title = parts.length > 1 ? parts[parts.length - 1].trim() : cleaned.trim()
+  if (title && lyrics.has(title)) return lyrics.get(title) ?? null
+  const compact = title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
   let best: string | null = null
-  if (compact) {
+  let bestLen = Infinity
+  if (compact.length >= 3) {
     for (const [name, lrc] of lyrics) {
       const key = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
-      if (key.includes(compact) && (best === null || key.length < best.length)) best = lrc
+      if (key.includes(compact) && key.length < bestLen) {
+        best = lrc
+        bestLen = key.length
+      }
     }
   }
   return best
