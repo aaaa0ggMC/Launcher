@@ -1306,6 +1306,9 @@ async function doFork(): Promise<void> {
   windowSize.value = 60
   inputText.value = ''
   sending.value = false
+  // 分支后成为新会话：token 计数归零，memory 由 pollStatus 拉取。
+  lastTokens.value = { prompt: 0, completion: 0 }
+  lastContext.value = { prompt: 0, completion: 0 }
   scrollToBottom()
   showSnack(`已分支为「${r.title || 'Copy'}」，从此处继续`)
 }
@@ -1352,7 +1355,7 @@ async function loadSession(sessionId: string): Promise<boolean> {
   try {
     const result = (await window.cockpit.command('aidj.sessions.open', {
       id: sessionId
-    })) as { ok?: boolean; error?: string; messages?: ChatMessage[] }
+    })) as { ok?: boolean; error?: string; messages?: ChatMessage[]; memory?: number }
     if (!result?.ok) {
       showSnack(result?.error || t('aidj.chat.session_load_failed', '会话加载失败'), 'error')
       return false
@@ -1365,6 +1368,11 @@ async function loadSession(sessionId: string): Promise<boolean> {
     sending.value = false
     inputText.value = ''
     expanded.value = false
+    // 载入另一个会话：token 计数归零（后端已重置），memory 立即反映
+    // 新会话已播记忆（最近 100 首），不再残留上一个会话的计数。
+    lastTokens.value = { prompt: 0, completion: 0 }
+    lastContext.value = { prompt: 0, completion: 0 }
+    if (typeof result.memory === 'number') sbMemory.value = result.memory
     scrollToBottom()
     showSnack(t('aidj.chat.session_loaded', '已载入会话'))
     return true
@@ -1398,6 +1406,10 @@ async function newChat(): Promise<void> {
   expanded.value = false
   sending.value = false
   thinking.value = false
+  // 换 session 后状态栏立即归零：memory 与 token 计数不能残留上一个会话的值。
+  sbMemory.value = 0
+  lastTokens.value = { prompt: 0, completion: 0 }
+  lastContext.value = { prompt: 0, completion: 0 }
   scrollToBottom()
   showSnack(t('aidj.chat_new', '已新建会话'))
 }

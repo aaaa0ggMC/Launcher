@@ -1419,7 +1419,7 @@ const commands: CommandSpec[] = [
       _sessionId = id
       abortCurrentRequest()
       log.info('Session loaded', { id, messages: uiMessages.length, bothCount })
-      return { ok: true, messages: uiMessages, sessionId: id }
+      return { ok: true, messages: uiMessages, sessionId: id, memory: session.playedSongs.size }
     }
   },
   {
@@ -1470,7 +1470,14 @@ const commands: CommandSpec[] = [
       const ok = await SessionManager.deleteSession(id)
       if (ok && _sessionId === id) {
         _sessionId = ''
-        _session?.refresh(true)
+        const s = _session
+        if (s) {
+          s.refresh(true)
+          s.promptTokens = 0
+          s.completionTokens = 0
+          s.lastPromptTokens = 0
+          s.lastCompletionTokens = 0
+        }
       }
       return ok ? { ok: true } : { ok: false, error: '会话不存在' }
     }
@@ -1573,10 +1580,21 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.session-new',
-    description: '新建会话：中止当前请求并清空会话上下文，下次生成从全新会话开始',
+    description:
+      '新建会话：中止当前请求并重置会话状态（清空上下文、已播记忆与计费），下次生成从全新会话开始',
     run: async () => {
       abortCurrentRequest()
       _sessionId = ''
+      const session = _session
+      if (session) {
+        // 换 session 必须重置必要的 status：已播记忆（memory）、上下文与计费，
+        // 否则新会话会继承上一个会话的已播曲目、历史与 token 计数。
+        session.refresh(true)
+        session.promptTokens = 0
+        session.completionTokens = 0
+        session.lastPromptTokens = 0
+        session.lastCompletionTokens = 0
+      }
       return { ok: true }
     }
   },
