@@ -17,6 +17,8 @@ export interface AidjConfig {
      * (built-in HTML5 player). Absent → platform default (Linux: dbus, else web).
      */
     player_mode?: 'dbus' | 'web'
+    /** NCM source: 'auto' external-first w/ built-in fallback | 'external' only | 'builtin' only */
+    ncm_mode?: 'auto' | 'external' | 'builtin'
     record_freq: boolean
     dynamic_balance_volume: boolean
     sound_adjust_method: 'lufs' | 'linear'
@@ -74,6 +76,7 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     model: '',
     auto_play: true,
     dbus_target: 'vlc',
+    ncm_mode: 'auto',
     record_freq: true,
     dynamic_balance_volume: true,
     sound_adjust_method: 'lufs',

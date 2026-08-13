@@ -47,6 +47,12 @@ const metadataModel = ref('')
 const baseUrl = ref('')
 const apiKey = ref('')
 const ncmBaseUrl = ref('')
+const ncmMode = ref<'auto' | 'external' | 'builtin'>('auto')
+const ncmModeItems = [
+  { title: t('aidj.settings.ncm_mode_auto', 'Auto（外部优先，内置兜底）'), value: 'auto' },
+  { title: t('aidj.settings.ncm_mode_external', '外部服务（仅 NCM API 地址）'), value: 'external' },
+  { title: t('aidj.settings.ncm_mode_builtin', '内置（进程内直连网易）'), value: 'builtin' }
+]
 const dbusTarget = ref('vlc')
 const playerMode = ref<'dbus' | 'web' | ''>('')
 const isLinux = window.cockpit?.platform === 'linux'
@@ -102,6 +108,7 @@ onMounted(async () => {
   baseUrl.value = (ai.base_url as string) || ''
   apiKey.value = (sec.api_key as string) || ''
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
+  ncmMode.value = (prefs.ncm_mode as 'auto' | 'external' | 'builtin') || 'auto'
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
   playerMode.value = (prefs.player_mode as 'dbus' | 'web' | undefined) ?? ''
   musicFolders.value = Array.isArray(cfg.music_folders) ? (cfg.music_folders as string[]) : []
@@ -267,6 +274,7 @@ watch(metadataModel, (v) => update('ai_settings.metadata_model', v))
 watch(baseUrl, (v) => update('ai_settings.base_url', v))
 watch(apiKey, (v) => update('secrets.api_key', v))
 watch(ncmBaseUrl, (v) => update('ncm_base_url', v))
+watch(ncmMode, (v) => update('preferences.ncm_mode', v))
 watch(dbusTarget, (v) => update('preferences.dbus_target', v))
 watch(playerMode, (v) => {
   if (!v) return
@@ -417,11 +425,31 @@ function resetDj(): void {
               v-model="ncmBaseUrl"
               :label="t('aidj.settings.ncm_url', 'NCM API 地址')"
               placeholder="http://localhost:3000"
+              :disabled="ncmMode === 'builtin'"
               hide-details
               density="compact"
               variant="outlined"
             />
           </v-col>
+          <v-col cols="12" md="6">
+            <v-select
+              v-model="ncmMode"
+              :items="ncmModeItems"
+              :label="t('aidj.settings.ncm_mode', '歌词来源')"
+              :hint="
+                t(
+                  'aidj.settings.ncm_mode_hint',
+                  'auto：外部服务优先，不可达时用内置；内置为进程内直连网易'
+                )
+              "
+              persistent-hint
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+        <v-row dense class="mt-2">
           <v-col cols="12" md="6">
             <v-text-field
               v-model="dbusTarget"

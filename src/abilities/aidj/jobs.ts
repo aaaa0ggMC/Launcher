@@ -13,6 +13,7 @@ import {
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
+  setNcmMode,
   initDbusManager,
   setPersistentSession,
   PersistentSession,
@@ -48,6 +49,7 @@ registerJobHandler(
     }
 
     setNcmBaseUrl(config.ncm_base_url)
+    setNcmMode(config.preferences?.ncm_mode)
     await ensureAidjDir()
 
     const client = new OpenAI({
@@ -908,6 +910,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   }
 
   setNcmBaseUrl(config.ncm_base_url)
+  setNcmMode(config.preferences?.ncm_mode)
   await ensureAidjDir()
 
   const lib = await loadLibrary()
@@ -1320,6 +1323,7 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
     return
   }
   setNcmBaseUrl(config.ncm_base_url)
+  setNcmMode(config.preferences?.ncm_mode)
   await ensureAidjDir()
 
   const client = new OpenAI({

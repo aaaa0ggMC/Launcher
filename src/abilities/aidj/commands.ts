@@ -13,6 +13,7 @@ import {
   findMissingSongs,
   syncMetadata,
   setNcmBaseUrl,
+  setNcmMode,
   getPlaylistsDir,
   DBusManager,
   DJSession,
@@ -386,6 +387,7 @@ async function ensureInit(): Promise<{
   }
 
   setNcmBaseUrl(config.ncm_base_url)
+  setNcmMode(config.preferences?.ncm_mode)
 
   let client = _client
   if (!client) {

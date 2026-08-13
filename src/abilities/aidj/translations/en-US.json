@@ -360,5 +360,10 @@
   "aidj.contextmenu.revert": "Revert to here",
   "aidj.contextmenu.fork": "Fork from here",
   "aidj.modelselect.unavailable": "Model unavailable",
-  "aidj.modelselect.model": "Model"
+  "aidj.modelselect.model": "Model",
+  "aidj.settings.ncm_mode": "Lyric source",
+  "aidj.settings.ncm_mode_hint": "auto: external service first, built-in fallback; built-in connects to Netease in-process",
+  "aidj.settings.ncm_mode_auto": "Auto (external first, built-in fallback)",
+  "aidj.settings.ncm_mode_external": "External service (NCM API URL only)",
+  "aidj.settings.ncm_mode_builtin": "Built-in (in-process, direct to Netease)"
 }

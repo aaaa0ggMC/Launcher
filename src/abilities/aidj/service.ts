@@ -687,13 +687,20 @@ export function setNcmBaseUrl(url: string): void {
   ncmBaseUrl = url
 }
 
+let ncmMode: 'auto' | 'external' | 'builtin' = 'auto'
+
+export function setNcmMode(mode: 'auto' | 'external' | 'builtin' | undefined): void {
+  ncmMode = mode ?? 'auto'
+}
+
 export async function searchNcmApi(
   keywords: string
 ): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+  if (ncmMode === 'builtin') return searchNcmApiBuiltin(keywords)
   // auto: prefer the configured external NCM service; fall back to the built-in
   // (vendored) Netease access whenever the external one is unreachable.
   const external = await searchNcmApiExternal(keywords)
-  if (!external.networkError) return external
+  if (ncmMode === 'external' || !external.networkError) return external
   log.info('NCM external service unreachable — falling back to built-in', { keywords })
   return searchNcmApiBuiltin(keywords)
 }

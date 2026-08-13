@@ -360,5 +360,10 @@
   "aidj.contextmenu.revert": "回退到此处",
   "aidj.contextmenu.fork": "从此处分支 (Fork)",
   "aidj.modelselect.unavailable": "模型不可用",
-  "aidj.modelselect.model": "模型"
+  "aidj.modelselect.model": "模型",
+  "aidj.settings.ncm_mode": "歌词来源",
+  "aidj.settings.ncm_mode_hint": "auto：外部服务优先，不可达时用内置；内置为进程内直连网易",
+  "aidj.settings.ncm_mode_auto": "Auto（外部优先，内置兜底）",
+  "aidj.settings.ncm_mode_external": "外部服务（仅 NCM API 地址）",
+  "aidj.settings.ncm_mode_builtin": "内置（进程内直连网易）"
 }
