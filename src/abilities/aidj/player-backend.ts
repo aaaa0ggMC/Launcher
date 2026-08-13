@@ -192,7 +192,11 @@ export class WebPlayerBackend implements PlayerBackend {
     const config = await loadAidjConfig()
     this.volbalEnabled = config?.preferences.dynamic_balance_volume ?? false
     this.volbalMethod = config?.preferences.sound_adjust_method ?? 'lufs'
-    this.volbalCurve = config?.preferences.volume_curve ?? 3.0
+    // HTML5 <audio>.volume is LINEAR amplitude (f(v) = v), so the volume_curve
+    // knob — tuned for external MPRIS players' non-linear (≈cubic) response —
+    // must be neutralized here: curve 1.0 → computeVolume = baseVol * gain,
+    // i.e. true linear loudness balance.
+    this.volbalCurve = 1.0
     this.recordFreq = config?.preferences.record_freq ?? false
     this.volCache = new LoudnessCache(this.volbalMethod, this.volbalCurve)
   }

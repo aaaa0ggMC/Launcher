@@ -1,4 +1,5 @@
 import { join } from 'path'
+import { existsSync } from 'fs'
 import chokidar from 'chokidar'
 import type { AppEntry, AppRegistryFile } from './types'
 import { CONFIG_JSON, abilityConfigPath } from '../../main/process/paths'
@@ -20,6 +21,17 @@ export async function getAppsConfig(): Promise<{
   searchRoots: SearchRoot[]
   confirmBeforeLaunch: boolean
 }> {
+  if (!existsSync(APPS_CONFIG_PATH)) {
+    // First run — materialize the config file with defaults so startup watchers
+    // and the settings UI get a real file instead of a spurious ENOENT warn.
+    const defaults = { searchRoots: [] as SearchRoot[], confirmBeforeLaunch: false }
+    try {
+      await writeJsonAtomic(APPS_CONFIG_PATH, defaults)
+    } catch (e) {
+      log.warn('create apps config failed', { error: String(e) })
+    }
+    return defaults
+  }
   const cfg = await readJson<{
     searchRoots?: SearchRoot[]
     confirmBeforeLaunch?: boolean
