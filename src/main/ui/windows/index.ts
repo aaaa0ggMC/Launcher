@@ -23,8 +23,11 @@ const abilityViews = import.meta.glob('../../../abilities/*/windows/*.vue') as R
 /** Resolve a child-window view key to its lazy component loader. */
 export function resolveWindowView(view: string): WindowViewLoader | undefined {
   const builtinKey = './' + view + '.vue'
-  const abilityKey = '../../../abilities/' + view + '.vue'
   const builtin = builtinViews[builtinKey]
   if (builtin) return builtin
+  // Ability-owned windows live in `<ability>/windows/<File>.vue`; the view key
+  // is `<ability>/<File>` (`aidj/LyricsWindow`), so insert the `/windows/`
+  // segment to match the glob key (`../../../abilities/aidj/windows/LyricsWindow.vue`).
+  const abilityKey = '../../../abilities/' + view.replace('/', '/windows/') + '.vue'
   return abilityViews[abilityKey]
 }

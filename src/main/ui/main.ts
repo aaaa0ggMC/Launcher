@@ -83,13 +83,18 @@ forwardConsoleErrors()
  * guard are all skipped).
  */
 async function mountRoot(): Promise<void> {
-  let root: Component = App
   const view = new URLSearchParams(location.search).get('view')
+  let root: Component = App
   if (view) {
     const loader = resolveWindowView(view)
     if (loader) {
       const mod = await loader()
       root = mod.default
+    } else {
+      // Child window with an unresolvable view — NEVER fall back to the full
+      // App shell; mount a dedicated failure window so the problem is visible.
+      const fb = await import('./windows/FallbackWindow.vue')
+      root = fb.default
     }
   }
   createApp(root).use(vuetify).mount('#app')
