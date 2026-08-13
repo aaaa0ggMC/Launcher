@@ -25,6 +25,7 @@ asarUnpack:
   - scripts/**
 win:
   executableName: cockpit
+  icon: build/icon.ico
   target:
     - portable
     - nsis
