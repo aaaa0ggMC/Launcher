@@ -60,6 +60,49 @@ export interface AidjConfig {
 }
 
 /**
+ * Full default AIDJ config — materialized on first run when
+ * `~/.config/LinuxCockpit/aidj/config.json` doesn't exist yet, so the settings
+ * UI gets a real object to mutate + persist instead of every update/save
+ * bailing with "配置未加载".
+ */
+export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
+  music_folders: [],
+  ncm_base_url: 'http://localhost:3000',
+  secrets: { api_key: '' },
+  ai_settings: { base_url: 'http://localhost:1145/v1', metadata_model: '' },
+  preferences: {
+    model: '',
+    auto_play: true,
+    dbus_target: 'vlc',
+    record_freq: true,
+    dynamic_balance_volume: true,
+    sound_adjust_method: 'lufs',
+    volume_curve: 3.0,
+    metadata_concurrency: 8,
+    context_mode: 'discard',
+    max_history_length: 10,
+    reconnect_minutes: 0,
+    network_retry_minutes: 0,
+    library_injects: {
+      genre: true,
+      emotion: true,
+      language: true,
+      loudness: true,
+      review: true
+    },
+    status_bar: {
+      tokens: 1,
+      context: 2,
+      tracks: 3,
+      memory: 4,
+      volbal: 5,
+      record_freq: 6,
+      backgrounds: 7
+    }
+  }
+}
+
+/**
  * Desktop-lyrics display config, mirroring `vp wshowlyrics -F '<font> <size>' -a
  * <anchor> -m <margin> -b <bg> -f <fg>`. Colors are RRGGBBAA hex (alpha last).
  *

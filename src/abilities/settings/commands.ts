@@ -1,8 +1,10 @@
 import { BrowserWindow } from 'electron'
+import { existsSync } from 'fs'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { CONFIG_JSON } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
+import { registerStartupHook } from '../../main/process/startup'
 import { loadUsageStats, recordUsage, clearUsageStats } from '../../main/process/usage-stats'
 import {
   setAbilityEnabled,
@@ -12,6 +14,45 @@ import {
 import { getLoadedAbilityIds } from '../../main/process/abilities-loader'
 
 const log = makeLogger('settings')
+
+/** Default global shell config — materialized on first run when config.json
+ *  doesn't exist yet, so the file exists for the settings UI + startup reads
+ *  (and the ENOENT warn at every launch goes away). */
+const DEFAULT_GLOBAL_CONFIG = {
+  theme: 'dark',
+  language: 'zh',
+  uiScale: 1.1,
+  animations: {
+    modernMotion: true,
+    enabled: true,
+    pageTransition: 'fade',
+    themeTransition: 'corner'
+  },
+  window: {
+    width: 1280,
+    height: 800,
+    frameless: true,
+    rounded: true,
+    background: 'transparent',
+    backgroundImage: '',
+    backgroundOpacity: 1,
+    fuseAlpha: 0.85,
+    fuseBlur: 28
+  },
+  runtime: { terminal: ['konsole', '--hold', '-e'], confirmBeforeLaunch: true },
+  sidebar: { default: 'cli', sort: 'alpha' }
+} as const
+
+registerStartupHook(async () => {
+  if (!existsSync(CONFIG_JSON)) {
+    try {
+      await writeJsonAtomic(CONFIG_JSON, DEFAULT_GLOBAL_CONFIG)
+      log.info('created default config.json')
+    } catch (e) {
+      log.warn('create config.json failed', { error: String(e) })
+    }
+  }
+})
 
 async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
   try {

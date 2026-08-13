@@ -5,7 +5,7 @@ import { promisify } from 'util'
 import OpenAI from 'openai'
 import { makeLogger } from '../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../main/process/paths'
-import { readJson, writeJsonAtomic, writeTextFile } from '../../main/process/util'
+import { readJson, readOrCreateJson, writeJsonAtomic, writeTextFile } from '../../main/process/util'
 import type {
   AidjConfig,
   SongMeta,
@@ -28,7 +28,8 @@ import {
   PLAYLISTS_DIR,
   SEPARATOR,
   DEFAULT_PERSONA,
-  DEFAULT_LYRICS_PAGE_CFG
+  DEFAULT_LYRICS_PAGE_CFG,
+  DEFAULT_AIDJ_CONFIG
 } from './types'
 
 const log = makeLogger('aidj')
@@ -104,7 +105,7 @@ export async function withNetworkRetry<T>(
 }
 
 export async function loadAidjConfig(): Promise<AidjConfig | null> {
-  return readJson<AidjConfig>(abilityConfigPath('aidj'))
+  return readOrCreateJson(abilityConfigPath('aidj'), () => DEFAULT_AIDJ_CONFIG)
 }
 
 /** Persist the current AIDJ config to ~/.config/LinuxCockpit/aidj/config.json. */

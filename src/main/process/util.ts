@@ -1,6 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { readFile, writeFile, mkdir, rename } from 'fs/promises'
+import { existsSync } from 'fs'
 import { dirname } from 'path'
 import { makeLogger } from './logger'
 
@@ -15,6 +16,29 @@ export async function readJson<T>(p: string): Promise<T | null> {
     log.warn('readJson failed', { path: p, error: e instanceof Error ? e.message : String(e) })
     return null
   }
+}
+
+/**
+ * Read a JSON config file, or materialize it when missing — like `mkdir -p`
+ * for configs. If `p` doesn't exist, `create()` is called and the result is
+ * deep-created (`writeJsonAtomic` mkdirs every parent) and returned, so a
+ * config always exists after the first read. A corrupt existing file falls
+ * back to `create()` in memory WITHOUT overwriting it (the next save repairs).
+ *
+ * Every ability settings UI should go through this instead of raw `readJson`
+ * + bailing on null, so fresh installs never dead-end on a missing config.
+ */
+export async function readOrCreateJson<T>(p: string, create: () => T): Promise<T> {
+  if (!existsSync(p)) {
+    const defaults = create()
+    try {
+      await writeJsonAtomic(p, defaults)
+    } catch (e) {
+      log.warn('create json failed', { path: p, error: String(e) })
+    }
+    return defaults
+  }
+  return (await readJson<T>(p)) ?? create()
 }
 
 /** Atomic JSON write (write temp then rename). The temp name must be unique

@@ -1,9 +1,8 @@
 import { join } from 'path'
-import { existsSync } from 'fs'
 import chokidar from 'chokidar'
 import type { AppEntry, AppRegistryFile } from './types'
 import { CONFIG_JSON, abilityConfigPath } from '../../main/process/paths'
-import { readJson, writeJsonAtomic } from '../../main/process/util'
+import { readJson, readOrCreateJson, writeJsonAtomic } from '../../main/process/util'
 import { makeLogger } from '../../main/process/logger'
 import { getBroadcast } from '../../main/process/broadcast'
 import { registerStartupHook } from '../../main/process/startup'
@@ -21,24 +20,13 @@ export async function getAppsConfig(): Promise<{
   searchRoots: SearchRoot[]
   confirmBeforeLaunch: boolean
 }> {
-  if (!existsSync(APPS_CONFIG_PATH)) {
-    // First run — materialize the config file with defaults so startup watchers
-    // and the settings UI get a real file instead of a spurious ENOENT warn.
-    const defaults = { searchRoots: [] as SearchRoot[], confirmBeforeLaunch: false }
-    try {
-      await writeJsonAtomic(APPS_CONFIG_PATH, defaults)
-    } catch (e) {
-      log.warn('create apps config failed', { error: String(e) })
-    }
-    return defaults
-  }
-  const cfg = await readJson<{
+  const cfg = await readOrCreateJson<{
     searchRoots?: SearchRoot[]
     confirmBeforeLaunch?: boolean
-  }>(APPS_CONFIG_PATH)
+  }>(APPS_CONFIG_PATH, () => ({ searchRoots: [], confirmBeforeLaunch: false }))
   return {
-    searchRoots: cfg?.searchRoots ?? [],
-    confirmBeforeLaunch: cfg?.confirmBeforeLaunch ?? false
+    searchRoots: cfg.searchRoots ?? [],
+    confirmBeforeLaunch: cfg.confirmBeforeLaunch ?? false
   }
 }
 

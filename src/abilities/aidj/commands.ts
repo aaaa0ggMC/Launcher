@@ -55,7 +55,7 @@ import type {
   AidjLyricsPageConfig,
   LyricPlaybackState
 } from './types'
-import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG } from './types'
+import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG, DEFAULT_AIDJ_CONFIG } from './types'
 import './jobs'
 import {
   getContinuousTasks,
@@ -1049,6 +1049,7 @@ const commands: CommandSpec[] = [
     run: async (ctx) => {
       const model = ctx.named.set as string
       if (!model) return { ok: false, error: '需要 --set 参数指定模型名称' }
+      if (!_config) _config = await loadAidjConfig()
       const config = _config
       if (!config) return { ok: false, error: '配置未加载' }
       config.preferences.model = model
@@ -1657,7 +1658,10 @@ const commands: CommandSpec[] = [
     usage: 'aidj.update-config --path <key> --value <json>',
     run: async (ctx) => {
       if (!_config) {
-        _config = await loadAidjConfig()
+        // loadAidjConfig materializes a default file when missing; the inline
+        // fallback covers any edge where it still couldn't be built — one
+        // update-config is then enough to bootstrap the config deep-created.
+        _config = (await loadAidjConfig()) ?? { ...DEFAULT_AIDJ_CONFIG }
       }
       const path = ctx.named.path as string
       const value = ctx.named.value
