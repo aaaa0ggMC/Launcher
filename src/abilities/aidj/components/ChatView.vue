@@ -10,7 +10,7 @@ import {
   nextTick,
   watch
 } from 'vue'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
 import ContextMenu from './ContextMenu.vue'
@@ -21,6 +21,16 @@ defineOptions({ name: 'cockpit-aidj-chat' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
@@ -197,7 +207,7 @@ async function runPushCommand(
     } else {
       messages.value.push({
         role: 'assistant',
-        content: `错误: ${r?.error || '请求失败'}`,
+        content: `错误: ${r?.error || t('aidj.chat.request_failed', '请求失败')}`,
         timestamp: Date.now(),
         uid: makeUid()
       })
@@ -266,7 +276,7 @@ async function runCurateCommand(count: number, userText: string): Promise<void> 
     } else {
       messages.value[placeholderIdx] = {
         role: 'assistant',
-        content: `错误: ${r?.error || '请求失败'}`,
+        content: `错误: ${r?.error || t('aidj.chat.request_failed', '请求失败')}`,
         timestamp: Date.now(),
         uid: messages.value[placeholderIdx]?.uid ?? makeUid()
       }
@@ -369,7 +379,7 @@ async function handleCommand(text: string): Promise<void> {
       } else {
         messages.value.push({
           role: 'system',
-          content: `错误: ${r?.error || '分析失败'}`,
+          content: `错误: ${r?.error || t('aidj.chat.analyse_failed', '分析失败')}`,
           timestamp: Date.now(),
           uid: makeUid()
         })
@@ -465,7 +475,7 @@ async function runFilterCommand(query: string, userText: string): Promise<void> 
     } else {
       messages.value[placeholderIdx] = {
         role: 'system',
-        content: `错误: ${r?.error || '查询失败'}`,
+        content: `错误: ${r?.error || t('aidj.chat.query_failed', '查询失败')}`,
         timestamp: Date.now(),
         uid: uid ?? makeUid()
       }
@@ -889,7 +899,7 @@ async function sendMessage(): Promise<void> {
       if (pl && pl.length > 0) {
         messages.value[placeholderIdx] = {
           role: 'assistant',
-          content: (result.intro as string) || '推荐歌单',
+          content: (result.intro as string) || t('aidj.chat.playlist_recommended', '推荐歌单'),
           playlist: pl as ChatMessage['playlist'],
           timestamp: Date.now(),
           uid: placeholderUid ?? makeUid()
@@ -910,7 +920,7 @@ async function sendMessage(): Promise<void> {
       } else {
         messages.value[placeholderIdx] = {
           role: 'assistant',
-          content: '（AI 无输出）',
+          content: t('aidj.chat.no_output', '（AI 无输出）'),
           timestamp: Date.now(),
           uid: placeholderUid ?? makeUid()
         }
@@ -918,7 +928,7 @@ async function sendMessage(): Promise<void> {
     } else {
       messages.value[placeholderIdx] = {
         role: 'assistant',
-        content: `错误: ${(result?.error as string) || '请求失败'}`,
+        content: `错误: ${(result?.error as string) || t('aidj.chat.request_failed', '请求失败')}`,
         timestamp: Date.now(),
         uid: messages.value[placeholderIdx]?.uid ?? makeUid()
       }
@@ -1009,7 +1019,9 @@ async function handleContinuous(songs: { name: string; path: string }[]): Promis
     // is just sending — there is no MPRIS continuous task to manage in web mode.
     if (mode === 'web') {
       await window.cockpit.command('aidj.send', { path: songs.map((s) => s.path) })
-      showSnack(`已加入内置播放器队列 (${songs.length} 首)`)
+      showSnack(
+        tt('aidj.chat.queued_web', { n: songs.length }, `已加入内置播放器队列 (${songs.length} 首)`)
+      )
       pollStatus()
       return
     }
@@ -1024,9 +1036,15 @@ async function handleContinuous(songs: { name: string; path: string }[]): Promis
         songs: JSON.stringify(songs.map((s) => ({ name: s.name, path: s.path })))
       })) as Record<string, unknown>
       if (r?.ok) {
-        showSnack(`已加入连续播放队列 (共 ${r.total ?? songs.length} 首)`)
+        const total = (r.total as number) ?? songs.length
+        showSnack(
+          tt('aidj.chat.queued_continuous', { n: total }, `已加入连续播放队列 (共 ${total} 首)`)
+        )
       } else {
-        showSnack(`加入队列失败: ${(r?.error as string) || '未知错误'}`, 'error')
+        showSnack(
+          `${t('aidj.chat.enqueue_failed', '加入队列失败')}: ${(r?.error as string) || t('aidj.chat.unknown_error', '未知错误')}`,
+          'error'
+        )
       }
       return
     }
@@ -1038,12 +1056,24 @@ async function handleContinuous(songs: { name: string; path: string }[]): Promis
       tags: ['aidj-playback']
     })) as Record<string, unknown>
     if (r?.ok && r.task) {
-      showSnack(`已启动连续播放后台任务 (${songs.length} 首)`)
+      showSnack(
+        tt(
+          'aidj.chat.continuous_started',
+          { n: songs.length },
+          `已启动连续播放后台任务 (${songs.length} 首)`
+        )
+      )
     } else {
-      showSnack(`启动连续播放失败: ${(r?.error as string) || '未知错误'}`, 'error')
+      showSnack(
+        `${t('aidj.chat.continuous_failed', '启动连续播放失败')}: ${(r?.error as string) || t('aidj.chat.unknown_error', '未知错误')}`,
+        'error'
+      )
     }
   } catch (e: unknown) {
-    showSnack(`推送到后台失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    showSnack(
+      `${t('aidj.chat.push_failed', '推送到后台失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
   }
 }
 
@@ -1117,14 +1147,20 @@ async function runPersistCommand(prompt: string): Promise<void> {
       if (task?.id) persistentTaskId.value = task.id
       showSnack(
         sessionId
-          ? '已分支当前会话并启动持久播放（可在后台面板继续对话）'
-          : '已在后台启动持续会话，可打开后台面板继续对话'
+          ? t('aidj.chat.persist_forked', '已分支当前会话并启动持久播放（可在后台面板继续对话）')
+          : t('aidj.chat.persist_started', '已在后台启动持续会话，可打开后台面板继续对话')
       )
     } else {
-      showSnack(`启动持续会话失败: ${(result?.error as string) || '未知错误'}`, 'error')
+      showSnack(
+        `${t('aidj.chat.persist_start_failed', '启动持续会话失败')}: ${(result?.error as string) || t('aidj.chat.unknown_error', '未知错误')}`,
+        'error'
+      )
     }
   } catch (e: unknown) {
-    showSnack(`启动持续会话失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    showSnack(
+      `${t('aidj.chat.persist_start_failed', '启动持续会话失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
   }
 }
 
@@ -1133,9 +1169,9 @@ async function stopPersistent(): Promise<void> {
   if (persistentTaskId.value) {
     await window.cockpit.command('background.stop', { id: persistentTaskId.value }).catch(() => {})
     persistentTaskId.value = ''
-    showSnack('已停止持久会话')
+    showSnack(t('aidj.chat.persist_stopped', '已停止持久会话'))
   } else {
-    showSnack('没有运行中的持久会话', 'warning')
+    showSnack(t('aidj.chat.persist_none', '没有运行中的持久会话'), 'warning')
   }
 }
 
@@ -1243,7 +1279,10 @@ async function doFork(): Promise<void> {
     }
   }
   if (keep <= 0) {
-    showSnack('无法从此处分支：该消息之前没有可保留的对话', 'warning')
+    showSnack(
+      t('aidj.chat.fork_no_history', '无法从此处分支：该消息之前没有可保留的对话'),
+      'warning'
+    )
     return
   }
   const r = (await window.cockpit.command('aidj.session-fork', {
@@ -1257,7 +1296,7 @@ async function doFork(): Promise<void> {
     error?: string
   }
   if (!r?.ok) {
-    showSnack(r?.error || '分支失败', 'error')
+    showSnack(r?.error || t('aidj.chat.fork_failed', '分支失败'), 'error')
     return
   }
   messages.value = (r.messages ?? []).map((m) => ({ ...m, uid: makeUid() }))
@@ -1312,7 +1351,7 @@ async function loadSession(sessionId: string): Promise<boolean> {
       id: sessionId
     })) as { ok?: boolean; error?: string; messages?: ChatMessage[] }
     if (!result?.ok) {
-      showSnack(result?.error || '会话加载失败', 'error')
+      showSnack(result?.error || t('aidj.chat.session_load_failed', '会话加载失败'), 'error')
       return false
     }
     messages.value = (result.messages ?? []).map((m) => ({
@@ -1324,10 +1363,13 @@ async function loadSession(sessionId: string): Promise<boolean> {
     inputText.value = ''
     expanded.value = false
     scrollToBottom()
-    showSnack('已载入会话')
+    showSnack(t('aidj.chat.session_loaded', '已载入会话'))
     return true
   } catch (e) {
-    showSnack(`会话加载失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    showSnack(
+      `${t('aidj.chat.session_load_failed', '会话加载失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
     return false
   } finally {
     unsub()
@@ -1391,7 +1433,11 @@ defineExpose({ toMarkdown, loadSession, newChat })
             variant="flat"
             :color="netState === 'ok' ? 'success' : netState === 'checking' ? 'secondary' : 'error'"
             class="ml-2 status-chip flex-shrink-0"
-            :title="netState === 'ok' ? 'AI API 已连接' : 'AI API 无法连接'"
+            :title="
+              netState === 'ok'
+                ? t('aidj.chat.api_ok', 'AI API 已连接')
+                : t('aidj.chat.api_bad', 'AI API 无法连接')
+            "
           >
             <span class="d-flex align-center ga-1">
               <v-icon size="12">
@@ -1403,7 +1449,13 @@ defineExpose({ toMarkdown, loadSession, newChat })
                       : 'mdi-wifi-off'
                 }}
               </v-icon>
-              <span>{{ netState === 'ok' ? 'API' : netState === 'checking' ? '…' : '离线' }}</span>
+              <span>{{
+                netState === 'ok'
+                  ? 'API'
+                  : netState === 'checking'
+                    ? '…'
+                    : t('aidj.chat.offline', '离线')
+              }}</span>
             </span>
           </v-chip>
         </v-col>
@@ -1490,7 +1542,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
                 variant="flat"
                 size="small"
                 class="status-chip is-on"
-                :title="'累计所有请求的 tokens 总和'"
+                :title="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
               >
                 <span class="status-label">Tokens</span
                 ><span class="status-value">{{
@@ -1504,7 +1556,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
                 variant="flat"
                 size="small"
                 class="status-chip is-on"
-                :title="'单次请求的上下文输入 tokens'"
+                :title="t('aidj.chat.title_context', '单次请求的上下文输入 tokens')"
               >
                 <span class="status-label">Context</span
                 ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
@@ -1513,7 +1565,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
                 variant="flat"
                 size="small"
                 class="status-chip is-on"
-                :title="'单次请求的输出 tokens'"
+                :title="t('aidj.chat.title_output_tokens', '单次请求的输出 tokens')"
               >
                 <span class="status-label">Completion</span
                 ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
@@ -1537,7 +1589,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
               variant="flat"
               size="small"
               class="status-chip clickable is-on"
-              :title="'点击清空已播记忆'"
+              :title="t('aidj.chat.title_clear_memory', '点击清空已播记忆')"
               @click="memoryConfirm = true"
             >
               <span class="status-label">Memory</span
@@ -1550,7 +1602,11 @@ defineExpose({ toMarkdown, loadSession, newChat })
               size="small"
               class="status-chip clickable"
               :class="{ 'is-on': sbVolbal.enabled }"
-              :title="sbVolbal.enabled ? '点击关闭响度平衡' : '点击开启响度平衡'"
+              :title="
+                sbVolbal.enabled
+                  ? t('aidj.chat.volbal_off', '点击关闭响度平衡')
+                  : t('aidj.chat.volbal_on', '点击开启响度平衡')
+              "
               @click="toggleVolbal"
             >
               <span class="status-label">Volbal</span
@@ -1563,7 +1619,11 @@ defineExpose({ toMarkdown, loadSession, newChat })
               size="small"
               class="status-chip clickable"
               :class="{ 'is-on': sbRecordFreq }"
-              :title="sbRecordFreq ? '点击关闭频率记录' : '点击开启频率记录'"
+              :title="
+                sbRecordFreq
+                  ? t('aidj.chat.freq_off', '点击关闭频率记录')
+                  : t('aidj.chat.freq_on', '点击开启频率记录')
+              "
               @click="toggleRecordFreq"
             >
               <span class="status-label">RecordFreq</span
@@ -1576,7 +1636,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
               size="small"
               class="status-chip"
               :class="{ 'is-on': sbBackgrounds > 0 }"
-              :title="'运行中的后台任务数量'"
+              :title="t('aidj.chat.title_bg_count', '运行中的后台任务数量')"
             >
               <span class="status-label">Backgrounds</span
               ><span class="status-value">{{ sbBackgrounds }}</span>
@@ -1734,18 +1794,24 @@ defineExpose({ toMarkdown, loadSession, newChat })
       <v-card rounded="lg">
         <v-card-title class="text-subtitle-1">
           <v-icon start>mdi-alert-circle-outline</v-icon>
-          覆盖播放列表？
+          {{ t('aidj.chat.overwrite_confirm', '覆盖播放列表？') }}
         </v-card-title>
         <v-card-text class="text-body-2">
-          该播放器上有一个连续播放后台任务正在推送歌曲。直接播放全部可能与之冲突（两个来源会争抢切歌），冲突需要你自行处理。
-          确认仍要播放全部吗？
+          {{
+            t(
+              'aidj.chat.overwrite_warn',
+              '该播放器上有一个连续播放后台任务正在推送歌曲。直接播放全部可能与之冲突（两个来源会争抢切歌），冲突需要你自行处理。确认仍要播放全部吗？'
+            )
+          }}
         </v-card-text>
         <v-card-actions class="px-4 pb-4 pt-2">
           <v-spacer />
           <v-btn variant="text" @click="playAllConfirm = false">
             {{ t('aidj.cancel', '取消') }}
           </v-btn>
-          <v-btn color="primary" @click="confirmPlayAll"> 覆盖并播放 </v-btn>
+          <v-btn color="primary" @click="confirmPlayAll">
+            {{ t('aidj.chat.overwrite_play', '覆盖并播放') }}
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

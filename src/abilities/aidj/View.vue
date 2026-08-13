@@ -266,10 +266,13 @@ async function saveTitle(): Promise<void> {
         showSnack(t('aidj.sessions.title_empty', '标题为空，保持不变'), 'info')
       }
     } else {
-      showSnack(r?.error || '设置标题失败', 'error')
+      showSnack(r?.error || t('aidj.sessions.title_failed', '设置标题失败'), 'error')
     }
   } catch (e) {
-    showSnack(`设置标题失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    showSnack(
+      `${t('aidj.sessions.title_failed', '设置标题失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
   }
 }
 
