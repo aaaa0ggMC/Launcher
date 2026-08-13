@@ -147,9 +147,21 @@ export function getAbility(id: string): Ability | undefined {
   return loadRegistry()[id]?.ability
 }
 
-/** The flattened module table keyed by ability id (for iteration / settings). */
+/**
+ * The flattened module table keyed by ability id, FILTERED to the running
+ * platform (platform + capability resolution). Consumers like the settings
+ * 「能力开关」and settings-section builder must not surface Linux-only
+ * abilities on other platforms (autostart/dashboard/mirror/systemd …).
+ */
 export function getAbilityModules(): Record<string, Ability> {
-  return loadAbilityModules()
+  const registry = loadRegistry()
+  const platform = window.cockpit?.platform ?? process.platform ?? 'linux'
+  const { available } = resolveAvailable(registry, platform)
+  const out: Record<string, Ability> = {}
+  for (const [id, entry] of Object.entries(registry)) {
+    if (available.has(id)) out[id] = entry.ability
+  }
+  return out
 }
 
 /** Forward an ability-loader report line into the main-process log pipeline. */
