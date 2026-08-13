@@ -74,11 +74,11 @@ const rootStyle = computed(() => {
     '--lyr-card-radius': `${Math.max(0, c.card_radius ?? 12)}px`,
     '--lyr-card-pad-y': `${Math.max(0, c.card_padding_y ?? 12)}px`,
     '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`,
-    // Karaoke fill: played words in the FULL text color, unplayed at 55% alpha —
-    // a clear progressive reveal regardless of the fg alpha (fg_color may itself
-    // be semi-transparent, which made the old fill look wrong/washed out).
+    // Karaoke fill: played words in the FULL text color, unplayed at 70% alpha —
+    // dim enough to read the progress, bright enough that a white config stays
+    // white-ish (55% of white on transparent read as flat gray).
     '--lyr-karaoke-fill': hexToRgba(c.fg_color, 1),
-    '--lyr-karaoke-dim': hexToRgba(c.fg_color, 0.55)
+    '--lyr-karaoke-dim': hexToRgba(c.fg_color, 0.7)
   } as Record<string, string>
 })
 
@@ -244,11 +244,11 @@ const windowEnd = computed(() =>
   Math.min(lrcLines.value.length, displayIdx.value + (lyricsCfg.value.lines_after ?? 0) + 1)
 )
 const windowLines = computed(() => {
-  const out: { text: string; isCurrent: boolean }[] = []
+  const out: { text: string; isCurrent: boolean; hasKaraoke: boolean }[] = []
   for (let i = windowStart.value; i < windowEnd.value; i++) {
     const l = lrcLines.value[i]
     if (!l || !l.text) continue // render only text lines; empty gaps stay as timing
-    out.push({ text: l.text, isCurrent: i === displayIdx.value })
+    out.push({ text: l.text, isCurrent: i === displayIdx.value, hasKaraoke: l.chunks.length > 1 })
   }
   return out
 })
@@ -632,7 +632,7 @@ onBeforeUnmount(() => {
                 class="lyrics-line"
                 :class="{ 'is-current': line.isCurrent, 'is-dim': !playing }"
               >
-                <template v-if="line.isCurrent && lyricsCfg.karaoke && line.text">
+                <template v-if="line.isCurrent && lyricsCfg.karaoke && line.hasKaraoke">
                   <span class="karaoke-mask" :style="karaokeMaskStyle">{{ line.text }}</span>
                 </template>
                 <span v-else>{{ line.text }}</span>
