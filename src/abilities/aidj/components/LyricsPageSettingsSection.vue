@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, inject } from 'vue'
+import type { Ref } from 'vue'
 import { DEFAULT_LYRICS_PAGE_CFG } from '../types'
 import type { AidjLyricsPageConfig } from '../types'
+import { translate } from '../../../main/ui/i18n'
 
 defineOptions({ name: 'cockpit-aidj-lyrics-settings' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const cfg = ref<AidjLyricsPageConfig>({ ...DEFAULT_LYRICS_PAGE_CFG })
 const saving = ref(false)
@@ -53,26 +58,38 @@ function resetAll(): void {
       AIDJ Lyrics
       <v-spacer />
       <v-btn variant="text" color="primary" prepend-icon="mdi-backup-restore" @click="resetAll">
-        恢复默认
+        {{ t('aidj.lyrics_settings.reset', '恢复默认') }}
       </v-btn>
-      <v-chip v-if="saving" size="small" variant="tonal">保存中…</v-chip>
+      <v-chip v-if="saving" size="small" variant="tonal">{{
+        t('aidj.lyrics_settings.saving', '保存中…')
+      }}</v-chip>
     </v-card-title>
 
     <v-divider />
 
     <v-card-text class="d-flex flex-column ga-4 py-4">
       <div>
-        <div class="text-subtitle-2 mb-2">显示模式</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.lyrics_settings.mode', '显示模式') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
-          颜色始终跟随应用主题，不可单独配置；这里只控制呈现方式与排版
+          {{
+            t(
+              'aidj.lyrics_settings.mode_hint',
+              '颜色始终跟随应用主题，不可单独配置；这里只控制呈现方式与排版'
+            )
+          }}
         </div>
         <v-row dense>
           <v-col cols="6" md="3">
             <v-switch
               v-model="cfg.scroll_follow"
               color="primary"
-              label="歌词滚动跟随"
-              hint="显示全部歌词并自动把当前行滚到居中；关闭则用固定窗口"
+              :label="t('aidj.lyrics_settings.scroll_follow', '歌词滚动跟随')"
+              :hint="
+                t(
+                  'aidj.lyrics_settings.scroll_follow_hint',
+                  '显示全部歌词并自动把当前行滚到居中；关闭则用固定窗口'
+                )
+              "
               hide-details
               density="compact"
             />
@@ -81,8 +98,8 @@ function resetAll(): void {
             <v-switch
               v-model="cfg.karaoke"
               color="primary"
-              label="卡拉OK 逐字高亮"
-              hint="当前行按 LRC 内联时间戳逐字填充高亮"
+              :label="t('aidj.lyrics_settings.karaoke', '卡拉OK 逐字高亮')"
+              :hint="t('aidj.lyrics_settings.karaoke_hint', '当前行按 LRC 内联时间戳逐字填充高亮')"
               hide-details
               density="compact"
             />
@@ -91,7 +108,7 @@ function resetAll(): void {
             <v-switch
               v-model="cfg.dim_candidates"
               color="primary"
-              label="淡化非当前行"
+              :label="t('aidj.lyrics_settings.dim_candidates', '淡化非当前行')"
               hide-details
               density="compact"
             />
@@ -100,8 +117,8 @@ function resetAll(): void {
             <v-switch
               v-model="cfg.show_header"
               color="primary"
-              label="显示头部"
-              hint="歌曲信息 / 播放控制 / 进度条"
+              :label="t('aidj.lyrics_settings.show_header', '显示头部')"
+              :hint="t('aidj.lyrics_settings.show_header_hint', '歌曲信息 / 播放控制 / 进度条')"
               hide-details
               density="compact"
             />
@@ -110,8 +127,13 @@ function resetAll(): void {
             <v-switch
               v-model="cfg.immerse_mode"
               color="primary"
-              label="沉浸模式"
-              hint="有封面时用模糊暗化的封面叠加背景，替代用户设置的背景"
+              :label="t('aidj.lyrics_settings.immerse', '沉浸模式')"
+              :hint="
+                t(
+                  'aidj.lyrics_settings.immerse_hint',
+                  '有封面时用模糊暗化的封面叠加背景，替代用户设置的背景'
+                )
+              "
               hide-details
               density="compact"
             />
@@ -121,7 +143,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.lines_before"
-              label="当前行上方行数"
+              :label="t('aidj.lyrics_settings.lines_before', '当前行上方行数')"
               type="number"
               min="0"
               max="8"
@@ -133,7 +155,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.lines_after"
-              label="当前行下方行数"
+              :label="t('aidj.lyrics_settings.lines_after', '当前行下方行数')"
               type="number"
               min="0"
               max="8"
@@ -148,12 +170,12 @@ function resetAll(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">排版</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.lyrics_settings.typography', '排版') }}</div>
         <v-row dense>
           <v-col cols="12" md="6">
             <v-text-field
               v-model="cfg.font_family"
-              label="字体"
+              :label="t('aidj.settings.lyrics_font', '字体')"
               placeholder="Iansui Regular"
               hide-details
               density="compact"
@@ -163,7 +185,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.font_size"
-              label="当前行字号 (px)"
+              :label="t('aidj.lyrics_settings.font_size', '当前行字号 (px)')"
               type="number"
               min="18"
               max="46"
@@ -175,7 +197,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.candidate_size"
-              label="候选行字号 (px)"
+              :label="t('aidj.lyrics_settings.candidate_size', '候选行字号 (px)')"
               type="number"
               min="13"
               max="28"
@@ -187,7 +209,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.current_weight"
-              label="当前行字重"
+              :label="t('aidj.settings.lyrics_weight', '当前行字重')"
               type="number"
               min="500"
               max="900"
@@ -200,7 +222,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.candidate_weight"
-              label="候选行字重"
+              :label="t('aidj.settings.lyrics_candidate_weight', '候选行字重')"
               type="number"
               min="400"
               max="700"
@@ -213,7 +235,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.line_height"
-              label="行高 (1.0–2.0)"
+              :label="t('aidj.settings.lyrics_line_height', '行高 (1.0–2.0)')"
               type="number"
               min="1"
               max="2"
@@ -226,7 +248,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.line_gap"
-              label="行间距 (px)"
+              :label="t('aidj.settings.lyrics_line_gap', '行间距 (px)')"
               type="number"
               min="4"
               max="24"
@@ -238,7 +260,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.letter_spacing"
-              label="字间距 (px)"
+              :label="t('aidj.settings.lyrics_letter_spacing', '字间距 (px)')"
               type="number"
               min="-2"
               max="8"
@@ -250,7 +272,7 @@ function resetAll(): void {
           <v-col cols="6" md="3">
             <v-text-field
               v-model.number="cfg.position_offset_ms"
-              label="位置偏移 (ms)"
+              :label="t('aidj.settings.lyrics_offset', '位置偏移 (ms)')"
               type="number"
               min="-1000"
               max="1000"

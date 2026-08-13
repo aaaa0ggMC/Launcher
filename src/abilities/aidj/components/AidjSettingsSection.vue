@@ -2,12 +2,45 @@
 import { ref, watch, onMounted, computed, inject } from 'vue'
 import type { Ref } from 'vue'
 import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const tt = (key: string, vars: Record<string, string | number>, fallback?: string): string =>
+  translateTemplate(
+    uiLang.value,
+    key,
+    Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) as Record<
+      string,
+      string
+    >,
+    fallback
+  )
+
+/** Localized labels for dynamic field keys (metadata inject + status bar). */
+const injectLabels: Record<string, string> = {
+  genre: t('aidj.settings.inject_genre', '风格'),
+  emotion: t('aidj.settings.inject_emotion', '情绪'),
+  language: t('aidj.settings.inject_language', '语言'),
+  loudness: t('aidj.settings.inject_loudness', '响度'),
+  review: t('aidj.settings.inject_review', '乐评')
+}
+const statusLabels: Record<string, string> = {
+  tokens: t('aidj.settings.status_tokens', 'Token 数'),
+  context: t('aidj.settings.status_context', '上下文'),
+  tracks: t('aidj.settings.status_tracks', '曲目'),
+  memory: t('aidj.settings.status_memory', '记忆'),
+  volbal: t('aidj.settings.status_volbal', '响度平衡'),
+  record_freq: t('aidj.settings.status_record_freq', '播放频次'),
+  backgrounds: t('aidj.settings.status_backgrounds', '后台任务')
+}
+
+/** Localized label for a dynamic field key (metadata inject / status bar). */
+function labelFor(k: string): string {
+  return injectLabels[k] ?? statusLabels[k] ?? k
+}
 
 const model = ref('')
 const metadataModel = ref('')
@@ -20,10 +53,10 @@ const isLinux = window.cockpit?.platform === 'linux'
 const playerModeItems = computed(() =>
   isLinux
     ? [
-        { title: '外部播放器 (MPRIS / DBus)', value: 'dbus' },
-        { title: '内置播放器', value: 'web' }
+        { title: t('aidj.settings.backend_dbus', '外部播放器 (MPRIS / DBus)'), value: 'dbus' },
+        { title: t('aidj.settings.backend_web', '内置播放器'), value: 'web' }
       ]
-    : [{ title: '内置播放器', value: 'web' }]
+    : [{ title: t('aidj.settings.backend_web', '内置播放器'), value: 'web' }]
 )
 const musicFolders = ref<string[]>([])
 const musicFolderInput = ref('')
@@ -164,7 +197,10 @@ function removeMusicFolder(p: string): void {
 }
 
 async function pickMusicFolder(): Promise<void> {
-  const path = await window.cockpit.pickFile({ title: '选择音乐目录', directory: true })
+  const path = await window.cockpit.pickFile({
+    title: t('aidj.settings.pick_music_dir', '选择音乐目录'),
+    directory: true
+  })
   if (path) musicFolderInput.value = path
 }
 
@@ -195,7 +231,10 @@ function removeLyricsFolder(p: string): void {
 }
 
 async function pickLyricsFolder(): Promise<void> {
-  const path = await window.cockpit.pickFile({ title: '选择歌词目录', directory: true })
+  const path = await window.cockpit.pickFile({
+    title: t('aidj.settings.pick_lyrics_dir', '选择歌词目录'),
+    directory: true
+  })
   if (path) lyricsFolderInput.value = path
 }
 
@@ -299,12 +338,12 @@ function resetDj(): void {
 
     <v-card-text class="d-flex flex-column ga-4 py-4">
       <div>
-        <div class="text-subtitle-2 mb-2">API 配置</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.api_config', 'API 配置') }}</div>
         <v-row dense>
           <v-col cols="12" md="6">
             <v-text-field
               v-model="baseUrl"
-              label="API 地址"
+              :label="t('aidj.settings.api_url', 'API 地址')"
               placeholder="http://localhost:1145/v1"
               hide-details
               density="compact"
@@ -314,7 +353,7 @@ function resetDj(): void {
           <v-col cols="12" md="6">
             <v-text-field
               v-model="apiKey"
-              label="API 密钥"
+              :label="t('aidj.settings.api_key', 'API 密钥')"
               type="password"
               hide-details
               density="compact"
@@ -327,15 +366,19 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">AI 模型</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.ai_models', 'AI 模型') }}</div>
         <v-row dense>
           <v-col cols="12" md="6">
             <v-combobox
               v-model="model"
               :items="availableModels"
               :loading="modelsLoading"
-              :no-data-text="modelsError ? 'API 未提供模型列表' : '无数据'"
-              label="对话模型"
+              :no-data-text="
+                modelsError
+                  ? t('aidj.settings.models_unavailable', 'API 未提供模型列表')
+                  : t('aidj.settings.no_data', '无数据')
+              "
+              :label="t('aidj.settings.chat_model', '对话模型')"
               hide-details
               density="compact"
               variant="outlined"
@@ -347,8 +390,12 @@ function resetDj(): void {
               v-model="metadataModel"
               :items="availableModels"
               :loading="modelsLoading"
-              :no-data-text="modelsError ? 'API 未提供模型列表' : '无数据'"
-              label="元数据提取模型"
+              :no-data-text="
+                modelsError
+                  ? t('aidj.settings.models_unavailable', 'API 未提供模型列表')
+                  : t('aidj.settings.no_data', '无数据')
+              "
+              :label="t('aidj.settings.metadata_model', '元数据提取模型')"
               hide-details
               density="compact"
               variant="outlined"
@@ -361,12 +408,14 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">音乐库与播放器</div>
+        <div class="text-subtitle-2 mb-2">
+          {{ t('aidj.settings.library_player', '音乐库与播放器') }}
+        </div>
         <v-row dense>
           <v-col cols="12" md="6">
             <v-text-field
               v-model="ncmBaseUrl"
-              label="NCM API 地址"
+              :label="t('aidj.settings.ncm_url', 'NCM API 地址')"
               placeholder="http://localhost:3000"
               hide-details
               density="compact"
@@ -376,7 +425,7 @@ function resetDj(): void {
           <v-col cols="12" md="6">
             <v-text-field
               v-model="dbusTarget"
-              label="DBus 播放器目标"
+              :label="t('aidj.settings.dbus_target', 'DBus 播放器目标')"
               placeholder="vlc"
               hide-details
               density="compact"
@@ -389,8 +438,13 @@ function resetDj(): void {
             <v-select
               v-model="playerMode"
               :items="playerModeItems"
-              label="播放后端"
-              hint="切换会停止运行中的连续播放/持久会话；内置播放器为实验性后端"
+              :label="t('aidj.settings.playback_backend', '播放后端')"
+              :hint="
+                t(
+                  'aidj.settings.backend_hint',
+                  '切换会停止运行中的连续播放/持久会话；内置播放器为实验性后端'
+                )
+              "
               persistent-hint
               hide-details
               density="compact"
@@ -400,13 +454,13 @@ function resetDj(): void {
         </v-row>
         <div class="mt-3">
           <div class="text-caption text-medium-emphasis mb-2">
-            搜索目录（递归扫描目录下所有音乐文件）
+            {{ t('aidj.settings.music_scan_hint', '搜索目录（递归扫描目录下所有音乐文件）') }}
           </div>
           <div v-if="musicFolders.length > 0" class="d-flex flex-column ga-2 rules-list">
             <div v-for="(p, i) in musicFolders" :key="p" class="d-flex align-center ga-2 flex-wrap">
               <v-text-field
                 :model-value="p"
-                :label="`音乐目录 ${i + 1}`"
+                :label="tt('aidj.settings.music_folder_n', { n: i + 1 }, `音乐目录 ${i + 1}`)"
                 readonly
                 density="compact"
                 variant="outlined"
@@ -419,7 +473,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   :disabled="i === 0"
-                  title="上移"
+                  :title="t('aidj.settings.move_up', '上移')"
                   @click="moveMusicFolder(i, -1)"
                 >
                   <v-icon size="small">mdi-arrow-up</v-icon>
@@ -429,7 +483,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   :disabled="i === musicFolders.length - 1"
-                  title="下移"
+                  :title="t('aidj.settings.move_down', '下移')"
                   @click="moveMusicFolder(i, 1)"
                 >
                   <v-icon size="small">mdi-arrow-down</v-icon>
@@ -439,7 +493,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   color="error"
-                  title="删除该目录"
+                  :title="t('aidj.settings.delete_folder', '删除该目录')"
                   @click="removeMusicFolder(p)"
                 >
                   <v-icon size="small">mdi-close</v-icon>
@@ -447,7 +501,9 @@ function resetDj(): void {
               </div>
             </div>
           </div>
-          <div v-else class="text-caption on-surface-variant rules-empty">未配置音乐目录</div>
+          <div v-else class="text-caption on-surface-variant rules-empty">
+            {{ t('aidj.settings.no_music_folders', '未配置音乐目录') }}
+          </div>
           <div class="d-flex align-center ga-2 mt-2 flex-wrap">
             <v-text-field
               v-model="musicFolderInput"
@@ -458,20 +514,31 @@ function resetDj(): void {
               class="flex-grow-1 rule-input"
             >
               <template #append-inner>
-                <v-btn icon variant="text" size="small" title="选择目录" @click="pickMusicFolder">
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  :title="t('aidj.settings.pick_dir', '选择目录')"
+                  @click="pickMusicFolder"
+                >
                   <v-icon>mdi-folder-open</v-icon>
                 </v-btn>
               </template>
             </v-text-field>
             <v-btn color="primary" variant="tonal" height="40" class="px-5" @click="addMusicFolder">
-              添加
+              {{ t('aidj.settings.add', '添加') }}
             </v-btn>
           </div>
         </div>
 
         <div class="mt-3">
           <div class="text-caption text-medium-emphasis mb-2">
-            歌词搜索目录（递归扫描 .lrc 歌词文件，供桌面歌词窗口使用）
+            {{
+              t(
+                'aidj.settings.lyrics_scan_hint',
+                '歌词搜索目录（递归扫描 .lrc 歌词文件，供桌面歌词窗口使用）'
+              )
+            }}
           </div>
           <div v-if="lyricsFolders.length > 0" class="d-flex flex-column ga-2 rules-list">
             <div
@@ -481,7 +548,7 @@ function resetDj(): void {
             >
               <v-text-field
                 :model-value="p"
-                :label="`歌词目录 ${i + 1}`"
+                :label="tt('aidj.settings.lyrics_folder_n', { n: i + 1 }, `歌词目录 ${i + 1}`)"
                 readonly
                 density="compact"
                 variant="outlined"
@@ -494,7 +561,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   :disabled="i === 0"
-                  title="上移"
+                  :title="t('aidj.settings.move_up', '上移')"
                   @click="moveLyricsFolder(i, -1)"
                 >
                   <v-icon size="small">mdi-arrow-up</v-icon>
@@ -504,7 +571,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   :disabled="i === lyricsFolders.length - 1"
-                  title="下移"
+                  :title="t('aidj.settings.move_down', '下移')"
                   @click="moveLyricsFolder(i, 1)"
                 >
                   <v-icon size="small">mdi-arrow-down</v-icon>
@@ -514,7 +581,7 @@ function resetDj(): void {
                   size="small"
                   variant="flat"
                   color="error"
-                  title="删除该目录"
+                  :title="t('aidj.settings.delete_folder', '删除该目录')"
                   @click="removeLyricsFolder(p)"
                 >
                   <v-icon size="small">mdi-close</v-icon>
@@ -522,7 +589,9 @@ function resetDj(): void {
               </div>
             </div>
           </div>
-          <div v-else class="text-caption on-surface-variant rules-empty">未配置歌词目录</div>
+          <div v-else class="text-caption on-surface-variant rules-empty">
+            {{ t('aidj.settings.no_lyrics_folders', '未配置歌词目录') }}
+          </div>
           <div class="d-flex align-center ga-2 mt-2 flex-wrap">
             <v-text-field
               v-model="lyricsFolderInput"
@@ -533,7 +602,13 @@ function resetDj(): void {
               class="flex-grow-1 rule-input"
             >
               <template #append-inner>
-                <v-btn icon variant="text" size="small" title="选择目录" @click="pickLyricsFolder">
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  :title="t('aidj.settings.pick_dir', '选择目录')"
+                  @click="pickLyricsFolder"
+                >
                   <v-icon>mdi-folder-open</v-icon>
                 </v-btn>
               </template>
@@ -545,20 +620,25 @@ function resetDj(): void {
               class="px-5"
               @click="addLyricsFolder"
             >
-              添加
+              {{ t('aidj.settings.add', '添加') }}
             </v-btn>
           </div>
         </div>
 
         <div class="mt-3">
           <div class="text-caption text-medium-emphasis mb-2">
-            桌面歌词显示（等价 vp wshowlyrics 参数，按元素定制）
+            {{
+              t(
+                'aidj.settings.lyrics_title',
+                '桌面歌词显示（等价 vp wshowlyrics 参数，按元素定制）'
+              )
+            }}
           </div>
           <v-row dense>
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="lyricsCfg.font_family"
-                label="字体"
+                :label="t('aidj.settings.lyrics_font', '字体')"
                 placeholder="Iansui Regular"
                 hide-details
                 density="compact"
@@ -568,7 +648,7 @@ function resetDj(): void {
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="lyricsCfg.bg_color"
-                label="背景色 (RRGGBBAA)"
+                :label="t('aidj.settings.lyrics_bg', '背景色 (RRGGBBAA)')"
                 placeholder="00000044"
                 hide-details
                 density="compact"
@@ -579,7 +659,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.font_size"
-                label="当前行字号"
+                :label="t('aidj.settings.lyrics_font_size', '当前行字号')"
                 type="number"
                 hide-details
                 density="compact"
@@ -589,7 +669,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.candidate_size"
-                label="候选行字号"
+                :label="t('aidj.settings.lyrics_candidate_size', '候选行字号')"
                 type="number"
                 hide-details
                 density="compact"
@@ -599,7 +679,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.header_size"
-                label="歌名字号"
+                :label="t('aidj.settings.lyrics_header_size', '歌名字号')"
                 type="number"
                 hide-details
                 density="compact"
@@ -609,7 +689,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.line_gap"
-                label="行间距"
+                :label="t('aidj.settings.lyrics_line_gap', '行间距')"
                 type="number"
                 hide-details
                 density="compact"
@@ -620,7 +700,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model="lyricsCfg.fg_color"
-                label="当前行色"
+                :label="t('aidj.settings.lyrics_fg', '当前行色')"
                 placeholder="EEEEFFEE"
                 hide-details
                 density="compact"
@@ -630,7 +710,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model="lyricsCfg.candidate_color"
-                label="候选行色"
+                :label="t('aidj.settings.lyrics_candidate_color', '候选行色')"
                 placeholder="EEEEFF99"
                 hide-details
                 density="compact"
@@ -640,7 +720,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model="lyricsCfg.header_color"
-                label="歌名色"
+                :label="t('aidj.settings.lyrics_header_color', '歌名色')"
                 placeholder="EEEEFF66"
                 hide-details
                 density="compact"
@@ -650,7 +730,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.shadow"
-                label="阴影 (0-1)"
+                :label="t('aidj.settings.lyrics_shadow', '阴影 (0-1)')"
                 type="number"
                 hide-details
                 density="compact"
@@ -661,7 +741,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.current_weight"
-                label="当前行字重"
+                :label="t('aidj.settings.lyrics_weight', '当前行字重')"
                 type="number"
                 hide-details
                 density="compact"
@@ -671,7 +751,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.candidate_weight"
-                label="候选行字重"
+                :label="t('aidj.settings.lyrics_candidate_weight', '候选行字重')"
                 type="number"
                 hide-details
                 density="compact"
@@ -681,7 +761,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.header_weight"
-                label="歌名字重"
+                :label="t('aidj.settings.lyrics_header_weight', '歌名字重')"
                 type="number"
                 hide-details
                 density="compact"
@@ -691,7 +771,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.line_height"
-                label="行高 (1.0-2.0)"
+                :label="t('aidj.settings.lyrics_line_height', '行高 (1.0-2.0)')"
                 type="number"
                 hide-details
                 density="compact"
@@ -702,7 +782,7 @@ function resetDj(): void {
             <v-col cols="6" md="3">
               <v-text-field
                 v-model.number="lyricsCfg.letter_spacing"
-                label="字间距"
+                :label="t('aidj.settings.lyrics_letter_spacing', '字间距')"
                 type="number"
                 hide-details
                 density="compact"
@@ -713,11 +793,11 @@ function resetDj(): void {
               <v-select
                 v-model="lyricsCfg.anchor"
                 :items="[
-                  { title: '顶部', value: 'top' },
-                  { title: '居中', value: 'center' },
-                  { title: '底部', value: 'bottom' }
+                  { title: t('aidj.settings.anchor_top', '顶部'), value: 'top' },
+                  { title: t('aidj.settings.anchor_center', '居中'), value: 'center' },
+                  { title: t('aidj.settings.anchor_bottom', '底部'), value: 'bottom' }
                 ]"
-                label="窗口位置"
+                :label="t('aidj.settings.lyrics_anchor', '窗口位置')"
                 hide-details
                 density="compact"
                 variant="outlined"
@@ -726,7 +806,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.width"
-                label="初始宽度"
+                :label="t('aidj.settings.lyrics_width', '初始宽度')"
                 type="number"
                 hide-details
                 density="compact"
@@ -736,7 +816,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.margin"
-                label="边距"
+                :label="t('aidj.settings.lyrics_margin', '边距')"
                 type="number"
                 hide-details
                 density="compact"
@@ -746,7 +826,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.lines_before"
-                label="上方行数"
+                :label="t('aidj.settings.lyrics_before', '上方行数')"
                 type="number"
                 hide-details
                 density="compact"
@@ -756,7 +836,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.lines_after"
-                label="下方行数"
+                :label="t('aidj.settings.lyrics_after', '下方行数')"
                 type="number"
                 hide-details
                 density="compact"
@@ -766,7 +846,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.position_offset_ms"
-                label="位置偏移(ms)"
+                :label="t('aidj.settings.lyrics_offset', '位置偏移(ms)')"
                 type="number"
                 hide-details
                 density="compact"
@@ -777,7 +857,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.card_radius"
-                label="圆角"
+                :label="t('aidj.settings.lyrics_radius', '圆角')"
                 type="number"
                 hide-details
                 density="compact"
@@ -787,7 +867,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.card_padding_y"
-                label="上下留白"
+                :label="t('aidj.settings.lyrics_pad_y', '上下留白')"
                 type="number"
                 hide-details
                 density="compact"
@@ -797,7 +877,7 @@ function resetDj(): void {
             <v-col cols="4" md="2">
               <v-text-field
                 v-model.number="lyricsCfg.card_padding_x"
-                label="两侧留白"
+                :label="t('aidj.settings.lyrics_pad_x', '两侧留白')"
                 type="number"
                 hide-details
                 density="compact"
@@ -809,7 +889,7 @@ function resetDj(): void {
               <v-switch
                 v-model="lyricsCfg.auto_width"
                 color="primary"
-                label="自动扩张宽度"
+                :label="t('aidj.settings.lyrics_auto_width', '自动扩张宽度')"
                 hide-details
                 density="compact"
               />
@@ -818,7 +898,7 @@ function resetDj(): void {
               <v-switch
                 v-model="lyricsCfg.lock_on_open"
                 color="primary"
-                label="打开即锁定"
+                :label="t('aidj.settings.lyrics_lock', '打开即锁定')"
                 hide-details
                 density="compact"
               />
@@ -827,7 +907,7 @@ function resetDj(): void {
               <v-switch
                 v-model="lyricsCfg.show_title"
                 color="primary"
-                label="显示歌曲名"
+                :label="t('aidj.settings.lyrics_show_title', '显示歌曲名')"
                 hide-details
                 density="compact"
               />
@@ -836,7 +916,7 @@ function resetDj(): void {
               <v-switch
                 v-model="lyricsCfg.ignore_empty_lines"
                 color="primary"
-                label="忽略空行"
+                :label="t('aidj.settings.lyrics_ignore_empty', '忽略空行')"
                 hide-details
                 density="compact"
               />
@@ -857,13 +937,13 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">播放偏好</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.playback_prefs', '播放偏好') }}</div>
         <v-row dense>
           <v-col cols="6" md="3">
             <v-switch
               v-model="autoPlay"
               color="primary"
-              label="自动播放"
+              :label="t('aidj.settings.auto_play', '自动播放')"
               hide-details
               density="compact"
             />
@@ -872,7 +952,7 @@ function resetDj(): void {
             <v-switch
               v-model="dynamicBalance"
               color="primary"
-              label="动态响度平衡"
+              :label="t('aidj.settings.dynamic_balance', '动态响度平衡')"
               hide-details
               density="compact"
             />
@@ -881,7 +961,7 @@ function resetDj(): void {
             <v-switch
               v-model="recordFreq"
               color="primary"
-              label="记录播放频率"
+              :label="t('aidj.settings.record_freq', '记录播放频率')"
               hide-details
               density="compact"
             />
@@ -892,7 +972,7 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">响度调整</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.loudness', '响度调整') }}</div>
         <v-row dense>
           <v-col cols="12" md="4">
             <v-select
@@ -901,7 +981,7 @@ function resetDj(): void {
                 { title: 'LUFS', value: 'lufs' },
                 { title: 'RMS (Linear)', value: 'linear' }
               ]"
-              label="调整方法"
+              :label="t('aidj.settings.adjust_method', '调整方法')"
               hide-details
               density="compact"
               variant="outlined"
@@ -911,7 +991,7 @@ function resetDj(): void {
             <v-slider
               v-model="volumeCurve"
               color="primary"
-              label="音量曲线"
+              :label="t('aidj.settings.volume_curve', '音量曲线')"
               min="1"
               max="5"
               step="0.1"
@@ -923,7 +1003,7 @@ function resetDj(): void {
           <v-col cols="12" md="4">
             <v-text-field
               v-model.number="metadataConcurrency"
-              label="同步并发数"
+              :label="t('aidj.settings.sync_concurrency', '同步并发数')"
               type="number"
               min="1"
               max="16"
@@ -938,7 +1018,7 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">上下文管理</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.context', '上下文管理') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
           即时与持久模式共用：会话历史超过上限时处理最旧消息（库提示词始终保留）；界面仍展示全部消息
         </div>
@@ -947,10 +1027,16 @@ function resetDj(): void {
             <v-select
               v-model="contextMode"
               :items="[
-                { title: 'Discard（丢弃最旧）', value: 'discard' },
-                { title: 'Compact（压缩为摘要）', value: 'compact' }
+                {
+                  title: t('aidj.settings.context_discard', 'Discard（丢弃最旧）'),
+                  value: 'discard'
+                },
+                {
+                  title: t('aidj.settings.context_compact', 'Compact（压缩为摘要）'),
+                  value: 'compact'
+                }
               ]"
-              label="处理方式"
+              :label="t('aidj.settings.context_mode', '处理方式')"
               hide-details
               density="compact"
               variant="outlined"
@@ -959,7 +1045,7 @@ function resetDj(): void {
           <v-col cols="12" md="4">
             <v-text-field
               v-model.number="maxHistoryLength"
-              label="历史消息上限"
+              :label="t('aidj.settings.history_limit', '历史消息上限')"
               type="number"
               min="2"
               max="100"
@@ -970,7 +1056,12 @@ function resetDj(): void {
           </v-col>
           <v-col cols="12" md="4" class="switch-col">
             <div class="d-flex align-center h-100 switch-align">
-              <v-switch v-model="autoTitle" color="primary" label="自动 AI 生成标题" hide-details />
+              <v-switch
+                v-model="autoTitle"
+                color="primary"
+                :label="t('aidj.settings.auto_title', '自动 AI 生成标题')"
+                hide-details
+              />
             </div>
           </v-col>
         </v-row>
@@ -979,7 +1070,7 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">DJ 人设定制</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.persona', 'DJ 人设定制') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
           即时与持久模式共用。空人设 = 使用内置默认；人设会替换 Role
           定义，附加规则追加到每次请求的提示词
@@ -988,7 +1079,7 @@ function resetDj(): void {
           <v-col cols="12" md="6">
             <v-textarea
               v-model="persona"
-              label="DJ 人设（Role 定义）"
+              :label="t('aidj.settings.persona_role', 'DJ 人设（Role 定义）')"
               no-resize
               hide-details
               density="compact"
@@ -1005,12 +1096,12 @@ function resetDj(): void {
               >
                 <v-text-field
                   v-model="extraRules[i]"
-                  :label="`规则 ${i + 1}`"
+                  :label="tt('aidj.settings.rule_n', { n: i + 1 }, `规则 ${i + 1}`)"
                   density="compact"
                   variant="outlined"
                   hide-details
                   class="flex-grow-1 rule-input"
-                  placeholder="例如：不要播放悲伤的歌"
+                  placeholder="t('aidj.settings.rule_placeholder', '例如：不要播放悲伤的歌')"
                 />
                 <div class="d-flex ga-1">
                   <v-btn
@@ -1018,7 +1109,7 @@ function resetDj(): void {
                     size="small"
                     variant="flat"
                     :disabled="i === 0"
-                    :title="'上移'"
+                    :title="t('aidj.settings.move_up', '上移')"
                     @click="moveRule(i, -1)"
                   >
                     <v-icon size="small">mdi-arrow-up</v-icon>
@@ -1028,7 +1119,7 @@ function resetDj(): void {
                     size="small"
                     variant="flat"
                     :disabled="i === extraRules.length - 1"
-                    :title="'下移'"
+                    :title="t('aidj.settings.move_down', '下移')"
                     @click="moveRule(i, 1)"
                   >
                     <v-icon size="small">mdi-arrow-down</v-icon>
@@ -1038,7 +1129,7 @@ function resetDj(): void {
                     size="small"
                     variant="flat"
                     color="error"
-                    :title="'删除该规则'"
+                    :title="t('aidj.settings.delete_rule', '删除该规则')"
                     @click="removeRule(i)"
                   >
                     <v-icon size="small">mdi-close</v-icon>
@@ -1066,7 +1157,7 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">连续播放</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.continuous', '连续播放') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
           播放器断开时的处理：0 = 立即结束，大于 0 = 在 N 分钟内尝试重连，小于 0 = 永不停止重连
         </div>
@@ -1074,7 +1165,7 @@ function resetDj(): void {
           <v-col cols="12" md="4">
             <v-text-field
               v-model.number="reconnectMinutes"
-              label="重连时长（分钟）"
+              :label="t('aidj.settings.reconnect_minutes', '重连时长（分钟）')"
               type="number"
               step="1"
               hide-details
@@ -1088,7 +1179,7 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">网络重试</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.network_retry', '网络重试') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
           AI API 请求失败（断网）时的重试：0 = 立即报错，大于 0 = 在 N 分钟内重试，小于 0 =
           永不停止重试
@@ -1097,7 +1188,7 @@ function resetDj(): void {
           <v-col cols="12" md="4">
             <v-text-field
               v-model.number="networkRetryMinutes"
-              label="网络重试时长（分钟）"
+              :label="t('aidj.settings.network_retry_minutes', '网络重试时长（分钟）')"
               type="number"
               step="1"
               hide-details
@@ -1111,13 +1202,15 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">元数据字段注入</div>
+        <div class="text-subtitle-2 mb-2">
+          {{ t('aidj.settings.metadata_inject', '元数据字段注入') }}
+        </div>
         <v-row dense>
           <v-col v-for="(_v, k) in libraryInjects" :key="k" cols="6" md="2">
             <v-switch
               v-model="libraryInjects[k]"
               color="primary"
-              :label="String(k)"
+              :label="labelFor(k)"
               hide-details
               density="compact"
             />
@@ -1128,15 +1221,15 @@ function resetDj(): void {
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">状态栏指示器</div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.status_bar', '状态栏指示器') }}</div>
         <div class="text-caption text-medium-emphasis mb-2">
-          数值为显示顺序，0 = 隐藏；相同数值按字母排序
+          {{ t('aidj.settings.status_hint', '数值为显示顺序，0 = 隐藏；相同数值按字母排序') }}
         </div>
         <v-row dense>
           <v-col v-for="(_v, k) in statusBar" :key="k" cols="6" md="3">
             <v-text-field
               v-model.number="statusBar[k]"
-              :label="String(k)"
+              :label="labelFor(k)"
               type="number"
               min="0"
               step="1"
