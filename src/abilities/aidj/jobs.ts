@@ -886,8 +886,13 @@ export async function replaceContinuousQueue(
   songs: PlaylistEntry[]
 ): Promise<{ ok: boolean; error?: string; taskId?: string; queueLen?: number }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
-  // /discard_follows: REPLACE the whole queue (drop pending, new batch next).
-  if (isWebTarget(player)) return pushToWebEngine(songs, false)
+  // /discard_follows on web: keep the CURRENT track + play history, drop the
+  // old pending (after the cursor), then append the new batch — so it never
+  // cuts the playing song or wipes what can be reached via prev.
+  if (isWebTarget(player)) {
+    await getWebPlayerBackend().trimQueue()
+    return pushToWebEngine(songs, true)
+  }
   const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     existing.queue = songs
