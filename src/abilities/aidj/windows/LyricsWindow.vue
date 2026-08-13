@@ -41,13 +41,14 @@ const myWindowId = new URLSearchParams(location.search).get('id') ?? ''
 const lyricsCfg = ref<LyricsDisplayConfig>(DEFAULT_LYRICS_CFG)
 
 /** `RRGGBBAA` hex → CSS rgba(). Anything malformed → fully transparent. */
-function hexToRgba(hex: string): string {
+function hexToRgba(hex: string, alphaOverride?: number): string {
   const h = (hex || '').replace(/^#/, '').trim()
   if (!/^[0-9a-fA-F]{8}$/.test(h)) return 'rgba(0, 0, 0, 0)'
+  const a = alphaOverride ?? parseInt(h.slice(6, 8), 16) / 255
   return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(
     h.slice(4, 6),
     16
-  )}, ${(parseInt(h.slice(6, 8), 16) / 255).toFixed(3)})`
+  )}, ${a.toFixed(3)})`
 }
 
 const rootStyle = computed(() => {
@@ -72,7 +73,12 @@ const rootStyle = computed(() => {
     '--lyr-gap': `${Math.max(2, c.line_gap ?? 6)}px`,
     '--lyr-card-radius': `${Math.max(0, c.card_radius ?? 12)}px`,
     '--lyr-card-pad-y': `${Math.max(0, c.card_padding_y ?? 12)}px`,
-    '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`
+    '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`,
+    // Karaoke fill: played words in the FULL text color, unplayed at 55% alpha —
+    // a clear progressive reveal regardless of the fg alpha (fg_color may itself
+    // be semi-transparent, which made the old fill look wrong/washed out).
+    '--lyr-karaoke-fill': hexToRgba(c.fg_color, 1),
+    '--lyr-karaoke-dim': hexToRgba(c.fg_color, 0.55)
   } as Record<string, string>
 })
 
@@ -169,9 +175,19 @@ const plainLyric = computed<string>(() => {
   return lrcLines.value.length ? '' : lyric.replace(/\[[^\]]*\]/g, '').trim()
 })
 
-const positionMs = computed(
-  () => (state.value.positionMs ?? 0) + (lyricsCfg.value.position_offset_ms ?? 0)
-)
+// Smooth playback position — `aidj.lyrics` polls every 600ms, so between polls
+// we advance the last-known position by wall-clock time on a rAF loop. Without
+// this the karaoke fill would jump in 600ms steps (visibly stuttery on Windows).
+// Player positions are quantized, so the loop only ever moves FORWARD (holds the
+// max reached) and a genuinely large backward raw delta is treated as a real
+// reset (track change / backward seek). Same technique as the in-app lyrics page.
+const smoothPos = ref(0)
+let lastRawAt = 0
+let lastRawPos = 0
+let rafId = 0
+const BACK_SEEK_MS = 500
+
+const positionMs = computed(() => smoothPos.value + (lyricsCfg.value.position_offset_ms ?? 0))
 
 /** Index of the current line: the last line whose time ≤ playback position. */
 const currentIdx = computed(() => {
@@ -239,6 +255,57 @@ const windowLines = computed(() => {
 
 const playing = computed(() => state.value.status === 'Playing')
 const hasTrack = computed(() => Boolean(state.value.track))
+
+/** Anchor the rAF interpolation to a freshly polled raw position. */
+function anchorPosition(pos: number | null | undefined): void {
+  const now = performance.now()
+  if (pos == null) {
+    lastRawPos = 0
+    lastRawAt = now
+    smoothPos.value = 0
+    return
+  }
+  if (!lastRawAt) {
+    lastRawPos = pos
+    lastRawAt = now
+    smoothPos.value = pos
+    return
+  }
+  const rawDelta = pos - lastRawPos
+  if (rawDelta < -BACK_SEEK_MS) {
+    // Real reset (track change / backward seek): snap, don't animate backward.
+    lastRawPos = pos
+    lastRawAt = now
+    smoothPos.value = pos
+    return
+  }
+  lastRawPos = pos
+  lastRawAt = now
+  // Hold the max reached — never roll back below the interpolation (quantization).
+  if (pos > smoothPos.value) smoothPos.value = pos
+}
+
+function smoothLoop(): void {
+  if (playing.value && lastRawAt) {
+    const p = lastRawPos + (performance.now() - lastRawAt)
+    if (p > smoothPos.value) smoothPos.value = p
+  } else {
+    smoothPos.value = lastRawPos
+  }
+  rafId = requestAnimationFrame(smoothLoop)
+}
+
+// Re-anchor on pause→play so the wall-clock advance never includes the paused
+// span (a stale lastRawAt would otherwise jump the position forward on resume).
+watch(playing, (v) => {
+  if (v) {
+    lastRawAt = performance.now()
+  } else {
+    lastRawAt = 0
+    smoothPos.value = lastRawPos
+  }
+})
+
 /** No lyric text → the card backdrop goes fully transparent. When
  *  `ignore_empty_lines` is off, an instrumental gap (empty current line) also
  *  hides the window fully transparent. */
@@ -309,6 +376,7 @@ async function poll(): Promise<void> {
     const res = (await window.cockpit.command('aidj.lyrics')) as PlaybackState | null
     if (res && typeof res === 'object' && res.ok === true) {
       state.value = res
+      anchorPosition(res.positionMs)
       failCount = 0
       return
     }
@@ -500,6 +568,7 @@ onMounted(async () => {
   }
   await poll()
   pollTimer.value = setInterval(() => void poll(), 600)
+  rafId = requestAnimationFrame(smoothLoop)
   window.addEventListener('resize', onResize)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('contextmenu', onContextMenu, true)
@@ -526,6 +595,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (pollTimer.value) clearInterval(pollTimer.value)
+  cancelAnimationFrame(rafId)
   winUnsub?.()
   window.removeEventListener('resize', onResize)
   window.removeEventListener('pointerup', onPointerUp)
@@ -700,13 +770,13 @@ onBeforeUnmount(() => {
   text-shadow: var(--lyr-shadow);
 }
 /* Karaoke: the lit line is a background-clip:text gradient whose hard stop sits
-   at --lyr-kfill — filled words use the normal text color, unplayed ones a dim
-   version of it. text-shadow stays on the element (drawn behind the fill). */
+   at --lyr-kfill — filled words use the full text color, unplayed ones a 55%
+   dim version of it (same pattern as the in-app lyrics page). */
 .lyrics-line.is-current .karaoke-mask {
   background-image: linear-gradient(
     90deg,
-    var(--lyr-fg) var(--lyr-kfill),
-    color-mix(in srgb, var(--lyr-fg) 35%, transparent) var(--lyr-kfill)
+    var(--lyr-karaoke-fill) var(--lyr-kfill),
+    var(--lyr-karaoke-dim) var(--lyr-kfill)
   );
   -webkit-background-clip: text;
   background-clip: text;
