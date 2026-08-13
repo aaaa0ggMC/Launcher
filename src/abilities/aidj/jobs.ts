@@ -852,9 +852,12 @@ async function ensureContinuousPlayer(
 
 /** /discard_follows: drop queued-but-unplayed songs; keep the current track playing. */
 export function clearContinuousPending(player: string): void {
-  // Web engine: no pending queue to trim — the current track keeps playing and
-  // the next generated batch REPLACES the engine queue (replace-on-next).
-  if (isWebTarget(player)) return
+  if (isWebTarget(player)) {
+    // Web engine: trim AFTER the cursor (current + play history stay so prev
+    // still works). A chat push is a distinct FULL replace, not a trim.
+    void getWebPlayerBackend().trimQueue()
+    return
+  }
   const st = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (!st) return
   st.queue = st.current ? [st.current] : []

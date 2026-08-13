@@ -31,6 +31,7 @@ type EngineCommand =
   | { type: 'toggle' }
   | { type: 'next' }
   | { type: 'prev' }
+  | { type: 'trim' }
   | { type: 'stop' }
   | { type: 'seek'; positionMs: number }
   | { type: 'volume'; volume: number }
@@ -44,6 +45,10 @@ class WebPlayerEngine {
 
   private queue: WebPlayerSong[] = []
   private index = -1
+  /** Recently played songs (most-recent first) — survives queue replacement, so
+   *  prev can still step back even after a new playlist/refill replaced the
+   *  queue (the queue itself is never spliced, it's only swapped wholesale). */
+  private history: WebPlayerSong[] = []
   private volume = 0.8
   private status: PlayerStatus = 'Unknown'
   private lengthMs = 0
@@ -115,6 +120,9 @@ class WebPlayerEngine {
       case 'prev':
         this.prev()
         break
+      case 'trim':
+        this.trimAfterCurrent()
+        break
       case 'stop':
         this.stop()
         break
@@ -144,10 +152,19 @@ class WebPlayerEngine {
       this.stop()
       return
     }
+    this.recordHistory(song)
     this.audio.src = song.url
     this.lengthMs = 0
     void this.updateMediaMetadata()
     this.report()
+  }
+
+  /** Push a played song to the front of the history stack (dedup by path). */
+  private recordHistory(song: WebPlayerSong): void {
+    const i = this.history.findIndex((h) => h.path === song.path)
+    if (i >= 0) this.history.splice(i, 1)
+    this.history.unshift(song)
+    if (this.history.length > 50) this.history.length = 50
   }
 
   private resume(): void {
@@ -180,6 +197,16 @@ class WebPlayerEngine {
     this.index--
     this.loadTrack()
     this.resume()
+  }
+
+  /** "Clear the queue" — NOT a full wipe: keep the current track + the play
+   *  history (queue[0..index]), drop everything after the cursor so prev keeps
+   *  working. A full replace is a separate operation (playlist/playList). */
+  private trimAfterCurrent(): void {
+    if (this.index >= 0 && this.index < this.queue.length - 1) {
+      this.queue = this.queue.slice(0, this.index + 1)
+    }
+    this.report()
   }
 
   private stop(): void {

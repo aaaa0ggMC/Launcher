@@ -362,6 +362,13 @@ export class WebPlayerBackend implements PlayerBackend {
     return true
   }
 
+  /** Clear queued-but-unplayed songs (trim after the cursor) — the current
+   *  track + play history stay so prev keeps working. */
+  async trimQueue(): Promise<boolean> {
+    this.emit({ type: 'trim' })
+    return true
+  }
+
   async seek(positionMs: number): Promise<boolean> {
     this.emit({ type: 'seek', positionMs })
     return true
