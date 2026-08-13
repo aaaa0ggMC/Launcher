@@ -371,9 +371,18 @@ export function moveWindowTo(win: BrowserWindow | null, x: number, y: number): b
 /** Resize a child window (works even with `resizable: false`). */
 export function resizeWindowTo(win: BrowserWindow | null, w: number, h: number): boolean {
   if (!win || win.isDestroyed()) return false
+  const cw = Math.max(120, Math.round(w))
+  const ch = Math.max(60, Math.round(h))
   try {
-    win.setSize(Math.max(120, Math.round(w)), Math.max(60, Math.round(h)))
-  } catch {
+    // Windows clamps setSize of a resizable:false window to its CURRENT
+    // minimum — a window that auto-grew can never shrink again, so the lyrics
+    // window stayed wide while re-centering by the (smaller) requested width
+    // and visibly drifted right. Lower the minimum first so SHRINK takes
+    // effect; the next grow re-raises it.
+    if (process.platform === 'win32') win.setMinimumSize(cw, ch)
+    win.setSize(cw, ch)
+  } catch (e) {
+    log.warn('resizeWindowTo failed', { error: String(e) })
     return false
   }
   return true
