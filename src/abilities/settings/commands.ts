@@ -17,7 +17,9 @@ const log = makeLogger('settings')
 
 /** Default global shell config — materialized on first run when config.json
  *  doesn't exist yet, so the file exists for the settings UI + startup reads
- *  (and the ENOENT warn at every launch goes away). */
+ *  (and the ENOENT warn at every launch goes away). Platform-aware terminal:
+ *  Windows has no konsole, so a fresh config there must not bake in the Linux
+ *  default. */
 const DEFAULT_GLOBAL_CONFIG = {
   theme: 'dark',
   language: 'zh',
@@ -39,7 +41,13 @@ const DEFAULT_GLOBAL_CONFIG = {
     fuseAlpha: 0.85,
     fuseBlur: 28
   },
-  runtime: { terminal: ['konsole', '--hold', '-e'], confirmBeforeLaunch: true },
+  runtime: {
+    terminal:
+      process.platform === 'win32'
+        ? ['cmd', '/c', 'start', 'cmd', '/k']
+        : ['konsole', '--hold', '-e'],
+    confirmBeforeLaunch: true
+  },
   sidebar: { default: 'cli', sort: 'alpha' }
 } as const
 

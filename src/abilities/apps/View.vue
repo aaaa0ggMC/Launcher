@@ -178,6 +178,10 @@ const filtered = computed(() => {
 function openEdit(id: string): void {
   const entry = apps.value[id]
   if (!entry) return
+  // A manually-written apps.json entry (or a scanner hit that produced no
+  // launch spec) may lack `exec`/`actions[].exec` — open the editor with
+  // safe defaults instead of crashing on `entry.exec.type`.
+  const exec = entry.exec ?? ({} as AppExecSpec)
   form.value = {
     root: entry.root ?? '',
     id,
@@ -187,31 +191,34 @@ function openEdit(id: string): void {
     icon: entry.icon ?? '',
     tags: (entry.tags ?? []).join(', '),
     localized: JSON.parse(JSON.stringify(entry.localized ?? {})),
-    execType: entry.exec.type,
-    execCwd: entry.exec.cwd ?? '',
-    execCommand: entry.exec.command.join(' '),
+    execType: exec.type ?? 'custom',
+    execCwd: exec.cwd ?? '',
+    execCommand: (exec.command ?? []).join(' '),
     risk: entry.security?.risk ?? 'low',
     note: entry.security?.note ?? '',
-    terminal: entry.exec.terminal ?? false,
-    rootFlag: entry.exec.root ?? false,
-    background: entry.exec.background ?? false,
+    terminal: exec.terminal ?? false,
+    rootFlag: exec.root ?? false,
+    background: exec.background ?? false,
     managed: entry.managed ?? true,
     transformer: entry.transformer ?? '',
     transformerDisplay: entry.transformer_display ?? false,
-    actions: Object.entries(entry.actions ?? {}).map(([aid, a]) => ({
-      id: aid,
-      name: typeof a.name === 'string' ? a.name : '',
-      icon: a.icon ?? '',
-      execType: a.exec.type,
-      execCwd: a.exec.cwd ?? '',
-      execCommand: a.exec.command.join(' '),
-      risk: a.risk ?? 'low',
-      terminal: a.exec.terminal ?? false,
-      background: a.exec.background ?? false,
-      rootFlag: a.exec.root ?? false,
-      stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n'),
-      localized: a.localized ?? {}
-    }))
+    actions: Object.entries(entry.actions ?? {}).map(([aid, a]) => {
+      const aExec = a.exec ?? ({} as AppExecSpec)
+      return {
+        id: aid,
+        name: typeof a.name === 'string' ? a.name : '',
+        icon: a.icon ?? '',
+        execType: aExec.type ?? 'custom',
+        execCwd: aExec.cwd ?? '',
+        execCommand: (aExec.command ?? []).join(' '),
+        risk: a.risk ?? 'low',
+        terminal: aExec.terminal ?? false,
+        background: aExec.background ?? false,
+        rootFlag: aExec.root ?? false,
+        stepsText: (a.steps ?? []).map((s) => s.command.join(' ')).join('\n'),
+        localized: a.localized ?? {}
+      }
+    })
   }
   editOpen.value = true
 }

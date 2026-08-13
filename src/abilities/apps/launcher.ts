@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { isAbsolute, dirname, join } from 'path'
+import { isAbsolute, dirname, join, delimiter } from 'path'
 import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
 import type { AppEntry, AppExecSpec, AppAction, LaunchResult, ProcOutputEvent } from './types'
@@ -87,7 +87,40 @@ function resolvePath(entry: AppEntry, target?: string): string {
 
 async function readTerminal(): Promise<string[]> {
   const cfg = await readJson<RuntimeConfig>(CONFIG_JSON)
-  return cfg?.runtime?.terminal ?? ['konsole', '--hold', '-e']
+  const configured = cfg?.runtime?.terminal
+  // Only honor a configured terminal whose binary actually resolves on this
+  // platform — a config written on Linux (e.g. `konsole`) would otherwise
+  // make every terminal:true launch ENOENT on Windows.
+  if (configured?.length && resolveCommand(configured[0])) return configured
+  return platformDefaultTerminal()
+}
+
+/** Windows → cmd /c start cmd /k (new console window that stays open);
+ *  Linux → konsole (the KDE default, hold the window after exit). */
+function platformDefaultTerminal(): string[] {
+  return process.platform === 'win32'
+    ? ['cmd', '/c', 'start', 'cmd', '/k']
+    : ['konsole', '--hold', '-e']
+}
+
+/** Resolve a command to an executable on PATH (or absolute path). Windows
+ *  tries PATHEXT extensions (.exe/.cmd/…). Returns null when not found. */
+function resolveCommand(cmd: string): string | null {
+  if (isAbsolute(cmd)) return existsSync(cmd) ? cmd : null
+  const isWin = process.platform === 'win32'
+  const exts = isWin ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';') : ['']
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    if (!dir) continue
+    for (const ext of exts) {
+      const p = join(dir, cmd + ext)
+      try {
+        if (existsSync(p) && statSync(p).isFile()) return p
+      } catch {
+        /* ignore unreadable dirs */
+      }
+    }
+  }
+  return null
 }
 
 /**
