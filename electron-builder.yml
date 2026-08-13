@@ -21,8 +21,12 @@ files:
 asarUnpack:
   # scripts/ holds pkexec helper scripts — the main process execFile's them, so
   # they must NOT stay packed inside the asar (can't be executed from there).
+  # esbuild compiles external abilities at RUNTIME (ability-loader.ts) — its
+  # native platform binary must be real files on disk, not inside the asar.
   - resources/**
   - scripts/**
+  - node_modules/esbuild/**
+  - node_modules/@esbuild/**
 win:
   executableName: cockpit
   icon: build/icon.ico

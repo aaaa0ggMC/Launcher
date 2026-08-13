@@ -23,6 +23,9 @@ importers:
       dbus-next:
         specifier: ^0.10.2
         version: 0.10.2
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       fuse.js:
         specifier: ^7.5.0
         version: 7.5.0
@@ -75,9 +78,6 @@ importers:
       electron-vite:
         specifier: ^5.0.0
         version: 5.0.0(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
-      esbuild:
-        specifier: ^0.28.1
-        version: 0.28.1
       eslint:
         specifier: ^9.39.1
         version: 9.39.5(jiti@2.7.0)
