@@ -91,7 +91,7 @@ DBus 模式渗透进 UI 的现状点：
 ## 6. 已知坑与对策
 
 1. **格式盲区**：Chromium 原生不认 `ape / wv / tak`（中文曲库常见）。对策：ffmpeg 转码（后台任务 + 缓存，「边播边转」策略）。
-2. **媒体键三重分叉**：Linux 自建 MPRIS server（`org.mpris.MediaPlayer2.Cockpit`，只读转发 position / 状态，保住耳机键与 KDE 媒体控件）；Windows 走 `Windows.Media` (SMTC)；macOS 走 Now Playing。三者独立实现。
+2. **媒体键 → mediaSession 统一方案（修正「三重分叉」）**：WebPlayerBackend 设置 `navigator.mediaSession`（`metadata` + `seekto/play/pause` 回调）后，**Chromium 原生桥接三平台系统媒体层**——Windows → SMTC（音量面板媒体卡片 / 媒体键 / 锁屏）、macOS → Now Playing、Linux → MPRIS。无需各自实现。**验证点**：Electron 的 Chromium 桥接并非 100% 完美（Linux 桥接依赖 GTK / 通知服务在跑，封面与 seek 支持看版本）；若 Linux 桥接质量差，才回退到「自建只读 MPRIS server（`org.mpris.MediaPlayer2.Cockpit`，只读转发 position / 状态）」兜底。
 3. **音量模型**：HTML5 `volume` 是软件音量，叠在系统音量之上，无 PipeWire 混音器统一控制。响度平衡（LoudnessCache）「改播放器音量」的语义需重定义。
 4. **切换瞬间续播**：DBus → Web 切换时当前歌停止，需用户手动续播；或 WebPlayerBackend 激活时把当前 track 加载进内置播放器继续。前者简单，后者才是真无缝。
 5. **事件源切换**：DBus 轮询 vs Web `timeupdate`，切换瞬间解绑旧源、绑定新源，避免双源同时推状态导致 position 跳变。
@@ -121,20 +121,25 @@ DBus 模式渗透进 UI 的现状点：
 
 **本地增强**
 
-11. **封面本地读取**：曲目同目录图片 / ID3 标签，DBus 模式拿不到的资源这里能拿。
+11. **封面本地读取**：MPRIS 的 `mpris:artUrl` 没有「接口」——封面是播放器自己解析标签填进字段的字符串，MPRIS 只是原样转发（KDE Connect 桌面端再读该图片转 base64 推给手机）。所以内置播放器要自己做封面获取：ID3 / FLAC 标签解析 + 同目录 `cover.jpg` / `folder.jpg` 查找。本地文件在手边，成本低。
 
-**推荐落地顺序**：crossfade + 情绪感知过渡（灵魂）→ 频谱（联动 ft）→ EQ / 响度归一 → 其余按需。
+**跨平台遥控（KDE Connect 的跨平台替代）**
+
+12. **自建局域网 Web 遥控端点**：Linux 的「手机看歌曲 + 封面 + 控制」（KDE Connect 依赖 MPRIS → `mpris:artUrl` → base64 推送）在 Windows / macOS 上因无 MPRIS 而失效。aidj-player 自己暴露一个局域网 Web 端点（手机浏览器 / 未来 PWA），实时看歌曲 / 封面 / 进度条 / 频谱并控制——**三平台统一**，不依赖任何系统媒体层，也顺带补齐「灵动岛看封面」类体验。
+
+**推荐落地顺序**：crossfade + 情绪感知过渡（灵魂）→ 频谱（联动 ft）→ EQ / 响度归一 → 封面本地读取 → 其余按需。
 
 ## 7. 里程碑
 
 1. **M1**：`PlayerBackend` 接口 + `aidj.player-mode` 命令 + 后端热切换流程（含 BT 标记清理）。Linux 默认仍 DBus，Web 后端可切。
-2. **M2**：`WebPlayerBackend`（HTML5 audio 封装 + 状态填充）+ 顶栏播放器条组件 v-if 分叉 + `aidj.send` 双语义。
-3. **M3**：桌面歌词窗口绑定重指向内置播放器；`meta.ts` 移除 `platforms: ['linux']`，aidj 全平台可用。
-4. **M4**（可选）：crossfade + 情绪感知过渡；频谱联动 ft；EQ / 响度归一；倍速 / AB 循环 / 睡眠定时；ffmpeg 转码；Linux MPRIS server（媒体键）。
-5. **M5**（远期）：Windows SMTC / macOS Now Playing 媒体键。
+2. **M2**：`WebPlayerBackend`（HTML5 audio 封装 + AudioContext 管线 + 状态填充）+ `navigator.mediaSession` 媒体键桥接（三平台一次到位）+ 顶栏播放器条组件 v-if 分叉 + `aidj.send` 双语义。
+3. **M3**：桌面歌词窗口绑定重指向内置播放器；封面本地读取（ID3 / 同目录）；`meta.ts` 移除 `platforms: ['linux']`，aidj 全平台可用。
+4. **M4**（可选）：crossfade + 情绪感知过渡；频谱联动 ft；EQ / 响度归一；倍速 / AB 循环 / 睡眠定时；自建局域网 Web 遥控端点；ffmpeg 转码。
+5. **M5**（远期）：若 Linux 的 mediaSession→MPRIS 桥接质量差，回退自建只读 MPRIS server。
 
 ## 8. 明确不做（本期范围外）
 
 - 不做独立解码器 / native 播放库——HTML5 audio +（远期 ffmpeg 转码）即可，避免 Electron 内置解码的维护成本。
 - 不做 UI 全量重构——只动顶栏播放器条组件。
 - 不删除 DBusBackend——保留作 Linux fallback。
+- 不做 Windows / macOS 外部播放器控制——该侧碎片化（vlc HTTP / AppleScript，功能比 MPRIS 更粗），不进跨平台主线；外部控制仅 Linux 保留 MPRIS，Windows vlc HTTP 列为远期可选 `ExternalPlayerBackend`。
