@@ -116,7 +116,11 @@ const outputEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLInputElement | null>(null)
 
 function scrollToBottom(): void {
-  outputEl.value?.scrollTo({ top: outputEl.value.scrollHeight })
+  // The ref is bound to a <v-card> (Vuetify component), so outputEl.value is
+  // the component instance — resolve the native element via $el when present.
+  const inst = outputEl.value as (HTMLElement & { $el?: HTMLElement }) | null
+  const el = inst?.$el ?? inst
+  el?.scrollTo({ top: el.scrollHeight })
 }
 
 function focusInput(): void {
