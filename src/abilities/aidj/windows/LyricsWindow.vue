@@ -41,14 +41,13 @@ const myWindowId = new URLSearchParams(location.search).get('id') ?? ''
 const lyricsCfg = ref<LyricsDisplayConfig>(DEFAULT_LYRICS_CFG)
 
 /** `RRGGBBAA` hex → CSS rgba(). Anything malformed → fully transparent. */
-function hexToRgba(hex: string, alphaOverride?: number): string {
+function hexToRgba(hex: string): string {
   const h = (hex || '').replace(/^#/, '').trim()
   if (!/^[0-9a-fA-F]{8}$/.test(h)) return 'rgba(0, 0, 0, 0)'
-  const a = alphaOverride ?? parseInt(h.slice(6, 8), 16) / 255
   return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(
     h.slice(4, 6),
     16
-  )}, ${a.toFixed(3)})`
+  )}, ${(parseInt(h.slice(6, 8), 16) / 255).toFixed(3)})`
 }
 
 const rootStyle = computed(() => {
@@ -73,12 +72,7 @@ const rootStyle = computed(() => {
     '--lyr-gap': `${Math.max(2, c.line_gap ?? 6)}px`,
     '--lyr-card-radius': `${Math.max(0, c.card_radius ?? 12)}px`,
     '--lyr-card-pad-y': `${Math.max(0, c.card_padding_y ?? 12)}px`,
-    '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`,
-    // Karaoke fill: played words in the FULL text color, unplayed at 70% alpha —
-    // dim enough to read the progress, bright enough that a white config stays
-    // white-ish (55% of white on transparent read as flat gray).
-    '--lyr-karaoke-fill': hexToRgba(c.fg_color, 1),
-    '--lyr-karaoke-dim': hexToRgba(c.fg_color, 0.7)
+    '--lyr-card-pad-x': `${Math.max(0, c.card_padding_x ?? 26)}px`
   } as Record<string, string>
 })
 
@@ -630,7 +624,10 @@ onBeforeUnmount(() => {
                 v-for="(line, i) in windowLines"
                 :key="windowStart + i"
                 class="lyrics-line"
-                :class="{ 'is-current': line.isCurrent, 'is-dim': !playing }"
+                :class="{
+                  'is-current': line.isCurrent,
+                  'is-dim': !line.isCurrent && !playing
+                }"
               >
                 <template v-if="line.isCurrent && lyricsCfg.karaoke && line.hasKaraoke">
                   <span class="karaoke-mask" :style="karaokeMaskStyle">{{ line.text }}</span>
@@ -770,13 +767,14 @@ onBeforeUnmount(() => {
   text-shadow: var(--lyr-shadow);
 }
 /* Karaoke: the lit line is a background-clip:text gradient whose hard stop sits
-   at --lyr-kfill — filled words use the full text color, unplayed ones a 55%
-   dim version of it (same pattern as the in-app lyrics page). */
+   at --lyr-kfill — filled words use the current-line color, unplayed words the
+   CANDIDATE color (which carries its own transparency from the config — never
+   stack an extra alpha layer on top). Mirrors the in-app lyrics page. */
 .lyrics-line.is-current .karaoke-mask {
   background-image: linear-gradient(
     90deg,
-    var(--lyr-karaoke-fill) var(--lyr-kfill),
-    var(--lyr-karaoke-dim) var(--lyr-kfill)
+    var(--lyr-fg) var(--lyr-kfill),
+    var(--lyr-candidate-color) var(--lyr-kfill)
   );
   -webkit-background-clip: text;
   background-clip: text;
