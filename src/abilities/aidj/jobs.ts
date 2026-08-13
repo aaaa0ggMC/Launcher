@@ -25,139 +25,145 @@ import {
 import OpenAI from 'openai'
 import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
 import { SEPARATOR } from './types'
+import { PLAYBACK_TAG, getPlayerMode, getWebPlayerBackend } from './player-backend'
 
 const log = makeLogger('aidj-persistent')
 
-registerJobHandler('aidj.persistent', async (control, args) => {
-  const initialPrompt = (args.prompt as string) || ''
-  const anchorValue = args.anchor !== undefined ? Number(args.anchor) : null
-  if (!initialPrompt) {
-    control.pushLine('错误: 需要初始提示词', 'stderr')
-    control.finish('error')
-    return
-  }
+registerJobHandler(
+  'aidj.persistent',
+  async (control, args) => {
+    const initialPrompt = (args.prompt as string) || ''
+    const anchorValue = args.anchor !== undefined ? Number(args.anchor) : null
+    if (!initialPrompt) {
+      control.pushLine('错误: 需要初始提示词', 'stderr')
+      control.finish('error')
+      return
+    }
 
-  const config = await loadAidjConfig()
-  if (!config) {
-    control.pushLine('错误: AIDJ 配置未找到', 'stderr')
-    control.finish('error')
-    return
-  }
+    const config = await loadAidjConfig()
+    if (!config) {
+      control.pushLine('错误: AIDJ 配置未找到', 'stderr')
+      control.finish('error')
+      return
+    }
 
-  setNcmBaseUrl(config.ncm_base_url)
-  await ensureAidjDir()
+    setNcmBaseUrl(config.ncm_base_url)
+    await ensureAidjDir()
 
-  const client = new OpenAI({
-    apiKey: config.secrets.api_key,
-    baseURL: config.ai_settings.base_url
-  })
+    const client = new OpenAI({
+      apiKey: config.secrets.api_key,
+      baseURL: config.ai_settings.base_url
+    })
 
-  const lib = await loadLibrary()
-  const musicPaths = lib.musicPaths
-  let metadata: Map<string, SongMeta> = lib.metadata
-  const missing = await findMissingSongs(musicPaths, metadata)
-  if (missing.size > 0) {
-    control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)
-    metadata = (
-      await syncMetadata(
-        client,
-        missing,
-        metadata,
-        config.ai_settings.metadata_model,
-        config.preferences.metadata_concurrency
-      )
-    ).metadata
-  }
+    const lib = await loadLibrary()
+    const musicPaths = lib.musicPaths
+    let metadata: Map<string, SongMeta> = lib.metadata
+    const missing = await findMissingSongs(musicPaths, metadata)
+    if (missing.size > 0) {
+      control.pushLine(`发现 ${missing.size} 首新歌曲，同步元数据中...`)
+      metadata = (
+        await syncMetadata(
+          client,
+          missing,
+          metadata,
+          config.ai_settings.metadata_model,
+          config.preferences.metadata_concurrency
+        )
+      ).metadata
+    }
 
-  control.pushLine(`曲库已加载: ${metadata.size} 首歌曲`)
-  control.pushLine(`初始提示: "${initialPrompt}"`)
+    control.pushLine(`曲库已加载: ${metadata.size} 首歌曲`)
+    control.pushLine(`初始提示: "${initialPrompt}"`)
 
-  const dbus = await initDbusManager(config)
-  if (!dbus) {
-    control.pushLine('错误: DBus 连接失败', 'stderr')
-    control.finish('error')
-    return
-  }
-  control.pushLine('DBus 已连接')
+    const dbus = await initDbusManager(config)
+    if (!dbus) {
+      control.pushLine('错误: DBus 连接失败', 'stderr')
+      control.finish('error')
+      return
+    }
+    control.pushLine('DBus 已连接')
 
-  const session = new PersistentSession(
-    client,
-    metadata,
-    musicPaths,
-    config,
-    dbus,
-    initialPrompt,
-    anchorValue
-  )
-  const sessionId = await SessionManager.createSession({
-    title: initialPrompt.slice(0, 40),
-    type: 'chat'
-  })
-  session.sessionId = sessionId
-  setPersistentSession(session)
+    const session = new PersistentSession(
+      client,
+      metadata,
+      musicPaths,
+      config,
+      dbus,
+      initialPrompt,
+      anchorValue
+    )
+    const sessionId = await SessionManager.createSession({
+      title: initialPrompt.slice(0, 40),
+      type: 'chat'
+    })
+    session.sessionId = sessionId
+    setPersistentSession(session)
 
-  const ac = new AbortController()
-  control.setCancel(() => {
-    ac.abort()
-    session.stop()
-    setPersistentSession(null)
-  })
+    const ac = new AbortController()
+    control.setCancel(() => {
+      ac.abort()
+      session.stop()
+      setPersistentSession(null)
+    })
 
-  control.pushLine('持久模式 AI DJ 已启动')
-  control.push({ data: { type: 'status', message: 'started', prompt: initialPrompt } })
+    control.pushLine('持久模式 AI DJ 已启动')
+    control.push({ data: { type: 'status', message: 'started', prompt: initialPrompt } })
 
-  let lastStatusUpdate = 0
-  let lastStatus: string | null = null
+    let lastStatusUpdate = 0
+    let lastStatus: string | null = null
 
-  while (!ac.signal.aborted) {
-    try {
-      if (await session.needsNextBatch()) {
-        control.pushLine('AI 思考中...', 'stderr')
-        control.push({ data: { type: 'status', message: 'thinking' } })
-        await session.fetchBatch(undefined, (attempt, waitMs) => {
-          control.pushLine(
-            `网络不可用，第 ${attempt} 次重试中… (${Math.round(waitMs / 1000)}s)`,
-            'stderr'
-          )
-        })
-        control.push({ data: { type: 'status', message: 'idle' } })
-      }
+    while (!ac.signal.aborted) {
+      try {
+        if (await session.needsNextBatch()) {
+          control.pushLine('AI 思考中...', 'stderr')
+          control.push({ data: { type: 'status', message: 'thinking' } })
+          await session.fetchBatch(undefined, (attempt, waitMs) => {
+            control.pushLine(
+              `网络不可用，第 ${attempt} 次重试中… (${Math.round(waitMs / 1000)}s)`,
+              'stderr'
+            )
+          })
+          control.push({ data: { type: 'status', message: 'idle' } })
+        }
 
-      await session.ensureNextBatchInQueue()
+        await session.ensureNextBatchInQueue()
 
-      if (session.hasReadyTrack()) {
-        const status = await dbus.getStatus()
-        if (status.status === 'Stopped' || status.status === 'Unknown') {
-          const track = session.dequeue()
-          if (track) {
-            await session.adjustVolume(track)
-            await dbus.sendFiles([track.path])
-            control.push({ data: { type: 'now_playing', track: track.name, path: track.path } })
-            control.pushLine(`▶ 播放: ${track.name}`)
+        if (session.hasReadyTrack()) {
+          const status = await dbus.getStatus()
+          if (status.status === 'Stopped' || status.status === 'Unknown') {
+            const track = session.dequeue()
+            if (track) {
+              await session.adjustVolume(track)
+              await dbus.sendFiles([track.path])
+              control.push({ data: { type: 'now_playing', track: track.name, path: track.path } })
+              control.pushLine(`▶ 播放: ${track.name}`)
+            }
           }
         }
-      }
 
-      const status = await dbus.getStatus()
-      const statusKey = `${status.status}|${status.track}`
-      if (statusKey !== lastStatus || Date.now() - lastStatusUpdate > 5000) {
-        lastStatus = statusKey
-        lastStatusUpdate = Date.now()
-        control.push({ data: { type: 'status', message: 'running', playerStatus: status } })
-      }
+        const status = await dbus.getStatus()
+        const statusKey = `${status.status}|${status.track}`
+        if (statusKey !== lastStatus || Date.now() - lastStatusUpdate > 5000) {
+          lastStatus = statusKey
+          lastStatusUpdate = Date.now()
+          control.push({ data: { type: 'status', message: 'running', playerStatus: status } })
+        }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-    } catch (e) {
-      if (ac.signal.aborted) break
-      log.error('persistent loop error', { error: String(e) })
-      control.pushLine(`错误: ${String(e)}`, 'stderr')
-      await new Promise((resolve) => setTimeout(resolve, 5000))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      } catch (e) {
+        if (ac.signal.aborted) break
+        log.error('persistent loop error', { error: String(e) })
+        control.pushLine(`错误: ${String(e)}`, 'stderr')
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+      }
     }
-  }
 
-  control.pushLine('持久模式已停止')
-  control.finish('exited')
-})
+    control.pushLine('持久模式已停止')
+    control.finish('exited')
+  },
+  // dbus-exclusive: not startable in web-player mode (MAddition gating)
+  () => getPlayerMode().then((m) => m === 'dbus')
+)
 
 // ---------------------------------------------------------------------------
 // Continuous player — pushes the given ordered song list to an MPRIS player,
@@ -397,278 +403,286 @@ export function reorderContinuousQueue(
   return { ok: true }
 }
 
-registerJobHandler('aidj.continuous', async (control, args) => {
-  const songs = (args.songs ?? []) as PlaylistEntry[]
-  const playerArg = (args.player as string) || ''
-  if (!songs.length) {
-    control.pushLine('错误: 没有要播放的歌曲', 'stderr')
-    control.finish('error')
-    return
-  }
+registerJobHandler(
+  'aidj.continuous',
+  async (control, args) => {
+    const songs = (args.songs ?? []) as PlaylistEntry[]
+    const playerArg = (args.player as string) || ''
+    if (!songs.length) {
+      control.pushLine('错误: 没有要播放的歌曲', 'stderr')
+      control.finish('error')
+      return
+    }
 
-  const config = await loadAidjConfig()
-  if (!config) {
-    control.pushLine('错误: AIDJ 配置未找到', 'stderr')
-    control.finish('error')
-    return
-  }
+    const config = await loadAidjConfig()
+    if (!config) {
+      control.pushLine('错误: AIDJ 配置未找到', 'stderr')
+      control.finish('error')
+      return
+    }
 
-  const target =
-    playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
+    const target =
+      playerArg && playerArg !== '__auto__' ? playerArg : config.preferences.dbus_target || 'vlc'
 
-  // Register the task IMMEDIATELY (before the connection retry) with the
-  // requested target as a provisional key — otherwise every new chat batch
-  // during a DBus outage spawns another task because the connecting one can't
-  // be found. Once connected, playerKey resolves to the real bus name.
-  const queue = [...songs]
-  const st: ContinuousTaskState = {
-    dbus: null,
-    control,
-    queue,
-    current: null,
-    index: 0,
-    playerKey: target,
-    total: queue.length,
-    volbalEnabled: config.preferences.dynamic_balance_volume,
-    recordFreq: config.preferences.record_freq,
-    method: config.preferences.sound_adjust_method,
-    curve: config.preferences.volume_curve,
-    sentFirst: false,
-    volCache: new LoudnessCache(
-      config.preferences.sound_adjust_method,
-      config.preferences.volume_curve
-    ),
-    volbal: null
-  }
-  continuousTasks.set(control.id, st)
+    // Register the task IMMEDIATELY (before the connection retry) with the
+    // requested target as a provisional key — otherwise every new chat batch
+    // during a DBus outage spawns another task because the connecting one can't
+    // be found. Once connected, playerKey resolves to the real bus name.
+    const queue = [...songs]
+    const st: ContinuousTaskState = {
+      dbus: null,
+      control,
+      queue,
+      current: null,
+      index: 0,
+      playerKey: target,
+      total: queue.length,
+      volbalEnabled: config.preferences.dynamic_balance_volume,
+      recordFreq: config.preferences.record_freq,
+      method: config.preferences.sound_adjust_method,
+      curve: config.preferences.volume_curve,
+      sentFirst: false,
+      volCache: new LoudnessCache(
+        config.preferences.sound_adjust_method,
+        config.preferences.volume_curve
+      ),
+      volbal: null
+    }
+    continuousTasks.set(control.id, st)
 
-  const ac = new AbortController()
-  const release = (): void => {
-    continuousTasks.delete(control.id)
-    if (st.playerKey) playerBindings.delete(st.playerKey)
-    if (st.dbus) {
+    const ac = new AbortController()
+    const release = (): void => {
+      continuousTasks.delete(control.id)
+      if (st.playerKey) playerBindings.delete(st.playerKey)
+      if (st.dbus) {
+        try {
+          st.dbus.disconnect()
+        } catch {
+          /* noop */
+        }
+      }
+    }
+    control.setCancel(() => {
+      ac.abort()
+      release()
+    })
+
+    // Connect with retry: the MPRIS player (or the DBus daemon itself) may be
+    // down — keep retrying every 10s until it comes up, the push lands, or the
+    // user cancels. Never die silently and never hand the chat a "pushed OK"
+    // that wasn't actually delivered.
+    let attempts = 0
+    while (!ac.signal.aborted) {
+      const mgr = new DBusManager(target)
+      const connected = await withTimeout(mgr.connect(), 4000, false)
+      let player = ''
+      if (connected) {
+        const status = await withTimeout<{ player?: string } | null>(mgr.getStatus(), 4000, null)
+        player = status?.player ?? ''
+      }
+      if (connected && player) {
+        const playerKey = mgr.resolvedPlayerName || player
+        if (playerBindings.has(playerKey)) {
+          control.pushLine(te('aidj.continuous.playerBusy', { player: playerKey }), 'stderr')
+          release()
+          control.finish('error')
+          return
+        }
+        st.dbus = mgr
+        st.playerKey = playerKey
+        playerBindings.set(playerKey, control.id)
+        break
+      }
+      attempts++
+      if (attempts === 1) {
+        control.pushLine(t('aidj.continuous.connectRetry'), 'stderr')
+      } else {
+        control.pushLine(te('aidj.continuous.connectAttempt', { n: String(attempts) }), 'stderr')
+      }
       try {
-        st.dbus.disconnect()
+        mgr.disconnect()
       } catch {
         /* noop */
       }
+      await cancellableWait(10_000, ac.signal)
     }
-  }
-  control.setCancel(() => {
-    ac.abort()
-    release()
-  })
+    if (ac.signal.aborted || !st.dbus) {
+      release()
+      control.pushLine(t('aidj.continuous.connectCancelled'), 'stderr')
+      control.finish('cancelled')
+      return
+    }
 
-  // Connect with retry: the MPRIS player (or the DBus daemon itself) may be
-  // down — keep retrying every 10s until it comes up, the push lands, or the
-  // user cancels. Never die silently and never hand the chat a "pushed OK"
-  // that wasn't actually delivered.
-  let attempts = 0
-  while (!ac.signal.aborted) {
-    const mgr = new DBusManager(target)
-    const connected = await withTimeout(mgr.connect(), 4000, false)
-    let player = ''
-    if (connected) {
-      const status = await withTimeout<{ player?: string } | null>(mgr.getStatus(), 4000, null)
-      player = status?.player ?? ''
-    }
-    if (connected && player) {
-      const playerKey = mgr.resolvedPlayerName || player
-      if (playerBindings.has(playerKey)) {
-        control.pushLine(te('aidj.continuous.playerBusy', { player: playerKey }), 'stderr')
-        release()
-        control.finish('error')
-        return
-      }
-      st.dbus = mgr
-      st.playerKey = playerKey
-      playerBindings.set(playerKey, control.id)
-      break
-    }
-    attempts++
-    if (attempts === 1) {
-      control.pushLine(t('aidj.continuous.connectRetry'), 'stderr')
-    } else {
-      control.pushLine(te('aidj.continuous.connectAttempt', { n: String(attempts) }), 'stderr')
-    }
-    try {
-      mgr.disconnect()
-    } catch {
-      /* noop */
-    }
-    await cancellableWait(10_000, ac.signal)
-  }
-  if (ac.signal.aborted || !st.dbus) {
-    release()
-    control.pushLine(t('aidj.continuous.connectCancelled'), 'stderr')
-    control.finish('cancelled')
-    return
-  }
+    // Pin the manager to the resolved player (exit auto-detect) so the loop
+    // tracks ONE MPRIS object, not whichever happens to be playing.
+    await st.dbus.switchToPlayer(st.playerKey)
 
-  // Pin the manager to the resolved player (exit auto-detect) so the loop
-  // tracks ONE MPRIS object, not whichever happens to be playing.
-  await st.dbus.switchToPlayer(st.playerKey)
-
-  control.pushLine(
-    te('aidj.continuous.started', {
-      player: st.playerKey,
-      total: String(st.total)
+    control.pushLine(
+      te('aidj.continuous.started', {
+        player: st.playerKey,
+        total: String(st.total)
+      })
+    )
+    control.push({
+      data: { type: 'state', message: 'started', player: st.playerKey, total: st.total }
     })
-  )
-  control.push({
-    data: { type: 'state', message: 'started', player: st.playerKey, total: st.total }
-  })
 
-  try {
-    const dbus = st.dbus
-    const reconnectMinutes = config.preferences.reconnect_minutes ?? 0
-    let lastStateKey = ''
-    let lastSendAt = 0
-    let disconnectSince: number | null = null
+    try {
+      const dbus = st.dbus
+      const reconnectMinutes = config.preferences.reconnect_minutes ?? 0
+      let lastStateKey = ''
+      let lastSendAt = 0
+      let disconnectSince: number | null = null
 
-    while (!ac.signal.aborted) {
-      try {
-        const status = await dbus.getStatus()
+      while (!ac.signal.aborted) {
+        try {
+          const status = await dbus.getStatus()
 
-        // Bound player disappeared → reconnect per config, or exit.
-        if (!status.player) {
-          const now = Date.now()
-          if (disconnectSince === null) {
-            disconnectSince = now
-            control.pushLine(te('aidj.continuous.disconnected', { player: st.playerKey }), 'stderr')
-          }
-          if (reconnectMinutes === 0) {
-            control.pushLine(
-              te('aidj.continuous.disconnectedEnd', { player: st.playerKey }),
-              'stderr'
-            )
-            control.finish('error')
-            break
-          }
-          if (reconnectMinutes > 0 && now - disconnectSince > reconnectMinutes * 60_000) {
-            control.pushLine(
-              te('aidj.continuous.disconnectedTimeout', {
-                player: st.playerKey,
-                minutes: String(reconnectMinutes)
-              }),
-              'stderr'
-            )
-            control.finish('error')
-            break
-          }
-          // reconnectMinutes < 0 → retry forever; > 0 → within the window
-          const rebound = await dbus.switchToPlayer(st.playerKey).catch(() => false)
-          if (rebound) {
-            disconnectSince = null
-            control.pushLine(t('aidj.continuous.reconnected'), 'stdout')
+          // Bound player disappeared → reconnect per config, or exit.
+          if (!status.player) {
+            const now = Date.now()
+            if (disconnectSince === null) {
+              disconnectSince = now
+              control.pushLine(
+                te('aidj.continuous.disconnected', { player: st.playerKey }),
+                'stderr'
+              )
+            }
+            if (reconnectMinutes === 0) {
+              control.pushLine(
+                te('aidj.continuous.disconnectedEnd', { player: st.playerKey }),
+                'stderr'
+              )
+              control.finish('error')
+              break
+            }
+            if (reconnectMinutes > 0 && now - disconnectSince > reconnectMinutes * 60_000) {
+              control.pushLine(
+                te('aidj.continuous.disconnectedTimeout', {
+                  player: st.playerKey,
+                  minutes: String(reconnectMinutes)
+                }),
+                'stderr'
+              )
+              control.finish('error')
+              break
+            }
+            // reconnectMinutes < 0 → retry forever; > 0 → within the window
+            const rebound = await dbus.switchToPlayer(st.playerKey).catch(() => false)
+            if (rebound) {
+              disconnectSince = null
+              control.pushLine(t('aidj.continuous.reconnected'), 'stdout')
+            } else {
+              await new Promise((resolve) => setTimeout(resolve, 2000))
+              continue
+            }
           } else {
-            await new Promise((resolve) => setTimeout(resolve, 2000))
-            continue
+            disconnectSince = null
           }
-        } else {
-          disconnectSince = null
-        }
 
-        // All songs played and player idle → job finished.
-        if (
-          st.index >= st.total &&
-          Date.now() - lastSendAt > 3000 &&
-          (status.status === 'Stopped' || status.status === 'Unknown')
-        ) {
-          break
-        }
+          // All songs played and player idle → job finished.
+          if (
+            st.index >= st.total &&
+            Date.now() - lastSendAt > 3000 &&
+            (status.status === 'Stopped' || status.status === 'Unknown')
+          ) {
+            break
+          }
 
-        if ((status.status === 'Stopped' || status.status === 'Unknown') && st.index < st.total) {
-          const track = st.queue[st.index]
-          st.index++
-          st.current = track
-          lastSendAt = Date.now()
-          let targetVol: number | null = null
-          let loudness: LoudnessInfo | null = null
-          if (st.volbalEnabled) {
-            if (!st.sentFirst) {
-              // Establish the anchor from this track. If the file can't be
-              // measured, skip (leave volume untouched); the next track tries
-              // again — no guessing, no fabricated 0 dB.
-              const anchor = await st.volCache.setAnchor(track.path, 0.5)
-              if (anchor != null) {
-                await dbus.setVolume(0.5)
-                st.sentFirst = true
-                targetVol = 0.5
+          if ((status.status === 'Stopped' || status.status === 'Unknown') && st.index < st.total) {
+            const track = st.queue[st.index]
+            st.index++
+            st.current = track
+            lastSendAt = Date.now()
+            let targetVol: number | null = null
+            let loudness: LoudnessInfo | null = null
+            if (st.volbalEnabled) {
+              if (!st.sentFirst) {
+                // Establish the anchor from this track. If the file can't be
+                // measured, skip (leave volume untouched); the next track tries
+                // again — no guessing, no fabricated 0 dB.
+                const anchor = await st.volCache.setAnchor(track.path, 0.5)
+                if (anchor != null) {
+                  await dbus.setVolume(0.5)
+                  st.sentFirst = true
+                  targetVol = 0.5
+                }
+                log.info('volbal first-track', {
+                  track: track.name,
+                  method: st.method,
+                  anchor,
+                  volSet: anchor != null
+                })
+              } else {
+                const v = await st.volCache.targetVolume(track.path)
+                if (v != null) {
+                  await dbus.setVolume(v)
+                  targetVol = v
+                }
+                log.info('volbal adjust', {
+                  track: track.name,
+                  method: st.method,
+                  anchorVal: st.volCache.anchorVal,
+                  target: v,
+                  volSet: v != null
+                })
               }
-              log.info('volbal first-track', {
-                track: track.name,
-                method: st.method,
-                anchor,
-                volSet: anchor != null
-              })
-            } else {
-              const v = await st.volCache.targetVolume(track.path)
-              if (v != null) {
-                await dbus.setVolume(v)
-                targetVol = v
+              const li = await st.volCache.get(track.path)
+              if (li) {
+                loudness = {
+                  peak_db: li.peak_db,
+                  rms_db: li.rms_db,
+                  integrated_lufs: li.integrated_lufs
+                }
+              } else {
+                log.warn('volbal no-loudness', { track: track.name })
               }
-              log.info('volbal adjust', {
-                track: track.name,
-                method: st.method,
-                anchorVal: st.volCache.anchorVal,
-                target: v,
-                volSet: v != null
-              })
+              if (st.queue[st.index]) st.volCache.preAnalyze(st.queue[st.index].path)
             }
-            const li = await st.volCache.get(track.path)
-            if (li) {
-              loudness = {
-                peak_db: li.peak_db,
-                rms_db: li.rms_db,
-                integrated_lufs: li.integrated_lufs
-              }
-            } else {
-              log.warn('volbal no-loudness', { track: track.name })
+            if (st.recordFreq) {
+              await bumpFrequency([track.name])
             }
-            if (st.queue[st.index]) st.volCache.preAnalyze(st.queue[st.index].path)
+            st.volbal = {
+              enabled: st.volbalEnabled,
+              method: st.method,
+              curve: st.curve,
+              anchor: st.volCache.anchorVal,
+              baseVolume: st.volCache.baseVolume,
+              targetVolume: targetVol,
+              currentLoudness: loudness
+            }
+            await dbus.sendFiles([track.path])
+            control.push({
+              data: { type: 'now_playing', track: track.name, path: track.path }
+            })
+            control.pushLine(`▶ ${track.name} (${st.index}/${st.total})`)
+            pushContinuousState(st)
           }
-          if (st.recordFreq) {
-            await bumpFrequency([track.name])
-          }
-          st.volbal = {
-            enabled: st.volbalEnabled,
-            method: st.method,
-            curve: st.curve,
-            anchor: st.volCache.anchorVal,
-            baseVolume: st.volCache.baseVolume,
-            targetVolume: targetVol,
-            currentLoudness: loudness
-          }
-          await dbus.sendFiles([track.path])
-          control.push({
-            data: { type: 'now_playing', track: track.name, path: track.path }
-          })
-          control.pushLine(`▶ ${track.name} (${st.index}/${st.total})`)
-          pushContinuousState(st)
-        }
 
-        const stateKey = `${st.playerKey}|${st.current?.name ?? ''}|${st.index}/${st.total}`
-        if (stateKey !== lastStateKey) {
-          lastStateKey = stateKey
-          pushContinuousState(st)
-        }
+          const stateKey = `${st.playerKey}|${st.current?.name ?? ''}|${st.index}/${st.total}`
+          if (stateKey !== lastStateKey) {
+            lastStateKey = stateKey
+            pushContinuousState(st)
+          }
 
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-      } catch (e) {
-        if (ac.signal.aborted) break
-        log.error('continuous loop error', { error: String(e) })
-        control.pushLine(`错误: ${String(e)}`, 'stderr')
-        await new Promise((resolve) => setTimeout(resolve, 5000))
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        } catch (e) {
+          if (ac.signal.aborted) break
+          log.error('continuous loop error', { error: String(e) })
+          control.pushLine(`错误: ${String(e)}`, 'stderr')
+          await new Promise((resolve) => setTimeout(resolve, 5000))
+        }
       }
+    } finally {
+      release()
     }
-  } finally {
-    release()
-  }
 
-  control.pushLine('连续播放已结束')
-  control.finish('exited')
-})
+    control.pushLine('连续播放已结束')
+    control.finish('exited')
+  },
+  // dbus-exclusive: not startable in web-player mode (MAddition gating)
+  () => getPlayerMode().then((m) => m === 'dbus')
+)
 
 // ---------------------------------------------------------------------------
 // Persistent AI-DJ chat task — generates batches and pushes them to a
@@ -712,10 +726,10 @@ export async function setChatPlayer(
 }
 
 /** Resend a playlist to the chat session's continuous player. */
-export function chatResendPlaylist(
+export async function chatResendPlaylist(
   chatTaskId: string,
   songs: PlaylistEntry[]
-): { ok: boolean; error?: string; total?: number } {
+): Promise<{ ok: boolean; error?: string; total?: number }> {
   const st = chatTasks.get(chatTaskId)
   if (!st) return { ok: false, error: '持续会话未运行' }
   return ensureContinuousPlayer(st.player, songs)
@@ -773,24 +787,72 @@ function findContinuousByPlayer(player: string): ContinuousTaskState | undefined
   return [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
 }
 
-/** Push a playlist to the player: enqueue to an existing continuous task, else create one. */
-function ensureContinuousPlayer(
+// ---------------------------------------------------------------------------
+// Web-mode "continuous player" — the built-in engine IS the continuous player:
+// it queues a batch and auto-advances (`ended` → next), so the chat job feeds
+// the engine directly instead of a DBus task. The engine's queue snapshot
+// drives the same refill threshold as the MPRIS continuous task.
+// ---------------------------------------------------------------------------
+
+/** Tracks still to play in the engine queue (0 when idle / drained). */
+function webQueueRemaining(): number {
+  const q = getWebPlayerBackend().getQueueState()
+  if (!q || q.total <= 0) return 0
+  return Math.max(0, q.total - q.index)
+}
+
+/** Whether `player` denotes the built-in engine ('web' / '__auto__' resolved
+ *  to web by the chat job). */
+function isWebTarget(player: string): boolean {
+  return player === 'web' || player === '__auto__'
+}
+
+/** Push a playlist to the engine (replaces its queue — the engine plays on). */
+async function pushToWebEngine(songs: PlaylistEntry[]): Promise<{
+  ok: boolean
+  queueLen?: number
+  error?: string
+}> {
+  if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
+  const ok = await getWebPlayerBackend().sendFiles(songs.map((s) => s.path))
+  return ok ? { ok: true, queueLen: songs.length } : { ok: false, error: '内置播放器未就绪' }
+}
+
+/** Tracks still to play for `player` (web engine queue or MPRIS continuous task). */
+function queueRemainingFor(player: string): number {
+  if (isWebTarget(player)) return webQueueRemaining()
+  const cont = findContinuousByPlayer(player)
+  return cont ? cont.total - cont.index : 0
+}
+
+/** Push a playlist to the player: web engine / enqueue to an existing
+ *  continuous task / else create one. */
+async function ensureContinuousPlayer(
   player: string,
   songs: PlaylistEntry[]
-): { ok: boolean; taskId?: string; queueLen?: number; error?: string } {
+): Promise<{ ok: boolean; taskId?: string; queueLen?: number; error?: string }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
+  if (isWebTarget(player)) return pushToWebEngine(songs)
   const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     const r = enqueueContinuousSongs(existing.control.id, songs)
     return r.ok ? { ok: true, taskId: existing.control.id, queueLen: r.queueLen } : r
   }
-  const task = startJobByName('aidj.continuous', { songs, player, view: 'continuous' })
+  const task = await startJobByName('aidj.continuous', {
+    songs,
+    player,
+    view: 'continuous',
+    tags: [PLAYBACK_TAG]
+  })
   if (!task) return { ok: false, error: '创建连续播放任务失败' }
   return { ok: true, taskId: task.id, queueLen: songs.length }
 }
 
 /** /discard_follows: drop queued-but-unplayed songs; keep the current track playing. */
 export function clearContinuousPending(player: string): void {
+  // Web engine: no pending queue to trim — the current track keeps playing and
+  // the next generated batch REPLACES the engine queue (replace-on-next).
+  if (isWebTarget(player)) return
   const st = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (!st) return
   st.queue = st.current ? [st.current] : []
@@ -802,11 +864,13 @@ export function clearContinuousPending(player: string): void {
 /** /discard_follows generation: swap the queued-but-unplayed songs for the new
  *  batch once it's ready — the currently playing track keeps running, and the
  *  old pending songs are dropped only now (never before the AI answers). */
-export function replaceContinuousQueue(
+export async function replaceContinuousQueue(
   player: string,
   songs: PlaylistEntry[]
-): { ok: boolean; error?: string; taskId?: string; queueLen?: number } {
+): Promise<{ ok: boolean; error?: string; taskId?: string; queueLen?: number }> {
   if (!songs.length) return { ok: false, error: '没有歌曲可推送' }
+  // Web engine: sending replaces its queue — exactly the discard semantics.
+  if (isWebTarget(player)) return pushToWebEngine(songs)
   const existing = [...continuousTasks.values()].find((s) => samePlayer(s.playerKey, player))
   if (existing) {
     existing.queue = songs
@@ -815,7 +879,12 @@ export function replaceContinuousQueue(
     pushContinuousState(existing)
     return { ok: true, taskId: existing.control.id, queueLen: songs.length }
   }
-  const task = startJobByName('aidj.continuous', { songs, player, view: 'continuous' })
+  const task = await startJobByName('aidj.continuous', {
+    songs,
+    player,
+    view: 'continuous',
+    tags: [PLAYBACK_TAG]
+  })
   if (!task) return { ok: false, error: '创建连续播放任务失败' }
   return { ok: true, taskId: task.id, queueLen: songs.length }
 }
@@ -862,10 +931,13 @@ registerJobHandler('aidj.chat', async (control, args) => {
     apiKey: config.secrets.api_key,
     baseURL: config.ai_settings.base_url
   })
-  // Resolve __auto__ / empty to the currently active player so the push
-  // matches the existing continuous task (which is keyed by the concrete name).
-  const player =
-    playerArg && playerArg !== '__auto__'
+  // Resolve the push target. Web mode → the built-in engine ('web'); dbus →
+  // __auto__/empty resolve to the active MPRIS player so the push matches the
+  // existing continuous task (keyed by the concrete name).
+  const webMode = (await getPlayerMode()) === 'web'
+  const player = webMode
+    ? 'web'
+    : playerArg && playerArg !== '__auto__'
       ? playerArg
       : await getCurrentPlayerKey().catch(() => config.preferences.dbus_target || 'vlc')
 
@@ -968,6 +1040,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   st.abortFetch = () => fetchAc.abort()
   let lastErrorShown = ''
   let lastIntroShown = ''
+  let lastWebTrack = ''
 
   const fetchWithTimeout = async (): Promise<void> => {
     fetchAc.abort()
@@ -999,8 +1072,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   try {
     while (!ac.signal.aborted) {
       try {
-        const cont = findContinuousByPlayer(st.player)
-        const queueLen = cont ? cont.total - cont.index : 0
+        const queueLen = queueRemainingFor(st.player)
 
         // Refill when the queue is low — or immediately when the user sent a
         // new message (/discard_follows), regardless of the batch threshold.
@@ -1043,11 +1115,11 @@ registerJobHandler('aidj.chat', async (control, args) => {
             // queue once the new songs are ready (never clears it beforehand).
             const mode = st.replaceQueueOnNext ? 'replace' : 'enqueue'
             st.replaceQueueOnNext = false
-            const push = (): { ok: boolean; error?: string } =>
+            const push = async (): Promise<{ ok: boolean; error?: string }> =>
               mode === 'replace'
                 ? replaceContinuousQueue(st.player, batch)
                 : ensureContinuousPlayer(st.player, batch)
-            let r = push()
+            let r = await push()
             let attempts = 0
             // A failed push (e.g. the player isn't up yet) must NOT be dropped
             // for the next cycle — keep retrying every 10s until it lands or
@@ -1071,7 +1143,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
               )
               await cancellableWait(10_000, ac.signal)
               if (ac.signal.aborted) break
-              r = push()
+              r = await push()
             }
             if (ac.signal.aborted) {
               control.pushLine(t('aidj.push.cancelled'), 'stderr')
@@ -1098,6 +1170,20 @@ registerJobHandler('aidj.chat', async (control, args) => {
               lastIntroShown = session.lastIntro
               control.push({ data: { type: 'assistant', content: session.lastIntro } })
             }
+          }
+        }
+
+        // Web mode: the built-in engine auto-advances its queue, so the chat
+        // job surfaces per-track "now playing" itself (dbus mode gets it from
+        // the continuous task).
+        if (webMode) {
+          const detail = await getWebPlayerBackend().getPlaybackDetail()
+          if (detail.ok && detail.track && detail.track !== lastWebTrack) {
+            lastWebTrack = detail.track
+            const path = detail.url.startsWith('file://')
+              ? decodeURIComponent(detail.url.slice('file://'.length))
+              : null
+            control.push({ data: { type: 'now_playing', track: detail.track, path } })
           }
         }
 

@@ -1,4 +1,4 @@
-import { markRaw } from 'vue'
+import { markRaw, ref, type Ref } from 'vue'
 import type { Component } from 'vue'
 import type { Ability } from './ability'
 import type { AbilityMeta } from '../../shared/types'
@@ -48,6 +48,43 @@ interface AbilityEntry {
 }
 
 let _registry: Record<string, AbilityEntry> | null = null
+
+// ---------------------------------------------------------------------------
+// Runtime enable/disable (MAddition). TRANSIENT — the disabled set is derived
+// from the last `cockpit:abilities-changed` broadcast (which mirrors the main
+// process's session-scoped registry); it is deliberately never persisted, so a
+// fresh mount re-derives the enabled state from the current registry.
+// ---------------------------------------------------------------------------
+const disabledAbilities = ref<string[]>([])
+
+/** Reactive list of currently-disabled ability ids. */
+export const useDisabledAbilities: Ref<string[]> = disabledAbilities
+
+/** Apply a fresh disabled set (from the main-process broadcast). */
+export function applyDisabledAbilities(ids: string[]): void {
+  disabledAbilities.value = ids
+}
+
+/** Toggle an ability's runtime state via IPC; the `cockpit:abilities-changed`
+ *  broadcast round-trips the authoritative list back. */
+export async function setAbilityEnabled(id: string, enabled: boolean): Promise<boolean> {
+  const r = (await window.cockpit.command('ability.set-enabled', {
+    id,
+    enabled
+  })) as { ok?: boolean } | null
+  return r?.ok === true
+}
+
+/** Subscribe to the main-process ability enable/disable broadcast. */
+export function subscribeAbilityChanges(): (() => void) | null {
+  if (!window.cockpit?.on) return null
+  return window.cockpit.on('cockpit:abilities-changed', (event: unknown) => {
+    const ev = event as Record<string, unknown>
+    if (Array.isArray(ev.disabled)) {
+      applyDisabledAbilities((ev.disabled as unknown[]).map(String))
+    }
+  })
+}
 
 /**
  * Build the full registry keyed by ability id. Platforms and the capability
@@ -229,6 +266,9 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
     }
     if (!platformOk(platforms, platform)) {
       ignoredPlatform.push(id)
+      continue
+    }
+    if (disabledAbilities.value.includes(id)) {
       continue
     }
     if (!available.has(id)) {

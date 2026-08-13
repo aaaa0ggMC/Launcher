@@ -21,4 +21,12 @@ export interface CommandSpec {
   description: string
   usage?: string
   run: (ctx: CommandContext) => unknown | Promise<unknown>
+  /**
+   * Optional runtime gate — when it resolves false the command behaves as NOT
+   * registered (the CLI/UI report an unknown command). Used for mode-gated
+   * commands (e.g. MPRIS-only commands hidden in web-player mode) instead of
+   * per-command `if` guards. Shared commands that exist in both modes keep the
+   * normal dispatch (the gate is evaluated at every dispatch).
+   */
+  enabled?: () => boolean | Promise<boolean>
 }

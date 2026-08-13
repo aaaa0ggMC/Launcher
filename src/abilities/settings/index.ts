@@ -105,6 +105,24 @@ export default {
           component: defineAsyncComponent(() => import('./items/AboutSection.vue'))
         }
       ]
+    },
+    {
+      key: 'abilities',
+      label: '能力',
+      icon: 'mdi-puzzle-outline',
+      description: '运行时启用/禁用能力（临时，不持久化；禁用后侧边栏与命令即时隐藏）',
+      keywords: ['能力', '启用', '禁用', 'enable', 'disable', 'ability'],
+      items: [
+        {
+          key: 'ability-toggle',
+          label: '能力开关',
+          icon: 'mdi-toggle-switch-outline',
+          description: '切换各能力的可用状态',
+          keywords: ['启用', '禁用', 'enable', 'disable', 'toggle'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/AbilityToggleSection.vue'))
+        }
+      ]
     }
   ]
 } satisfies Ability

@@ -12,6 +12,11 @@ export interface AidjConfig {
     model: string
     auto_play: boolean
     dbus_target: string
+    /**
+     * Active playback backend mode: `dbus` (external player via MPRIS) or `web`
+     * (built-in HTML5 player). Absent → platform default (Linux: dbus, else web).
+     */
+    player_mode?: 'dbus' | 'web'
     record_freq: boolean
     dynamic_balance_volume: boolean
     sound_adjust_method: 'lufs' | 'linear'

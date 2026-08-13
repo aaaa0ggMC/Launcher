@@ -42,5 +42,14 @@ export default defineConfig(
       ]
     }
   },
+  {
+    // `.mjs` scripts (scripts/dev-lts.mjs etc.) are plain Node.js — the TS
+    // rules (e.g. explicit-function-return-type) don't apply and TS annotations
+    // would break them at runtime.
+    files: ['**/*.mjs'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

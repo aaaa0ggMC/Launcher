@@ -46,6 +46,8 @@ export interface StartProcessOptions {
   description?: string
   /** how the panel renders this task's output; default 'log' */
   view?: string
+  /** arbitrary tags — e.g. `['aidj-playback']` to mark playback-control tasks */
+  tags?: string[]
   argv: string[]
   cwd?: string
   env?: NodeJS.ProcessEnv
@@ -56,6 +58,8 @@ export interface StartJobOptions {
   description?: string
   /** how the panel renders this task's output; default 'log' */
   view?: string
+  /** arbitrary tags — e.g. `['aidj-playback']` to mark playback-control tasks */
+  tags?: string[]
   /** called when the user stops/cancels the task */
   onCancel?: () => void | Promise<void>
 }
@@ -87,12 +91,22 @@ export type JobHandler = (
   args: Record<string, unknown>
 ) => void | Promise<void>
 
-const jobHandlers = new Map<string, JobHandler>()
+/** Optional runtime gate — when it resolves false `startJobByName` treats the
+ *  handler as unknown (mode-gated features are not startable). */
+export type JobHandlerGate = () => boolean | Promise<boolean>
 
-/** Register a named job handler (called once at ability/service load). */
-export function registerJobHandler(name: string, handler: JobHandler): void {
+interface RegisteredJob {
+  handler: JobHandler
+  gate?: JobHandlerGate
+}
+
+const jobHandlers = new Map<string, RegisteredJob>()
+
+/** Register a named job handler (called once at ability/service load). An
+ *  optional `gate` controls whether the handler is startable right now. */
+export function registerJobHandler(name: string, handler: JobHandler, gate?: JobHandlerGate): void {
   if (jobHandlers.has(name)) throw new Error(`重复作业处理器: ${name}`)
-  jobHandlers.set(name, handler)
+  jobHandlers.set(name, { handler, gate })
 }
 
 interface InternalTask {
@@ -354,7 +368,8 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
       stats: {},
       outputCount: 0,
       canInput: true,
-      canSignal: true
+      canSignal: true,
+      tags: opts.tags
     },
     output: [],
     child,
@@ -405,7 +420,8 @@ export function startJobTask(opts: StartJobOptions): JobControl {
       stats: {},
       outputCount: 0,
       canInput: false,
-      canSignal: false
+      canSignal: false,
+      tags: opts.tags
     },
     output: [],
     cancel: opts.onCancel
@@ -444,20 +460,36 @@ export function startJobTask(opts: StartJobOptions): JobControl {
  * started it doesn't block for the whole job. The handler's promise resolving
  * → task finishes; rejecting → task marked errored.
  */
-export function startJobByName(
+export async function startJobByName(
   name: string,
   args: Record<string, unknown> = {}
-): BtTaskInfo | null {
-  const handler = jobHandlers.get(name)
-  if (!handler) {
+): Promise<BtTaskInfo | null> {
+  const reg = jobHandlers.get(name)
+  if (!reg) {
     log.warn('job handler not found', { name })
     return null
   }
+  // Mode/platform gate closed → treat as unknown handler.
+  if (reg.gate) {
+    let ok = true
+    try {
+      ok = await reg.gate()
+    } catch {
+      ok = false
+    }
+    if (!ok) {
+      log.warn('job handler gated off', { name })
+      return null
+    }
+  }
+  const { handler } = reg
   log.info('start job by name', { name, taskName: String(args.name ?? name) })
+  const rawTags = args.tags
   const control = startJobTask({
     name: String(args.name ?? name),
     description: args.description ? String(args.description) : undefined,
     view: typeof args.view === 'string' ? args.view : 'log',
+    tags: Array.isArray(rawTags) ? rawTags.map((x) => String(x)) : undefined,
     onCancel: undefined
   })
   // Fire-and-forget: do not await the job — return control to the caller.

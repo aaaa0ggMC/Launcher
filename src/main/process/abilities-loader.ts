@@ -44,6 +44,11 @@ function abilityMeta(id: string): AbilityMeta {
   return metaModules[`../../abilities/${id}/meta.ts`] ?? {}
 }
 
+/** Every ability folder that registered commands (for `ability.list`). */
+export function getLoadedAbilityIds(): string[] {
+  return Object.keys(commandModules).map((key) => key.split('/').at(-2) ?? key)
+}
+
 /** Platform eligibility of an ability folder for the running platform. */
 function platformOk(id: string): boolean {
   const ps = abilityMeta(id).platforms
@@ -177,7 +182,7 @@ export function registerAbilityCommands(): void {
     const key = `../../abilities/${id}/commands.ts`
     const specs = commandModules[key]?.default ?? []
     try {
-      registerAll(specs)
+      registerAll(specs, id)
       loaded.push(id)
     } catch (e) {
       log.error('register failed', { key, error: e instanceof Error ? e.message : String(e) })

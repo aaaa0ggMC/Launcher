@@ -64,6 +64,7 @@ async function doRevert(): Promise<void> {
 // -- send target (player) ------------------------------------------------
 const players = ref<string[]>([])
 const targetPlayer = ref('')
+const mode = ref<'dbus' | 'web'>('dbus')
 let playersTimer: ReturnType<typeof setInterval> | null = null
 
 function shortPlayer(name: string): string {
@@ -72,7 +73,19 @@ function shortPlayer(name: string): string {
   return short.slice(0, 5) + '…' + short.slice(-4)
 }
 
+async function pollMode(): Promise<void> {
+  try {
+    const r = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
+    if (r?.mode === 'dbus' || r?.mode === 'web') mode.value = r.mode
+  } catch {
+    /* noop */
+  }
+}
+
 async function pollPlayers(): Promise<void> {
+  // MPRIS player list is dbus-only — skip in web mode (the command isn't
+  // exposed there, and the chat always pushes to the built-in engine).
+  if (mode.value !== 'dbus') return
   try {
     const r = (await window.cockpit.command('aidj.list-players').catch(() => null)) as {
       ok?: boolean
@@ -94,8 +107,11 @@ async function selectTarget(name: string): Promise<void> {
 }
 
 onMounted(() => {
-  pollPlayers()
-  playersTimer = setInterval(pollPlayers, 5000)
+  void pollMode().then(() => pollPlayers())
+  playersTimer = setInterval(() => {
+    void pollPlayers()
+    void pollMode()
+  }, 5000)
 })
 onUnmounted(() => {
   if (playersTimer) clearInterval(playersTimer)
@@ -242,6 +258,7 @@ watch(
       <v-spacer />
       <ModelSelect class="chat-model-select" />
       <v-select
+        v-if="mode === 'dbus'"
         :model-value="targetPlayer"
         :items="[
           { title: '当前激活', value: '__auto__' },
@@ -254,6 +271,10 @@ watch(
         :placeholder="'发送目标'"
         @update:model-value="selectTarget"
       />
+      <v-chip v-else size="small" variant="flat" class="chat-player-chip">
+        <v-icon start size="14">mdi-music</v-icon>
+        <span>内置播放器</span>
+      </v-chip>
       <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
         <v-progress-circular indeterminate size="12" width="2" />
         <span class="ml-1">AI DJ</span>

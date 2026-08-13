@@ -1,18 +1,23 @@
 import type { CommandSpec } from './types'
 import { makeLogger } from '../logger'
+import { registerCommand, isCommandRunnable } from '../ability-runtime'
 
 const log = makeLogger('commands')
 
 /**
  * Thrown when a command name isn't registered (e.g. the backing ability was
- * removed). Carries the exact name so the IPC layer can notify the UI without
- * parsing the message.
+ * removed, or the command's runtime gate is closed). Carries the exact name so
+ * the IPC layer can notify the UI without parsing the message.
+ * `silent` marks mode/platform-GATED commands — the renderer shouldn't toast
+ * for those (it's "not exposed", not a bug), only for truly-missing commands.
  */
 export class UnknownCommandError extends Error {
   readonly commandName: string
-  constructor(name: string) {
+  readonly silent: boolean
+  constructor(name: string, silent = false) {
     super(`未知命令: ${name}`)
     this.commandName = name
+    this.silent = silent
     this.name = 'UnknownCommandError'
   }
 }
@@ -27,10 +32,11 @@ export class UnknownCommandError extends Error {
 
 const commands = new Map<string, CommandSpec>()
 
-export function registerAll(specs: CommandSpec[]): void {
+export function registerAll(specs: CommandSpec[], abilityId?: string): void {
   for (const s of specs) {
     if (commands.has(s.name)) throw new Error(`重复命令: ${s.name}`)
     commands.set(s.name, s)
+    registerCommand(abilityId ?? '', s.name, s.enabled)
   }
   log.info(`registered ${specs.length} commands (total ${commands.size})`)
 }
@@ -87,6 +93,11 @@ export async function tryRunCommand(input: string): Promise<string | null> {
   const name = tokens[0]
   const spec = commands.get(name)
   if (!spec) return null
+  if (!(await isCommandRunnable(name))) {
+    // Registered but gated off (mode/platform) → treat as unknown, do NOT fall
+    // through to app-alias resolution.
+    return `未知命令: ${name}`
+  }
   const { named, positional } = parseArgs(tokens.slice(1))
   try {
     const result = await spec.run({ named, positional })
@@ -104,5 +115,8 @@ export async function runCommand(
 ): Promise<unknown> {
   const spec = commands.get(name)
   if (!spec) throw new UnknownCommandError(name)
+  // Gated (mode/platform-exclusive) commands are "silently unknown" — the
+  // renderer shouldn't toast for them.
+  if (!(await isCommandRunnable(name))) throw new UnknownCommandError(name, true)
   return await spec.run({ named: args, positional: [] })
 }

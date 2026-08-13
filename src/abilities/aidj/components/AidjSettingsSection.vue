@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
@@ -10,6 +10,16 @@ const baseUrl = ref('')
 const apiKey = ref('')
 const ncmBaseUrl = ref('')
 const dbusTarget = ref('vlc')
+const playerMode = ref<'dbus' | 'web' | ''>('')
+const isLinux = window.cockpit?.platform === 'linux'
+const playerModeItems = computed(() =>
+  isLinux
+    ? [
+        { title: '外部播放器 (MPRIS / DBus)', value: 'dbus' },
+        { title: '内置播放器', value: 'web' }
+      ]
+    : [{ title: '内置播放器', value: 'web' }]
+)
 const musicFolders = ref<string[]>([])
 const musicFolderInput = ref('')
 const lyricsFolders = ref<string[]>([])
@@ -55,6 +65,7 @@ onMounted(async () => {
   apiKey.value = (sec.api_key as string) || ''
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
+  playerMode.value = (prefs.player_mode as 'dbus' | 'web' | undefined) ?? ''
   musicFolders.value = Array.isArray(cfg.music_folders) ? (cfg.music_folders as string[]) : []
   lyricsFolders.value = Array.isArray(cfg.lyrics_folders) ? (cfg.lyrics_folders as string[]) : []
   lyricsCfg.value = {
@@ -85,6 +96,14 @@ onMounted(async () => {
     record_freq: 6,
     backgrounds: 7,
     ...((prefs.status_bar as Record<string, number>) || {})
+  }
+  // Effective backend mode (config may not store it yet → platform default).
+  const pm = (await window.cockpit.command('aidj.player-mode')) as {
+    ok?: boolean
+    mode?: string
+  } | null
+  if (pm?.ok && (pm.mode === 'dbus' || pm.mode === 'web')) {
+    playerMode.value = pm.mode
   }
   fetchModels()
 })
@@ -205,6 +224,18 @@ watch(baseUrl, (v) => update('ai_settings.base_url', v))
 watch(apiKey, (v) => update('secrets.api_key', v))
 watch(ncmBaseUrl, (v) => update('ncm_base_url', v))
 watch(dbusTarget, (v) => update('preferences.dbus_target', v))
+watch(playerMode, (v) => {
+  if (!v) return
+  window.cockpit
+    .command('aidj.player-mode', { set: v })
+    .then((r) => {
+      const res = r as { ok?: boolean; error?: string } | null
+      if (!res?.ok) playerMode.value = ''
+    })
+    .catch(() => {
+      playerMode.value = ''
+    })
+})
 watch(autoPlay, (v) => update('preferences.auto_play', v))
 watch(dynamicBalance, (v) => update('preferences.dynamic_balance_volume', v))
 watch(adjMethod, (v) => update('preferences.sound_adjust_method', v))
@@ -342,6 +373,20 @@ function resetDj(): void {
               v-model="dbusTarget"
               label="DBus 播放器目标"
               placeholder="vlc"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+        <v-row dense class="mt-2">
+          <v-col cols="12" md="6">
+            <v-select
+              v-model="playerMode"
+              :items="playerModeItems"
+              label="播放后端"
+              hint="切换会停止运行中的连续播放/持久会话；内置播放器为实验性后端"
+              persistent-hint
               hide-details
               density="compact"
               variant="outlined"

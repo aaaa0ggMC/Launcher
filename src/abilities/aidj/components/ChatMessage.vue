@@ -9,6 +9,9 @@ defineOptions({ name: 'AidjChatMessage' })
 const props = defineProps<{
   message: ChatMessage
   index?: number
+  /** Whether the "推送到后台" (continuous) action is available — hidden in
+   *  web-player mode where the `aidj.continuous` job isn't exposed. */
+  continuousEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -109,6 +112,7 @@ function roleLabel(msg: ChatMessage): string {
             播放全部
           </v-btn>
           <v-btn
+            v-if="continuousEnabled"
             variant="elevated"
             color="primary"
             prepend-icon="mdi-send-clock-outline"

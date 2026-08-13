@@ -86,6 +86,11 @@ export interface BtTaskInfo {
   canSignal: boolean
   /** job tasks only: 0–100 progress, undefined when indeterminate. */
   progress?: number
+  /**
+   * Arbitrary tags set by the task owner (e.g. `['aidj-playback']` to mark a
+   * playback-control task so a backend-mode switch can stop exactly those).
+   */
+  tags?: string[]
 }
 
 /** Live output event from a background task. */

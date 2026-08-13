@@ -115,6 +115,8 @@ const lyricsOpen = ref(false)
 const players = ref<string[]>([])
 const selectedPlayer = ref('')
 const playerBusy = ref(false)
+/** 'dbus' shows the MPRIS player selector; 'web' (built-in) hides it. */
+const backendMode = ref<'dbus' | 'web'>('dbus')
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let playersTimer: ReturnType<typeof setInterval> | null = null
 let unsub: (() => void) | null = null
@@ -455,8 +457,10 @@ async function pollPlayers(): Promise<void> {
     players?: string[]
     current?: string
     auto?: boolean
+    mode?: 'dbus' | 'web'
   } | null
   if (!res?.ok || !Array.isArray(res.players)) return
+  if (res.mode === 'dbus' || res.mode === 'web') backendMode.value = res.mode
   players.value = res.players
   selectedPlayer.value = res.auto ? '__auto__' : res.current || selectedPlayer.value
 }
@@ -651,6 +655,7 @@ defineExpose({ toMarkdown })
 
         <div class="lyrics-controls">
           <v-select
+            v-if="backendMode === 'dbus'"
             v-model="selectedPlayer"
             :items="playerItems"
             :label="t('aidj.lyrics_page.player', 'Player')"

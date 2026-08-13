@@ -202,11 +202,14 @@ export function registerIpc(): void {
     } catch (err) {
       // Command not registered (backing ability removed etc.) — notify every
       // window so the renderer can show a friendly toast, then rethrow so
-      // existing callers keep their current error semantics.
+      // existing callers keep their current error semantics. Mode/platform-
+      // GATED commands are silent (not exposed ≠ broken), so no toast.
       if (err instanceof UnknownCommandError) {
         log.warn('unknown command', err.commandName)
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send('cockpit:command-error', err.commandName)
+        if (!err.silent) {
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send('cockpit:command-error', err.commandName)
+          }
         }
       } else {
         log.error(`${name} failed`, err instanceof Error ? err.message : String(err))

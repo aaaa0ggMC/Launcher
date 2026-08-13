@@ -29,6 +29,7 @@ import {
   loadFrequency,
   getLyricPlayback,
   getCurrentPlayerKey,
+  resolveLyricForTrackPath,
   loadLyricsPageConfig,
   saveLyricsPageConfig,
   getLyricPlayerBinding,
@@ -51,7 +52,8 @@ import type {
   RawHistoryMessage,
   PlaylistEntry,
   LyricsDisplayConfig,
-  AidjLyricsPageConfig
+  AidjLyricsPageConfig,
+  LyricPlaybackState
 } from './types'
 import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG } from './types'
 import './jobs'
@@ -72,8 +74,29 @@ import {
   chatResendPlaylist,
   clearContinuousPending
 } from './jobs'
+import {
+  getActiveBackend,
+  getPlayerMode,
+  setPlayerMode,
+  getWebPlayerBackend,
+  resetPlayerMode,
+  reconcilePlayerAbilityVisibility
+} from './player-backend'
+import type { WebPlayerReport } from './player-backend'
+import { registerStartupHook } from '../../main/process/startup'
 
 const log = makeLogger('aidj')
+
+/** Mode-exclusive command gates (MAddition) — commands that only make sense in
+ *  one playback mode are NOT exposed in the other, so the UI never sees a
+ *  "only supports MPRIS" style guard. Shared commands (next/toggle/send/...) use
+ *  the normal backend dispatch instead of a gate. */
+const dbusMode = (): Promise<boolean> => getPlayerMode().then((m) => m === 'dbus')
+const webMode = (): Promise<boolean> => getPlayerMode().then((m) => m === 'web')
+
+// Startup: the built-in player page is mode-bound — hide it from the sidebar
+// when the app boots into dbus mode (Linux default), show it in web mode.
+registerStartupHook(() => reconcilePlayerAbilityVisibility())
 
 /** Variant-cache sizing for `aidj.filter` — one entry ≈ 2× lyric text + title.
  *  Budget ~80MB of resident haystacks; beyond that the cache can't fit the
@@ -124,8 +147,62 @@ async function effectiveLyricsCfg(): Promise<LyricsDisplayConfig> {
   return { ...DEFAULT_LYRICS_CFG, ...(config?.preferences?.lyrics ?? {}) }
 }
 
+/** Stable lyrics-window key: `web` for the built-in player, otherwise the bound
+ *  MPRIS player (M3 — the lyrics source now follows the active backend). */
+async function currentLyricsKey(): Promise<string> {
+  return (await getPlayerMode()) === 'web' ? 'web' : getCurrentPlayerKey()
+}
+
+/**
+ * Lyrics source for the built-in (web) player — fills the same
+ * `LyricPlaybackState` model from the WebPlayerBackend's reported state +
+ * library lyric resolution, so the desktop window / in-app page are backend-
+ * agnostic (M3: 桌面歌词窗口绑定重指向内置播放器).
+ */
+async function getWebLyricPlayback(): Promise<LyricPlaybackState> {
+  const empty: LyricPlaybackState = {
+    ok: false,
+    status: 'Unknown',
+    track: '',
+    artist: '',
+    album: '',
+    player: 'web',
+    positionMs: null,
+    lengthMs: null,
+    lyric: null
+  }
+  const detail = await getWebPlayerBackend().getPlaybackDetail()
+  // No track loaded yet — keep the window open in "waiting" (ok:true, no track).
+  if (!detail.ok || !detail.track) {
+    return {
+      ...empty,
+      ok: true,
+      status: detail.status,
+      positionMs: detail.positionMs,
+      lengthMs: detail.lengthMs
+    }
+  }
+  const lib = await loadLibrary()
+  const path = detail.url.startsWith('file://')
+    ? decodeURIComponent(detail.url.slice('file://'.length))
+    : null
+  return {
+    ok: true,
+    status: detail.status,
+    track: detail.track,
+    artist: detail.artist,
+    album: detail.album,
+    player: 'web',
+    positionMs: detail.positionMs,
+    lengthMs: detail.lengthMs,
+    path,
+    lyric: resolveLyricForTrackPath(path, detail.track, lib.lyrics),
+    karaokeLyric: resolveLyricForTrackPath(path, detail.track, lib.karaoke) ?? null
+  }
+}
+
 async function lyricWindowSpec(): Promise<{ id: string; key: string; spec: WindowSpec }> {
-  const key = await getCurrentPlayerKey()
+  const key = await currentLyricsKey()
   const id = lyricWindowId(key)
   const cfg = await effectiveLyricsCfg()
   const w = Math.max(240, cfg.width ?? LYRICS_WINDOW_W)
@@ -298,7 +375,7 @@ async function ensureInit(): Promise<{
   client: OpenAI
   config: AidjConfig
   session: DJSession
-  dbus: DBusManager
+  dbus: DBusManager | null
 }> {
   let config = _config
   if (!config) {
@@ -318,8 +395,11 @@ async function ensureInit(): Promise<{
     _client = client
   }
 
-  let dbus = getDbusManager()
-  if (!dbus) {
+  // Only the external-player (dbus) backend needs a session-bus connection —
+  // in web mode NEVER spin up dbus-next (on non-Linux platforms it can't even
+  // connect). The generated / session flows don't need a player binding.
+  let dbus: DBusManager | null = getDbusManager()
+  if (!dbus && (await getPlayerMode()) === 'dbus') {
     dbus = await initDbusManager(config)
   }
 
@@ -457,7 +537,7 @@ const commands: CommandSpec[] = [
           // background title job (if enabled). Otherwise the raw prompt slice stays.
           const produced = playlist.length > 0 || (intro && intro.trim() !== '')
           if (wasNewSession && produced && config.preferences.auto_title) {
-            startJobByName('aidj.title', {
+            await startJobByName('aidj.title', {
               sessionId: _sessionId,
               name: 'AIDJ 标题生成',
               description: '自动生成会话标题'
@@ -777,9 +857,9 @@ const commands: CommandSpec[] = [
     name: 'aidj.next',
     description: '下一首',
     run: async () => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
-      await dbus.control('next')
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
+      await backend.control('next')
       return { ok: true }
     }
   },
@@ -787,9 +867,9 @@ const commands: CommandSpec[] = [
     name: 'aidj.prev',
     description: '上一首',
     run: async () => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
-      await dbus.control('prev')
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
+      await backend.control('prev')
       return { ok: true }
     }
   },
@@ -797,9 +877,9 @@ const commands: CommandSpec[] = [
     name: 'aidj.toggle',
     description: '播放/暂停',
     run: async () => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
-      await dbus.control('toggle')
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
+      await backend.control('toggle')
       return { ok: true }
     }
   },
@@ -807,9 +887,9 @@ const commands: CommandSpec[] = [
     name: 'aidj.stop',
     description: '停止播放',
     run: async () => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
-      await dbus.control('stop')
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
+      await backend.control('stop')
       return { ok: true }
     }
   },
@@ -818,7 +898,17 @@ const commands: CommandSpec[] = [
     description: '获取播放器状态',
     run: async () => {
       if (!_config) _config = await loadAidjConfig()
-      await ensureLibraryLoaded()
+      // Warm the library cache in the BACKGROUND — the first status poll (the
+      // player page polls immediately on mount) must NOT block on a full music
+      // folder scan + metadata read, which freezes the UI for seconds with a
+      // large library. librarySize reflects whatever is already loaded (0 until
+      // the warm finishes / a session loads); the next poll picks it up.
+      void loadLibrary()
+        .then((lib) => {
+          if (!_metadata) _metadata = lib.metadata
+          if (!_musicPaths) _musicPaths = lib.musicPaths
+        })
+        .catch(() => {})
       const session = _session
       const librarySize = session
         ? [...session.metadata.keys()].filter((k) => session.musicPaths.has(k)).length
@@ -834,7 +924,14 @@ const commands: CommandSpec[] = [
           method: _config?.preferences.sound_adjust_method ?? 'lufs'
         },
         recordFreq: _config?.preferences.record_freq ?? false,
-        statusBar: _config?.preferences.status_bar
+        statusBar: _config?.preferences.status_bar,
+        mode: await getPlayerMode()
+      }
+      // Web backend: bypass the DBus path entirely — the built-in player fills
+      // its own status model.
+      const backend = await getActiveBackend()
+      if (backend?.mode === 'web') {
+        return { ...base, status: await backend.getStatus() }
       }
       let dbus = getDbusManager()
       if (!dbus && _config) dbus = await initDbusManager(_config)
@@ -858,12 +955,12 @@ const commands: CommandSpec[] = [
     description: '发送歌单到播放器',
     usage: 'aidj.send [--path <filepath>]...',
     run: async (ctx) => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
       const paths = ctx.named.path as string[] | string | undefined
       const pathArray = Array.isArray(paths) ? paths : paths ? [paths] : []
       if (pathArray.length === 0) return { ok: false, error: '未指定文件路径' }
-      await dbus.sendFiles(pathArray)
+      await backend.sendFiles(pathArray)
       // record_freq — immediate mode bumps every sent track.
       if (!_config) _config = await loadAidjConfig()
       if (_config?.preferences.record_freq) {
@@ -881,15 +978,15 @@ const commands: CommandSpec[] = [
     description: '获取或设置音量',
     usage: 'aidj.volume [--set <0-1>]',
     run: async (ctx) => {
-      const dbus = getDbusManager()
-      if (!dbus) return { ok: false, error: 'DBus 未连接' }
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: 'DBus 未连接' }
       if (ctx.named.set !== undefined) {
         const vol = Number(ctx.named.set)
         if (isNaN(vol) || vol < 0 || vol > 1) return { ok: false, error: '音量需在 0-1 之间' }
-        await dbus.setVolume(vol)
+        await backend.setVolume(vol)
         return { ok: true, volume: vol }
       }
-      const vol = await dbus.getVolume()
+      const vol = await backend.getVolume()
       return { ok: true, volume: vol }
     }
   },
@@ -1008,7 +1105,7 @@ const commands: CommandSpec[] = [
         (tk) => tk.status === 'running' && tk.name === 'AIDJ 元数据同步'
       )
       if (already) return { ok: false, alreadyRunning: true, error: '元数据同步任务正在运行中' }
-      const task = startJobByName('aidj.metadata-sync', {
+      const task = await startJobByName('aidj.metadata-sync', {
         name: 'AIDJ 元数据同步',
         description: '扫描曲库并更新缺失歌曲元数据'
       })
@@ -1097,6 +1194,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.chat-player',
     description: '切换持续会话的发送目标播放器',
     usage: 'aidj.chat-player --task <id> --player <name>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       const player = ctx.named.player as string
@@ -1124,7 +1222,7 @@ const commands: CommandSpec[] = [
       } catch {
         return { ok: false, error: '--songs 不是合法 JSON' }
       }
-      return chatResendPlaylist(taskId, songs as { name: string; path: string }[])
+      return await chatResendPlaylist(taskId, songs as { name: string; path: string }[])
     }
   },
   {
@@ -1405,7 +1503,7 @@ const commands: CommandSpec[] = [
       )
       if (already)
         return { ok: false, alreadyRunning: true, error: '该会话的标题生成任务正在运行中' }
-      const task = startJobByName('aidj.title', {
+      const task = await startJobByName('aidj.title', {
         sessionId: id,
         name: 'AIDJ 标题生成',
         description: `为会话 ${id} 自动生成标题`
@@ -1419,6 +1517,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.start-persistent',
     description: '启动持久模式',
     usage: 'aidj.start-persistent --prompt <text> [--anchor <value>]',
+    enabled: dbusMode,
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
       if (!prompt) return { ok: false, error: '需要初始提示词' }
@@ -1443,6 +1542,7 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.stop-persistent',
     description: '停止持久模式',
+    enabled: dbusMode,
     run: async () => {
       const ps = getPersistentSession()
       if (!ps) return { ok: false, error: '持久模式未运行' }
@@ -1590,10 +1690,13 @@ const commands: CommandSpec[] = [
       _musicPaths = null
       _sessionId = ''
       invalidateLibrary()
+      // Re-read the persisted backend mode + drop the stale wrapper.
+      resetPlayerMode()
       const oldDbus = getDbusManager()
       if (oldDbus) oldDbus.disconnect()
       setDbusManager(null as unknown as DBusManager)
       const { session } = await ensureInit()
+      reconcilePlayerAbilityVisibility()
       return {
         ok: true,
         librarySize: session.metadata.size,
@@ -1615,6 +1718,8 @@ const commands: CommandSpec[] = [
     name: 'aidj.list-players',
     description: '列出所有可用的 MPRIS 播放器',
     usage: 'aidj.list-players [--force true]',
+    // dbus-exclusive: not exposed in web-player mode (no session bus on non-Linux)
+    enabled: dbusMode,
     run: async (ctx) => {
       const force = String(ctx.named.force ?? '') === 'true'
       const players = await listAvailablePlayers(force)
@@ -1628,11 +1733,128 @@ const commands: CommandSpec[] = [
     name: 'aidj.select-player',
     description: '切换到指定播放器',
     usage: 'aidj.select-player --name <player>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const name = ctx.named.name as string
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器名称' }
       const ok = await switchPlayer(name)
       return ok ? { ok: true, player: name } : { ok: false, error: `切换到 ${name} 失败` }
+    }
+  },
+  {
+    name: 'aidj.player-mode',
+    description: '查询或切换播放后端模式（dbus=外部 MPRIS 播放器，web=内置播放器）',
+    usage: 'aidj.player-mode [--set <dbus|web>]',
+    run: async (ctx) => {
+      const set = ctx.named.set as string | undefined
+      if (set !== undefined) {
+        if (set !== 'dbus' && set !== 'web') {
+          return { ok: false, error: 'mode 必须是 dbus 或 web' }
+        }
+        return setPlayerMode(set)
+      }
+      const mode = await getPlayerMode()
+      const backend = await getActiveBackend()
+      return {
+        ok: true,
+        mode,
+        backend: backend?.mode ?? null,
+        supported: backend?.supported ?? true,
+        displayName: backend?.displayName ?? ''
+      }
+    }
+  },
+  {
+    name: 'aidj.web-player-report',
+    description: '渲染端内置播放器状态上报（内部）',
+    usage: 'aidj.web-player-report --state <json>',
+    // web-exclusive: no renderer engine exists in dbus mode
+    enabled: webMode,
+    run: async (ctx) => {
+      // The renderer engine passes the report directly as named args; the CLI
+      // form is `--state <json>`.
+      let state = (ctx.named.state as string | WebPlayerReport | undefined) ?? ctx.named
+      if (typeof state === 'string') {
+        try {
+          state = JSON.parse(state) as WebPlayerReport
+        } catch {
+          return { ok: false, error: '--state 不是合法 JSON' }
+        }
+      }
+      if (!state || typeof state !== 'object') {
+        return { ok: false, error: '需要 --state 状态对象' }
+      }
+      getWebPlayerBackend().report(state as WebPlayerReport)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.player-state',
+    description: '获取统一播放状态（播放器页轮询；dbus=MPRIS 快照，web=内置播放器上报）',
+    usage: 'aidj.player-state',
+    run: async () => {
+      const mode = await getPlayerMode()
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: true, mode, state: null }
+      const state = await backend.getPlaybackDetail()
+      return { ok: true, mode, state }
+    }
+  },
+  {
+    name: 'aidj.player-volbal',
+    description: '查询或设置内置播放器的响度平衡（--enabled <bool> --method <lufs|linear>）',
+    usage: 'aidj.player-volbal [--enabled <true|false>] [--method <lufs|linear>]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      if (ctx.named.enabled === undefined && ctx.named.method === undefined) {
+        return { ok: true, ...backend.getVolbalState() }
+      }
+      const enabled = String(ctx.named.enabled ?? '') !== 'false'
+      const method = ctx.named.method as 'lufs' | 'linear' | undefined
+      if (method && method !== 'lufs' && method !== 'linear') {
+        return { ok: false, error: 'method 必须是 lufs 或 linear' }
+      }
+      await backend.setVolbal(enabled, method)
+      // Persist the shared preference (same fields the continuous task uses).
+      try {
+        const config = await loadAidjConfig()
+        if (config) {
+          config.preferences.dynamic_balance_volume = enabled
+          if (method) config.preferences.sound_adjust_method = method
+          await saveAidjConfig(config)
+        }
+      } catch (e) {
+        log.warn('persist player volbal failed', { error: String(e) })
+      }
+      return { ok: true, ...backend.getVolbalState() }
+    }
+  },
+  {
+    name: 'aidj.player-rebase',
+    description: '将当前音量设为内置播放器响度平衡的新基准',
+    usage: 'aidj.player-rebase --base <0-1>',
+    enabled: webMode,
+    run: async (ctx) => {
+      const base = Number(ctx.named.base)
+      if (isNaN(base) || base < 0 || base > 1) return { ok: false, error: '需要 --base (0-1)' }
+      const ok = await getWebPlayerBackend().rebase(base)
+      return ok ? { ok: true, base } : { ok: false, error: 'rebase 失败' }
+    }
+  },
+  {
+    name: 'aidj.seek',
+    description: '跳转到指定位置（毫秒）',
+    usage: 'aidj.seek --position <ms>',
+    run: async (ctx) => {
+      const position = Number(ctx.named.position)
+      if (!Number.isFinite(position) || position < 0) {
+        return { ok: false, error: '需要 --position 非负毫秒数' }
+      }
+      const backend = await getActiveBackend()
+      if (!backend) return { ok: false, error: '播放后端未连接' }
+      const ok = await backend.seek(position)
+      return ok ? { ok: true, position } : { ok: false, error: 'seek 失败' }
     }
   },
   {
@@ -1661,6 +1883,7 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.continuous-list',
     description: '列出所有运行中的连续播放任务',
+    enabled: dbusMode,
     run: async () => {
       const tasks = getContinuousTasks().map((t) => ({
         taskId: t.control.id,
@@ -1682,6 +1905,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-switch',
     description: '切换连续播放任务的 MPRIS 播放器',
     usage: 'aidj.continuous-switch --task <id> --player <name>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       const player = ctx.named.player as string
@@ -1710,6 +1934,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-reorder',
     description: '调整连续播放队列顺序',
     usage: 'aidj.continuous-reorder --task <id> --songs <json>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       const songsJson = ctx.named.songs as string
@@ -1728,6 +1953,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-enqueue',
     description: '向运行中的连续播放任务添加歌曲',
     usage: 'aidj.continuous-enqueue --task <id> --songs <json>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       const songsJson = ctx.named.songs as string
@@ -1748,6 +1974,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-volbal',
     description: '切换连续播放任务的响度平衡开关/方法',
     usage: 'aidj.continuous-volbal --task <id> --enabled <true|false> [--method <lufs|linear>]',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       if (!taskId) return { ok: false, error: '需要 --task 参数' }
@@ -1766,6 +1993,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-recordfreq',
     description: '切换连续播放任务的播放频率记录',
     usage: 'aidj.continuous-recordfreq --task <id> --enabled <true|false>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       if (!taskId) return { ok: false, error: '需要 --task 参数' }
@@ -1779,6 +2007,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-clear-memory',
     description: '重置连续播放队列的已播记忆（从头重播）',
     usage: 'aidj.continuous-clear-memory --task <id>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       if (!taskId) return { ok: false, error: '需要 --task 参数' }
@@ -1790,6 +2019,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-volume',
     description: '获取或设置连续播放任务的音量',
     usage: 'aidj.continuous-volume --task <id> [--set <0-1>]',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       if (!taskId) return { ok: false, error: '需要 --task 参数' }
@@ -1807,6 +2037,7 @@ const commands: CommandSpec[] = [
     name: 'aidj.continuous-rebase',
     description: '将当前音量设为响度平衡的新基准（自定义 anchor）',
     usage: 'aidj.continuous-rebase --task <id> --base <0-1>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const taskId = ctx.named.task as string
       const base = Number(ctx.named.base)
@@ -1818,16 +2049,19 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.lyrics',
-    description: '当前 DBus 播放状态 + 对应歌词（桌面歌词窗口 1Hz 轮询）',
+    description: '当前播放状态 + 对应歌词（桌面歌词窗口 1Hz 轮询；dbus/web 通用）',
     usage: 'aidj.lyrics',
-    run: async () => getLyricPlayback()
+    run: async () => {
+      if ((await getPlayerMode()) === 'web') return getWebLyricPlayback()
+      return getLyricPlayback()
+    }
   },
   {
     name: 'aidj.lyrics-state',
-    description: '当前 DBus 播放器对应的歌词窗口是否已打开（菜单开关状态）',
+    description: '当前播放器对应的歌词窗口是否已打开（菜单开关状态）',
     usage: 'aidj.lyrics-state',
     run: async () => {
-      const key = await getCurrentPlayerKey()
+      const key = await currentLyricsKey()
       const windowId = lyricWindowId(key)
       const open = listChildWindows().some((w) => w.id === windowId)
       return { ok: true, open, windowId, player: key }
@@ -1835,7 +2069,7 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.lyrics-open',
-    description: '打开当前 DBus 播放器的桌面歌词浮窗（透明 · 无边框 · 圆角）',
+    description: '打开当前播放器的桌面歌词浮窗（透明 · 无边框 · 圆角）',
     usage: 'aidj.lyrics-open',
     run: async () => {
       const { id, key, spec } = await lyricWindowSpec()
@@ -1845,7 +2079,7 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.lyrics-close',
-    description: '关闭当前 DBus 播放器的桌面歌词浮窗',
+    description: '关闭当前播放器的桌面歌词浮窗',
     usage: 'aidj.lyrics-close',
     run: async () => {
       const { id, key } = await lyricWindowSpec()
@@ -1855,7 +2089,7 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'aidj.lyrics-toggle',
-    description: '切换当前 DBus 播放器的桌面歌词浮窗开关',
+    description: '切换当前播放器的桌面歌词浮窗开关',
     usage: 'aidj.lyrics-toggle',
     run: async () => {
       const { id, key, spec } = await lyricWindowSpec()
@@ -1869,22 +2103,34 @@ const commands: CommandSpec[] = [
     name: 'aidj.activate',
     description: '激活 AIDJ 的共享 DBus 播放器绑定（无需启动 AI 会话）',
     usage: 'aidj.activate',
-    run: async () => activateAidjDbus()
+    run: async () => {
+      // Mode-aware rather than gated: the lyrics page calls this in both modes.
+      if ((await getPlayerMode()) === 'web') {
+        return { ok: false, error: '内置播放器模式无需 DBus 绑定' }
+      }
+      return activateAidjDbus()
+    }
   },
   {
     name: 'aidj.lyrics-player',
-    description: '获取歌词页当前绑定的 MPRIS 播放器与可用列表',
+    description: '获取歌词页当前绑定的播放器与可用列表（web 模式返回空列表）',
     usage: 'aidj.lyrics-player',
     run: async () => {
+      // Shared command: in web mode there is no player selection — report the
+      // mode so the in-app page can hide the selector.
+      if ((await getPlayerMode()) === 'web') {
+        return { ok: true, players: [], current: '', auto: true, mode: 'web' }
+      }
       const players = await listAvailablePlayers()
       const binding = await getLyricPlayerBinding()
-      return { ok: true, players, current: binding.current, auto: binding.auto }
+      return { ok: true, players, current: binding.current, auto: binding.auto, mode: 'dbus' }
     }
   },
   {
     name: 'aidj.lyrics-select-player',
     description: '绑定歌词页到指定 MPRIS 播放器（或 __auto__ 自动跟随）',
     usage: 'aidj.lyrics-select-player --name <player>',
+    enabled: dbusMode,
     run: async (ctx) => {
       const name = ctx.named.name as string
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器' }

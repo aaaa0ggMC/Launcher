@@ -4,6 +4,12 @@ import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { CONFIG_JSON } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import { loadUsageStats, recordUsage, clearUsageStats } from '../../main/process/usage-stats'
+import {
+  setAbilityEnabled,
+  getDisabledAbilities,
+  listAbilityStates
+} from '../../main/process/ability-runtime'
+import { getLoadedAbilityIds } from '../../main/process/abilities-loader'
 
 const log = makeLogger('settings')
 
@@ -82,6 +88,26 @@ export default [
     run: async () => {
       await clearUsageStats()
       return { ok: true }
+    }
+  },
+  {
+    name: 'ability.set-enabled',
+    description: '运行时启用/禁用指定能力 (--id --enabled)，侧边栏与命令即时生效（不持久化）',
+    usage: 'ability.set-enabled --id display --enabled false',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const enabled = String(ctx.named.enabled ?? '') !== 'false'
+      return setAbilityEnabled(id, enabled)
+    }
+  },
+  {
+    name: 'ability.list',
+    description: '列出已加载能力及其运行时启用状态',
+    usage: 'ability.list',
+    run: async () => {
+      const ids = getLoadedAbilityIds()
+      return { ok: true, disabled: getDisabledAbilities(), states: listAbilityStates(ids) }
     }
   }
 ] satisfies CommandSpec[]

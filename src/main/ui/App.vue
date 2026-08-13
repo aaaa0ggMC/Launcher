@@ -14,9 +14,12 @@ import type { Ability } from './ability'
 import {
   getAbilityModules,
   resolveSidebarAbilities,
-  buildSettingsSections
+  buildSettingsSections,
+  subscribeAbilityChanges,
+  useDisabledAbilities,
+  applyDisabledAbilities
 } from './ability-registry'
-import type { SettingsCategory } from './ability-registry'
+import type { SettingsCategory, AbilityLoadReport } from './ability-registry'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
@@ -37,7 +40,7 @@ import { PAGE_TRANSITIONS } from './animations'
 // This frame consumes the loaded registry and exposes it back to abilities for
 // cross-scope control (see provide('cockpit:abilities')).
 // ---------------------------------------------------------------------------
-const sidebarReport = resolveSidebarAbilities(window.cockpit.platform)
+const sidebarReport = ref<AbilityLoadReport>(resolveSidebarAbilities(window.cockpit.platform))
 
 interface SidebarAbility {
   id: string
@@ -266,7 +269,7 @@ const abilities = computed<SidebarAbility[]>(() => {
     const u = usageStats.value[a.id]
     return mode === 'recent' ? (u?.lastUsed ?? 0) : (u?.count ?? 0)
   }
-  return sidebarReport.loaded
+  return sidebarReport.value.loaded
     .map((meta) => ({
       id: meta.id,
       config: {} as Record<string, unknown>,
@@ -661,6 +664,35 @@ let winUnsub: (() => void) | null = null
 let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
 let usageUnsub: (() => void) | null = null
+let abilityUnsub: (() => void) | null = null
+
+/** Pull the authoritative disabled set from the main process (a renderer reload
+ *  must not resurrect abilities that were disabled earlier this session). */
+async function loadAbilityStates(): Promise<void> {
+  try {
+    const r = (await window.cockpit.command('ability.list')) as {
+      ok?: boolean
+      disabled?: string[]
+    } | null
+    if (r?.ok && Array.isArray(r.disabled)) {
+      applyDisabledAbilities(r.disabled.map(String))
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+/** Re-resolve the sidebar when the disabled set changes; bail out of a page
+ *  that was just disabled (its component stays cached, but no longer reachable). */
+watch(
+  () => useDisabledAbilities.value,
+  () => {
+    sidebarReport.value = resolveSidebarAbilities(window.cockpit.platform)
+    if (currentId.value && !abilities.value.some((a) => a.id === currentId.value)) {
+      currentId.value = abilities.value[0]?.id ?? null
+    }
+  }
+)
 
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
@@ -682,6 +714,10 @@ onMounted(async () => {
   // Usage stats drive the sidebar frequency / recent sort; reload on change
   // so a click re-sorts the sidebar live.
   usageUnsub = window.cockpit.on('cockpit:usage-changed', () => void loadUsage())
+  // Runtime ability enable/disable — re-resolve the sidebar live and bail out
+  // of a page that was just disabled.
+  abilityUnsub = subscribeAbilityChanges()
+  void loadAbilityStates()
   void loadUsage()
   window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
@@ -712,6 +748,7 @@ watch(rail, () => persistUiState())
 onBeforeUnmount(() => {
   unsub?.()
   usageUnsub?.()
+  abilityUnsub?.()
   winUnsub?.()
   configUnsub?.()
   commandErrorUnsub?.()

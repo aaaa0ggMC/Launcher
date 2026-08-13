@@ -15,6 +15,7 @@ import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
 import ContextMenu from './ContextMenu.vue'
 import ModelSelect from './ModelSelect.vue'
+import { ensureWebPlayerEngine } from '../web-player/engine'
 
 defineOptions({ name: 'cockpit-aidj-chat' })
 
@@ -512,6 +513,11 @@ const selectedPlayer = ref('')
 const autoMode = ref(true)
 const netState = ref<'ok' | 'bad' | 'checking'>('checking')
 
+// -- playback backend mode (top-bar fork: dbus player select vs none) ---------
+const mode = ref<'dbus' | 'web'>('dbus')
+
+let modeUnsub: (() => void) | null = null
+
 function formatTokens(n: number): string {
   if (n >= 1000) {
     return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
@@ -574,14 +580,15 @@ let netPollTimer: ReturnType<typeof setInterval> | null = null
 let btUnsub: (() => void) | null = null
 
 onMounted(() => {
-  pollStatus()
-  pollPlayers()
+  ensureWebPlayerEngine()
+  void pollStatus().then(() => pollPlayers())
   pollNetwork()
   refreshBackgroundCount()
   statusPollTimer = setInterval(pollStatus, 2000)
   playersPollTimer = setInterval(pollPlayers, 5000)
   netPollTimer = setInterval(pollNetwork, 15000)
   listenBt()
+  listenMode()
   setupOverlayMeasure()
   setupOverlayH()
 })
@@ -596,7 +603,13 @@ onActivated(() => {
   if (!netPollTimer) {
     netPollTimer = setInterval(pollNetwork, 15000)
   }
+  // Keep-alive pages were deactivated (timers + broadcasts missed) while the
+  // user was elsewhere — repoll immediately so mode/status reflect a backend
+  // switch made in settings, not after the next 2s tick.
+  void pollStatus().then(() => pollPlayers())
+  void pollNetwork()
   listenBt()
+  listenMode()
   scrollToBottom()
   setupOverlayMeasure()
   setupOverlayH()
@@ -626,6 +639,10 @@ onDeactivated(() => {
   if (btUnsub) {
     btUnsub()
     btUnsub = null
+  }
+  if (modeUnsub) {
+    modeUnsub()
+    modeUnsub = null
   }
 })
 
@@ -679,6 +696,19 @@ function listenBt(): void {
   })
 }
 
+/** Backend-mode changes (from `aidj.player-mode` / the settings toggle) are
+ *  broadcast as `cockpit:aidj-mode` — flip the top-bar fork immediately. */
+function listenMode(): void {
+  if (modeUnsub) return
+  if (!window.cockpit?.on) return
+  modeUnsub = window.cockpit.on('cockpit:aidj-mode', (event: unknown) => {
+    const ev = event as Record<string, unknown>
+    if (ev?.mode === 'dbus' || ev?.mode === 'web') {
+      mode.value = ev.mode
+    }
+  })
+}
+
 function handleBtData(data: Record<string, unknown>): void {
   if (data.type === 'now_playing') {
     messages.value.push({
@@ -710,6 +740,7 @@ async function pollStatus(): Promise<void> {
       if (typeof result.memory === 'number') sbMemory.value = result.memory
       if (result.volbal) sbVolbal.value = result.volbal as { enabled: boolean; method: string }
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
+      if (result.mode === 'dbus' || result.mode === 'web') mode.value = result.mode
       if (result.statusBar) {
         sbOrder.value = {
           tokens: 1,
@@ -729,6 +760,9 @@ async function pollStatus(): Promise<void> {
 }
 
 async function pollPlayers(): Promise<void> {
+  // MPRIS player list is dbus-only — skip in web mode (the command isn't
+  // exposed there, so polling it would just burn IPC round-trips).
+  if (mode.value !== 'dbus') return
   try {
     const result = (await window.cockpit.command('aidj.list-players')) as Record<string, unknown>
     if (result?.ok && Array.isArray(result.players)) {
@@ -989,7 +1023,8 @@ async function handleContinuous(songs: { name: string; path: string }[]): Promis
     const r = (await window.cockpit.btJob('aidj.continuous', {
       songs: songs.map((s) => ({ name: s.name, path: s.path })),
       player: player || '__auto__',
-      view: 'continuous'
+      view: 'continuous',
+      tags: ['aidj-playback']
     })) as Record<string, unknown>
     if (r?.ok && r.task) {
       showSnack(`已启动连续播放后台任务 (${songs.length} 首)`)
@@ -1063,7 +1098,8 @@ async function runPersistCommand(prompt: string): Promise<void> {
       rollingHistory,
       sessionId,
       player: player || '__auto__',
-      view: 'chat'
+      view: 'chat',
+      tags: ['aidj-playback']
     })) as Record<string, unknown>
     if (result?.task || result?.ok) {
       const task = result.task as { id?: string } | undefined
@@ -1360,7 +1396,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
             </span>
           </v-chip>
         </v-col>
-        <v-col cols="auto" class="player-select-col">
+        <v-col v-if="mode === 'dbus'" cols="auto" class="player-select-col">
           <v-select
             v-model="selectedPlayer"
             :items="[
@@ -1402,6 +1438,7 @@ defineExpose({ toMarkdown, loadSession, newChat })
           :key="msg.uid ?? msg.timestamp"
           :message="msg"
           :index="messages.length - visibleMessages.length + idx"
+          :continuous-enabled="mode === 'dbus'"
           @play-all="handlePlayAll"
           @play-one="handlePlayOne"
           @reorder="

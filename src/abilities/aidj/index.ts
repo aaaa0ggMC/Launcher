@@ -67,5 +67,13 @@ export default [
         ]
       }
     ]
+  },
+  {
+    id: 'aidj-player',
+    name: '播放器',
+    icon: 'default/music/padding',
+    category: '工具',
+    keepAlive: true,
+    component: defineAsyncComponent(() => import('./PlayerView.vue'))
   }
 ] satisfies Ability[]

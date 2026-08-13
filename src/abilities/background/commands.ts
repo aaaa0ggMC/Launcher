@@ -168,7 +168,7 @@ export default [
       } else if (ctx.named.args && typeof ctx.named.args === 'object') {
         args = ctx.named.args as Record<string, unknown>
       }
-      const task = startJobByName(name, args)
+      const task = await startJobByName(name, args)
       if (!task) return { ok: false, error: `未知作业处理器: ${name}` }
       log.info('background.job ok', { name, id: task.id })
       return { ok: true, task }

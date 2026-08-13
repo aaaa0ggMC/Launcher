@@ -1,5 +1,5 @@
 import { readFile, readdir, mkdir, appendFile, writeFile, rename, rm } from 'fs/promises'
-import { join, extname, basename } from 'path'
+import { join, extname, basename, dirname } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import OpenAI from 'openai'
@@ -870,6 +870,8 @@ interface PlayerInterface {
   PlayPause: () => Promise<void>
   Stop: () => Promise<void>
   OpenUri: (uri: string) => Promise<void>
+  /** MPRIS Seek(offsetMicros) — relative seek in microseconds. */
+  Seek: (offsetMicros: number) => Promise<void>
 }
 interface TrackListInterface {
   AddTrack: (uri: string, afterTrack: string, setAsCurrent: boolean) => Promise<void>
@@ -1155,6 +1157,26 @@ export class DBusManager {
       }
     } catch (e) {
       log.warn('sendFiles failed', { error: String(e) })
+      return false
+    }
+  }
+
+  /** Absolute seek to `positionMs` — MPRIS only exposes relative `Seek`, so the
+   *  offset is computed against the current reported position. */
+  async seekTo(positionMs: number): Promise<boolean> {
+    try {
+      if (this._autoMode && !(await this.ensureBound())) return false
+      if (!this.playerProxy) return false
+      const detail = await this.getPlaybackDetail()
+      if (!detail.ok || detail.positionMs == null) return false
+      const iface = this.playerProxy.getInterface(
+        'org.mpris.MediaPlayer2.Player'
+      ) as unknown as PlayerInterface
+      const offsetMicros = Math.round((positionMs - detail.positionMs) * 1000)
+      await iface.Seek(offsetMicros)
+      return true
+    } catch (e) {
+      log.warn('seekTo failed', { positionMs, error: String(e) })
       return false
     }
   }
@@ -2412,8 +2434,39 @@ export async function switchPlayer(playerName: string): Promise<boolean> {
 
 const _coverCache = new Map<string, string>()
 
+/** Common same-directory cover filenames — checked BEFORE the embedded-cover
+ *  ffmpeg path (no subprocess needed, and present for most FLAC/MP3 folders). */
+const COVER_FILENAMES = [
+  'cover.jpg',
+  'cover.png',
+  'cover.jpeg',
+  'folder.jpg',
+  'folder.png',
+  'front.jpg',
+  'front.png'
+]
+
 export async function getCoverArt(filepath: string): Promise<string | null> {
   if (_coverCache.has(filepath)) return _coverCache.get(filepath) ?? null
+  // 1. Same-directory cover file (cheap, no ffmpeg/ffprobe dependency — works
+  //    even where ffmpeg isn't installed, e.g. a fresh non-Linux box).
+  try {
+    const dir = dirname(filepath)
+    for (const name of COVER_FILENAMES) {
+      try {
+        const buf = await readFile(join(dir, name))
+        const ext = extname(name).slice(1)
+        const url = `data:image/${ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext};base64,${buf.toString('base64')}`
+        _coverCache.set(filepath, url)
+        return url
+      } catch {
+        /* not this filename — keep looking */
+      }
+    }
+  } catch {
+    /* unreadable dir — fall through to embedded */
+  }
+  // 2. Embedded cover (ID3/FLAC tags) via ffprobe/ffmpeg.
   try {
     const { stdout } = await execFileAsync('ffprobe', [
       '-v',

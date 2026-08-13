@@ -4,6 +4,7 @@ import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpc } from './process/ipc'
 import { registerIconProtocol } from './process/icon-protocol'
+import { registerAudioProtocol } from './process/audio-protocol'
 import { loadExternalAbilities } from './process/ability-loader'
 import { registerAbilityCommands } from './process/abilities-loader'
 import { setBroadcast } from './process/broadcast'
@@ -25,6 +26,13 @@ protocol.registerSchemesAsPrivileged([
     // absolute path (`cockpit-icon://%2Fhome%2F...`) puts `%2F` in the URL
     // authority, which Chromium rejects → no request ever reaches the handler.
     // As a non-standard (opaque) scheme the whole URL is passed through as-is.
+    privileges: { secure: true, supportFetchAPI: true, stream: true }
+  },
+  {
+    scheme: 'cockpit-audio',
+    // NOTE: no `corsEnabled` — the `<audio>` element makes a no-cors request,
+    // and marking the scheme CORS-enabled can block that. `stream` is required
+    // for the media stack.
     privileges: { secure: true, supportFetchAPI: true, stream: true }
   }
 ])
@@ -87,7 +95,11 @@ async function createWindow(): Promise<void> {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // The built-in web player (aidj) starts `<audio>` + resumes its
+      // AudioContext on main-process-driven commands (CLI send, media keys),
+      // which carry no renderer user gesture — allow it app-wide in this window.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 
@@ -143,6 +155,7 @@ if (!gotLock) {
     })
 
     registerIconProtocol()
+    registerAudioProtocol()
     // The shell owns the window broadcast; framework modules and abilities pull
     // it via the broadcast hub (setBroadcast/getBroadcast).
     setBroadcast(broadcast)

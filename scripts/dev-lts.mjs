@@ -61,7 +61,10 @@ function computeHash() {
 }
 
 function runElectronVite(args) {
-  const r = spawnSync(process.execPath, [ELECTRON_VITE_BIN, ...args], { stdio: 'inherit', cwd: root })
+  const r = spawnSync(process.execPath, [ELECTRON_VITE_BIN, ...args], {
+    stdio: 'inherit',
+    cwd: root
+  })
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
 
