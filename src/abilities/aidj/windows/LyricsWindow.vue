@@ -238,11 +238,11 @@ const windowEnd = computed(() =>
   Math.min(lrcLines.value.length, displayIdx.value + (lyricsCfg.value.lines_after ?? 0) + 1)
 )
 const windowLines = computed(() => {
-  const out: { text: string; isCurrent: boolean; hasKaraoke: boolean }[] = []
+  const out: { text: string; isCurrent: boolean }[] = []
   for (let i = windowStart.value; i < windowEnd.value; i++) {
     const l = lrcLines.value[i]
     if (!l || !l.text) continue // render only text lines; empty gaps stay as timing
-    out.push({ text: l.text, isCurrent: i === displayIdx.value, hasKaraoke: l.chunks.length > 1 })
+    out.push({ text: l.text, isCurrent: i === displayIdx.value })
   }
   return out
 })
@@ -629,7 +629,7 @@ onBeforeUnmount(() => {
                   'is-dim': !line.isCurrent && !playing
                 }"
               >
-                <template v-if="line.isCurrent && lyricsCfg.karaoke && line.hasKaraoke">
+                <template v-if="line.isCurrent && lyricsCfg.karaoke && line.text">
                   <span class="karaoke-mask" :style="karaokeMaskStyle">{{ line.text }}</span>
                 </template>
                 <span v-else>{{ line.text }}</span>
