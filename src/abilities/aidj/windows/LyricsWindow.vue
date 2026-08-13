@@ -4,9 +4,18 @@ import { translate } from '@ui/i18n'
 import { DEFAULT_LYRICS_CFG } from '../types'
 import type { LyricsDisplayConfig } from '../types'
 
+interface LyricChunk {
+  /** text fragment of a karaoke word */
+  text: string
+  /** ms at which this chunk becomes active (line-relative, raw LRC time) */
+  time: number
+}
+
 interface LyricLine {
   time: number
   text: string
+  /** per-word sub-timestamps from inline LRC tags; length > 1 = real karaoke */
+  chunks: LyricChunk[]
 }
 
 interface PlaybackState {
@@ -97,7 +106,11 @@ const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const FAIL_LIMIT = 3
 let failCount = 0
 
-/** Parse an LRC document into time-sorted lines (bracket tags + [offset]). */
+/** Parse an LRC document into time-sorted lines with per-word chunks.
+ *  A line like `[00:12.00]一[00:12.30]二` becomes ONE line with two chunks so
+ *  the current line can fill word-by-word (karaoke). Single-timestamp lines get
+ *  one chunk (plain highlight). Empty-timestamp lines are kept as timing
+ *  boundaries (instrumental-gap detection). */
 function parseLrc(lrc: string): LyricLine[] {
   const lines: LyricLine[] = []
   let offset = 0
@@ -109,18 +122,37 @@ function parseLrc(lrc: string): LyricLine[] {
       offset = Number(off[1])
       continue
     }
-    const timeTags = line.match(/\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g)
-    if (!timeTags) continue
-    const text = line.replace(/\[[^\]]*\]/g, '').trim()
-    // Keep the timestamp even when the text is empty — it's a timing boundary.
-    // Empty-text lines are skipped only at RENDER time (see windowLines).
-    for (const tag of timeTags) {
-      const m = tag.match(/\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/)
-      if (!m) continue
-      const frac = Number(m[3] ?? '0')
-      const ms =
-        Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac) + offset
-      lines.push({ time: ms, text })
+    if (!line.match(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/)) continue
+    const parts = line.split(/(\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\])/g)
+    const chunks: LyricChunk[] = []
+    let pendingTime = 0
+    let pendingText = ''
+    const flush = (): void => {
+      if (pendingText) chunks.push({ text: pendingText, time: pendingTime + offset })
+      pendingText = ''
+    }
+    for (const part of parts) {
+      const m = part.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]$/)
+      if (m) {
+        flush()
+        const frac = Number(m[3] ?? '0')
+        pendingTime = Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac)
+      } else {
+        pendingText += part
+      }
+    }
+    flush()
+    if (!chunks.length) {
+      lines.push({ time: pendingTime + offset, text: '', chunks: [] })
+    } else {
+      lines.push({
+        time: chunks[0].time,
+        text: chunks
+          .map((c) => c.text)
+          .join('')
+          .trim(),
+        chunks
+      })
     }
   }
   return lines.sort((a, b) => a.time - b.time)
@@ -167,6 +199,26 @@ const inGap = computed(() => {
   const i = currentIdx.value
   return i >= 0 && !lrcLines.value[i].text
 })
+
+/** Karaoke fill % for the lit line — drawn as a `background-clip:text` gradient
+ *  whose hard stop sits at this percent (cheap single repaint per frame). Fill
+ *  window = [line.time, last chunk time) for real karaoke lines, else the plain
+ *  line spreads to the next line's timestamp. */
+const karaokeFill = computed(() => {
+  const lines = lrcLines.value
+  const idx = displayIdx.value
+  const line = lines[idx]
+  if (!line || !lyricsCfg.value.karaoke || !line.text) return 0
+  const end =
+    line.chunks.length > 1
+      ? line.chunks[line.chunks.length - 1].time
+      : idx + 1 < lines.length
+        ? lines[idx + 1].time
+        : line.time + 2000
+  const span = Math.max(1, end - line.time)
+  return Math.min(100, Math.max(0, ((positionMs.value - line.time) / span) * 100))
+})
+const karaokeMaskStyle = computed(() => ({ '--lyr-kfill': `${karaokeFill.value.toFixed(2)}%` }))
 
 /** Static window around the current line: before + current + after (no scroll). */
 const windowStart = computed(() =>
@@ -510,7 +562,10 @@ onBeforeUnmount(() => {
                 class="lyrics-line"
                 :class="{ 'is-current': line.isCurrent, 'is-dim': !playing }"
               >
-                <span>{{ line.text }}</span>
+                <template v-if="line.isCurrent && lyricsCfg.karaoke && line.text">
+                  <span class="karaoke-mask" :style="karaokeMaskStyle">{{ line.text }}</span>
+                </template>
+                <span v-else>{{ line.text }}</span>
               </div>
             </div>
             <div v-else class="lyrics-line is-current lyrics-empty">
@@ -643,6 +698,20 @@ onBeforeUnmount(() => {
   font-weight: var(--lyr-current-weight);
   line-height: var(--lyr-line-height);
   text-shadow: var(--lyr-shadow);
+}
+/* Karaoke: the lit line is a background-clip:text gradient whose hard stop sits
+   at --lyr-kfill — filled words use the normal text color, unplayed ones a dim
+   version of it. text-shadow stays on the element (drawn behind the fill). */
+.lyrics-line.is-current .karaoke-mask {
+  background-image: linear-gradient(
+    90deg,
+    var(--lyr-fg) var(--lyr-kfill),
+    color-mix(in srgb, var(--lyr-fg) 35%, transparent) var(--lyr-kfill)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 .lyrics-line.is-dim {
   opacity: 0.5;

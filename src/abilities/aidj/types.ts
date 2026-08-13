@@ -162,6 +162,8 @@ export interface LyricsDisplayConfig {
   /** position adjustment in ms. Positive = show lyrics EARLIER (compensate the
    *  poll lag, ~+200 to match wshowlyrics); negative = later. */
   position_offset_ms: number
+  /** word-by-word karaoke fill on the current line (uses inline LRC timestamps) */
+  karaoke?: boolean
   /** card corner radius (px) */
   card_radius: number
   /** card top/bottom padding (px) */
@@ -197,6 +199,7 @@ export const DEFAULT_LYRICS_CFG: LyricsDisplayConfig = {
   show_title: true,
   ignore_empty_lines: true,
   position_offset_ms: 0,
+  karaoke: true,
   card_radius: 12,
   card_padding_y: 12,
   card_padding_x: 26,

@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed, inject } from 'vue'
+import type { Ref } from 'vue'
 import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
+import { translate } from '../../../main/ui/i18n'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const model = ref('')
 const metadataModel = ref('')
@@ -832,6 +837,15 @@ function resetDj(): void {
                 v-model="lyricsCfg.ignore_empty_lines"
                 color="primary"
                 label="忽略空行"
+                hide-details
+                density="compact"
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-switch
+                v-model="lyricsCfg.karaoke"
+                color="primary"
+                :label="t('aidj.settings.karaoke', '逐字卡拉OK')"
                 hide-details
                 density="compact"
               />

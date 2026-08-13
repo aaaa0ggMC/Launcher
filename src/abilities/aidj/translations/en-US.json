@@ -168,5 +168,6 @@
   "aidj.player.volume": "Volume",
   "aidj.player.volume_hint": "Re-calibrates the loudness anchor on release",
   "aidj.player-volbal.desc": "Query or set the built-in player loudness balance (--enabled <bool> --method <lufs|linear>)",
-  "aidj.player-rebase.desc": "Make the current volume the new base of the built-in loudness balance"
+  "aidj.player-rebase.desc": "Make the current volume the new base of the built-in loudness balance",
+  "aidj.settings.karaoke": "Word-by-word karaoke"
 }

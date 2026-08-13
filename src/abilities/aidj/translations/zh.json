@@ -168,5 +168,6 @@
   "aidj.player.volume": "音量",
   "aidj.player.volume_hint": "松手后重新校准响度基准",
   "aidj.player-volbal.desc": "查询或设置内置播放器的响度平衡（--enabled <bool> --method <lufs|linear>）",
-  "aidj.player-rebase.desc": "将当前音量设为内置播放器响度平衡的新基准"
+  "aidj.player-rebase.desc": "将当前音量设为内置播放器响度平衡的新基准",
+  "aidj.settings.karaoke": "逐字卡拉OK"
 }
