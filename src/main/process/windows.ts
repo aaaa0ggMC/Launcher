@@ -70,6 +70,43 @@ const children = new Map<
   { win: BrowserWindow; spec: WindowSpec; startedAt: number; locked: boolean; alwaysOnTop: boolean }
 >()
 
+/**
+ * Window geometry debug — `COCKPIT_WINDOW_DEBUG=1` enables a 0.5s heartbeat
+ * logging every child window's bounds, the display it's on, and the horizontal
+ * centering deltas (left/right gaps, offset from the exact center). Used to
+ * diagnose the lyrics-window "drifts right" on Windows; harmless when off.
+ */
+const windowDebug = process.env.COCKPIT_WINDOW_DEBUG === '1'
+
+function debugWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  const b = win.getBounds()
+  const disp = screen.getDisplayMatching(b)
+  const area = disp.workArea
+  const expectedX = area.x + Math.round((area.width - b.width) / 2)
+  const left = b.x - area.x
+  const right = area.x + area.width - (b.x + b.width)
+  log.info('[win-debug] geometry', {
+    id: win.getTitle(),
+    bounds: { x: b.x, y: b.y, width: b.width, height: b.height },
+    workArea: { x: area.x, y: area.y, width: area.width, height: area.height },
+    scale: disp.scaleFactor,
+    expectedCenterX: expectedX,
+    leftGap: left,
+    rightGap: right,
+    centerOffset: b.x - expectedX, // >0 = window sits RIGHT of center
+    minimized: win.isMinimized()
+  })
+}
+
+if (windowDebug) {
+  setInterval(() => {
+    for (const { win } of children.values()) {
+      if (!win.isDestroyed()) debugWindow(win)
+    }
+  }, 500)
+}
+
 export function setMainWindow(win: BrowserWindow): void {
   main = win
 }
@@ -373,6 +410,16 @@ export function centerChildWindow(
   if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height)
     return false
   lastCenter.set(win, { x, y, w: b.width, h: b.height })
+  if (windowDebug) {
+    log.info('[win-debug] centerChildWindow request', {
+      id: win.getTitle(),
+      anchor,
+      margin,
+      fromBounds: { x: b.x, y: b.y, width: b.width, height: b.height },
+      target: { x, y }
+    })
+    setTimeout(() => debugWindow(win), 300)
+  }
   return moveWindowTo(win, x, y)
 }
 
@@ -402,6 +449,16 @@ export function resizeAndCenterChildWindow(
   const last = lastCenter.get(win)
   if (last && last.x === x && last.y === y && last.w === cw && last.h === ch) return false
   lastCenter.set(win, { x, y, w: cw, h: ch })
+  if (windowDebug) {
+    log.info('[win-debug] auto-fit request', {
+      id: win.getTitle(),
+      anchor,
+      margin,
+      fromBounds: { x: b.x, y: b.y, width: b.width, height: b.height },
+      target: { x, y, width: cw, height: ch }
+    })
+    setTimeout(() => debugWindow(win), 300)
+  }
   resizeWindowTo(win, cw, ch)
   return moveWindowTo(win, x, y)
 }

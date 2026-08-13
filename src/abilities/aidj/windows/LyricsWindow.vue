@@ -308,6 +308,11 @@ function fitWindowToContent(): void {
   const card = cardEl.value
   if (!card) return
   const r = card.getBoundingClientRect()
+  if (window.cockpit.windowDebug) {
+    console.warn(
+      `[win-debug] fitWindowToContent card rect=${JSON.stringify({ w: r.width, h: r.height })}`
+    )
+  }
   if (r.width < 4 || r.height < 4) return
   const w = Math.ceil(r.width) + 2
   const h = Math.ceil(r.height) + 2
@@ -367,6 +372,14 @@ function autoFitWidth(): void {
     const maxW = Math.round(window.screen.availWidth * 0.9)
     const rect = card.getBoundingClientRect()
     const needed = Math.min(maxW, Math.max(baseWinW.value, Math.ceil(rect.width) + pad))
+    if (window.cockpit.windowDebug) {
+      console.warn(
+        `[win-debug] autoFitWidth card=${JSON.stringify({ w: rect.width, h: rect.height })} ` +
+          `innerW=${window.innerWidth} innerH=${window.innerHeight} screenX=${window.screenX} ` +
+          `screenW=${window.screen.width} availW=${window.screen.availWidth} needed=${needed} ` +
+          `lastFitW=${lastFitW}`
+      )
+    }
     if (needed !== lastFitW || force) {
       lastFitW = needed
       void window.cockpit.autoFitWindow(needed, window.innerHeight, c.anchor, c.margin)
@@ -418,6 +431,24 @@ onMounted(async () => {
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('contextmenu', onContextMenu, true)
   winUnsub = window.cockpit.on('cockpit:windows', onWindowsChanged)
+
+  // Debug heartbeat (COCKPIT_WINDOW_DEBUG=1): report the renderer's viewport
+  // geometry + card rect every 0.5s so it can be compared against the main
+  // process's win.getBounds() heartbeat to find the centering drift.
+  if (window.cockpit.windowDebug) {
+    const dbg = setInterval(() => {
+      const card = cardEl.value
+      const cr = card?.getBoundingClientRect()
+      console.warn(
+        `[win-debug] renderer heartbeat innerW=${window.innerWidth} innerH=${window.innerHeight} ` +
+          `screenX=${window.screenX} screenY=${window.screenY} ` +
+          `screenW=${window.screen.width} screenH=${window.screen.height} ` +
+          `availW=${window.screen.availWidth} ` +
+          `card=${cr ? JSON.stringify({ w: Math.round(cr.width), h: Math.round(cr.height) }) : 'none'}`
+      )
+    }, 500)
+    onBeforeUnmount(() => clearInterval(dbg))
+  }
 })
 
 onBeforeUnmount(() => {

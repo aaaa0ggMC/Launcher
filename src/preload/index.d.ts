@@ -24,6 +24,7 @@ export interface CockpitApi {
   getConfig: () => Promise<Record<string, unknown> | null>
   setConfig: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>
   platform: string
+  windowDebug: boolean
   listApps: () => Promise<AppsListResult>
   getEntry: (root: string, id: string) => Promise<AppEntry | null>
   updateEntry: (root: string, id: string, patch: Partial<AppEntry>) => Promise<AppEntry>

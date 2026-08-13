@@ -24,6 +24,8 @@ const cockpit = {
   setConfig: (patch: CommandArgs): Promise<Record<string, unknown>> =>
     cockpit.command('config.set', { patch }) as Promise<Record<string, unknown>>,
   platform: process.platform,
+  /** Window-geometry debug heartbeat (COCKPIT_WINDOW_DEBUG=1) — lyrics-window drift diagnosis. */
+  windowDebug: process.env.COCKPIT_WINDOW_DEBUG === '1',
 
   // apps registry
   listApps: (): Promise<unknown> => cockpit.command('apps.list'),
