@@ -710,15 +710,10 @@ function listenMode(): void {
 }
 
 function handleBtData(data: Record<string, unknown>): void {
-  if (data.type === 'now_playing') {
-    messages.value.push({
-      role: 'assistant',
-      content: `▶ 播放: ${String(data.track ?? '')}`,
-      timestamp: Date.now(),
-      uid: makeUid()
-    })
-    scrollToBottom()
-  } else if (data.type === 'status' && data.message === 'started') {
+  // NOTE: now_playing is intentionally NOT injected into the main chat — a
+  // forked persistent session's live activity belongs to the background panel
+  // (BtChatView), and runPersistCommand promises "the main chat stays untouched".
+  if (data.type === 'status' && data.message === 'started') {
     messages.value.push({
       role: 'system',
       content: `持久模式已启动 | 提示: ${String(data.prompt ?? '')}`,

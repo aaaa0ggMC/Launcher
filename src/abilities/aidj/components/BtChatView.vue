@@ -164,6 +164,13 @@ const items = computed<ChatItem[]>(() => {
     if (!d || typeof d !== 'object') continue
     const t = (d as Record<string, unknown>).type as string | undefined
     if (t === 'thinking' || t === 'idle') continue
+    if (t === 'now_playing') {
+      out.push({
+        kind: 'system',
+        content: `▶ 播放: ${String((d as Record<string, unknown>).track ?? '')}`
+      })
+      continue
+    }
     if (t === 'clear_history') {
       out.length = 0
       continue
