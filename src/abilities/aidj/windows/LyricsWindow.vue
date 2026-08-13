@@ -769,7 +769,9 @@ onBeforeUnmount(() => {
 /* Karaoke: the lit line is a background-clip:text gradient whose hard stop sits
    at --lyr-kfill — filled words use the current-line color, unplayed words the
    CANDIDATE color (which carries its own transparency from the config — never
-   stack an extra alpha layer on top). Mirrors the in-app lyrics page. */
+   stack an extra alpha layer on top). No text-shadow on the mask: the parent
+   line's dark shadow would muddy the dim unplayed words ("deeper than
+   intended") and costs a repaint each frame. Mirrors the in-app lyrics page. */
 .lyrics-line.is-current .karaoke-mask {
   background-image: linear-gradient(
     90deg,
@@ -780,6 +782,7 @@ onBeforeUnmount(() => {
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
+  text-shadow: none;
 }
 .lyrics-line.is-dim {
   opacity: 0.5;
