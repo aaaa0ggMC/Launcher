@@ -104,9 +104,16 @@ function expandArgv(entry: AppEntry, spec: AppExecSpec): string[] {
     case 'uv':
       return ['uv', 'run', '--directory', cwd, ...command, ...args]
     case 'python': {
-      const py = existsSync(join(cwd, '.venv', 'bin', 'python'))
-        ? join(cwd, '.venv', 'bin', 'python')
-        : 'python3'
+      // venv layout differs per platform: Unix `bin/python`, Windows
+      // `Scripts/python.exe`. Fall back to the platform's bare interpreter
+      // (`python` on Windows — `python3` doesn't exist there).
+      const venvPy = join(
+        cwd,
+        '.venv',
+        process.platform === 'win32' ? 'Scripts' : 'bin',
+        process.platform === 'win32' ? 'python.exe' : 'python'
+      )
+      const py = existsSync(venvPy) ? venvPy : process.platform === 'win32' ? 'python' : 'python3'
       return [py, ...command, ...args]
     }
     case 'node':
@@ -243,6 +250,15 @@ export async function launchSpec(
   const eff = opts.monitor ? { ...spec, terminal: false } : spec
   const cwd = expandCwd(entry, eff)
   const env: NodeJS.ProcessEnv = { ...process.env, ...(eff.env ?? {}) }
+
+  // Distinguish "cwd missing" from "binary missing" early — Node reports BOTH
+  // as `spawn <cmd> ENOENT`, which misleads debugging when a project dir was
+  // deleted/moved. Fail with a clear message instead.
+  if (!existsSync(cwd)) {
+    const error = `工作目录不存在: ${cwd}`
+    log.warn('launch aborted: cwd missing', { name: entry.alias ?? entry.name, cwd })
+    return { ok: false, error }
+  }
 
   // Frequency statistic — every successful launch (foreground, background task
   // or multi-step action) counts once in apps.csv, keyed by `app:<root>:<path>`.
