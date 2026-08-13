@@ -12,6 +12,7 @@ import {
   writeJsonAtomicSerialized,
   writeTextFile
 } from '../../main/process/util'
+import { ncmSearch, ncmLyric } from './ncm_api'
 import type {
   AidjConfig,
   SongMeta,
@@ -689,6 +690,18 @@ export function setNcmBaseUrl(url: string): void {
 export async function searchNcmApi(
   keywords: string
 ): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+  // auto: prefer the configured external NCM service; fall back to the built-in
+  // (vendored) Netease access whenever the external one is unreachable.
+  const external = await searchNcmApiExternal(keywords)
+  if (!external.networkError) return external
+  log.info('NCM external service unreachable — falling back to built-in', { keywords })
+  return searchNcmApiBuiltin(keywords)
+}
+
+/** External NCM service path (`ncm_base_url`, e.g. NeteaseCloudMusicApi). */
+async function searchNcmApiExternal(
+  keywords: string
+): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
   const started = Date.now()
   try {
     const sRes = await fetch(
@@ -727,6 +740,39 @@ export async function searchNcmApi(
     return { sid, lyric, karaoke, networkError: false }
   } catch (e) {
     log.warn('NCM search failed', { keywords, error: String(e) })
+    return { sid: null, lyric: '', karaoke: '', networkError: true }
+  }
+}
+
+/** Built-in path — the vendored Netease search + lyric access (no external
+ *  service, no port). Falls back here automatically when the external one is
+ *  unreachable. */
+async function searchNcmApiBuiltin(
+  keywords: string
+): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+  const started = Date.now()
+  try {
+    const sData = await ncmSearch(keywords, 1)
+    if (sData.code !== 200 || !sData.result?.songCount || !sData.result.songs.length) {
+      log.debug('NCM builtin search: no result', { keywords, code: sData.code })
+      return { sid: null, lyric: '', karaoke: '', networkError: false }
+    }
+    const sid = sData.result.songs[0].id
+    const lData = await ncmLyric(sid)
+    const lyric = lData.code === 200 ? (lData.lrc?.lyric ?? '') : ''
+    const yrc = lData.code === 200 && lData.yrc?.lyric ? lData.yrc.lyric : ''
+    const karaoke = yrc ? yrcToInlineLrc(yrc) : ''
+    log.debug('NCM builtin search ok', {
+      keywords,
+      sid,
+      songCount: sData.result.songCount,
+      lyricLen: lyric.length,
+      karaokeLen: karaoke.length,
+      latencyMs: Date.now() - started
+    })
+    return { sid, lyric, karaoke, networkError: false }
+  } catch (e) {
+    log.warn('NCM builtin search failed', { keywords, error: String(e) })
     return { sid: null, lyric: '', karaoke: '', networkError: true }
   }
 }

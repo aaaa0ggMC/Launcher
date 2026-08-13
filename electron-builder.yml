@@ -14,6 +14,8 @@ files:
   - src/main/ui/translations/**
   - src/abilities/*/translations/**
   - src/background/*/translations/**
+  # MIT attribution for the vendored Netease search/lyric code
+  - src/abilities/aidj/ncm_api/LICENSE
   - '!**/*.map'
   - '!{docs/**,test*/**,README.md,CHANGELOG.md}'
 asarUnpack:
