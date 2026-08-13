@@ -905,7 +905,8 @@ export async function syncMetadata(
   model: string,
   concurrency: number,
   onProgress?: (p: MetadataSyncProgress) => void,
-  lyrics?: Map<string, string>
+  lyrics?: Map<string, string>,
+  isCancelled?: () => boolean
 ): Promise<{ metadata: Map<string, SongMeta>; counts: MetadataSyncCounts }> {
   const counts: MetadataSyncCounts = { ok: 0, noLyric: 0, failed: 0, networkError: 0 }
   if (!missing.size) return { metadata, counts }
@@ -922,6 +923,7 @@ export async function syncMetadata(
     await Promise.allSettled(
       Array.from({ length: workers }, async (_, i) => {
         for (let j = i; j < entries.length; j += workers) {
+          if (isCancelled?.()) return // user stopped the task — bail the worker
           const [name] = entries[j]
           const { sid, lyric, karaoke, networkError, comments } = await searchNcmApi(name)
           if (sid === null) {

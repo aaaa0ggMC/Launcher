@@ -1376,6 +1376,11 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
     `发现 ${total} 首歌曲缺少元数据，使用 ${model} 开始同步 (并发 ${concurrency})...`
   )
 
+  // Cancellable: stopping the task aborts the worker loop so it doesn't keep
+  // burning AI calls on the remaining songs.
+  const abort = new AbortController()
+  control.setCancel(() => abort.abort())
+
   const { counts } = await syncMetadata(
     client,
     missing,
@@ -1400,8 +1405,15 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
         )
       }
     },
-    lib.lyrics
+    lib.lyrics,
+    () => abort.signal.aborted
   )
+
+  if (abort.signal.aborted) {
+    control.pushLine('已停止（已完成的部分歌曲已保存，其余保留待下次同步）')
+    control.finish('cancelled')
+    return
+  }
 
   if (counts.networkError > 0) {
     control.pushLine(
