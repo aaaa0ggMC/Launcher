@@ -3,16 +3,31 @@ productName: cockpit
 directories:
   buildResources: build
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack:
+  # Whitelist the runtime payload — everything else (docs/, dev tools, the
+  # game-icon-pack submodule) is either bundled into out/ by electron-vite or
+  # irrelevant at runtime. The main process reads translation JSONs straight
+  # off disk (i18n.ts), so the framework + per-ability translation folders are
+  # packaged even though the rest of src/ is not.
+  - out/**
   - resources/**
+  - scripts/**
+  - src/main/ui/translations/**
+  - src/abilities/*/translations/**
+  - src/background/*/translations/**
+  - '!**/*.map'
+  - '!{docs/**,test*/**,README.md,CHANGELOG.md}'
+asarUnpack:
+  # scripts/ holds pkexec helper scripts — the main process execFile's them, so
+  # they must NOT stay packed inside the asar (can't be executed from there).
+  - resources/**
+  - scripts/**
 win:
   executableName: cockpit
+  target:
+    - portable
+    - nsis
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
