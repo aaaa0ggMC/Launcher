@@ -119,6 +119,19 @@ async function control(cmd: string): Promise<void> {
   await window.cockpit.command(`aidj.${cmd}`).catch(() => {})
 }
 
+async function clearQueue(): Promise<void> {
+  const r = (await window.cockpit.command('aidj.player-clear-queue').catch(() => null)) as {
+    ok?: boolean
+  } | null
+  if (r?.ok) {
+    queueTracks.value = []
+    queueIndex.value = -1
+    queueTotal.value = 0
+    track.value = ''
+    status.value = 'Stopped'
+  }
+}
+
 // -- seek slider: local value while dragging, commit ONCE on release ----------
 const seekInput = ref(0)
 const seeking = ref(false)
@@ -348,6 +361,17 @@ const hasTrack = computed(() => track.value !== '')
               <span v-if="queueTotal > 0" class="text-caption text-medium-emphasis">{{
                 tt('aidj.player.count', { n: queueTotal }, '{n} 首')
               }}</span>
+              <v-btn
+                v-if="mode === 'web' && queueTracks.length > 0"
+                icon
+                size="small"
+                variant="text"
+                color="error"
+                :title="t('aidj.player.clear_queue', '清空队列')"
+                @click="clearQueue"
+              >
+                <v-icon size="16">mdi-trash-can-outline</v-icon>
+              </v-btn>
             </div>
             <div v-if="queueTracks.length === 0" class="menu-empty text-body-2">
               {{ t('aidj.player.queue_empty', '队列为空') }}

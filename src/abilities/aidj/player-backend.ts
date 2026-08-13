@@ -374,6 +374,15 @@ export class WebPlayerBackend implements PlayerBackend {
     return true
   }
 
+  /** Fully clear the queue (web only): stop playback and drop every track. */
+  async clearQueue(): Promise<boolean> {
+    this.lastDetail = { ...this.lastDetail, ok: false, status: 'Stopped', track: '' }
+    this.queueIndex = -1
+    this.queueTotal = 0
+    this.emit({ type: 'clear' })
+    return true
+  }
+
   async seek(positionMs: number): Promise<boolean> {
     this.emit({ type: 'seek', positionMs })
     return true

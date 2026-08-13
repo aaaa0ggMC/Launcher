@@ -161,6 +161,7 @@
   "aidj.lyrics_page.lock": "锁定",
   "aidj.player.dbus_hint": "当前为外部播放器模式（MPRIS / DBus）。切换到内置播放器后，可在此页直接控制播放。",
   "aidj.player.queue": "播放队列",
+  "aidj.player.clear_queue": "清空队列",
   "aidj.player.empty": "—",
   "aidj.player.volbal_hint": "点击切换响度平衡（off → LUFS → RMS）",
   "aidj.player.backend": "播放后端",

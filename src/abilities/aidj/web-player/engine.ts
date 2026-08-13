@@ -33,6 +33,7 @@ type EngineCommand =
   | { type: 'next' }
   | { type: 'prev' }
   | { type: 'trim' }
+  | { type: 'clear' }
   | { type: 'stop' }
   | { type: 'seek'; positionMs: number }
   | { type: 'volume'; volume: number }
@@ -126,6 +127,9 @@ class WebPlayerEngine {
         break
       case 'trim':
         this.trimAfterCurrent()
+        break
+      case 'clear':
+        this.clearQueue()
         break
       case 'stop':
         this.stop()
@@ -224,6 +228,20 @@ class WebPlayerEngine {
     if (this.index >= 0 && this.index < this.queue.length - 1) {
       this.queue = this.queue.slice(0, this.index + 1)
     }
+    this.report()
+  }
+
+  /** Fully clear the queue — stop playback and drop every track (including the
+   *  current one), so the player page's 「清空队列」 empties the whole list. */
+  private clearQueue(): void {
+    this.queue = []
+    this.index = -1
+    this.history = []
+    this.audio.pause()
+    this.audio.removeAttribute('src')
+    this.audio.load()
+    this.lengthMs = 0
+    this.status = 'Stopped'
     this.report()
   }
 

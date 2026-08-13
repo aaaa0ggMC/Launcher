@@ -161,6 +161,7 @@
   "aidj.lyrics_page.lock": "Lock",
   "aidj.player.dbus_hint": "Currently in external-player mode (MPRIS / DBus). Switch to the built-in player to control playback here.",
   "aidj.player.queue": "Play queue",
+  "aidj.player.clear_queue": "Clear queue",
   "aidj.player.empty": "—",
   "aidj.player.volbal_hint": "Cycle loudness balance (off → LUFS → RMS)",
   "aidj.player.backend": "Playback backend",

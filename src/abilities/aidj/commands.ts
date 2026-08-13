@@ -1876,6 +1876,16 @@ const commands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.player-clear-queue',
+    description: '清空内置播放器的播放队列（停止播放并移除全部曲目）',
+    usage: 'aidj.player-clear-queue',
+    enabled: webMode,
+    run: async () => {
+      await getWebPlayerBackend().clearQueue()
+      return { ok: true }
+    }
+  },
+  {
     name: 'aidj.seek',
     description: '跳转到指定位置（毫秒）',
     usage: 'aidj.seek --position <ms>',
