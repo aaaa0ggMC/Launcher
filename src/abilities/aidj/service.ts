@@ -12,7 +12,7 @@ import {
   writeJsonAtomicSerialized,
   writeTextFile
 } from '../../main/process/util'
-import { ncmSearch, ncmLyric } from './ncm_api'
+import { ncmSearch, ncmLyric, ncmComments } from './ncm_api'
 import type {
   AidjConfig,
   SongMeta,
@@ -701,9 +701,26 @@ export function setNcmMode(mode: 'auto' | 'external' | 'builtin' | undefined): v
   ncmMode = mode ?? 'auto'
 }
 
-export async function searchNcmApi(
-  keywords: string
-): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+let ncmCommentCount = 10
+
+export function setNcmCommentCount(count: number | undefined): void {
+  ncmCommentCount = Math.max(0, Math.min(50, Math.round(count ?? 10)))
+}
+
+/** Format hot comments for the AI prompt. */
+function formatComments(cs: { nickname: string; content: string; likes: number }[]): string[] {
+  return cs.slice(0, ncmCommentCount).map((c) => `${c.nickname}: ${c.content} (👍 ${c.likes})`)
+}
+
+export type NcmSearchResultT = {
+  sid: number | null
+  lyric: string
+  karaoke: string
+  networkError: boolean
+  comments: string[]
+}
+
+export async function searchNcmApi(keywords: string): Promise<NcmSearchResultT> {
   if (ncmMode === 'builtin') return searchNcmApiBuiltin(keywords)
   // auto: prefer the configured external NCM service; fall back to the built-in
   // (vendored) Netease access whenever the external one is unreachable.
@@ -714,9 +731,7 @@ export async function searchNcmApi(
 }
 
 /** External NCM service path (`ncm_base_url`, e.g. NeteaseCloudMusicApi). */
-async function searchNcmApiExternal(
-  keywords: string
-): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+async function searchNcmApiExternal(keywords: string): Promise<NcmSearchResultT> {
   const started = Date.now()
   try {
     const sRes = await fetch(
@@ -732,7 +747,7 @@ async function searchNcmApiExternal(
         code: sData.code,
         latencyMs: Date.now() - started
       })
-      return { sid: null, lyric: '', karaoke: '', networkError: false }
+      return { sid: null, lyric: '', karaoke: '', networkError: false, comments: [] }
     }
     const sid = sData.result.songs[0].id
     const lRes = await fetch(`${ncmBaseUrl}/lyric?id=${sid}`)
@@ -744,51 +759,78 @@ async function searchNcmApiExternal(
     const lyric = lData.code === 200 ? (lData.lrc?.lyric ?? '') : ''
     const yrc = lData.code === 200 && lData.yrc?.lyric ? lData.yrc.lyric : ''
     const karaoke = yrc ? yrcToInlineLrc(yrc) : ''
+    const comments = await fetchExternalComments(sid)
     log.debug('NCM search ok', {
       keywords,
       sid,
       songCount: sData.result.songCount,
       lyricLen: lyric.length,
       karaokeLen: karaoke.length,
+      commentCount: comments.length,
       latencyMs: Date.now() - started
     })
-    return { sid, lyric, karaoke, networkError: false }
+    return { sid, lyric, karaoke, networkError: false, comments }
   } catch (e) {
     log.warn('NCM search failed', { keywords, error: String(e) })
-    return { sid: null, lyric: '', karaoke: '', networkError: true }
+    return { sid: null, lyric: '', karaoke: '', networkError: true, comments: [] }
+  }
+}
+
+/** Hot comments from the external service — non-fatal. */
+async function fetchExternalComments(sid: number): Promise<string[]> {
+  if (ncmCommentCount <= 0) return []
+  try {
+    const res = await fetch(`${ncmBaseUrl}/comment/music?id=${sid}&limit=${ncmCommentCount}`)
+    const data = (await res.json()) as {
+      code: number
+      hotComments?: { user?: { nickname?: string }; content?: string; likedCount?: number }[]
+    }
+    if (data.code !== 200 || !data.hotComments?.length) return []
+    return formatComments(
+      data.hotComments.slice(0, ncmCommentCount).map((c) => ({
+        nickname: c.user?.nickname ?? '',
+        content: c.content ?? '',
+        likes: c.likedCount ?? 0
+      }))
+    )
+  } catch {
+    return []
   }
 }
 
 /** Built-in path — the vendored Netease search + lyric access (no external
  *  service, no port). Falls back here automatically when the external one is
  *  unreachable. */
-async function searchNcmApiBuiltin(
-  keywords: string
-): Promise<{ sid: number | null; lyric: string; karaoke: string; networkError: boolean }> {
+async function searchNcmApiBuiltin(keywords: string): Promise<NcmSearchResultT> {
   const started = Date.now()
   try {
     const sData = await ncmSearch(keywords, 1)
     if (sData.code !== 200 || !sData.result?.songCount || !sData.result.songs.length) {
       log.debug('NCM builtin search: no result', { keywords, code: sData.code })
-      return { sid: null, lyric: '', karaoke: '', networkError: false }
+      return { sid: null, lyric: '', karaoke: '', networkError: false, comments: [] }
     }
     const sid = sData.result.songs[0].id
     const lData = await ncmLyric(sid)
     const lyric = lData.code === 200 ? (lData.lrc?.lyric ?? '') : ''
     const yrc = lData.code === 200 && lData.yrc?.lyric ? lData.yrc.lyric : ''
     const karaoke = yrc ? yrcToInlineLrc(yrc) : ''
+    const comments =
+      ncmCommentCount > 0
+        ? formatComments(await ncmComments(sid, ncmCommentCount).catch(() => []))
+        : []
     log.debug('NCM builtin search ok', {
       keywords,
       sid,
       songCount: sData.result.songCount,
       lyricLen: lyric.length,
       karaokeLen: karaoke.length,
+      commentCount: comments.length,
       latencyMs: Date.now() - started
     })
-    return { sid, lyric, karaoke, networkError: false }
+    return { sid, lyric, karaoke, networkError: false, comments }
   } catch (e) {
     log.warn('NCM builtin search failed', { keywords, error: String(e) })
-    return { sid: null, lyric: '', karaoke: '', networkError: true }
+    return { sid: null, lyric: '', karaoke: '', networkError: true, comments: [] }
   }
 }
 
@@ -796,28 +838,33 @@ export async function extractMetadataAi(
   client: OpenAI,
   name: string,
   lyric: string,
-  model: string
+  model: string,
+  comments?: string[]
 ): Promise<{ meta: SongMeta | null; error?: string }> {
   const started = Date.now()
   try {
-    const info = { title: name, lyrics: lyric.slice(0, 500) }
+    const info = {
+      title: name,
+      lyrics: lyric.slice(0, 500),
+      ...(comments?.length ? { hot_comments: comments } : {})
+    }
     const resp = await client.chat.completions.create(
       {
         model,
         messages: [
           {
             role: 'system',
-            content: `You are a music metadata annotator. Given a song title and its lyrics (which may be partial or missing), return a JSON object with EXACTLY these fields:
+            content: `You are a music metadata annotator. Given a song title, its lyrics (which may be partial or missing) and listener comments (may be absent), return a JSON object with EXACTLY these fields:
 - "language": string — the dominant language of the song, e.g. "Chinese", "English", "Japanese", "Cantonese". Use "Unknown" when the lyrics are empty.
 - "emotion": string or string[] — one to three concise mood keywords, e.g. "nostalgic", "upbeat", "melancholic".
 - "genre": string or string[] — one to three genre tags, e.g. "indie rock", "city pop", "folk".
 - "loudness": string — a coarse intensity descriptor: "soft", "medium", or "loud". Infer it from the song style implied by the title and lyrics, never from the lyrics text itself.
-- "review": string — a vivid 1-2 sentence review of the song.
+- "review": string — a vivid 1-2 sentence review of the song. GROUND IT in the hot_comments when present (synthesize their sentiment/observations); never invent facts about the artist, release year, or awards.
 
 RULES:
 - Use a string[] for "emotion" and "genre" when there are multiple values; otherwise use a plain string.
-- Only infer from the information provided. Never invent facts about the artist, release year, or awards.
-- When the lyrics are empty, rely on the title alone and set "language" to "Unknown".`
+- Only infer from the information provided.
+- When the lyrics are empty, rely on the title (and comments) alone and set "language" to "Unknown".`
           },
           { role: 'user', content: JSON.stringify(info) }
         ],
@@ -835,6 +882,7 @@ RULES:
       name,
       model,
       lyricLen: lyric.length,
+      commentCount: comments?.length ?? 0,
       parsed,
       latencyMs: Date.now() - started
     })
@@ -875,7 +923,7 @@ export async function syncMetadata(
       Array.from({ length: workers }, async (_, i) => {
         for (let j = i; j < entries.length; j += workers) {
           const [name] = entries[j]
-          const { sid, lyric, karaoke, networkError } = await searchNcmApi(name)
+          const { sid, lyric, karaoke, networkError, comments } = await searchNcmApi(name)
           if (sid === null) {
             if (networkError) {
               counts.networkError++
@@ -899,7 +947,7 @@ export async function syncMetadata(
             }
             continue
           }
-          const { meta, error } = await extractMetadataAi(client, name, lyric, model)
+          const { meta, error } = await extractMetadataAi(client, name, lyric, model, comments)
           if (meta) {
             metadata.set(name, meta)
             await appendMetadata(name, meta)

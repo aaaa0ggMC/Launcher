@@ -75,6 +75,7 @@ const adjMethod = ref<'lufs' | 'linear'>('lufs')
 const volumeCurve = ref(3.0)
 const recordFreq = ref(true)
 const metadataConcurrency = ref(8)
+const metadataCommentCount = ref(10)
 const maxHistoryLength = ref(10)
 const contextMode = ref<'discard' | 'compact'>('discard')
 const autoTitle = ref(false)
@@ -123,6 +124,7 @@ onMounted(async () => {
   volumeCurve.value = (prefs.volume_curve as number) ?? 3.0
   recordFreq.value = (prefs.record_freq as boolean) ?? true
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
+  metadataCommentCount.value = (prefs.metadata_comment_count as number) ?? 10
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
   contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
   autoTitle.value = (prefs.auto_title as boolean) ?? false
@@ -294,6 +296,7 @@ watch(adjMethod, (v) => update('preferences.sound_adjust_method', v))
 watch(volumeCurve, (v) => update('preferences.volume_curve', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
+watch(metadataCommentCount, (v) => update('preferences.metadata_comment_count', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
 watch(autoTitle, (v) => update('preferences.auto_title', v))
@@ -1035,6 +1038,25 @@ function resetDj(): void {
               type="number"
               min="1"
               max="16"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="metadataCommentCount"
+              :label="t('aidj.settings.metadata_comment_count', '乐评抓取数量')"
+              type="number"
+              min="0"
+              max="50"
+              :hint="
+                t(
+                  'aidj.settings.metadata_comment_hint',
+                  '每条歌曲抓取的网易热评数，供 AI 参考撰写 review；0 = 关闭'
+                )
+              "
+              persistent-hint
               hide-details
               density="compact"
               variant="outlined"

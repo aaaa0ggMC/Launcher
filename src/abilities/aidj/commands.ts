@@ -14,6 +14,7 @@ import {
   syncMetadata,
   setNcmBaseUrl,
   setNcmMode,
+  setNcmCommentCount,
   getPlaylistsDir,
   DBusManager,
   DJSession,
@@ -389,6 +390,7 @@ async function ensureInit(): Promise<{
 
   setNcmBaseUrl(config.ncm_base_url)
   setNcmMode(config.preferences?.ncm_mode)
+  setNcmCommentCount(config.preferences?.metadata_comment_count)
 
   let client = _client
   if (!client) {

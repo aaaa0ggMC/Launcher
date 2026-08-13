@@ -365,5 +365,7 @@
   "aidj.settings.ncm_mode_hint": "auto：外部服务优先，不可达时用内置；内置为进程内直连网易",
   "aidj.settings.ncm_mode_auto": "Auto（外部优先，内置兜底）",
   "aidj.settings.ncm_mode_external": "外部服务（仅 NCM API 地址）",
-  "aidj.settings.ncm_mode_builtin": "内置（进程内直连网易）"
+  "aidj.settings.ncm_mode_builtin": "内置（进程内直连网易）",
+  "aidj.settings.metadata_comment_count": "乐评抓取数量",
+  "aidj.settings.metadata_comment_hint": "每条歌曲抓取的网易热评数，供 AI 参考撰写 review；0 = 关闭"
 }

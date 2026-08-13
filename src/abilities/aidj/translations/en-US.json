@@ -365,5 +365,7 @@
   "aidj.settings.ncm_mode_hint": "auto: external service first, built-in fallback; built-in connects to Netease in-process",
   "aidj.settings.ncm_mode_auto": "Auto (external first, built-in fallback)",
   "aidj.settings.ncm_mode_external": "External service (NCM API URL only)",
-  "aidj.settings.ncm_mode_builtin": "Built-in (in-process, direct to Netease)"
+  "aidj.settings.ncm_mode_builtin": "Built-in (in-process, direct to Netease)",
+  "aidj.settings.metadata_comment_count": "Comment count",
+  "aidj.settings.metadata_comment_hint": "Hot comments fetched per song to ground the AI review; 0 = off"
 }

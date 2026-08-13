@@ -24,6 +24,8 @@ export interface AidjConfig {
     sound_adjust_method: 'lufs' | 'linear'
     volume_curve: number
     metadata_concurrency: number
+    /** Number of NCM hot comments fetched per song to ground the AI review (0 = off). */
+    metadata_comment_count?: number
     /** Context management mode: discard drops oldest messages, compact summarizes them. */
     context_mode: 'discard' | 'compact'
     /** Auto-generate the session title via AI after the first AI output (else: use the first user input). */
@@ -82,6 +84,7 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     sound_adjust_method: 'lufs',
     volume_curve: 3.0,
     metadata_concurrency: 8,
+    metadata_comment_count: 10,
     context_mode: 'discard',
     max_history_length: 10,
     reconnect_minutes: 0,
