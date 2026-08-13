@@ -248,7 +248,7 @@ onBeforeUnmount(() => {
       <v-icon v-else size="16" class="flex-shrink-0">mdi-music</v-icon>
 
       <div class="d-flex flex-column flex-grow-1 min-w-0 song-name-wrap">
-        <span class="text-body-2 song-name text-truncate">{{ song.name }}</span>
+        <span class="text-body-2 song-name text-truncate" :title="song.name">{{ song.name }}</span>
       </div>
 
       <v-icon size="14" class="drag-handle text-medium-emphasis flex-shrink-0"> mdi-drag </v-icon>

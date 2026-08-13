@@ -364,7 +364,7 @@ const hasTrack = computed(() => track.value !== '')
                   :icon="i === queueIndex ? 'mdi-play-circle' : 'mdi-music-note'"
                   :color="i === queueIndex ? 'primary' : undefined"
                 />
-                <span class="text-body-2 text-truncate">{{ name }}</span>
+                <span class="text-body-2 text-truncate" :title="name">{{ name }}</span>
               </div>
             </div>
           </template>
@@ -381,7 +381,7 @@ const hasTrack = computed(() => track.value !== '')
         </div>
       </div>
 
-      <div class="track-title text-h6 font-weight-medium text-truncate mb-2">
+      <div class="track-title text-h6 font-weight-medium text-truncate mb-2" :title="track">
         {{ hasTrack ? track : t('aidj.player.empty', '—') }}
       </div>
       <v-chip

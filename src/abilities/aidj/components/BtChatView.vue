@@ -361,7 +361,7 @@ watch(
                     {{ si + 1 }}
                   </span>
                   <v-icon size="16">mdi-music</v-icon>
-                  <span class="text-body-2 text-truncate">{{ song.name }}</span>
+                  <span class="text-body-2 text-truncate" :title="song.name">{{ song.name }}</span>
                 </div>
               </div>
             </v-card>

@@ -299,14 +299,18 @@ onUnmounted(() => {
           <span class="text-caption text-medium-emphasis flex-shrink-0">{{
             t('aidj.continuous.now_playing', '正在播放')
           }}</span>
-          <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.current || '—' }}</span>
+          <span class="text-body-2 text-truncate cv-ellipsis" :title="info?.current || ''">{{
+            info?.current || '—'
+          }}</span>
         </span>
         <span class="d-flex align-center ga-1">
           <v-icon size="14" color="info">mdi-skip-next</v-icon>
           <span class="text-caption text-medium-emphasis flex-shrink-0">{{
             t('aidj.continuous.next', '下一首')
           }}</span>
-          <span class="text-body-2 text-truncate cv-ellipsis">{{ info?.next || '—' }}</span>
+          <span class="text-body-2 text-truncate cv-ellipsis" :title="info?.next || ''">{{
+            info?.next || '—'
+          }}</span>
         </span>
         <v-spacer />
         <span class="d-flex align-center ga-1">
