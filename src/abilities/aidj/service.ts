@@ -596,7 +596,8 @@ export function resolveLyricForTrack(track: string, lyrics: Map<string, string>)
 export function resolveLyricForTrackPath(
   path: string | null,
   track: string,
-  lyrics: Map<string, string>
+  lyrics: Map<string, string>,
+  opts?: { fuzzy?: boolean }
 ): string | null {
   if (path) {
     const name = basename(path)
@@ -608,6 +609,10 @@ export function resolveLyricForTrackPath(
     if (titleOnly && titleOnly !== name && lyrics.has(titleOnly))
       return lyrics.get(titleOnly) ?? null
   }
+  // Karaoke is resolved WITHOUT the fuzzy fallback — an inexact title match can
+  // pull in a DIFFERENT song's karaoke (worse than no karaoke); path / exact
+  // title matches above are the safe ones.
+  if (opts?.fuzzy === false) return null
   return resolveLyricForTrack(track, lyrics)
 }
 
@@ -2438,7 +2443,8 @@ export async function getLyricPlayback(): Promise<LyricPlaybackState> {
     const lib = await loadLibrary()
     const path = resolveTrackPath(detail, lib.musicPaths)
     const lyric = resolveLyricForTrackPath(path, detail.track, lib.lyrics)
-    const karaokeLyric = resolveLyricForTrackPath(path, detail.track, lib.karaoke) ?? null
+    const karaokeLyric =
+      resolveLyricForTrackPath(path, detail.track, lib.karaoke, { fuzzy: false }) ?? null
     return {
       ok: true,
       status: detail.status,

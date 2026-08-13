@@ -91,7 +91,8 @@ export interface PlayerBackend {
   control(command: PlayerControlCommand): Promise<boolean>
   /** absolute seek to a position in ms (MPRIS Seek is relative — computed here) */
   seek(positionMs: number): Promise<boolean>
-  sendFiles(paths: string[]): Promise<boolean>
+  /** `append` (web only): push onto the existing queue instead of replacing it. */
+  sendFiles(paths: string[], opts?: { append?: boolean }): Promise<boolean>
   getVolume(): Promise<number | null>
   setVolume(vol: number): Promise<boolean>
 }
@@ -130,7 +131,8 @@ export class DBusBackend implements PlayerBackend {
     return this.mgr.seekTo(positionMs)
   }
 
-  sendFiles(paths: string[]): Promise<boolean> {
+  sendFiles(paths: string[], _opts?: { append?: boolean }): Promise<boolean> {
+    void _opts // dbus MPRIS replaces its playlist; append is web-only
     return this.mgr.sendFiles(paths)
   }
 
@@ -338,7 +340,7 @@ export class WebPlayerBackend implements PlayerBackend {
     getBroadcast()('cockpit:aidj-webplayer', payload)
   }
 
-  async sendFiles(paths: string[]): Promise<boolean> {
+  async sendFiles(paths: string[], opts?: { append?: boolean }): Promise<boolean> {
     if (!paths.length) return false
     // Resolve library names for the queue (the engine advances by itself);
     // fall back to the file basename when the path isn't in the library.
@@ -352,8 +354,11 @@ export class WebPlayerBackend implements PlayerBackend {
       path: p,
       url: audioUrl(p)
     }))
-    this.emit({ type: 'playlist', songs })
-    log.info('WebPlayerBackend.sendFiles', { count: songs.length })
+    this.emit({ type: opts?.append ? 'enqueue' : 'playlist', songs })
+    log.info('WebPlayerBackend.sendFiles', {
+      count: songs.length,
+      append: opts?.append === true
+    })
     return true
   }
 

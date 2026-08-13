@@ -960,16 +960,17 @@ async function stopSending(): Promise<void> {
 
 async function handlePlayAll(songs: { name: string; path: string }[]): Promise<void> {
   if (!songs.length) return
+  let webMode = false
   try {
     const statusRes = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
     const status = statusRes?.status as { player?: string } | undefined
-    const mode = statusRes?.mode as string | undefined
+    webMode = statusRes?.mode === 'web'
     const resolved = status?.player || ''
     const player = resolved || (selectedPlayer.value !== '__auto__' ? selectedPlayer.value : '')
 
     // MPRIS-only occupancy check — the built-in web player owns its queue, and
     // the dbus-gated query would just log "unknown command" in web mode.
-    if (mode !== 'web') {
+    if (!webMode) {
       const list = (await window.cockpit.command('aidj.continuous-list')) as Record<string, unknown>
       const tasks = (list?.tasks ?? []) as { player: string }[]
       const occupied = player ? tasks.some((t) => t.player === player) : false
@@ -983,12 +984,14 @@ async function handlePlayAll(songs: { name: string; path: string }[]): Promise<v
   } catch {
     /* fall through to direct send */
   }
-  doPlayAll(songs)
+  doPlayAll(songs, webMode)
 }
 
-function doPlayAll(songs: { name: string; path: string }[]): void {
+function doPlayAll(songs: { name: string; path: string }[], append = false): void {
   const paths = songs.map((s) => s.path)
-  window.cockpit.command('aidj.send', { path: paths })
+  // Web: PUSH onto the existing queue instead of replacing it — the current
+  // track keeps playing and the batch joins the tail (dbus ignores append).
+  window.cockpit.command('aidj.send', { path: paths, append })
   pollStatus()
 }
 

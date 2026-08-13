@@ -199,7 +199,8 @@ async function getWebLyricPlayback(): Promise<LyricPlaybackState> {
     lengthMs: detail.lengthMs,
     path,
     lyric: resolveLyricForTrackPath(path, detail.track, lib.lyrics),
-    karaokeLyric: resolveLyricForTrackPath(path, detail.track, lib.karaoke) ?? null
+    karaokeLyric:
+      resolveLyricForTrackPath(path, detail.track, lib.karaoke, { fuzzy: false }) ?? null
   }
 }
 
@@ -960,14 +961,15 @@ const commands: CommandSpec[] = [
   {
     name: 'aidj.send',
     description: '发送歌单到播放器',
-    usage: 'aidj.send [--path <filepath>]...',
+    usage: 'aidj.send [--path <filepath>]... [--append <true|false>]',
     run: async (ctx) => {
       const backend = await getActiveBackend()
       if (!backend) return { ok: false, error: 'DBus 未连接' }
       const paths = ctx.named.path as string[] | string | undefined
       const pathArray = Array.isArray(paths) ? paths : paths ? [paths] : []
       if (pathArray.length === 0) return { ok: false, error: '未指定文件路径' }
-      await backend.sendFiles(pathArray)
+      const append = String(ctx.named.append ?? '') === 'true'
+      await backend.sendFiles(pathArray, { append })
       // record_freq — immediate mode bumps every sent track.
       if (!_config) _config = await loadAidjConfig()
       if (_config?.preferences.record_freq) {

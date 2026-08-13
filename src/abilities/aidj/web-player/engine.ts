@@ -26,6 +26,7 @@ export interface WebPlayerSong {
 
 type EngineCommand =
   | { type: 'playlist'; songs: WebPlayerSong[] }
+  | { type: 'enqueue'; songs: WebPlayerSong[] }
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'toggle' }
@@ -104,6 +105,9 @@ class WebPlayerEngine {
       case 'playlist':
         this.playList(cmd.songs ?? [])
         break
+      case 'enqueue':
+        this.enqueue(cmd.songs ?? [])
+        break
       case 'play':
         this.resume()
         break
@@ -144,6 +148,20 @@ class WebPlayerEngine {
     this.index = 0
     this.loadTrack()
     this.resume()
+  }
+
+  /** Append songs to the END of the queue — the current track keeps playing.
+   *  Starts playback when nothing is loaded yet. */
+  private enqueue(songs: WebPlayerSong[]): void {
+    if (!songs.length) return
+    const playing = this.index >= 0 && this.queue.length > 0
+    this.queue.push(...songs)
+    if (!playing) {
+      this.index = Math.max(0, this.index)
+      this.loadTrack()
+      this.resume()
+    }
+    this.report()
   }
 
   private loadTrack(): void {
