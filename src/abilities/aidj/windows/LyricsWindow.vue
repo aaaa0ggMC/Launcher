@@ -326,20 +326,32 @@ function fitWindowToContent(): void {
 // change (windowLines) autoFitWidth may legitimately grow the window — the
 // old "size !== base → restore" logic fired then too, shrinking then growing
 // the window every lyric line (the vertical/horizontal "jumping").
+//
+// Width policy is GROW-ONLY: the window never shrinks back to the current
+// line — it only ever grows to fit the longest line seen (fitCeilingW), and
+// stays perfectly centered. The transparent surround is invisible, so a wide
+// window during a short line is fine (and sidesteps every platform's resize
+// quirks). Exceptions: Wayland LOCKED shrinks to the card because Wayland has
+// no input passthrough — a wide locked window would block a wide input strip.
 let wasLocked = false
 watch([locked, windowLines, cardEmpty], () => {
   const nowLocked = locked.value
   void nextTick().then(() => {
     if (nowLocked) {
-      fitWindowToContent()
+      if (window.cockpit.wayland) {
+        fitWindowToContent()
+      } else {
+        autoFitWidth() // passthrough works — grow-only + centered
+      }
       wasLocked = true
       lastFitW = 0
       return
     }
     if (wasLocked) {
-      // just unlocked → restore the configured base size + anchor position
+      // just unlocked → reset the grow-only ceiling + restore base size
       wasLocked = false
       lastFitW = 0
+      fitCeilingW.value = baseWinW.value
       void window.cockpit.autoFitWindow(
         baseWinW.value,
         baseWinH.value,
@@ -351,6 +363,11 @@ watch([locked, windowLines, cardEmpty], () => {
     autoFitWidth()
   })
 })
+
+// Session-wide grow-only width ceiling: the maximum width the window reached
+// for the longest line; shorter lines keep it (transparent surround is fine),
+// so auto-fit never oscillates and never needs to shrink.
+const fitCeilingW = ref(baseWinW.value)
 
 // Last width auto-fit resized to. On Wayland `setSize` is async, so
 // `window.innerWidth` lags — without this guard autoFitWidth re-resized and
@@ -364,6 +381,7 @@ function autoFitWidth(): void {
     if (c.auto_width === false) {
       if (lastFitW !== baseWinW.value) {
         lastFitW = baseWinW.value
+        fitCeilingW.value = baseWinW.value
         void window.cockpit.autoFitWindow(baseWinW.value, window.innerHeight, c.anchor, c.margin)
       }
       return
@@ -372,17 +390,19 @@ function autoFitWidth(): void {
     const maxW = Math.round(window.screen.availWidth * 0.9)
     const rect = card.getBoundingClientRect()
     const needed = Math.min(maxW, Math.max(baseWinW.value, Math.ceil(rect.width) + pad))
+    const target = Math.max(fitCeilingW.value, needed) // grow-only
     if (window.cockpit.windowDebug) {
       console.warn(
         `[win-debug] autoFitWidth card=${JSON.stringify({ w: rect.width, h: rect.height })} ` +
           `innerW=${window.innerWidth} innerH=${window.innerHeight} screenX=${window.screenX} ` +
           `screenW=${window.screen.width} availW=${window.screen.availWidth} needed=${needed} ` +
-          `lastFitW=${lastFitW}`
+          `ceiling=${fitCeilingW.value} target=${target} lastFitW=${lastFitW}`
       )
     }
-    if (needed !== lastFitW || force) {
-      lastFitW = needed
-      void window.cockpit.autoFitWindow(needed, window.innerHeight, c.anchor, c.margin)
+    if (target !== lastFitW || force) {
+      lastFitW = target
+      fitCeilingW.value = target
+      void window.cockpit.autoFitWindow(target, window.innerHeight, c.anchor, c.margin)
     }
   }
   doFit(false)
@@ -419,6 +439,7 @@ onMounted(async () => {
   setTimeout(applyAnchorPlacement, 500)
   baseWinW.value = lyricsCfg.value.width ?? window.innerWidth
   baseWinH.value = window.innerHeight
+  fitCeilingW.value = baseWinW.value
   void nextTick().then(autoFitWidth)
   // lock_on_open: make the window untouchable right away (unlock via BT panel).
   if (lyricsCfg.value.lock_on_open === true) {

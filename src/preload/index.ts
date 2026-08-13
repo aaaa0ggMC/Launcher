@@ -24,6 +24,9 @@ const cockpit = {
   setConfig: (patch: CommandArgs): Promise<Record<string, unknown>> =>
     cockpit.command('config.set', { patch }) as Promise<Record<string, unknown>>,
   platform: process.platform,
+  /** Wayland session (no input passthrough → locked lyrics window shrinks to
+   *  the card so it doesn't block a wide strip; other platforms grow-only). */
+  wayland: process.platform === 'linux' && !!process.env.WAYLAND_DISPLAY,
   /** Window-geometry debug heartbeat (COCKPIT_WINDOW_DEBUG=1) — lyrics-window drift diagnosis. */
   windowDebug: process.env.COCKPIT_WINDOW_DEBUG === '1',
 

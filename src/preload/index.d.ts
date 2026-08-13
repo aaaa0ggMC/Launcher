@@ -24,6 +24,7 @@ export interface CockpitApi {
   getConfig: () => Promise<Record<string, unknown> | null>
   setConfig: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>
   platform: string
+  wayland: boolean
   windowDebug: boolean
   listApps: () => Promise<AppsListResult>
   getEntry: (root: string, id: string) => Promise<AppEntry | null>
