@@ -76,10 +76,12 @@ KWin 脚本移动窗口后，Electron 的 `win.getBounds()` / `getPosition()` **
 - 禁用硬件加速后，透明窗口走 `x11_software_bitmap_presenter` 又无法呈现（`XGetWindowAttributes failed`）。
 - **XWayland 彻底放弃**。
 
+> 补充（08-14）：虽然默认路线是 Wayland，`src/main/process/windows.ts` 仍保留「强制 X11 会话下跳过 KWin scripting」的分支（`--ozone-platform=x11` 处理代码），以防未来有人在真实 X11 会话里运行——真 X11 下定位/穿透/置顶全部原生可用，不需要 KWin 脚本。
+
 ## 现状（可用的部分）
 
 - **定位/居中**：主进程用目标宽高算绝对中心 → KWin 整对象赋值搬窗 → 可用。
-- **锁定**：内部不响应 + 缩窗；穿透在 Wayland 不可用（README「已知局限」有表）。
+- **锁定**：内部不响应 + 缩窗；穿透在 Wayland 不可用（[AIDJ README「已知局限」表](../abilities/aidj/README.md)有完整能力对照）。
 - **置顶**：KDE 手动（应用无法强制）。
 - X11 / Windows / macOS：全部能力正常（穿透/置顶/定位）。
 

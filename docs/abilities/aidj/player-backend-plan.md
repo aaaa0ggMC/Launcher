@@ -1,6 +1,6 @@
 # aidj 播放后端抽象与内置播放器（aidj-player）设计稿
 
-> 状态：**方案讨论稿，未实现**。记录 aidj 引入「内置网页播放器」后端的动机、架构决策、平台策略、切换语义与已知坑，供实现时对照。
+> 状态：**已实现（M1–M4 全部落地，2026-08-14）**。本文保留设计动机、架构决策与已知坑，供后续维护与扩展对照；实现细节以代码为准（`player-backend.ts` / `web-player/engine.ts` / `web-remote.ts`）。
 > 原则：`保持命令接口不变即可改写适配`（AGENTS.md「平台适配」）。
 
 ## 1. 动机
@@ -131,11 +131,18 @@ DBus 模式渗透进 UI 的现状点：
 
 ## 7. 里程碑
 
-1. **M1**：`PlayerBackend` 接口 + `aidj.player-mode` 命令 + 后端热切换流程（含 BT 标记清理）。Linux 默认仍 DBus，Web 后端可切。
-2. **M2**：`WebPlayerBackend`（HTML5 audio 封装 + AudioContext 管线 + 状态填充）+ `navigator.mediaSession` 媒体键桥接（三平台一次到位）+ 顶栏播放器条组件 v-if 分叉 + `aidj.send` 双语义。
-3. **M3**：桌面歌词窗口绑定重指向内置播放器；封面本地读取（ID3 / 同目录）；`meta.ts` 移除 `platforms: ['linux']`，aidj 全平台可用。
-4. **M4**（可选）：crossfade + 情绪感知过渡；频谱联动 ft；EQ / 响度归一；倍速 / AB 循环 / 睡眠定时；自建局域网 Web 遥控端点；ffmpeg 转码。
+1. **M1**：`PlayerBackend` 接口 + `aidj.player-mode` 命令 + 后端热切换流程（含 BT 标记清理）。Linux 默认仍 DBus，Web 后端可切。✅
+2. **M2**：`WebPlayerBackend`（HTML5 audio 封装 + AudioContext 管线 + 状态填充）+ `navigator.mediaSession` 媒体键桥接 + 顶栏播放器条组件 v-if 分叉 + `aidj.send` 双语义。✅
+3. **M3**：桌面歌词窗口绑定重指向内置播放器；封面本地读取（同目录优先）；`meta.ts` 移除 `platforms: ['linux']`，aidj 全平台可用。✅
+4. **M4**：crossfade（情绪感知，自动切歌）+ EQ（**10 段图形式曲线库 `eq.jsonl`**，用户可编辑、可调范围）+ 倍速（≤16x 出声 / **>16x 静音快进**）+ AB 循环 + 睡眠定时 + 实时频谱 + 自建局域网 Web 遥控端点（`web-remote.ts`）。✅
 5. **M5**（远期）：若 Linux 的 mediaSession→MPRIS 桥接质量差，回退自建只读 MPRIS server。
+
+> 落地偏差（与初稿对照）：
+> - crossfade 采用**单元素淡出→切→淡入**（非双元素重叠交叉），且**只对自动切歌（ended）生效**，手动 next/prev 即时切换不等待淡入淡出。
+> - EQ 从「5~10 段预设」演进为**10 段 ISO 频点（31–16k）+ 用户可编辑曲线库**（`aidj/eq.jsonl`，每行一个 profile），编辑器为拖拽式平滑曲线 + 整体偏移；增益范围 `preferences.eq_gain_range`（默认 ±20，12–60 可调）。
+> - 倍速突破 Chromium 原生上限 16x：>16x 用「逐帧 seek 静音快进」，到曲尾自动切下一首。
+> - 局域网遥控跑成后台任务（`aidj.web-remote`），端口 `preferences.web_remote_port`（默认 17320，0 禁用）。
+> - 封面本地读取：同目录 `cover.jpg/folder.jpg` 等优先，未命中才走 ffmpeg/ffprobe 嵌入提取。
 
 ## 8. 明确不做（本期范围外）
 

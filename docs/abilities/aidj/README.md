@@ -2,12 +2,13 @@
 
 **AI DJ** 是一个接入 OpenAI 兼容 API 的「AI 音乐电台」：它能理解你的点歌/氛围需求，从你的本地曲库中生成连贯歌单，通过 MPRIS 控制播放器自动播放，并顺带完成曲库元数据同步、响度平衡与桌面歌词展示。
 
-本能力在侧栏注册了两个页面：
+本能力在侧栏注册了三个页面：
 
 - **AI DJ**（`aidj`）—— 对话生成歌单 + 播放控制 + 会话/频率管理的主页面；
-- **歌词**（`aidj-lyrics`）—— 跟随播放的整页歌词展示（卡拉 OK 逐字高亮 / 滚动跟随）。
+- **歌词**（`aidj-lyrics`）—— 跟随播放的整页歌词展示（卡拉 OK 逐字高亮 / 滚动跟随）；
+- **播放器**（`aidj-player`）—— **内置播放器**页面（web 模式下显示，dbus 模式自动隐藏，见 §1.1 播放后端）。
 
-外加一个独立于应用窗口的**桌面歌词浮窗**（绑定在 `src/abilities/aidj/windows/` 的 LyricsWindow）。本文档面向最终用户，覆盖以上全部三个部分。
+外加一个独立于应用窗口的**桌面歌词浮窗**（绑定在 `src/abilities/aidj/windows/` 的 LyricsWindow）。本文档面向最终用户，覆盖以上全部四个部分。
 
 ---
 
@@ -19,14 +20,29 @@ AIDJ 依赖下面几个外部组件。**缺失时只是对应功能不可用，�
 | --- | --- | --- |
 | **OpenAI 兼容 API 端点 + API 密钥** | 歌单生成（`aidj.generate`）、持续对话、元数据 AI 提取、会话标题生成 | 对话、`/pr`、持续模式全部不可用；`/random`、`/explore`、`/ftop`、`/filter` 等纯本地命令仍可用 |
 | **NeteaseCloudMusicApi 服务**（`ncm_base_url`） | 按歌名搜索歌曲 → 拉取 LRC 歌词与 YRC 卡拉 OK 数据，供元数据提取与歌词展示 | 元数据同步会以「网络错误」失败（看不到歌词就没有可提取的元数据）；已有本地 `.lrc` / `.yrc` 文件时歌词展示不受影响 |
-| **MPRIS 兼容播放器**（vlc / mpv 等）+ 会话 DBus | 播放控制（上/下一首、播放/暂停、音量）、发送歌单、持续/连续播放、歌词页与桌面歌词的数据来源 | 播放控制、持久轮播、歌词页/桌面歌词不可用；歌单仍能正常生成 |
+| **MPRIS 兼容播放器**（vlc / mpv 等）+ 会话 DBus | **dbus 模式**下的播放控制（上/下一首、播放/暂停、音量）、发送歌单、持续/连续播放、歌词页与桌面歌词的数据来源 | dbus 模式下播放控制/持久轮播/歌词页/桌面歌词不可用；**web 模式（内置播放器）不依赖此**，歌单仍能正常生成与播放 |
 | **ffprobe + ffmpeg** | 响度分析（动态音量平衡）、内嵌封面提取 | 响度平衡不生效（播放音量保持原样）、歌词页封面显示不出来 |
 
 另外：
 
 - 支持的音乐格式：`.mp3` / `.flac` / `.wav` / `.m4a` / `.ogg` / `.opus`（递归扫描）。
 - 歌词文件：`.lrc`（标准 LRC）与 `.yrc`（网易云逐字卡拉 OK，本地文件或经 NCM API 拉取）。
-- 本能力依赖 `background-tasks` 能力（持续模式 / 连续播放 / 元数据同步都跑在后台任务上），如果该能力被移除，本页面不会显示。
+- 本能力依赖 `background-tasks` 能力（持续模式 / 连续播放 / 元数据同步 / 局域网遥控都跑在后台任务上），如果该能力被移除，本页面不会显示。
+
+### 1.1 播放后端：dbus 与内置播放器（web）
+
+AIDJ 的播放层有两种后端，可在设置里切换（`preferences.player_mode`，或命令 `aidj.player-mode`）：
+
+| 模式 | 实现 | 适用 |
+| --- | --- | --- |
+| `dbus`（外部播放器） | 通过 MPRIS / 会话 DBus 控制 vlc / mpv 等 | 已有趁手的外部播放器；Linux 默认 |
+| `web`（内置播放器） | 渲染进程 HTML5 `<audio>` + Web Audio 图（EQ / 淡入淡出 / 频谱 / 响度） | 无外部播放器；跨平台（Windows / macOS 只能用它）；功能最全 |
+
+- **非 Linux 平台只能用 web 模式**（没有会话 DBus）。
+- 内置播放器需要渲染端能读本地文件：已通过 `cockpit-audio://` 自定义协议 + CORS 白名单打通（`Access-Control-Allow-Origin`）。
+- 切换模式：停止播放类后台任务 → 释放旧后端 → 激活新后端，无需重启。
+- **侧栏「播放器」页面只在 web 模式下显示**（dbus 模式自动隐藏，避免误导）；dbus 模式下播放入口是 AI DJ 主页面顶部的播放器条。
+- 内置播放器页面（§4.5）提供倍速、AB 循环、睡眠定时、EQ 曲线库、频谱、局域网遥控等完整能力。
 
 ---
 
@@ -172,6 +188,52 @@ AI DJ 的每次对话都会落盘为一个会话（存于 `~/.config/LinuxCockpi
 
 ---
 
+## 4.5 内置播放器页面（侧栏「播放器」，`aidj-player`）
+
+**内置播放器**是 AIDJ 在 `web` 模式下使用的 HTML5 播放层（见 §1.1），侧栏「播放器」页面只在该模式下显示。它把歌曲经 Web Audio 图路由（`MediaElementAudioSourceNode → EQ 滤波器链 → 主增益 → 频谱 → 输出`），因此 EQ / 淡入淡出 / 频谱 / 响度这些 DBus 模式做不到的能力都是原生的。
+
+### 4.5.1 页面布局
+
+```
+顶部中央下拉把手 ─ 页面菜单：播放队列 / 倍速 / 睡眠定时 / EQ / 局域网遥控 / 播放后端
+主体：封面、歌名、播放状态、进度条 + 上一首 / 播放暂停 / 下一首 / 停止
+底部：响度平衡 chip（off → LUFS → RMS）· 淡入淡出 chip · A/B 循环按钮 · 音量
+频谱条（开启时）：实时频段柱，跟随当前主题色
+```
+
+- **倍速**：预设 0.5–2.0x 按钮 + 自定义输入框。**任意正数**：≤16x 走原生变速出声；**>16x 为静音快进**（逐帧 seek 快速扫过整首，到末尾自动切下一首继续快进）。
+- **AB 循环**：底部 `A` / `B` 两个按钮，在当前进度打点，再次点击清除；两点都设好后在该区间循环（练歌 / 学歌用）。
+- **睡眠定时**：页面菜单 → 睡眠定时，选 15–120 分钟；到点自动暂停，可随时取消。
+- **EQ**：见 §4.5.2。
+- **频谱**：页面菜单开关；开启后在底部显示实时频段柱。
+- **局域网遥控**：见 §4.5.3。
+- 底部响度平衡 / 淡入淡出 chip 与 AI DJ 主页面共享配置（`preferences`）。
+
+### 4.5.2 EQ：10 段图形式均衡器（eq.jsonl）
+
+EQ 不再是写死的几个预设，而是**用户可管理的 EQ 曲线库**：
+
+- **10 段** ISO 图形式频点：`31 / 63 / 125 / 250 / 500 / 1k / 2k / 4k / 8k / 16k Hz`，每段增益 ±**范围 dB**（默认 ±20，可在设置里调 12–60）。
+- **列表式子菜单**：每项显示该曲线的**小图预览** + 名字；点整行应用，右侧 ✎ 编辑、🗑 删除（内置预设不可删，可编辑）。
+- **曲线编辑器**（✎ / 顶部 `+` 打开）：直接在平滑曲线上**拖拽控制点**调整各段增益，拖动时**实时发声预览**；底部「整体偏移」滑块一次平移全部频段（直接调整，无「应用」按钮）；取消恢复编辑前的曲线，保存才落盘并应用。
+- **存储**：`~/.config/LinuxCockpit/aidj/eq.jsonl`（每行一个 profile，`{id, name, gains, builtin?}`）；`config.json` 只记当前激活的 id（`preferences.eq_preset`）。内置 5 个（平直 / 流行 / 摇滚 / 古典 / 人声）首次启动自动生成，**设置页「重置预设」可一键还原内置曲线（用户自定义保留）**。
+- **最大范围**：设置页「EQ 最大范围 (±dB)」可调（12–60），编辑器 Y 轴、滑块与保存 clamp 全部跟随。
+
+### 4.5.3 局域网遥控（Web Remote）
+
+内置播放器自带一个局域网 HTTP 服务，让手机 / 平板 / 同网段设备的浏览器实时看歌曲、封面、进度并控制播放——跨平台的 KDE Connect 替代（Windows / macOS 同样可用）。
+
+- **启动 / 停止**：播放器页菜单 → 局域网遥控，或命令 `aidj.web-remote-start` / `aidj.web-remote-stop`；也跑成一个后台任务（`aidj.web-remote`），后台面板可停止。
+- **地址**：启动后页面显示 `http://<本机IP>:<端口>`，局域网内浏览器打开即可。
+- **端口**：设置页「局域网遥控端口」可改（默认 `17320`，0 = 禁用）。
+- 端点：`GET /`（遥控页面）、`GET /state`（播放快照）、`POST /control`（`play/pause/toggle/next/prev/stop/seek/volume/rate`）。
+
+### 4.5.4 倍速 / 淡入淡出等偏好
+
+这些偏好存在 `~/.config/LinuxCockpit/aidj/config.json` 的 `preferences.*`（见 §7.1），设置页 →「播放器」分类可改：淡入淡出开关 + 时长、EQ 曲线与最大范围、默认倍速 / 默认音量、频谱默认显示、局域网遥控端口。改动即持久化，并实时推给运行中的播放器。
+
+---
+
 ## 5. 桌面歌词浮窗（LyricsWindow）
 
 一个**透明、无边框、圆角、置顶**的独立小窗口，悬浮在桌面上显示当前播放歌曲的歌词（当前行 + 前后行），适合边做别的事边看词。
@@ -223,6 +285,32 @@ Electron 在 Wayland 上缺少窗口能力（定位/置顶/输入路由归合成
 | `aidj.select-player` | `aidj.select-player --name <player>` | 切换播放器（`__auto__` = 自动跟随） |
 | `aidj.freq` | `aidj.freq` | 播放频率列表（按次数降序） |
 | `aidj.get-cover` | `aidj.get-cover --path <文件>` | 提取歌曲内嵌封面（base64 data URL） |
+
+### 6.2b 播放后端与内置播放器（web 模式）
+
+`aidj.player-*` / `aidj.eq-*` / `aidj.web-remote-*` 系列只在 `web` 模式下可用（dbus 模式下命令不注册）。
+
+| 命令 | 用法 | 说明 |
+| --- | --- | --- |
+| `aidj.player-mode` | `aidj.player-mode [--set <dbus\|web>]` | 查询 / 切换播放后端模式 |
+| `aidj.player-state` | `aidj.player-state` | 内置播放器完整状态快照（含队列 / 倍速 / AB 循环 / 睡眠 / 淡入淡出 / EQ） |
+| `aidj.player-clear-queue` | `aidj.player-clear-queue` | 清空内置播放器队列（当前曲 + 播放历史保留，prev 仍可回退） |
+| `aidj.player-volbal` | `aidj.player-volbal [--enabled <bool>] [--method <lufs\|linear>]` | 内置播放器响度平衡（查询 / 设置，即时生效并持久化） |
+| `aidj.player-rebase` | `aidj.player-rebase --base <0-1>` | 把当前音量设为响度平衡的新基准 |
+| `aidj.player-rate` | `aidj.player-rate [--set <rate>]` | 倍速：任意正数，>16 为静音快进（见 §4.5.1）；持久化 |
+| `aidj.player-abloop` | `aidj.player-abloop [--a <sec>] [--b <sec>] [--off true]` | 设置 / 清除 AB 循环点（秒） |
+| `aidj.player-sleep` | `aidj.player-sleep --minutes <n>` | 睡眠定时（分钟，0 = 取消） |
+| `aidj.player-crossfade` | `aidj.player-crossfade [--enabled <bool>] [--seconds <n>]` | 曲间淡入淡出开关 + 时长（自动切歌时生效，手动切歌即时） |
+| `aidj.player-eq` | `aidj.player-eq [--gains "[..10 个 dB..]"]` | 查询当前 EQ 曲线 / 实时预览（不落盘） |
+| `aidj.eq-list` | `aidj.eq-list` | 列出 EQ 曲线库（内置 + 自定义）+ 激活项 + 最大范围 |
+| `aidj.eq-save` | `aidj.eq-save --name <名> --gains "[..]" [--id <id>]` | 新增 / 更新 EQ 曲线（upsert） |
+| `aidj.eq-delete` | `aidj.eq-delete --id <id>` | 删除用户 EQ 曲线（内置不可删；删激活项自动回退 flat） |
+| `aidj.eq-active` | `aidj.eq-active --id <id>` | 应用某个 EQ 曲线（持久化激活 id） |
+| `aidj.eq-range` | `aidj.eq-range [--set <12-60>]` | 查询 / 设置 EQ 最大增益范围（±dB） |
+| `aidj.eq-reset` | `aidj.eq-reset` | 重置内置 EQ 曲线为出厂值（用户自定义保留） |
+| `aidj.web-remote-status` | `aidj.web-remote-status` | 局域网遥控服务器运行状态 + 端口 |
+| `aidj.web-remote-start` | `aidj.web-remote-start` | 启动局域网遥控（后台任务 `aidj.web-remote`） |
+| `aidj.web-remote-stop` | `aidj.web-remote-stop` | 停止局域网遥控 |
 
 ### 6.3 元数据与曲库
 
@@ -312,6 +400,14 @@ Electron 在 Wayland 上缺少窗口能力（定位/置顶/输入路由归合成
 | `preferences.model` | `string` | — | 对话（歌单生成）模型 |
 | `preferences.auto_play` | `boolean` | `true` | 生成后自动播放 |
 | `preferences.dbus_target` | `string` | `vlc` | 首选 MPRIS 播放器名 |
+| `preferences.player_mode` | `'dbus' \| 'web'` | `dbus`（Linux） | 播放后端：外部 MPRIS 播放器 / 内置播放器（见 §1.1） |
+| `preferences.crossfade` | `{enabled, seconds}` | `{false, 2.5}` | 内置播放器曲间淡入淡出（自动切歌时生效） |
+| `preferences.eq_preset` | `string` | `flat` | 当前激活的 EQ 曲线 id（曲线库在 `eq.jsonl`，见 §4.5.2） |
+| `preferences.eq_gain_range` | `number` | `20` | EQ 最大增益范围 ±dB（12–60） |
+| `preferences.playback_rate` | `number` | `1.0` | 内置播放器默认倍速（任意正数，>16 静音快进） |
+| `preferences.default_volume` | `number` | `0.8` | 内置播放器初始软件音量（0–1） |
+| `preferences.spectrum_enabled` | `boolean` | `false` | 内置播放器频谱条默认显示 |
+| `preferences.web_remote_port` | `number` | `17320` | 局域网遥控端口（0 = 禁用） |
 | `preferences.record_freq` | `boolean` | `true` | 记录播放频率 |
 | `preferences.dynamic_balance_volume` | `boolean` | `true` | 动态响度平衡开关 |
 | `preferences.sound_adjust_method` | `'lufs' \| 'linear'` | `lufs` | 响度测量方法（LUFS / RMS） |
@@ -411,9 +507,22 @@ A: 存在 `aidj/frequency.csv`，AI DJ 页面菜单「歌曲频率」查看，`/
 **Q: 换台播放器会不会乱？**
 A: 每个 MPRIS 播放器独立绑定：歌词窗口按播放器各开一个；连续播放任务一个播放器只能有一个（冲突会提示）；持续会话可在运行中改目标播放器。
 
+**Q: 内置播放器没声音？**
+A: 检查播放后端是否为 `web`（`aidj.player-mode`），且「播放器」页面是否出现在侧栏（dbus 模式它不显示）。内置播放器把本地文件经 `cockpit-audio://` 协议喂给 `<audio>` 再路由进 Web Audio 图——该协议必须带 CORS 头且元素 `crossOrigin='anonymous'`（已内置，勿改）。极少数情况下 AudioContext 被挂起：恢复播放（暂停再播放）会自动唤醒。
+
+**Q: 倍速填了很大的数（如 100）没声？**
+A: 预期行为。≤16x 是真变速出声；**>16x 是静音快进**（浏览器倍速上限 16），会快速扫过整首到末尾自动切下一首。想快速跳过歌曲正文时正好用它。
+
+**Q: EQ 曲线编辑器拖了没反应 / 取消后曲线没还原？**
+A: 拖动时是**实时预览**（不落盘）；**保存**才写入 `eq.jsonl` 并应用。点「取消」会恢复到打开编辑器前的曲线。内置预设（平直/流行/摇滚/古典/人声）可编辑不可删除。
+
+**Q: 局域网遥控打不开？**
+A: 播放器页菜单 → 局域网遥控启动（需 `web` 模式），页面显示 `http://<本机IP>:<端口>`；确保手机与电脑在同一局域网，且防火墙放行该端口（默认 17320）。端口可在设置里改（0 = 禁用）。
+
 **其他已知取舍（用户可见）**
 
 - 状态栏「Tokens」等数值是会话级累计，重新载入历史会话时会归零重计。
 - `aidj.playlist` 命令是占位（返回「队列管理通过 UI 操作」），真正的队列操作在歌单卡片与连续播放任务里。
 - 会话标题长度上限 60 字，AI 生成标题上限 20 字；AI 生成的标题也可随时手动改。
 - 一次性向播放器发送多曲时走 MPRIS TrackList 入队；个别不支持 TrackList 的播放器退化为逐条 `OpenUri`（可能无法自动连续切歌，建议用「连续播放」任务代替）。
+- 内置播放器按曲目自动推进队列；手动「上一首」超过 3 秒时先回到当前曲开头（与常见播放器一致）。

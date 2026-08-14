@@ -228,7 +228,7 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 
 ---
 
-## 4. Abilities（当前 11 个 + 2 个纯后端；aidj 一文件夹注册两条目）
+## 4. Abilities（当前 11 个 + 2 个纯后端；aidj 一文件夹注册三个条目）
 
 | id                    | 介绍                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -239,7 +239,7 @@ Provider Playground（`abilities/playground/`）——模板驱动 API 请求调
 | `systemd` 服务        | 用户 systemd 服务列表 / 启动 / 停止 / 重启                                                                                                                                                                          |
 | `cli` 命令行          | CLI REPL 前端：别名启动、标签补全、`info/list` 等                                                                                                                                                                   |
 | `playground` 接口调试 | Provider Playground：模板驱动 API 请求 + 变量插值 + 响应变换（文本/图片/音频/视频/脚本/异步任务），异步任务经后台任务框架轮询；命令 `playground.export` / `playground.import` / `playground.download-url`           |
-| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi + LLM）+ MPRIS 播放控制 + ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` 等。**实际注册两个 ability**：`aidj`（聊天/持续播放页）+ `aidj-lyrics`（整页卡拉OK歌词）。播放层依赖 DBus/MPRIS，`platforms: ['linux']`，`dependencies: ['background-tasks']` |
+| `aidj` AI DJ          | AI 歌单生成（OpenAI 兼容端点）+ 本地曲库元数据同步（NeteaseCloudMusicApi 内置直连兜底 + LLM）+ **双播放后端**（dbus MPRIS / 内置 HTML5 播放器，`aidj.player-mode` 热切换）+ ffprobe 响度平衡 + 持久轮播模式；命令 `aidj.generate` / `aidj.sync` / `aidj.status` / `aidj.start-persistent` / `aidj.player-*`（倍速/AB循环/睡眠/淡入淡出/EQ 预览）/ `aidj.eq-*`（EQ 曲线库 CRUD）/ `aidj.web-remote-*`（局域网遥控）等。**实际注册三个 ability**：`aidj`（聊天/持续播放页）+ `aidj-lyrics`（整页卡拉OK歌词）+ `aidj-player`（内置播放器页，仅 web 模式显示）。内置播放器经 Web Audio 图提供 10 段图形式 EQ 曲线库（`eq.jsonl`）、倍速（>16x 静音快进）、AB 循环、睡眠定时、淡入淡出与频谱；跨平台（`platforms: []`，非 Linux 强制 web 模式）。播放层 dbus 分支依赖 DBus/MPRIS；`dependencies: ['background-tasks']` |
 | `ft` 傅里叶变换       | Canvas2D 天体/傅里叶可视化（无 GPU 依赖，规避 radeonsi 崩溃）：预设、可编辑矢量表、JSON 加载/导出、2D/3D 相机，画布配色跟随当前主题                                                                                 |
 | `logs` 日志           | 当前会话日志查看器：逐行虚拟滚动、级别过滤、滑动窗口翻页、实时尾随、忽略自身、导出                                                                                                                                  |
 | `settings` 设置       | 设置外壳：各能力通过 `settings` 注入分类/条目（主题 / 界面缩放 / 窗口 / 界面动画 / 语言 / 启动 / 关于）                                                                                                             |

@@ -11,6 +11,8 @@
 > - **Launcher 内嵌版**：PK_Result 之后又有一批大更新（`git log a360964..HEAD` 约 30 个文件、+4000 行），集中在**播放后端抽象 + 内置播放器**、**内置网易云访问（免外部服务）**、**跨平台支持**。第二章整体重写。
 >
 > 2026-08-13 16:36 补充：内嵌版又合入 9 个 patch（`git log 71d9f6a..HEAD`）——web 播放器**播放历史 + 追加队列 + trim-after-cursor**、桌面歌词卡拉OK **rAF 平滑 + 配色修复**、歌词/卡拉OK **匹配安全**、**悬浮标题**。本报告已并入。
+>
+> 2026-08-14 补充（M4 音效管线落地）：内嵌版合入 `8d43351`（内置播放器 M4：crossfade / AB loop / 倍速 / EQ / 频谱 / 局域网遥控）+ `ae86fec`（10-band 用户可编辑 EQ 曲线库，存 `eq.jsonl`）。上一版标注为「设计稿 / 未实现」的音效管线已**全部实现**，本报告已更新。
 
 ---
 
@@ -92,7 +94,14 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 - 进度条 seek 滑块（拖动本地值、松手才提交）、音量弹窗、播放/暂停/上下首
 - `navigator.mediaSession` → 系统媒体键（SMTC / Now Playing / MPRIS 映射），跨平台媒体键统一方案
 - 响度平衡在 web 端有独立实现：`player-volbal` / `player-rebase`（把当前音量设为新基准），`WebPlayerBackend` 监听引擎上报的曲目变化自动调 `audio.volume`（曲线固定 1.0 = 真线性，因 HTML5 volume 本身线性）
-- **已实现**：基础播放 + 队列 + 播放历史 + 追加/trim + 媒体键 + 音量 + seek + volbal；**计划中（M2，未实现）**：crossfade、EQ、频谱、倍速（`engine.ts` 头注释明确说明，Web Audio 管线方案见 `docs/abilities/aidj/` 设计稿）
+- **M4 音效管线（已实现，`8d43351` + `ae86fec`）**：`<audio>` 经 `MediaElementAudioSourceNode` 接入 Web Audio 图（EQ 滤波器链 → 主增益 → 频谱 analyser → 输出），因此：
+  - **EQ（10 段图形式曲线库）**：ISO 频点 31–16k Hz，存 `aidj/eq.jsonl`（每行一个 profile，内置 5 + 用户自定义，内置可编辑不可删）；播放器页曲线列表小图 + 拖拽式曲线编辑器（实时发声预览）+ 整体偏移；增益范围 ±12–60dB 可在设置调（`preferences.eq_gain_range`，默认 ±20）
+  - **倍速**：任意正数；≤16x 原生变速出声，**>16x 静音快进**（逐帧 seek 扫曲，末尾自动切下一首）
+  - **AB 循环**：底部 A/B 打点，区间循环；**睡眠定时**：到点自动暂停
+  - **crossfade（淡入淡出）**：自动切歌时淡出/淡入（情绪一致短淡、突变长淡），时长可配（`preferences.crossfade`）；手动切歌即时不等待
+  - **频谱**：实时频段柱（analyser），可开关
+  - **局域网 Web 遥控（新）**：`aidj.web-remote-start/stop/status`，内置 HTTP 服务（`GET /` 遥控页 + `/state` + `POST /control`），手机浏览器实时看歌/封面/进度并控制；端口 `preferences.web_remote_port`（默认 17320，0 禁用），跑成后台任务 `aidj.web-remote`
+  - 完整命令：`aidj.player-*`（state/rate/abloop/sleep/crossfade/eq/volbal/rebase/clear-queue）+ `aidj.eq-*`（list/save/delete/active/range/reset）+ `aidj.web-remote-*`
 - 状态回传：引擎经 `aidj.web-player-report` 上报 → `WebPlayerBackend.report()` 统一状态模型；播放器页/歌词浮窗对后端无感知
 
 ### 2.4 歌词（双端：桌面浮窗 + 歌词页 + 内置播放器）
@@ -163,6 +172,7 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 | **网络可靠** | `withNetworkRetry`、`network_retry_minutes` / `reconnect_minutes` 断线重连、推送失败每 10s 重推——独立版失败即报错 |
 | **歌词能力** | 桌面浮窗 + 歌词页 + 内置播放器三端、卡拉OK 逐字（YRC）、封面沉浸、锁定/鼠标穿透、多播放器多窗口——独立版只有终端内滚动 LRC |
 | **内置播放器（新）** | web 后端跨平台直出声音、自带队列/播放历史（prev 跨替换回退）/追加与 trim/seek/音量/媒体键、与 volbal 联动——独立版必须依赖外部 MPRIS 播放器 |
+| **M4 音效管线（新）** | **crossfade / 10 段图形式 EQ 曲线库（`eq.jsonl`，拖拽编辑）/ 倍速（≤16x 出声、>16x 静音快进）/ AB 循环 / 睡眠定时 / 实时频谱 / 局域网 Web 遥控**——独立版全无 |
 | **内置网易云（新）** | 进程内直连网易拿 LRC+YRC，`ncm_mode` 三档自动兜底——**不再强依赖外部 NeteaseCloudMusicApi 服务**（独立版仍然依赖） |
 | **跨平台（新）** | `platforms: []`，非 Linux 走内置播放器、dbus 命令自动门控不暴露——独立版 Windows 仍需改代码 |
 | **播放后端热切换（新）** | `aidj.player-mode` 运行期切 dbus/web，自动停 playback 任务、持久化、UI 即时反映 |
@@ -181,11 +191,11 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 | **命令哲学** | bash 化短别名密集（`q/?/n/b/s/sw/rev/unique/pl`…），playlist 管道式操作顺手 |
 | **dhelp 帮助浏览器** | markdown 文档 + `cmd:` 交叉引用 + AI 协作规范 |
 | **配套工具** | 网易云下载（pyncm）、双源歌词批量同步（NCM/Lyrica）、简繁转换、leak_check |
-| **音量曲线可调** | `volcurve` 1.0–3.0 用户可配；Launcher web 端固定线性（外部 MPRIS 才用曲线） |
+| **音量曲线可调** | `volcurve` 1.0–3.0 用户可配；Launcher web 端内置播放器固定线性（外部 MPRIS 才用曲线） |
 
 ### 3.4 相互缺失
-- **Launcher 没有**：小游戏、终端全屏沉浸歌词、dhelp 帮助浏览器、pyncm 下载工具、细粒度终端开关命令；**crossfade / EQ / 频谱 / 倍速** 处于设计稿阶段（M2），内置播放器暂未实现
-- **独立版没有**：GUI、会话持久化/分支/回退、自动重试与断线重连、卡拉OK/桌面浮窗歌词、内置播放器、内置网易云兜底、/filter 表达式、简繁变体、多播放器管理面板、后台任务框架、封面提取、模型 API 拉取、配置热更新
+- **Launcher 没有**：小游戏、终端全屏沉浸歌词、dhelp 帮助浏览器、pyncm 下载工具、细粒度终端开关命令
+- **独立版没有**：GUI、会话持久化/分支/回退、自动重试与断线重连、卡拉OK/桌面浮窗歌词、内置播放器（含 crossfade / EQ 曲线库 / 倍速 / AB 循环 / 睡眠定时 / 频谱 / 局域网遥控）、内置网易云兜底、/filter 表达式、简繁变体、多播放器管理面板、后台任务框架、封面提取、模型 API 拉取、配置热更新
 
 ### 3.5 技术栈对比表
 | 维度 | AIDJ 独立版 | Launcher 内嵌版 |
@@ -193,7 +203,7 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 | 语言 | Python 3.10 | TypeScript（Electron 主进程 + Vue 3） |
 | 交互形态 | TUI（rich / questionary / prompt_toolkit） | GUI（Vuetify / Material 3） |
 | 进程模型 | 单进程阻塞 + threading 等待注入 | 主进程命令 + 后台任务框架（命名作业） |
-| 播放 | MPRIS（`dbus-send` 子进程） | **双后端**：dbus-next 原生 + 内置 HTML5 `<audio>`（web） |
+| 播放 | MPRIS（`dbus-send` 子进程） | **双后端**：dbus-next 原生 + 内置 HTML5 `<audio>`（web，含 Web Audio 音效管线） |
 | 播放器依赖 | 必须外部 MPRIS 播放器 | dbus 模式同左；**web 模式零依赖直出声音** |
 | 网易云访问 | NeteaseCloudMusicApi 外部服务 | 外部服务 + **内置直连兜底**（`ncm_api`，三档模式） |
 | 响度分析 | soundfile + numpy + pyloudnorm | 同算法 TypeScript 重写（LoudnessCache，双后端复用） |
@@ -210,7 +220,8 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 两者仍是**同一个核心思想的两种产品形态**，但差距结构发生了明显变化：
 
 - 上一版报告里 Launcher 版的核心短板是「仅 Linux、依赖外部 NCM 服务、必须外部 MPRIS 播放器」——本次更新全部补齐：**内置播放器**（web 后端，跨平台直出声音）、**内置网易云**（`ncm_api` 免外部服务）、**跨平台**（`platforms: []`，dbus 命令门控）。Launcher 版在「能听歌」这件事上已经不再依赖任何外部组件。
+- **M4 音效管线已落地**：上一版标注「停留在设计稿」的 crossfade / EQ / 频谱 / 倍速，加上 AB 循环、睡眠定时、10 段图形式 EQ 曲线库（`eq.jsonl`，用户可编辑）与局域网 Web 遥控，全部实现。内置播放器从「能播」进化到「能调」。
 - **AIDJ 独立版**自 07-22 起没有新提交，仍保持「轻量 + 终端氛围 + 可玩性」的定位；小游戏、dhelp、沉浸终端、下载/歌词工具依然是它的独有优势。
-- 遗留差距：Launcher 的**内置播放器音效管线**（crossfade / EQ / 频谱 / 倍速）还停留在设计稿；独立版的**会话持久化**仍空白。
+- 遗留差距：独立版的**会话持久化**仍空白；Launcher 的等待小游戏、终端沉浸歌词、pyncm 下载等仍未做（非核心）。
 
-一句话：**要 GUI + 可靠 + 长期会话 + 跨平台免依赖选 Launcher 版；要轻量 + 终端氛围 + 小游戏可玩性选独立版。** 两边都在向对方缺的那块移动，但步伐不同。
+一句话：**要 GUI + 可靠 + 长期会话 + 跨平台免依赖 + 音效可调（EQ/倍速/淡入淡出）选 Launcher 版；要轻量 + 终端氛围 + 小游戏可玩性选独立版。** 两边都在向对方缺的那块移动，但步伐不同。

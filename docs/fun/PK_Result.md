@@ -1,5 +1,8 @@
 # AIDJ PK 对比报告
 
+> **⚠️ 已归档（2026-08-14）**：本报告已过时——Launcher 内嵌版自生成后经历「播放后端抽象 + 内置播放器 + 内置网易云 + M4 音效管线（crossfade/EQ/倍速/AB循环/睡眠/频谱/局域网遥控）」等多轮大更新，且内嵌版现注册 `aidj` / `aidj-lyrics` / `aidj-player` **三个页面**（本文仍写两个）。
+> **现行报告见 [`PK_Result2.md`](PK_Result2.md)**（2026-08-14 已更新至 M4 落地）。本文仅作历史留档。
+
 > 对比对象：
 > - **AIDJ 独立版**：`~/Projs/AIDJ`（Python TUI 命令行应用）
 > - **Launcher 内嵌版**：`~/Projs/Launcher/src/abilities/aidj`（Electron + Vue 3 桌面应用的一个 Ability，含 `aidj` 与 `aidj-lyrics` 两个页面）
