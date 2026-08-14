@@ -84,6 +84,7 @@ const webRemotePort = ref(0)
 
 // -- spectrum (renderer engine analyser → bars) --------------------------------
 const spectrumOn = ref(false)
+let prefsLoaded = false
 let rafId = 0
 const spectrumCanvas = ref<HTMLCanvasElement | null>(null)
 
@@ -480,8 +481,18 @@ async function loadPlayerPrefs(): Promise<void> {
   > | null
   if (r?.ok && r.config) {
     const prefs = (r.config as Record<string, unknown>).preferences as Record<string, unknown>
+    prefsLoaded = true
     spectrumOn.value = (prefs.spectrum_enabled as boolean) ?? false
   }
+}
+
+/** Persist the page-menu spectrum toggle so it survives page switches. */
+function persistSpectrum(on: boolean): void {
+  if (!prefsLoaded) return
+  window.cockpit
+    .command('aidj.update-config', { path: 'preferences.spectrum_enabled', value: on })
+    .then(() => window.cockpit.command('aidj.save-config'))
+    .catch(() => null)
 }
 
 async function toggleWebRemote(): Promise<void> {
@@ -628,6 +639,7 @@ function stopPolling(): void {
 watch(spectrumOn, (on) => {
   if (on) startSpectrum()
   else stopSpectrum()
+  persistSpectrum(on)
 })
 
 onMounted(() => startPolling())
