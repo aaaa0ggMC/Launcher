@@ -1,12 +1,22 @@
 <script setup lang="ts">
 defineOptions({ name: 'CockpitSettings' })
 
-import { computed, inject, ref, watch } from 'vue'
+import {
+  computed,
+  inject,
+  ref,
+  watch,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  onBeforeUnmount
+} from 'vue'
 import type { Ref } from 'vue'
 import type { SettingsCategory, SettingsItem } from '@ui/ability-registry'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields, type SearchField } from '@ui/composables/search'
+import { settingsSessionMemory } from './session-memory'
 
 /**
  * Settings page — consumes the injection list built & provided by App.vue
@@ -24,8 +34,34 @@ const injected = inject<Ref<SettingsCategory[]>>('cockpit:settings', ref([]))
 const sections = computed<SettingsCategory[]>(() => injected.value)
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
+// ---------------------------------------------------------------------------
+// Single-launch memory: module-level (see settingsSessionMemory above) so it
+// survives remounts — this page is NOT keep-alive'd, so component state would
+// reset every time you leave and come back.
+// ---------------------------------------------------------------------------
+const mem = settingsSessionMemory
+let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null
+
 const query = ref('')
-const activeCategoryId = ref<string | null>(null)
+const activeCategoryId = ref<string | null>(mem.category)
+
+function findScroller(): HTMLElement | null {
+  // The scroller is the shared `v-main scrollable` → `.v-main__scroller` in
+  // App.vue. Fall back to the window if not found.
+  const main = document.querySelector<HTMLElement>('.v-main__scroller')
+  if (main) return main
+  return document.documentElement
+}
+function saveScroll(el: HTMLElement): void {
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
+  scrollSaveTimer = setTimeout(() => {
+    mem.scroll = el.scrollTop
+  }, 200)
+}
+function restoreScroll(): void {
+  const el = findScroller()
+  if (el && mem.scroll > 0) el.scrollTop = mem.scroll
+}
 
 function isMdiIcon(icon: string): boolean {
   return icon.startsWith('mdi')
@@ -33,6 +69,10 @@ function isMdiIcon(icon: string): boolean {
 
 watch(sections, (list) => {
   if (list.length && !activeCategoryId.value) activeCategoryId.value = list[0].id
+})
+
+watch(activeCategoryId, (id) => {
+  if (id) mem.category = id
 })
 
 const trimmed = computed(() => query.value.trim())
@@ -99,6 +139,37 @@ function selectCategory(id: string): void {
   activeCategoryId.value = id
   query.value = ''
 }
+
+// -- single-launch memory lifecycle -------------------------------------------
+function captureScroll(): void {
+  const el = findScroller()
+  if (el) saveScroll(el)
+}
+// Persist the scroll offset when leaving the page (keep-alive deactivate) and
+// when the window itself is closing; restore it on return.
+function bindScroll(on: boolean): void {
+  const el = findScroller()
+  if (!el) return
+  if (on) el.addEventListener('scroll', captureScroll)
+  else el.removeEventListener('scroll', captureScroll)
+}
+onMounted(() => {
+  restoreScroll()
+  bindScroll(true)
+})
+onActivated(() => {
+  restoreScroll()
+  bindScroll(true)
+})
+onDeactivated(() => {
+  captureScroll()
+  bindScroll(false)
+})
+onBeforeUnmount(() => {
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
+  scrollSaveTimer = null
+  bindScroll(false)
+})
 
 /** Export all injected settings sections as markdown (labels + descriptions). */
 function toMarkdown(): string {

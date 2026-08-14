@@ -12,6 +12,9 @@ import {
 } from 'vue'
 import { translate, translateTemplate } from '../../main/ui/i18n'
 import { ensureWebPlayerEngine } from './web-player/engine'
+import EqCurveCanvas from './components/EqCurveCanvas.vue'
+import EqEditorDialog from './components/EqEditorDialog.vue'
+import type { EqProfile } from './types'
 
 defineOptions({ name: 'cockpit-aidj-player' })
 
@@ -62,8 +65,14 @@ const loopB = ref<number | null>(null)
 const sleepRemainMs = ref<number | null>(null)
 const crossfade = ref(false)
 const crossfadeSeconds = ref(2.5)
-const eqPreset = ref('flat')
-const eqPresetItems = ['flat', 'pop', 'rock', 'classical', 'vocal']
+/** EQ profiles (builtin + user) with the active profile id. */
+const eqProfiles = ref<EqProfile[]>([])
+const eqActiveId = ref('flat')
+const eqRange = ref(20)
+const eqEditorOpen = ref(false)
+const eqEditing = ref<EqProfile | null>(null)
+/** Active EQ id when the editor opened — restore it if the user cancels. */
+const eqEditorOrigin = ref<string | null>(null)
 const rateItems = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 const sleepItems = [15, 30, 45, 60, 90, 120]
 /** Custom speed input (any positive number; >16 = silent fast-forward). */
@@ -147,7 +156,7 @@ async function pollState(): Promise<void> {
         sleepRemainMs.value = s.sleepRemainMs as number | null
       if (typeof s.crossfade === 'boolean') crossfade.value = s.crossfade
       if (typeof s.crossfadeSeconds === 'number') crossfadeSeconds.value = s.crossfadeSeconds
-      if (typeof s.eqPreset === 'string') eqPreset.value = s.eqPreset
+      if (typeof s.eqPreset === 'string') eqActiveId.value = s.eqPreset
       const url = String(s.url ?? '')
       if (url.startsWith('file://')) {
         const path = decodeURIComponent(url.slice('file://'.length))
@@ -320,12 +329,80 @@ async function toggleCrossfade(): Promise<void> {
   }
 }
 
-async function setEQ(preset: string): Promise<void> {
-  if (preset === eqPreset.value) return
+/** Refresh the EQ profile list + active id. */
+async function loadEqProfiles(): Promise<void> {
+  const r = (await window.cockpit.command('aidj.eq-list').catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+  if (r?.ok) {
+    if (Array.isArray(r.profiles)) eqProfiles.value = r.profiles as EqProfile[]
+    if (typeof r.activeId === 'string') eqActiveId.value = r.activeId
+    if (typeof r.range === 'number') eqRange.value = r.range
+  }
+}
+
+/** Apply an EQ profile (persists active id). */
+async function applyEq(id: string): Promise<void> {
+  const r = (await window.cockpit.command('aidj.eq-active', { id }).catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+  if (r?.ok) {
+    eqActiveId.value = id
+    if (Array.isArray(r.gains) && !eqProfiles.value.some((p) => p.id === id)) {
+      eqProfiles.value.push({
+        id,
+        name: id,
+        gains: r.gains as number[],
+        builtin: true
+      })
+    }
+  }
+}
+
+/** Live preview while dragging in the editor (no persistence). */
+async function previewEq(gains: number[]): Promise<void> {
+  await window.cockpit.command('aidj.player-eq', { gains }).catch(() => {})
+}
+
+function openEqEditor(profile: EqProfile | null): void {
+  eqEditing.value = profile
+  eqEditorOrigin.value = eqActiveId.value
+  eqEditorOpen.value = true
+}
+
+watch(eqEditorOpen, (open) => {
+  if (open) return
+  // Cancel (no save happened): the live preview reshaped the engine's curve —
+  // restore the profile that was active before the editor opened. This must run
+  // even when the edited profile IS the active one (origin === active) — the
+  // preview changed the engine's gains without touching the active id.
+  const origin = eqEditorOrigin.value
+  eqEditorOrigin.value = null
+  if (origin) void applyEq(origin)
+})
+
+async function saveEqProfile(profile: {
+  id?: string
+  name: string
+  gains: number[]
+}): Promise<void> {
+  // A save already chose a profile — don't let the close-watch restore the old one.
+  eqEditorOrigin.value = null
   const r = (await window.cockpit
-    .command('aidj.player-eq', { preset })
+    .command('aidj.eq-save', { id: profile.id ?? '', name: profile.name, gains: profile.gains })
     .catch(() => null)) as Record<string, unknown> | null
-  if (r?.ok) eqPreset.value = preset
+  if (r?.ok) {
+    await loadEqProfiles()
+    const saved = r.profile as EqProfile | undefined
+    if (saved) await applyEq(saved.id)
+  }
+}
+
+async function deleteEqProfile(id: string): Promise<void> {
+  await window.cockpit.command('aidj.eq-delete', { id }).catch(() => {})
+  await loadEqProfiles()
 }
 
 async function setRate(rate: number): Promise<void> {
@@ -524,6 +601,7 @@ function startPolling(): void {
   void pollVolbal()
   void pollWebRemote()
   void loadPlayerPrefs()
+  void loadEqProfiles()
   if (spectrumOn.value) startSpectrum()
   if (window.cockpit?.on && !modeUnsub) {
     modeUnsub = window.cockpit.on('cockpit:aidj-mode', (event: unknown) => {
@@ -601,7 +679,9 @@ const hasTrack = computed(() => track.value !== '')
             <div class="menu-item" @click="menuStep = 'eq'">
               <v-icon size="18">mdi-chart-bell-curve-cumulative</v-icon>
               <span>{{ t('aidj.player.eq', '均衡器') }}</span>
-              <span class="ml-auto text-caption text-medium-emphasis">{{ eqPreset }}</span>
+              <span class="ml-auto text-caption text-medium-emphasis">
+                {{ eqProfiles.find((p) => p.id === eqActiveId)?.name ?? eqActiveId }}
+              </span>
               <v-icon size="16">mdi-chevron-right</v-icon>
             </div>
             <div class="menu-item">
@@ -799,18 +879,54 @@ const hasTrack = computed(() => track.value !== '')
                 <v-icon size="18">mdi-arrow-left</v-icon>
               </v-btn>
               <span class="text-body-2 font-weight-medium">{{ submenuTitle('eq') }}</span>
-            </div>
-            <div class="menu-grid">
+              <v-spacer />
               <v-btn
-                v-for="p in eqPresetItems"
-                :key="p"
-                variant="tonal"
-                class="menu-grid-item"
-                :color="eqPreset === p ? 'primary' : undefined"
-                @click="setEQ(p)"
+                icon
+                size="small"
+                variant="text"
+                color="primary"
+                :title="t('aidj.player.eq_new', '新建 EQ')"
+                @click="openEqEditor(null)"
               >
-                {{ t(`aidj.player.eq_${p}`, p) }}
+                <v-icon size="18">mdi-plus</v-icon>
               </v-btn>
+            </div>
+            <div class="menu-scroll">
+              <div
+                v-for="p in eqProfiles"
+                :key="p.id"
+                class="eq-item d-flex align-center ga-2"
+                :class="{ 'is-active': p.id === eqActiveId }"
+                @click="applyEq(p.id)"
+              >
+                <EqCurveCanvas :gains="p.gains" :height="30" :range="eqRange" class="eq-thumb" />
+                <span class="text-body-2 text-truncate flex-grow-1">{{
+                  p.builtin ? t(`aidj.player.eq_${p.id}`, p.name) : p.name
+                }}</span>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.player.eq_edit', '编辑')"
+                  @click.stop="openEqEditor(p)"
+                >
+                  <v-icon size="16">mdi-pencil</v-icon>
+                </v-btn>
+                <v-btn
+                  v-if="!p.builtin"
+                  icon
+                  size="small"
+                  variant="text"
+                  color="error"
+                  :title="t('aidj.player.eq_delete', '删除')"
+                  @click.stop="deleteEqProfile(p.id)"
+                >
+                  <v-icon size="16">mdi-trash-can-outline</v-icon>
+                </v-btn>
+              </div>
+              <div v-if="eqProfiles.length === 0" class="menu-empty text-body-2">
+                {{ t('aidj.player.eq_empty', '暂无 EQ，点击 + 新建') }}
+              </div>
             </div>
           </template>
 
@@ -865,6 +981,14 @@ const hasTrack = computed(() => track.value !== '')
         </div>
       </Transition>
     </div>
+
+    <EqEditorDialog
+      v-model="eqEditorOpen"
+      :profile="eqEditing"
+      :preview="previewEq"
+      :range="eqRange"
+      @save="saveEqProfile"
+    />
 
     <!-- main player body: cover/track up top, progress + controls pinned low -->
     <div class="player-body d-flex flex-column align-center flex-grow-1 min-h-0 px-8 pt-10 pb-6">
@@ -1224,6 +1348,23 @@ const hasTrack = computed(() => track.value !== '')
 }
 .menu-grid-item {
   text-transform: none;
+}
+.eq-item {
+  padding: 4px 8px;
+  border-radius: 8px;
+  margin-block: 1px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.eq-item:hover {
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+.eq-item.is-active {
+  background: rgba(var(--v-theme-primary), 0.16);
+}
+.eq-thumb {
+  flex: 0 0 84px;
+  min-width: 84px;
 }
 .flex-1-1 {
   flex: 1 1 auto;

@@ -13,8 +13,10 @@ import {
   saveAidjConfig,
   loadLibrary,
   LoudnessCache,
-  bumpFrequency
+  bumpFrequency,
+  findEqProfile
 } from './service'
+import { EQ_BAND_COUNT } from './types'
 import type { PlayerStatus } from './types'
 
 const log = makeLogger('aidj-player')
@@ -71,8 +73,10 @@ export interface PlaybackDetail {
   /** crossfade fade-in/out between tracks */
   crossfade?: boolean
   crossfadeSeconds?: number
-  /** EQ preset id (flat/pop/rock/classical/vocal) */
+  /** EQ preset id (flat/pop/rock/classical/vocal or user profile id) */
   eqPreset?: string
+  /** Current per-band EQ gains (dB), length 10. */
+  eqGains?: number[]
 }
 
 /** State the renderer web-player engine reports up (extends PlaybackDetail). */
@@ -95,6 +99,7 @@ export interface WebPlayerReport {
   crossfade?: boolean
   crossfadeSeconds?: number
   eqPreset?: string
+  eqGains?: number[]
 }
 
 /** Backend-neutral contract every playback mode implements. */
@@ -236,9 +241,17 @@ export class WebPlayerBackend implements PlayerBackend {
     this.lastDetail.volume = defaultVol
     // Push the persisted feature prefs into the renderer engine.
     this.emit({ type: 'crossfade', enabled: this.crossfadeEnabled, seconds: this.crossfadeSeconds })
-    this.emit({ type: 'eq', preset: this.eqPreset })
+    this.emit({ type: 'eq', gains: await this.eqGainsFor(this.eqPreset) })
     this.emit({ type: 'rate', rate: this.playbackRate })
     this.emit({ type: 'volume', volume: defaultVol })
+  }
+
+  /** Resolve an EQ profile id → gains (unknown id falls back to flat). */
+  private async eqGainsFor(id: string): Promise<number[]> {
+    const profile = await findEqProfile(id)
+    if (profile) return profile.gains
+    const flat = await findEqProfile('flat')
+    return flat?.gains ?? Array(EQ_BAND_COUNT).fill(0)
   }
 
   disconnect(): void {
@@ -278,12 +291,12 @@ export class WebPlayerBackend implements PlayerBackend {
       sleepRemainMs: state.sleepRemainMs,
       crossfade: state.crossfade,
       crossfadeSeconds: state.crossfadeSeconds,
-      eqPreset: state.eqPreset
+      eqPreset: this.eqPreset,
+      eqGains: state.eqGains
     }
     if (typeof state.playbackRate === 'number') this.playbackRate = state.playbackRate
     if (typeof state.crossfade === 'boolean') this.crossfadeEnabled = state.crossfade
     if (typeof state.crossfadeSeconds === 'number') this.crossfadeSeconds = state.crossfadeSeconds
-    if (typeof state.eqPreset === 'string') this.eqPreset = state.eqPreset
     if (typeof state.queueIndex === 'number') this.queueIndex = state.queueIndex
     if (typeof state.queueTotal === 'number') this.queueTotal = state.queueTotal
     // Track-change side effects: record play frequency + apply loudness balance
@@ -460,9 +473,15 @@ export class WebPlayerBackend implements PlayerBackend {
     this.emit({ type: 'crossfade', enabled, seconds: this.crossfadeSeconds })
   }
 
-  async setEQ(preset: string): Promise<void> {
-    this.eqPreset = preset
-    this.emit({ type: 'eq', preset })
+  /** Apply an EQ curve directly (per-band gains, dB). Used for live preview
+   *  while editing; the persisted profile id is set separately via `setEqPreset`. */
+  async setEQ(gains: number[]): Promise<void> {
+    this.emit({ type: 'eq', gains: gains.slice(0, EQ_BAND_COUNT) })
+  }
+
+  /** Track which profile id the current curve belongs to (for state/reporting). */
+  setEqPreset(id: string): void {
+    this.eqPreset = id
   }
 
   async setRate(rate: number): Promise<void> {

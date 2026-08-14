@@ -25,7 +25,8 @@ import type {
   RawHistoryMessage,
   SessionMeta,
   LyricPlaybackState,
-  AidjLyricsPageConfig
+  AidjLyricsPageConfig,
+  EqProfile
 } from './types'
 import {
   AIDJ_DATA_DIR,
@@ -33,6 +34,9 @@ import {
   LYRICS_FILE,
   FREQ_FILE,
   PLAYLISTS_DIR,
+  EQ_FILE,
+  EQ_BAND_COUNT,
+  EQ_GAIN_RANGE_DEFAULT,
   SEPARATOR,
   DEFAULT_PERSONA,
   DEFAULT_LYRICS_PAGE_CFG,
@@ -179,6 +183,97 @@ export function getFreqPath(): string {
 
 export function getPlaylistsDir(): string {
   return join(AIDJ_DIR, PLAYLISTS_DIR)
+}
+
+// ---------------------------------------------------------------------------
+// EQ store — eq.jsonl (one profile per line). Unlike the append-only metadata
+// store, profiles are edited/deleted wholesale, so we rewrite the whole file.
+// ---------------------------------------------------------------------------
+
+export function getEqPath(): string {
+  return join(AIDJ_DIR, EQ_FILE)
+}
+
+/** Built-in 10-band presets — materialized into eq.jsonl when it doesn't exist. */
+export const BUILTIN_EQ_PROFILES: EqProfile[] = [
+  { id: 'flat', name: 'Flat', builtin: true, gains: Array(EQ_BAND_COUNT).fill(0) },
+  { id: 'pop', name: 'Pop', builtin: true, gains: [-1, 2, 1, 2, 1, 2, 1, 1, 2, 1] },
+  { id: 'rock', name: 'Rock', builtin: true, gains: [3, 1, -1, 2, 3, 2, 0, 1, 2, 3] },
+  { id: 'classical', name: 'Classical', builtin: true, gains: [2, 0, 0, 0, 0, 0, 0, 0, 0, 2] },
+  { id: 'vocal', name: 'Vocal', builtin: true, gains: [-1, 1, 3, 2, 0, 0, 1, 2, 2, 0] }
+]
+
+/** Hard upper bound on a stored gain (guards against corrupt eq.jsonl lines).
+ *  The configured editable range (`eq_gain_range`) is applied at edit/save time,
+ *  so loading never destroys a value that was saved under a wider range. */
+const EQ_GAIN_ABS_MAX = 60
+
+/** Configured max ±dB gain range (default 20, clamped 12–60). */
+export async function getEqGainRange(): Promise<number> {
+  const config = await loadAidjConfig()
+  const n = config?.preferences.eq_gain_range
+  if (typeof n === 'number' && Number.isFinite(n)) {
+    return Math.max(12, Math.min(60, Math.round(n)))
+  }
+  return EQ_GAIN_RANGE_DEFAULT
+}
+
+/** Clamp a raw gain into the allowed dB range. */
+function clampGain(v: number): number {
+  return Math.max(-EQ_GAIN_ABS_MAX, Math.min(EQ_GAIN_ABS_MAX, v))
+}
+
+/** Sanitize a raw parsed profile (guard against hand-edited / corrupt lines). */
+function sanitizeEqProfile(raw: Record<string, unknown>): EqProfile | null {
+  if (typeof raw.id !== 'string' || typeof raw.name !== 'string') return null
+  const gains = Array.isArray(raw.gains)
+    ? raw.gains
+        .slice(0, EQ_BAND_COUNT)
+        .map((g) => (typeof g === 'number' && Number.isFinite(g) ? clampGain(g) : 0))
+    : Array(EQ_BAND_COUNT).fill(0)
+  while (gains.length < EQ_BAND_COUNT) gains.push(0)
+  return { id: raw.id, name: raw.name, gains, builtin: raw.builtin === true }
+}
+
+let _eqProfiles: EqProfile[] | null = null
+
+/** Load all EQ profiles (cached). Materializes builtins on first run. */
+export async function loadEqProfiles(): Promise<EqProfile[]> {
+  if (_eqProfiles) return _eqProfiles
+  const file = getEqPath()
+  let profiles: EqProfile[] = []
+  try {
+    const raw = await readFile(file, 'utf-8')
+    for (const line of raw.split('\n').filter(Boolean)) {
+      try {
+        const p = sanitizeEqProfile(JSON.parse(line) as Record<string, unknown>)
+        if (p) profiles.push(p)
+      } catch {
+        /* skip corrupt line */
+      }
+    }
+  } catch {
+    /* file missing → build from builtins below */
+  }
+  if (!profiles.length) {
+    profiles = BUILTIN_EQ_PROFILES.map((p) => ({ ...p, gains: [...p.gains] }))
+    await saveEqProfiles(profiles)
+  }
+  _eqProfiles = profiles
+  return profiles
+}
+
+/** Persist the full profile list to eq.jsonl (atomic rewrite). */
+export async function saveEqProfiles(profiles: EqProfile[]): Promise<void> {
+  _eqProfiles = profiles
+  const lines = profiles.map((p) => JSON.stringify(p)).join('\n')
+  await writeTextFile(getEqPath(), lines ? `${lines}\n` : '')
+}
+
+/** Find a profile by id. */
+export async function findEqProfile(id: string): Promise<EqProfile | null> {
+  const list = await loadEqProfiles()
+  return list.find((p) => p.id === id) ?? null
 }
 
 // ---------------------------------------------------------------------------

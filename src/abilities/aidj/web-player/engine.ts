@@ -43,11 +43,9 @@ type EngineCommand =
   | { type: 'abloop'; a?: number | null; b?: number | null }
   | { type: 'sleep'; minutes: number }
   | { type: 'crossfade'; enabled: boolean; seconds?: number }
-  | { type: 'eq'; preset: string }
+  | { type: 'eq'; gains: number[] }
 
 type PlayerStatus = 'Playing' | 'Paused' | 'Stopped' | 'Unknown'
-
-export type EqPreset = 'flat' | 'pop' | 'rock' | 'classical' | 'vocal'
 
 const REPORT_THROTTLE_MS = 300
 const RATE_MIN = 0.0625
@@ -69,22 +67,8 @@ function dbg(...args: unknown[]): void {
   }
 }
 
-/** Biquad EQ chain: low shelf + 3 peak + high shelf. Preset = per-band gain dB. */
-const EQ_BANDS = [
-  { type: 'lowshelf' as BiquadFilterType, frequency: 120, Q: 0.8 },
-  { type: 'peaking' as BiquadFilterType, frequency: 350, Q: 1.0 },
-  { type: 'peaking' as BiquadFilterType, frequency: 1000, Q: 1.0 },
-  { type: 'peaking' as BiquadFilterType, frequency: 3000, Q: 1.0 },
-  { type: 'highshelf' as BiquadFilterType, frequency: 8000, Q: 0.8 }
-]
-
-const EQ_PRESETS: Record<EqPreset, number[]> = {
-  flat: [0, 0, 0, 0, 0],
-  pop: [-1, 2, 1, 2, 1],
-  rock: [3, 1, -1, 2, 3],
-  classical: [2, 0, 0, 0, 2],
-  vocal: [-1, 1, 3, 2, 0]
-}
+/** Biquad EQ chain: 10 peaking filters on ISO graphic-EQ centers (31→16k). */
+const EQ_FREQS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 class WebPlayerEngine {
   private audio: HTMLAudioElement
@@ -105,7 +89,8 @@ class WebPlayerEngine {
   private masterGain: GainNode | null = null
   private analyser: AnalyserNode | null = null
   private eqFilters: BiquadFilterNode[] = []
-  private eqPreset: EqPreset = 'flat'
+  /** Current per-band gains (dB). */
+  private eqGains: number[] = Array(EQ_FREQS.length).fill(0)
 
   // -- M4 playback features --------------------------------------------------
   private playbackRate = 1.0
@@ -211,14 +196,14 @@ class WebPlayerEngine {
     analyser.fftSize = 256
     analyser.smoothingTimeConstant = 0.7
 
-    // Build the EQ chain (all filters start at 0 dB → flat by default).
+    // Build the EQ chain — 10 peaking filters (all start at 0 dB → flat).
     const filters: BiquadFilterNode[] = []
     let node: AudioNode = source
-    for (const band of EQ_BANDS) {
+    for (const freq of EQ_FREQS) {
       const f = ctx.createBiquadFilter()
-      f.type = band.type
-      f.frequency.value = band.frequency
-      f.Q.value = band.Q
+      f.type = 'peaking'
+      f.frequency.value = freq
+      f.Q.value = 1.0
       f.gain.value = 0
       node.connect(f)
       node = f
@@ -232,7 +217,7 @@ class WebPlayerEngine {
     this.masterGain = master
     this.analyser = analyser
     this.eqFilters = filters
-    this.applyEQ(this.eqPreset)
+    this.applyEQ(this.eqGains)
     dbg('graph created, ctx.state=', ctx.state)
     // A freshly created context can start suspended — kick it into 'running'
     // so first playback (which awaits the resume) isn't delayed.
@@ -244,13 +229,13 @@ class WebPlayerEngine {
     }
   }
 
-  /** Apply an EQ preset — each band's BiquadFilter gain is set in dB. */
-  private applyEQ(preset: string): void {
-    const p = (EQ_PRESETS[preset as EqPreset] ? preset : 'flat') as EqPreset
-    this.eqPreset = p
-    const gains = EQ_PRESETS[p]
+  /** Apply EQ gains (dB per band) — each band's BiquadFilter gain is set. */
+  private applyEQ(gains: number[]): void {
+    const g = gains.slice(0, EQ_FREQS.length)
+    while (g.length < EQ_FREQS.length) g.push(0)
+    this.eqGains = g
     this.eqFilters.forEach((f, i) => {
-      f.gain.setTargetAtTime(gains[i], this.ctx?.currentTime ?? 0, 0.02)
+      f.gain.setTargetAtTime(g[i] ?? 0, this.ctx?.currentTime ?? 0, 0.02)
     })
   }
 
@@ -397,7 +382,7 @@ class WebPlayerEngine {
         this.setCrossfade(cmd.enabled, cmd.seconds)
         break
       case 'eq':
-        this.applyEQ(cmd.preset)
+        this.applyEQ(cmd.gains)
         this.report()
         break
     }
@@ -682,7 +667,7 @@ class WebPlayerEngine {
     sleepRemainMs: number | null
     crossfade: boolean
     crossfadeSeconds: number
-    eqPreset: string
+    eqGains: number[]
     /** Debug diagnostics — AudioContext state + master gain (silence hunter). */
     ctxState?: string
     masterGain?: number
@@ -704,7 +689,7 @@ class WebPlayerEngine {
       sleepRemainMs: this.sleepUntil ? Math.max(0, this.sleepUntil - Date.now()) : null,
       crossfade: this.crossfadeEnabled,
       crossfadeSeconds: this.crossfadeSeconds,
-      eqPreset: this.eqPreset,
+      eqGains: this.eqGains,
       ctxState: this.ctx?.state,
       masterGain: this.masterGain?.gain.value
     }

@@ -62,8 +62,10 @@ export interface AidjConfig {
     lyrics?: Partial<LyricsDisplayConfig>
     /** Built-in player (M4): crossfade between tracks (fade out/in). */
     crossfade?: { enabled: boolean; seconds: number }
-    /** Built-in player EQ preset id. */
-    eq_preset?: 'flat' | 'pop' | 'rock' | 'classical' | 'vocal'
+    /** Built-in player EQ preset id (builtin or user profile id from eq.jsonl). */
+    eq_preset?: string
+    /** Max ±dB gain range for the EQ editor (default 20, clamped 12–60). */
+    eq_gain_range?: number
     /** Built-in player playback rate (0.5–2.0). */
     playback_rate?: number
     /** Built-in player initial software volume (0–1). */
@@ -74,6 +76,12 @@ export interface AidjConfig {
     web_remote_port?: number
   }
 }
+
+/** ISO 10-band graphic-EQ center frequencies (Hz). */
+export const EQ_FREQS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const
+export const EQ_BAND_COUNT = EQ_FREQS.length
+/** Default EQ gain range (±dB) — user-configurable via `preferences.eq_gain_range`. */
+export const EQ_GAIN_RANGE_DEFAULT = 20
 
 /**
  * Full default AIDJ config — materialized on first run when
@@ -119,6 +127,7 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     },
     crossfade: { enabled: false, seconds: 2.5 },
     eq_preset: 'flat',
+    eq_gain_range: EQ_GAIN_RANGE_DEFAULT,
     playback_rate: 1.0,
     default_volume: 0.8,
     spectrum_enabled: false,
@@ -400,6 +409,21 @@ export const METADATA_FILE = 'music_metadata.jsonl'
 export const LYRICS_FILE = 'music_lyrics.jsonl'
 export const FREQ_FILE = 'frequency.csv'
 export const PLAYLISTS_DIR = 'playlists'
+export const EQ_FILE = 'eq.jsonl'
+
+/**
+ * User-editable EQ profile — a 10-band graphic equalizer curve. Persisted in
+ * `eq.jsonl` (one JSON object per line), NOT in config.json (the config only
+ * keeps the active profile id in `preferences.eq_preset`).
+ */
+export interface EqProfile {
+  id: string
+  name: string
+  /** Per-band gain in dB, length 10, values clamped to [EQ_GAIN_MIN, EQ_GAIN_MAX]. */
+  gains: number[]
+  /** Built-in preset (flat/pop/rock/classical/vocal) — editable but not deletable. */
+  builtin?: boolean
+}
 
 /** Desktop-lyrics window id prefix — the full id is `<prefix>-<playerKey>`, so
  *  each DBus instance (player) gets its own single-instance lyrics window. */

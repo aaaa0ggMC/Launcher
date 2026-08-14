@@ -37,7 +37,12 @@ import {
   saveLyricsPageConfig,
   getLyricPlayerBinding,
   switchLyricsPlayer,
-  activateAidjDbus
+  activateAidjDbus,
+  loadEqProfiles,
+  saveEqProfiles,
+  findEqProfile,
+  getEqGainRange,
+  BUILTIN_EQ_PROFILES
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -59,6 +64,8 @@ import type {
   LyricPlaybackState
 } from './types'
 import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG, DEFAULT_AIDJ_CONFIG } from './types'
+import { EQ_BAND_COUNT } from './types'
+import type { EqProfile } from './types'
 import './jobs'
 import {
   getContinuousTasks,
@@ -1923,31 +1930,173 @@ const commands: CommandSpec[] = [
     }
   },
   {
-    name: 'aidj.player-eq',
-    description: '查询或设置内置播放器的 EQ 预设（flat|pop|rock|classical|vocal）',
-    usage: 'aidj.player-eq [--preset <flat|pop|rock|classical|vocal>]',
+    name: 'aidj.eq-list',
+    description: '列出所有 EQ 配置（内置 + 用户自定义）与当前激活项',
+    usage: 'aidj.eq-list',
+    enabled: webMode,
+    run: async () => {
+      const profiles = await loadEqProfiles()
+      const config = await loadAidjConfig()
+      const activeId = config?.preferences.eq_preset ?? 'flat'
+      const range = await getEqGainRange()
+      return { ok: true, profiles, activeId, range }
+    }
+  },
+  {
+    name: 'aidj.eq-range',
+    description: '查询或设置 EQ 最大增益范围（±dB，默认 20，范围 12–60）',
+    usage: 'aidj.eq-range [--set <12-60>]',
     enabled: webMode,
     run: async (ctx) => {
+      const config = await loadAidjConfig()
+      if (ctx.named.set === undefined) {
+        return { ok: true, range: await getEqGainRange() }
+      }
+      const n = Number(ctx.named.set)
+      if (isNaN(n) || n < 12 || n > 60) {
+        return { ok: false, error: '范围必须在 12–60 dB 之间' }
+      }
+      const range = Math.round(n)
+      if (config) {
+        config.preferences.eq_gain_range = range
+        await saveAidjConfig(config)
+      }
+      return { ok: true, range }
+    }
+  },
+  {
+    name: 'aidj.eq-reset',
+    description: '重置内置 EQ 预设为出厂默认（用户自定义配置保留）',
+    usage: 'aidj.eq-reset',
+    enabled: webMode,
+    run: async () => {
+      const profiles = await loadEqProfiles()
+      // Restore builtin profiles' gains + names to factory defaults; keep any
+      // user-defined profiles untouched.
+      const next = profiles.map((p) => {
+        const builtin = BUILTIN_EQ_PROFILES.find((b) => b.id === p.id)
+        return builtin ? { ...builtin, gains: [...builtin.gains] } : p
+      })
+      await saveEqProfiles(next)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.eq-save',
+    description: '新增或更新一个 EQ 配置（--name <名> --gains <JSON 数组> [--id <id>]）',
+    usage: 'aidj.eq-save --name <name> --gains "[..10 个 dB..]" [--id <id>]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const name = String(ctx.named.name ?? '').trim()
+      if (!name) return { ok: false, error: '需要 --name' }
+      const raw = String(ctx.named.gains ?? '')
+      let gains: number[]
+      const range = await getEqGainRange()
+      try {
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed) || !parsed.length) throw new Error('not array')
+        gains = parsed
+          .slice(0, EQ_BAND_COUNT)
+          .map((g) => Math.max(-range, Math.min(range, Number(g) || 0)))
+        while (gains.length < EQ_BAND_COUNT) gains.push(0)
+      } catch {
+        return { ok: false, error: `--gains 需要 ${EQ_BAND_COUNT} 个 dB 的 JSON 数组` }
+      }
+      const profiles = await loadEqProfiles()
+      let id = String(ctx.named.id ?? '')
+      const existing = id ? profiles.find((p) => p.id === id) : null
+      if (id && !existing) return { ok: false, error: 'id 不存在' }
+      if (!id) {
+        id = `eq-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+      }
+      const updated: EqProfile = {
+        id,
+        name,
+        gains,
+        builtin: existing?.builtin === true
+      }
+      const idx = profiles.findIndex((p) => p.id === id)
+      if (idx >= 0) profiles[idx] = updated
+      else profiles.push(updated)
+      await saveEqProfiles(profiles)
+      return { ok: true, profile: updated }
+    }
+  },
+  {
+    name: 'aidj.eq-delete',
+    description: '删除一个用户 EQ 配置（内置不可删）',
+    usage: 'aidj.eq-delete --id <id>',
+    enabled: webMode,
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const profiles = await loadEqProfiles()
+      const target = profiles.find((p) => p.id === id)
+      if (!target) return { ok: false, error: 'id 不存在' }
+      if (target.builtin) return { ok: false, error: '内置 EQ 不可删除' }
+      const next = profiles.filter((p) => p.id !== id)
+      await saveEqProfiles(next)
+      // If the deleted profile was active, fall back to flat.
+      const config = await loadAidjConfig()
+      if (config?.preferences.eq_preset === id) {
+        config.preferences.eq_preset = 'flat'
+        await saveAidjConfig(config)
+        const backend = getWebPlayerBackend()
+        const flat = await findEqProfile('flat')
+        backend.setEqPreset('flat')
+        await backend.setEQ(flat?.gains ?? Array(EQ_BAND_COUNT).fill(0))
+      }
+      return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.eq-active',
+    description: '应用某个 EQ 配置（--id <id>）',
+    usage: 'aidj.eq-active --id <id>',
+    enabled: webMode,
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const profile = await findEqProfile(id)
+      if (!profile) return { ok: false, error: 'id 不存在' }
       const backend = getWebPlayerBackend()
-      const preset = ctx.named.preset as string | undefined
-      if (!preset) {
-        const s = await backend.getPlaybackDetail()
-        return { ok: true, preset: s.eqPreset ?? 'flat' }
-      }
-      if (!['flat', 'pop', 'rock', 'classical', 'vocal'].includes(preset)) {
-        return { ok: false, error: 'preset 必须是 flat|pop|rock|classical|vocal' }
-      }
-      await backend.setEQ(preset)
+      backend.setEqPreset(id)
+      await backend.setEQ(profile.gains)
       try {
         const config = await loadAidjConfig()
         if (config) {
-          config.preferences.eq_preset = preset as 'flat' | 'pop' | 'rock' | 'classical' | 'vocal'
+          config.preferences.eq_preset = id
           await saveAidjConfig(config)
         }
       } catch (e) {
-        log.warn('persist player eq failed', { error: String(e) })
+        log.warn('persist active eq failed', { error: String(e) })
       }
-      return { ok: true, preset }
+      return { ok: true, id, gains: profile.gains }
+    }
+  },
+  {
+    name: 'aidj.player-eq',
+    description: '查询或实时预览 EQ 曲线（--gains <JSON 数组>，不落盘）',
+    usage: 'aidj.player-eq [--gains "[..10 个 dB..]"]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      if (ctx.named.gains === undefined) {
+        const s = await backend.getPlaybackDetail()
+        return { ok: true, id: s.eqPreset ?? 'flat', gains: s.eqGains }
+      }
+      let gains: number[]
+      const range = await getEqGainRange()
+      try {
+        const parsed = JSON.parse(String(ctx.named.gains))
+        if (!Array.isArray(parsed) || !parsed.length) throw new Error('not array')
+        gains = parsed
+          .slice(0, EQ_BAND_COUNT)
+          .map((g) => Math.max(-range, Math.min(range, Number(g) || 0)))
+        while (gains.length < EQ_BAND_COUNT) gains.push(0)
+      } catch {
+        return { ok: false, error: `--gains 需要 ${EQ_BAND_COUNT} 个 dB 的 JSON 数组` }
+      }
+      await backend.setEQ(gains)
+      return { ok: true, gains }
     }
   },
   {

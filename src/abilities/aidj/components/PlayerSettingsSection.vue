@@ -12,15 +12,13 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 const crossfadeEnabled = ref(false)
 const crossfadeSeconds = ref(2.5)
 const eqPreset = ref('flat')
+const eqGainRange = ref(20)
 const playbackRate = ref(1.0)
 const defaultVolume = ref(80)
 const spectrumEnabled = ref(false)
 const webRemotePort = ref(17320)
 
-const eqItems = ['flat', 'pop', 'rock', 'classical', 'vocal'].map((p) => ({
-  title: t(`aidj.player.eq_${p}`, p),
-  value: p
-}))
+const eqItems = ref<{ title: string; value: string }[]>([])
 const rateItems = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((r) => ({
   title: `${r}x`,
   value: r
@@ -40,10 +38,23 @@ onMounted(async () => {
     crossfadeEnabled.value = cf.enabled ?? false
     crossfadeSeconds.value = cf.seconds ?? 2.5
     eqPreset.value = (prefs.eq_preset as string) || 'flat'
+    eqGainRange.value = (prefs.eq_gain_range as number) ?? 20
     playbackRate.value = (prefs.playback_rate as number) ?? 1.0
     defaultVolume.value = Math.round(((prefs.default_volume as number) ?? 0.8) * 100)
     spectrumEnabled.value = (prefs.spectrum_enabled as boolean) ?? false
     webRemotePort.value = (prefs.web_remote_port as number) ?? 17320
+  }
+  // EQ profiles come from eq.jsonl (the config only stores the active id).
+  const eq = (await window.cockpit.command('aidj.eq-list').catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+  if (eq?.ok && Array.isArray(eq.profiles)) {
+    eqItems.value = (eq.profiles as { id: string; name: string; builtin?: boolean }[]).map((p) => ({
+      title: p.builtin ? t(`aidj.player.eq_${p.id}`, p.name) : p.name,
+      value: p.id
+    }))
+    if (typeof eq.activeId === 'string') eqPreset.value = eq.activeId
   }
   loaded = true
 })
@@ -73,9 +84,21 @@ watch(crossfadeSeconds, (v) =>
     window.cockpit.command('aidj.player-crossfade', { enabled: crossfadeEnabled.value, seconds: v })
   )
 )
-watch(eqPreset, (v) =>
-  apply('preferences.eq_preset', v, () => window.cockpit.command('aidj.player-eq', { preset: v }))
-)
+watch(eqPreset, (v) => {
+  if (!eqItems.value.some((i) => i.value === v)) return
+  // The active profile id is already persisted via eq-active; push it live.
+  window.cockpit.command('aidj.eq-active', { id: v }).catch(() => {})
+})
+watch(eqGainRange, (v) => {
+  const n = Math.round(Number(v))
+  if (Number.isFinite(n) && n >= 12 && n <= 60) {
+    window.cockpit.command('aidj.eq-range', { set: n }).catch(() => {})
+  }
+})
+/** Reset builtin EQ presets to factory defaults (user presets kept). */
+async function resetEqPresets(): Promise<void> {
+  await window.cockpit.command('aidj.eq-reset').catch(() => {})
+}
 watch(playbackRate, (v) =>
   apply('preferences.playback_rate', v, () =>
     window.cockpit.command('aidj.player-rate', { set: v })
@@ -141,6 +164,7 @@ function resetAll(): void {
               :max="8"
               :step="0.5"
               :disabled="!crossfadeEnabled"
+              color="primary"
               thumb-label
               hide-details
               class="mt-1"
@@ -165,6 +189,30 @@ function resetAll(): void {
             />
           </v-col>
           <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="eqGainRange"
+              :label="t('aidj.player_settings.eq_range', 'EQ 最大范围 (±dB)')"
+              :hint="t('aidj.player_settings.eq_range_hint', '12–60，默认 20')"
+              type="number"
+              min="12"
+              max="60"
+              persistent-hint
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4" class="d-flex align-center">
+            <v-btn
+              variant="tonal"
+              color="primary"
+              prepend-icon="mdi-backup-restore"
+              @click="resetEqPresets"
+            >
+              {{ t('aidj.player_settings.eq_reset_presets', '重置预设') }}
+            </v-btn>
+          </v-col>
+          <v-col cols="12" md="4">
             <v-select
               v-model="playbackRate"
               :items="rateItems"
@@ -181,6 +229,7 @@ function resetAll(): void {
               :min="0"
               :max="100"
               :step="5"
+              color="primary"
               thumb-label
               hide-details
               class="mt-1"
