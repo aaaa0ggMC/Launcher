@@ -60,6 +60,18 @@ export interface AidjConfig {
     extra_rules?: string
     /** Desktop-lyrics window display settings (mirrors `vp wshowlyrics` flags). */
     lyrics?: Partial<LyricsDisplayConfig>
+    /** Built-in player (M4): crossfade between tracks (fade out/in). */
+    crossfade?: { enabled: boolean; seconds: number }
+    /** Built-in player EQ preset id. */
+    eq_preset?: 'flat' | 'pop' | 'rock' | 'classical' | 'vocal'
+    /** Built-in player playback rate (0.5–2.0). */
+    playback_rate?: number
+    /** Built-in player initial software volume (0–1). */
+    default_volume?: number
+    /** Built-in player spectrum strip visible by default. */
+    spectrum_enabled?: boolean
+    /** Built-in player LAN web-remote server port (0 = disabled). */
+    web_remote_port?: number
   }
 }
 
@@ -104,7 +116,13 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
       volbal: 5,
       record_freq: 6,
       backgrounds: 7
-    }
+    },
+    crossfade: { enabled: false, seconds: 2.5 },
+    eq_preset: 'flat',
+    playback_rate: 1.0,
+    default_volume: 0.8,
+    spectrum_enabled: false,
+    web_remote_port: 17320
   }
 }
 

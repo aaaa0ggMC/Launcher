@@ -45,6 +45,11 @@ export function registerAudioProtocol(): void {
           status: 206,
           headers: {
             'Content-Type': mime,
+            // CORS-opt-in: the renderer routes this media through a Web Audio
+            // MediaElementAudioSourceNode, which outputs SILENCE unless the
+            // element is origin-clean. A wildcard ACAO keeps the media usable
+            // by the graph while this is a local file read anyway.
+            'Access-Control-Allow-Origin': '*',
             'Accept-Ranges': 'bytes',
             'Content-Range': `bytes ${start}-${end}/${total}`,
             'Content-Length': String(end - start + 1)
@@ -56,6 +61,7 @@ export function registerAudioProtocol(): void {
         status: 200,
         headers: {
           'Content-Type': mime,
+          'Access-Control-Allow-Origin': '*',
           'Accept-Ranges': 'bytes',
           'Content-Length': String(total)
         }

@@ -28,6 +28,12 @@ import OpenAI from 'openai'
 import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
 import { SEPARATOR } from './types'
 import { PLAYBACK_TAG, getPlayerMode, getWebPlayerBackend } from './player-backend'
+import {
+  startWebRemoteServer,
+  stopWebRemoteServer,
+  isWebRemoteRunning,
+  getWebRemotePort
+} from './web-remote'
 
 const log = makeLogger('aidj-persistent')
 
@@ -1433,3 +1439,55 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
   control.push({ data: { type: 'metadata_sync_done', synced: counts.ok } })
   control.finish('exited')
 })
+
+// ---------------------------------------------------------------------------
+// aidj.web-remote — 内置播放器的局域网 Web 遥控服务器（M4）。
+// 以后台任务形式运行：启动服务器并常驻，直到用户停止/切换后端/退出。
+// 端口来自 `preferences.web_remote_port`（设置页可配），page-menu 的开关就是
+// 启停这个任务；后台面板同样可以直接停止。
+// ---------------------------------------------------------------------------
+registerJobHandler(
+  'aidj.web-remote',
+  async (control) => {
+    if (isWebRemoteRunning()) {
+      control.pushLine(`遥控服务已在运行（端口 ${getWebRemotePort()}）`)
+      control.finish('exited')
+      return
+    }
+
+    const config = await loadAidjConfig()
+    const port = config?.preferences.web_remote_port ?? 17320
+
+    let urls: string[] = []
+    try {
+      urls = (await startWebRemoteServer(port)).urls
+    } catch (e) {
+      control.pushLine(`启动失败: ${e instanceof Error ? e.message : String(e)}`, 'stderr')
+      control.finish('error')
+      return
+    }
+
+    control.push({ data: { type: 'state', running: true, port: getWebRemotePort() } })
+    control.pushLine(`局域网遥控已启动，端口 ${getWebRemotePort()}`)
+    control.pushLine(`本机访问: http://localhost:${getWebRemotePort()}`)
+    for (const u of urls) control.pushLine(`局域网访问: ${u}`)
+    control.pushLine('手机浏览器打开上面的地址即可查看歌曲/封面并控制播放。')
+
+    const ac = new AbortController()
+    control.setCancel(async () => {
+      ac.abort()
+      await stopWebRemoteServer()
+    })
+
+    // Keep the task alive until cancelled.
+    while (!ac.signal.aborted) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+
+    control.push({ data: { type: 'state', running: false, port: getWebRemotePort() } })
+    control.pushLine('局域网遥控已停止')
+    control.finish('exited')
+  },
+  // web-exclusive: the built-in player is the control target
+  () => getPlayerMode().then((m) => m === 'web')
+)

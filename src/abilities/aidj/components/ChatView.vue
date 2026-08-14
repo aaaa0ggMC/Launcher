@@ -536,10 +536,17 @@ function formatTokens(n: number): string {
 }
 
 const visibleStatus = computed(() => {
-  return Object.entries(sbOrder.value)
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
-    .map(([k]) => k)
+  return (
+    Object.entries(sbOrder.value)
+      .filter(([, v]) => v > 0)
+      // Volbal is dbus/continuous-only: in web mode the built-in player manages
+      // its own loudness balance live (PlayerView's bottom chip), and the shared
+      // `dynamic_balance_volume` toggle here only writes config — it can't apply
+      // to the running engine, so it would show a state that doesn't hold.
+      .filter(([k]) => !(mode.value === 'web' && k === 'volbal'))
+      .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
+      .map(([k]) => k)
+  )
 })
 
 async function toggleVolbal(): Promise<void> {

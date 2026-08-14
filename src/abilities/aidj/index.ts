@@ -74,6 +74,51 @@ export default [
     icon: 'default/headset/padding',
     category: '工具',
     keepAlive: true,
-    component: defineAsyncComponent(() => import('./PlayerView.vue'))
+    component: defineAsyncComponent(() => import('./PlayerView.vue')),
+    settings: [
+      {
+        key: 'player',
+        label: '播放器',
+        icon: 'mdi-play-speed',
+        description:
+          '内置播放器的音频处理与遥控配置（淡入淡出 / EQ / 倍速 / 音量 / 频谱 / 局域网遥控）',
+        keywords: [
+          '播放器',
+          'player',
+          '淡入淡出',
+          'crossfade',
+          'EQ',
+          '均衡器',
+          '倍速',
+          '音量',
+          '频谱',
+          '局域网',
+          '遥控',
+          'web remote'
+        ],
+        items: [
+          {
+            key: 'playback',
+            label: '内置播放器配置',
+            description: '淡入淡出时长、均衡器预设、默认倍速/音量、频谱与局域网遥控端口',
+            keywords: [
+              '播放器',
+              'player',
+              '淡入淡出',
+              'crossfade',
+              'EQ',
+              '均衡器',
+              '倍速',
+              '音量',
+              '频谱',
+              '局域网',
+              '遥控'
+            ],
+            fullWidth: true,
+            component: defineAsyncComponent(() => import('./components/PlayerSettingsSection.vue'))
+          }
+        ]
+      }
+    ]
   }
 ] satisfies Ability[]

@@ -28,6 +28,8 @@ interface PlaybackState {
   positionMs?: number | null
   lengthMs?: number | null
   lyric?: string | null
+  /** inline-timestamp karaoke LRC (Netease YRC) — preferred over `lyric` when set */
+  karaokeLyric?: string | null
 }
 
 // -- language: standalone window root has no App.vue to provide it, read config --
@@ -159,13 +161,16 @@ function parseLrc(lrc: string): LyricLine[] {
 }
 
 const lrcLines = computed<LyricLine[]>(() => {
-  const lyric = state.value.lyric
+  // Same preference as the in-app lyrics page: the inline-timestamp karaoke
+  // LRC (from Netease YRC) when a song has one — each word carries its own
+  // time and real karaoke fills work. Otherwise fall back to the plain LRC.
+  const lyric = state.value.karaokeLyric ?? state.value.lyric
   if (!lyric) return []
   return parseLrc(lyric)
 })
 
 const plainLyric = computed<string>(() => {
-  const lyric = state.value.lyric ?? ''
+  const lyric = state.value.karaokeLyric ?? state.value.lyric ?? ''
   return lrcLines.value.length ? '' : lyric.replace(/\[[^\]]*\]/g, '').trim()
 })
 

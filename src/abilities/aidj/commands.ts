@@ -43,7 +43,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { screen } from 'electron'
 import OpenAI from 'openai'
-import { startJobByName, listTasks } from '../../main/process/background-tasks'
+import { startJobByName, listTasks, stopTask } from '../../main/process/background-tasks'
 import { parseFilterCommand, evaluateFilter, FilterParseError } from './parser/filterGrammar'
 import { cachedVariantHaystack, setVariantCacheCapacity } from './parser/chineseVariants'
 import { createChildWindow, destroyChildWindow, listChildWindows } from '../../main/process/windows'
@@ -83,12 +83,19 @@ import {
   setPlayerMode,
   getWebPlayerBackend,
   resetPlayerMode,
-  reconcilePlayerAbilityVisibility
+  reconcilePlayerAbilityVisibility,
+  PLAYBACK_TAG
 } from './player-backend'
 import type { WebPlayerReport } from './player-backend'
+import { isWebRemoteRunning, getWebRemotePort, stopWebRemoteServer } from './web-remote'
 import { registerStartupHook } from '../../main/process/startup'
 
 const log = makeLogger('aidj')
+
+/** Locate the running web-remote background task id (if any). */
+function findWebRemoteTaskId(): string {
+  return listTasks().find((t) => t.name === 'AIDJ 局域网遥控' && t.status === 'running')?.id ?? ''
+}
 
 /** Mode-exclusive command gates (MAddition) — commands that only make sense in
  *  one playback mode are NOT exposed in the other, so the UI never sees a
@@ -1883,6 +1890,168 @@ const commands: CommandSpec[] = [
     run: async () => {
       await getWebPlayerBackend().clearQueue()
       return { ok: true }
+    }
+  },
+  {
+    name: 'aidj.player-crossfade',
+    description: '查询或设置内置播放器的曲间淡入淡出（--enabled <bool> [--seconds <n>]）',
+    usage: 'aidj.player-crossfade [--enabled <true|false>] [--seconds <n>]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      const enabled =
+        ctx.named.enabled !== undefined ? String(ctx.named.enabled) !== 'false' : undefined
+      const seconds = ctx.named.seconds !== undefined ? Number(ctx.named.seconds) : undefined
+      if (enabled === undefined && seconds === undefined) {
+        const s = await backend.getPlaybackDetail()
+        return { ok: true, enabled: s.crossfade === true, seconds: s.crossfadeSeconds ?? 2.5 }
+      }
+      const next = enabled ?? (await backend.getPlaybackDetail()).crossfade === true
+      const sec = seconds ?? (await backend.getPlaybackDetail()).crossfadeSeconds ?? 2.5
+      await backend.setCrossfade(next, sec)
+      // Persist the shared preference.
+      try {
+        const config = await loadAidjConfig()
+        if (config) {
+          config.preferences.crossfade = { enabled: next, seconds: sec }
+          await saveAidjConfig(config)
+        }
+      } catch (e) {
+        log.warn('persist player crossfade failed', { error: String(e) })
+      }
+      return { ok: true, enabled: next, seconds: sec }
+    }
+  },
+  {
+    name: 'aidj.player-eq',
+    description: '查询或设置内置播放器的 EQ 预设（flat|pop|rock|classical|vocal）',
+    usage: 'aidj.player-eq [--preset <flat|pop|rock|classical|vocal>]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      const preset = ctx.named.preset as string | undefined
+      if (!preset) {
+        const s = await backend.getPlaybackDetail()
+        return { ok: true, preset: s.eqPreset ?? 'flat' }
+      }
+      if (!['flat', 'pop', 'rock', 'classical', 'vocal'].includes(preset)) {
+        return { ok: false, error: 'preset 必须是 flat|pop|rock|classical|vocal' }
+      }
+      await backend.setEQ(preset)
+      try {
+        const config = await loadAidjConfig()
+        if (config) {
+          config.preferences.eq_preset = preset as 'flat' | 'pop' | 'rock' | 'classical' | 'vocal'
+          await saveAidjConfig(config)
+        }
+      } catch (e) {
+        log.warn('persist player eq failed', { error: String(e) })
+      }
+      return { ok: true, preset }
+    }
+  },
+  {
+    name: 'aidj.player-rate',
+    description: '查询或设置内置播放器的播放倍速（任意正数；>16 为静音快进）',
+    usage: 'aidj.player-rate [--set <rate>]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      const rate = ctx.named.set !== undefined ? Number(ctx.named.set) : undefined
+      if (rate === undefined || isNaN(rate)) {
+        const s = await backend.getPlaybackDetail()
+        return { ok: true, rate: s.playbackRate ?? 1.0 }
+      }
+      if (rate <= 0) return { ok: false, error: '倍速必须是正数' }
+      await backend.setRate(rate)
+      // Persist the shared preference (survives restarts, mirrors the settings page).
+      try {
+        const config = await loadAidjConfig()
+        if (config) {
+          config.preferences.playback_rate = rate
+          await saveAidjConfig(config)
+        }
+      } catch (e) {
+        log.warn('persist player rate failed', { error: String(e) })
+      }
+      return { ok: true, rate }
+    }
+  },
+  {
+    name: 'aidj.player-abloop',
+    description: '设置内置播放器的 AB 循环点（秒；--off 清除）',
+    usage: 'aidj.player-abloop [--a <sec>] [--b <sec>] [--off true]',
+    enabled: webMode,
+    run: async (ctx) => {
+      const backend = getWebPlayerBackend()
+      if (String(ctx.named.off ?? '') === 'true') {
+        await backend.setAbloop(null, null)
+        return { ok: true, loopA: null, loopB: null }
+      }
+      const a = ctx.named.a === undefined || ctx.named.a === null ? null : Number(ctx.named.a)
+      const b = ctx.named.b === undefined || ctx.named.b === null ? null : Number(ctx.named.b)
+      if ((a != null && isNaN(a)) || (b != null && isNaN(b))) {
+        return { ok: false, error: '--a/--b 需要秒数' }
+      }
+      await backend.setAbloop(a, b)
+      return { ok: true, loopA: a, loopB: b }
+    }
+  },
+  {
+    name: 'aidj.player-sleep',
+    description: '设置内置播放器的睡眠定时（分钟；0 = 取消）',
+    usage: 'aidj.player-sleep --minutes <n>',
+    enabled: webMode,
+    run: async (ctx) => {
+      const minutes = Number(ctx.named.minutes)
+      if (isNaN(minutes) || minutes < 0) return { ok: false, error: '需要 --minutes 非负分钟数' }
+      await getWebPlayerBackend().setSleep(minutes)
+      return { ok: true, minutes }
+    }
+  },
+  {
+    name: 'aidj.web-remote-status',
+    description: '查询内置播放器局域网遥控服务器的运行状态',
+    usage: 'aidj.web-remote-status',
+    enabled: webMode,
+    run: async () => {
+      const config = await loadAidjConfig()
+      return {
+        ok: true,
+        running: isWebRemoteRunning(),
+        port: isWebRemoteRunning() ? getWebRemotePort() : (config?.preferences.web_remote_port ?? 0)
+      }
+    }
+  },
+  {
+    name: 'aidj.web-remote-start',
+    description: '启动内置播放器的局域网遥控服务器（后台任务）',
+    usage: 'aidj.web-remote-start',
+    enabled: webMode,
+    run: async () => {
+      if (isWebRemoteRunning()) {
+        return { ok: true, alreadyRunning: true, port: getWebRemotePort() }
+      }
+      const task = await startJobByName('aidj.web-remote', {
+        name: 'AIDJ 局域网遥控',
+        description: '内置播放器的局域网 Web 遥控服务器',
+        view: 'log',
+        tags: [PLAYBACK_TAG]
+      })
+      if (!task) return { ok: false, error: '无法启动遥控服务器' }
+      return { ok: true, taskId: task.id }
+    }
+  },
+  {
+    name: 'aidj.web-remote-stop',
+    description: '停止内置播放器的局域网遥控服务器',
+    usage: 'aidj.web-remote-stop',
+    enabled: webMode,
+    run: async () => {
+      if (!isWebRemoteRunning()) return { ok: true, running: false }
+      const stopped = await stopTask(findWebRemoteTaskId())
+      await stopWebRemoteServer()
+      return { ok: true, stopped }
     }
   },
   {

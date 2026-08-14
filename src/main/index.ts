@@ -30,10 +30,12 @@ protocol.registerSchemesAsPrivileged([
   },
   {
     scheme: 'cockpit-audio',
-    // NOTE: no `corsEnabled` — the `<audio>` element makes a no-cors request,
-    // and marking the scheme CORS-enabled can block that. `stream` is required
-    // for the media stack.
-    privileges: { secure: true, supportFetchAPI: true, stream: true }
+    // `corsEnabled` + the renderer element's `crossOrigin='anonymous'` make the
+    // media origin-clean so Web Audio's MediaElementAudioSourceNode actually
+    // outputs audio (a tainted element plays but routes SILENCE through the
+    // graph). Responses carry `Access-Control-Allow-Origin: *`. `stream` is
+    // required for the media stack.
+    privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
   }
 ])
 

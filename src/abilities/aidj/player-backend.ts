@@ -61,6 +61,18 @@ export interface PlaybackDetail {
   queueIndex?: number
   queueTotal?: number
   queueTracks?: string[]
+  /** playback rate 0.5–2 (web only) */
+  playbackRate?: number
+  /** AB-loop points in seconds, null = unset (web only) */
+  loopA?: number | null
+  loopB?: number | null
+  /** ms until the sleep timer fires (null = off) */
+  sleepRemainMs?: number | null
+  /** crossfade fade-in/out between tracks */
+  crossfade?: boolean
+  crossfadeSeconds?: number
+  /** EQ preset id (flat/pop/rock/classical/vocal) */
+  eqPreset?: string
 }
 
 /** State the renderer web-player engine reports up (extends PlaybackDetail). */
@@ -76,6 +88,13 @@ export interface WebPlayerReport {
   queueIndex?: number
   queueTotal?: number
   queueTracks?: string[]
+  playbackRate?: number
+  loopA?: number | null
+  loopB?: number | null
+  sleepRemainMs?: number | null
+  crossfade?: boolean
+  crossfadeSeconds?: number
+  eqPreset?: string
 }
 
 /** Backend-neutral contract every playback mode implements. */
@@ -182,6 +201,12 @@ export class WebPlayerBackend implements PlayerBackend {
   private recordFreq = false
   private lastTrackPath: string | null = null
 
+  // -- M4 playback features (forwarded to the renderer engine) ---------------
+  private crossfadeEnabled = false
+  private crossfadeSeconds = 2.5
+  private eqPreset = 'flat'
+  private playbackRate = 1.0
+
   async connect(): Promise<boolean> {
     this.connected = true
     await this.syncPrefs()
@@ -201,6 +226,19 @@ export class WebPlayerBackend implements PlayerBackend {
     this.volbalCurve = 1.0
     this.recordFreq = config?.preferences.record_freq ?? false
     this.volCache = new LoudnessCache(this.volbalMethod, this.volbalCurve)
+    // M4 prefs.
+    this.crossfadeEnabled = config?.preferences.crossfade?.enabled ?? false
+    this.crossfadeSeconds = config?.preferences.crossfade?.seconds ?? 2.5
+    this.eqPreset = config?.preferences.eq_preset ?? 'flat'
+    this.playbackRate = config?.preferences.playback_rate ?? 1.0
+    const defaultVol = config?.preferences.default_volume ?? 0.8
+    this.lastStatus.volume = defaultVol
+    this.lastDetail.volume = defaultVol
+    // Push the persisted feature prefs into the renderer engine.
+    this.emit({ type: 'crossfade', enabled: this.crossfadeEnabled, seconds: this.crossfadeSeconds })
+    this.emit({ type: 'eq', preset: this.eqPreset })
+    this.emit({ type: 'rate', rate: this.playbackRate })
+    this.emit({ type: 'volume', volume: defaultVol })
   }
 
   disconnect(): void {
@@ -233,8 +271,19 @@ export class WebPlayerBackend implements PlayerBackend {
       volume: typeof state.volume === 'number' ? state.volume : null,
       queueIndex: state.queueIndex,
       queueTotal: state.queueTotal,
-      queueTracks: state.queueTracks
+      queueTracks: state.queueTracks,
+      playbackRate: state.playbackRate,
+      loopA: state.loopA,
+      loopB: state.loopB,
+      sleepRemainMs: state.sleepRemainMs,
+      crossfade: state.crossfade,
+      crossfadeSeconds: state.crossfadeSeconds,
+      eqPreset: state.eqPreset
     }
+    if (typeof state.playbackRate === 'number') this.playbackRate = state.playbackRate
+    if (typeof state.crossfade === 'boolean') this.crossfadeEnabled = state.crossfade
+    if (typeof state.crossfadeSeconds === 'number') this.crossfadeSeconds = state.crossfadeSeconds
+    if (typeof state.eqPreset === 'string') this.eqPreset = state.eqPreset
     if (typeof state.queueIndex === 'number') this.queueIndex = state.queueIndex
     if (typeof state.queueTotal === 'number') this.queueTotal = state.queueTotal
     // Track-change side effects: record play frequency + apply loudness balance
@@ -349,11 +398,15 @@ export class WebPlayerBackend implements PlayerBackend {
     if (lib) {
       for (const [name, p] of lib.musicPaths) pathToName.set(p, name)
     }
-    const songs = paths.map((p) => ({
-      name: pathToName.get(p) ?? basename(p).replace(/\.[^.]+$/, ''),
-      path: p,
-      url: audioUrl(p)
-    }))
+    const songs = paths.map((p) => {
+      const name = pathToName.get(p) ?? basename(p).replace(/\.[^.]+$/, '')
+      return {
+        name,
+        path: p,
+        url: audioUrl(p),
+        emotion: lib?.metadata.get(name)?.emotion ?? null
+      }
+    })
     this.emit({ type: opts?.append ? 'enqueue' : 'playlist', songs })
     log.info('WebPlayerBackend.sendFiles', {
       count: songs.length,
@@ -397,6 +450,34 @@ export class WebPlayerBackend implements PlayerBackend {
     this.lastStatus.volume = v
     this.emit({ type: 'volume', volume: v })
     return true
+  }
+
+  // -- M4: crossfade / EQ / playback rate / AB loop / sleep timer -------------
+
+  async setCrossfade(enabled: boolean, seconds?: number): Promise<void> {
+    this.crossfadeEnabled = enabled
+    if (seconds != null && seconds > 0) this.crossfadeSeconds = seconds
+    this.emit({ type: 'crossfade', enabled, seconds: this.crossfadeSeconds })
+  }
+
+  async setEQ(preset: string): Promise<void> {
+    this.eqPreset = preset
+    this.emit({ type: 'eq', preset })
+  }
+
+  async setRate(rate: number): Promise<void> {
+    // Any positive rate — the engine falls back to silent turbo fast-forward
+    // beyond the element's native cap (16x).
+    this.playbackRate = Math.max(0.0625, rate)
+    this.emit({ type: 'rate', rate: this.playbackRate })
+  }
+
+  async setAbloop(a?: number | null, b?: number | null): Promise<void> {
+    this.emit({ type: 'abloop', a: a ?? null, b: b ?? null })
+  }
+
+  async setSleep(minutes: number): Promise<void> {
+    this.emit({ type: 'sleep', minutes })
   }
 }
 

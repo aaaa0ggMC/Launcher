@@ -11,6 +11,7 @@ import {
   computed
 } from 'vue'
 import { translate, translateTemplate } from '../../main/ui/i18n'
+import { ensureWebPlayerEngine } from './web-player/engine'
 
 defineOptions({ name: 'cockpit-aidj-player' })
 
@@ -42,7 +43,7 @@ const coverPath = ref('')
 
 // -- page menu (mirrors the aidj main page: top-center handle → subpages) -----
 const menuOpen = ref(false)
-const menuStep = ref<'main' | 'queue'>('main')
+const menuStep = ref<'main' | 'queue' | 'speed' | 'sleep' | 'eq' | 'remote'>('main')
 const pageMenuRef = ref<HTMLElement | null>(null)
 let menuCleanup: (() => void) | null = null
 
@@ -54,6 +55,29 @@ const volbal = ref<{
   baseVolume: number
 }>({ enabled: false, method: 'lufs', anchor: null, baseVolume: 0.5 })
 
+// -- M4 playback features (speed / AB loop / sleep / EQ / crossfade) ----------
+const playbackRate = ref(1.0)
+const loopA = ref<number | null>(null)
+const loopB = ref<number | null>(null)
+const sleepRemainMs = ref<number | null>(null)
+const crossfade = ref(false)
+const crossfadeSeconds = ref(2.5)
+const eqPreset = ref('flat')
+const eqPresetItems = ['flat', 'pop', 'rock', 'classical', 'vocal']
+const rateItems = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+const sleepItems = [15, 30, 45, 60, 90, 120]
+/** Custom speed input (any positive number; >16 = silent fast-forward). */
+const customRate = ref('')
+
+// -- LAN web-remote ------------------------------------------------------------
+const webRemoteRunning = ref(false)
+const webRemotePort = ref(0)
+
+// -- spectrum (renderer engine analyser → bars) --------------------------------
+const spectrumOn = ref(false)
+let rafId = 0
+const spectrumCanvas = ref<HTMLCanvasElement | null>(null)
+
 let stateTimer: ReturnType<typeof setInterval> | null = null
 let modeTimer: ReturnType<typeof setInterval> | null = null
 let modeUnsub: (() => void) | null = null
@@ -63,6 +87,29 @@ function formatMs(ms: number | null | undefined): string {
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** Sleep countdown as `MM:SS` (or `H:MM:SS` when ≥ 1h). */
+function formatSleep(ms: number | null | undefined): string {
+  if (ms == null) return ''
+  const total = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** Sub-menu label helper (queue / speed / sleep / eq / remote). */
+function submenuTitle(step: string): string {
+  const keys: Record<string, string> = {
+    queue: 'aidj.player.queue',
+    speed: 'aidj.player.speed',
+    sleep: 'aidj.player.sleep_timer',
+    eq: 'aidj.player.eq',
+    remote: 'aidj.player.web_remote'
+  }
+  return t(keys[step] ?? keys.queue, keys[step] ?? '')
 }
 
 async function pollMode(): Promise<void> {
@@ -93,6 +140,14 @@ async function pollState(): Promise<void> {
       if (typeof s.queueIndex === 'number') queueIndex.value = s.queueIndex
       if (typeof s.queueTotal === 'number') queueTotal.value = s.queueTotal
       if (Array.isArray(s.queueTracks)) queueTracks.value = s.queueTracks as string[]
+      if (typeof s.playbackRate === 'number') playbackRate.value = s.playbackRate
+      if (typeof s.loopA === 'number' || s.loopA === null) loopA.value = s.loopA as number | null
+      if (typeof s.loopB === 'number' || s.loopB === null) loopB.value = s.loopB as number | null
+      if (typeof s.sleepRemainMs === 'number' || s.sleepRemainMs === null)
+        sleepRemainMs.value = s.sleepRemainMs as number | null
+      if (typeof s.crossfade === 'boolean') crossfade.value = s.crossfade
+      if (typeof s.crossfadeSeconds === 'number') crossfadeSeconds.value = s.crossfadeSeconds
+      if (typeof s.eqPreset === 'string') eqPreset.value = s.eqPreset
       const url = String(s.url ?? '')
       if (url.startsWith('file://')) {
         const path = decodeURIComponent(url.slice('file://'.length))
@@ -116,7 +171,28 @@ async function refreshCover(path: string): Promise<void> {
 }
 
 async function control(cmd: string): Promise<void> {
+  // Optimistic UI: flip the play/pause icon and track title immediately
+  // instead of waiting up to a poll cycle — the next pollState reconciles.
+  if (cmd === 'toggle') status.value = status.value === 'Playing' ? 'Paused' : 'Playing'
+  if (cmd === 'next' || cmd === 'prev') {
+    const delta = cmd === 'next' ? 1 : -1
+    if (cmd === 'prev' && positionMs.value > 3000) {
+      // prev with progress > 3s just seeks to 0 — no track change.
+      void pollState()
+    } else {
+      const i = queueIndex.value + delta
+      if (i >= 0 && i < queueTracks.value.length) {
+        queueIndex.value = i
+        track.value = queueTracks.value[i] ?? ''
+        positionMs.value = 0
+        seekInput.value = 0
+        status.value = 'Playing'
+      }
+    }
+  }
   await window.cockpit.command(`aidj.${cmd}`).catch(() => {})
+  // Reconcile quickly after the command lands (engine reports fast).
+  setTimeout(() => void pollState(), 120)
 }
 
 async function clearQueue(): Promise<void> {
@@ -231,6 +307,167 @@ function volbalLabel(): string {
   return volbal.value.method === 'lufs' ? 'LUFS' : 'RMS'
 }
 
+// -- M4: crossfade / EQ / rate / AB loop / sleep / web-remote ------------------
+
+async function toggleCrossfade(): Promise<void> {
+  const next = !crossfade.value
+  const r = (await window.cockpit
+    .command('aidj.player-crossfade', { enabled: next })
+    .catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) {
+    crossfade.value = next
+    if (typeof r.seconds === 'number') crossfadeSeconds.value = r.seconds
+  }
+}
+
+async function setEQ(preset: string): Promise<void> {
+  if (preset === eqPreset.value) return
+  const r = (await window.cockpit
+    .command('aidj.player-eq', { preset })
+    .catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) eqPreset.value = preset
+}
+
+async function setRate(rate: number): Promise<void> {
+  const r = (await window.cockpit
+    .command('aidj.player-rate', { set: rate })
+    .catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) {
+    playbackRate.value = rate
+    customRate.value = String(rate)
+  }
+}
+
+/** Apply the custom speed input — any positive number; invalid input resets. */
+async function applyCustomRate(): Promise<void> {
+  const v = Number(customRate.value)
+  if (Number.isFinite(v) && v > 0) {
+    await setRate(v)
+  } else {
+    customRate.value = String(playbackRate.value)
+  }
+}
+
+/** Mark A or B at the current playback position; clicking an active point clears the loop. */
+async function toggleAbloop(side: 'a' | 'b'): Promise<void> {
+  const active = side === 'a' ? loopA.value != null : loopB.value != null
+  if (active) {
+    const r = (await window.cockpit
+      .command('aidj.player-abloop', { off: true })
+      .catch(() => null)) as Record<string, unknown> | null
+    if (r?.ok) {
+      loopA.value = null
+      loopB.value = null
+    }
+    return
+  }
+  const pos = seekInput.value / 1000
+  const nextA = side === 'a' ? pos : loopA.value
+  const nextB = side === 'b' ? pos : loopB.value
+  const r = (await window.cockpit
+    .command('aidj.player-abloop', { a: nextA, b: nextB })
+    .catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) {
+    loopA.value = r.loopA as number | null
+    loopB.value = r.loopB as number | null
+  }
+}
+
+async function setSleep(minutes: number): Promise<void> {
+  const r = (await window.cockpit
+    .command('aidj.player-sleep', { minutes })
+    .catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) {
+    if (minutes > 0) sleepRemainMs.value = minutes * 60_000
+    else sleepRemainMs.value = null
+  }
+}
+
+async function pollWebRemote(): Promise<void> {
+  if (mode.value !== 'web') return
+  const r = (await window.cockpit.command('aidj.web-remote-status').catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+  if (r?.ok) {
+    webRemoteRunning.value = r.running === true
+    if (typeof r.port === 'number') webRemotePort.value = r.port
+  }
+}
+
+/** Load persisted player prefs the page depends on (spectrum default). */
+async function loadPlayerPrefs(): Promise<void> {
+  const r = (await window.cockpit.command('aidj.get-config').catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+  if (r?.ok && r.config) {
+    const prefs = (r.config as Record<string, unknown>).preferences as Record<string, unknown>
+    spectrumOn.value = (prefs.spectrum_enabled as boolean) ?? false
+  }
+}
+
+async function toggleWebRemote(): Promise<void> {
+  const cmd = webRemoteRunning.value ? 'aidj.web-remote-stop' : 'aidj.web-remote-start'
+  const r = (await window.cockpit.command(cmd).catch(() => null)) as Record<string, unknown> | null
+  if (r?.ok) {
+    webRemoteRunning.value = !webRemoteRunning.value
+    if (webRemoteRunning.value && typeof r.port === 'number') webRemotePort.value = r.port
+    if (webRemoteRunning.value && typeof r.taskId === 'string') {
+      // poll for the bound port shortly after the job boots
+      setTimeout(() => void pollWebRemote(), 800)
+    }
+  }
+}
+
+// -- spectrum drawing ----------------------------------------------------------
+function drawSpectrum(): void {
+  rafId = 0
+  const canvas = spectrumCanvas.value
+  const analyser = ensureWebPlayerEngine().getAnalyser()
+  if (!canvas || !analyser || !spectrumOn.value || status.value !== 'Playing') {
+    return
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const w = canvas.width
+  const h = canvas.height
+  const bins = new Uint8Array(analyser.frequencyBinCount)
+  analyser.getByteFrequencyData(bins)
+  ctx.clearRect(0, 0, w, h)
+  const barCount = 48
+  const gap = 1
+  const bw = (w - gap * (barCount - 1)) / barCount
+  const primary = getComputedStyle(document.documentElement).getPropertyValue('--v-theme-primary')
+  const onBg = getComputedStyle(document.documentElement).getPropertyValue(
+    '--v-theme-on-surface-variant'
+  )
+  for (let i = 0; i < barCount; i++) {
+    // Skip the DC bin, spread the rest evenly across the spectrum.
+    const idx = 1 + Math.floor((i / barCount) * (bins.length - 2))
+    const v = bins[idx] / 255
+    const bh = Math.max(2, v * h)
+    ctx.fillStyle = `rgba(${primary || '79,124,255'}, ${0.55 + v * 0.45})`
+    ctx.fillRect(i * (bw + gap), h - bh, bw, bh)
+  }
+  void onBg
+  rafId = requestAnimationFrame(drawSpectrum)
+}
+
+function startSpectrum(): void {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(drawSpectrum)
+}
+
+function stopSpectrum(): void {
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  }
+  const canvas = spectrumCanvas.value
+  if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+}
+
 // -- page menu open/close (mirrors the aidj main page) ------------------------
 function toggleMenu(): void {
   if (menuOpen.value) {
@@ -259,6 +496,10 @@ function onMenuKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') menuClose()
 }
 
+watch(menuStep, (step) => {
+  if (step === 'speed') customRate.value = String(playbackRate.value)
+})
+
 watch(menuOpen, (open) => {
   menuCleanup?.()
   menuCleanup = null
@@ -281,6 +522,9 @@ function startPolling(): void {
   void pollMode()
   void pollState()
   void pollVolbal()
+  void pollWebRemote()
+  void loadPlayerPrefs()
+  if (spectrumOn.value) startSpectrum()
   if (window.cockpit?.on && !modeUnsub) {
     modeUnsub = window.cockpit.on('cockpit:aidj-mode', (event: unknown) => {
       const ev = event as Record<string, unknown>
@@ -300,7 +544,13 @@ function stopPolling(): void {
   }
   modeUnsub?.()
   modeUnsub = null
+  stopSpectrum()
 }
+
+watch(spectrumOn, (on) => {
+  if (on) startSpectrum()
+  else stopSpectrum()
+})
 
 onMounted(() => startPolling())
 onActivated(() => startPolling())
@@ -330,10 +580,60 @@ const hasTrack = computed(() => track.value !== '')
               <span>{{ t('aidj.player.queue', '播放队列') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
+            <div class="menu-item" @click="menuStep = 'speed'">
+              <v-icon size="18">mdi-speedometer</v-icon>
+              <span>{{ t('aidj.player.speed', '倍速') }}</span>
+              <span class="ml-auto text-caption text-medium-emphasis">{{
+                `${playbackRate.toFixed(2)}x`
+              }}</span>
+              <v-icon size="16">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item" @click="menuStep = 'sleep'">
+              <v-icon size="18">mdi-bed-clock</v-icon>
+              <span>{{ t('aidj.player.sleep_timer', '睡眠定时') }}</span>
+              <span
+                v-if="sleepRemainMs != null"
+                class="ml-auto text-caption text-primary tabular-nums"
+                >{{ formatSleep(sleepRemainMs) }}</span
+              >
+              <v-icon size="16">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item" @click="menuStep = 'eq'">
+              <v-icon size="18">mdi-chart-bell-curve-cumulative</v-icon>
+              <span>{{ t('aidj.player.eq', '均衡器') }}</span>
+              <span class="ml-auto text-caption text-medium-emphasis">{{ eqPreset }}</span>
+              <v-icon size="16">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item">
+              <v-icon size="18">mdi-chart-bar</v-icon>
+              <span>{{ t('aidj.player.spectrum', '频谱') }}</span>
+              <v-switch
+                v-model="spectrumOn"
+                :disabled="mode !== 'web'"
+                size="x-small"
+                density="compact"
+                color="primary"
+                hide-details
+                class="ml-auto"
+              />
+            </div>
+            <div class="menu-item" @click="menuStep = 'remote'">
+              <v-icon size="18">mdi-access-point-network</v-icon>
+              <span>{{ t('aidj.player.web_remote', '局域网遥控') }}</span>
+              <v-chip
+                v-if="webRemoteRunning"
+                variant="flat"
+                color="success"
+                class="ml-auto menu-chip"
+              >
+                {{ webRemotePort || '' }}
+              </v-chip>
+              <v-icon size="16">mdi-chevron-right</v-icon>
+            </div>
             <div class="menu-item is-static">
               <v-icon size="18">mdi-playback-speed</v-icon>
               <span>{{ t('aidj.player.backend', '播放后端') }}</span>
-              <v-chip size="x-small" variant="flat" class="ml-auto">
+              <v-chip variant="flat" class="ml-auto menu-chip">
                 {{
                   mode === 'web'
                     ? t('aidj.player_mode.web', '内置播放器')
@@ -389,6 +689,176 @@ const hasTrack = computed(() => track.value !== '')
                   :color="i === queueIndex ? 'primary' : undefined"
                 />
                 <span class="text-body-2 text-truncate" :title="name">{{ name }}</span>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="menuStep === 'speed'">
+            <div class="menu-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{ submenuTitle('speed') }}</span>
+            </div>
+            <div class="menu-grid">
+              <v-btn
+                v-for="rate in rateItems"
+                :key="rate"
+                variant="tonal"
+                class="menu-grid-item"
+                :color="Math.abs(playbackRate - rate) < 0.001 ? 'primary' : undefined"
+                @click="setRate(rate)"
+              >
+                {{ `${rate}x` }}
+              </v-btn>
+            </div>
+            <div class="menu-scroll pa-2 d-flex flex-column ga-2">
+              <div class="d-flex align-center ga-2">
+                <v-text-field
+                  v-model="customRate"
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="custom-rate-field"
+                  :placeholder="t('aidj.player.custom_rate', '自定义倍速')"
+                  @keyup.enter="applyCustomRate"
+                />
+                <v-btn
+                  variant="tonal"
+                  :title="t('aidj.player.custom_rate_hint', '任意正数，>16 为静音快进')"
+                  @click="applyCustomRate"
+                >
+                  {{ t('aidj.player.apply', '应用') }}
+                </v-btn>
+              </div>
+              <div class="text-caption text-medium-emphasis">
+                {{ t('aidj.player.custom_rate_hint', '任意正数，>16 为静音快进') }}
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="menuStep === 'sleep'">
+            <div class="menu-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{ submenuTitle('sleep') }}</span>
+            </div>
+            <div class="menu-scroll pa-2 d-flex flex-column ga-2">
+              <div v-if="sleepRemainMs != null" class="text-caption text-primary text-center">
+                {{
+                  tt('aidj.player.sleep_remaining', { t: formatSleep(sleepRemainMs) }, '剩余 {t}')
+                }}
+              </div>
+              <div class="menu-grid">
+                <v-btn
+                  v-for="m in sleepItems"
+                  :key="m"
+                  variant="tonal"
+                  class="menu-grid-item"
+                  @click="setSleep(m)"
+                >
+                  {{ m }}
+                </v-btn>
+              </div>
+              <v-btn
+                variant="text"
+                color="error"
+                :disabled="sleepRemainMs == null"
+                @click="setSleep(0)"
+              >
+                {{ t('aidj.player.sleep_off', '取消定时') }}
+              </v-btn>
+            </div>
+          </template>
+
+          <template v-else-if="menuStep === 'eq'">
+            <div class="menu-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{ submenuTitle('eq') }}</span>
+            </div>
+            <div class="menu-grid">
+              <v-btn
+                v-for="p in eqPresetItems"
+                :key="p"
+                variant="tonal"
+                class="menu-grid-item"
+                :color="eqPreset === p ? 'primary' : undefined"
+                @click="setEQ(p)"
+              >
+                {{ t(`aidj.player.eq_${p}`, p) }}
+              </v-btn>
+            </div>
+          </template>
+
+          <template v-else-if="menuStep === 'remote'">
+            <div class="menu-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('aidj.sessions.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{ submenuTitle('remote') }}</span>
+            </div>
+            <div class="menu-scroll pa-2 d-flex flex-column ga-2">
+              <div class="text-caption text-medium-emphasis">
+                {{
+                  t(
+                    'aidj.player.web_remote_hint',
+                    '在手机或同局域网设备的浏览器打开服务器地址，即可查看歌曲/封面并控制播放。'
+                  )
+                }}
+              </div>
+              <v-btn
+                variant="tonal"
+                :color="webRemoteRunning ? 'error' : 'primary'"
+                :prepend-icon="
+                  webRemoteRunning ? 'mdi-stop-circle-outline' : 'mdi-play-circle-outline'
+                "
+                @click="toggleWebRemote"
+              >
+                {{
+                  webRemoteRunning
+                    ? t('aidj.player.web_remote_stop', '停止遥控服务器')
+                    : t('aidj.player.web_remote_start', '启动遥控服务器')
+                }}
+              </v-btn>
+              <div v-if="webRemoteRunning" class="text-body-2">
+                <a
+                  :href="`http://localhost:${webRemotePort}`"
+                  target="_blank"
+                  rel="noopener"
+                  class="link"
+                >
+                  http://localhost:{{ webRemotePort }}
+                </a>
               </div>
             </div>
           </template>
@@ -462,57 +932,102 @@ const hasTrack = computed(() => track.value !== '')
       </div>
     </div>
 
-    <!-- bottom bar: volbal cycle (left) + volume icon (right) — mirrors aidj.continuous -->
-    <div class="volume-footer d-flex align-center justify-space-between px-4 py-2">
-      <v-chip
-        variant="flat"
-        class="volbal-chip"
-        :class="{ 'is-on': volbal.enabled }"
-        :title="t('aidj.player.volbal_hint', '点击切换响度平衡（off → LUFS → RMS）')"
-        @click="cycleVolbal"
-      >
-        <v-icon start size="18">mdi-gauge</v-icon>
-        <span class="volbal-value">{{ volbalLabel() }}</span>
-      </v-chip>
+    <!-- spectrum strip (web mode + spectrum on) -->
+    <div v-if="spectrumOn && mode === 'web'" class="spectrum-wrap">
+      <canvas ref="spectrumCanvas" class="spectrum-canvas" width="560" height="44" />
+    </div>
 
-      <v-menu v-model="volumeMenu" :close-on-content-click="false" offset="8">
-        <template #activator="{ props: mp }">
-          <v-btn
-            v-bind="mp"
-            icon
-            variant="flat"
-            class="volume-fab"
-            :title="t('aidj.volume.desc', '音量')"
-          >
-            <v-icon
-              :icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
-            />
-          </v-btn>
-        </template>
-        <v-card width="240" rounded="lg">
-          <v-card-text class="pa-4">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-caption text-medium-emphasis">
-                {{ t('aidj.player.volume', '音量') }}
-              </span>
-              <span class="text-body-2 tabular-nums font-weight-medium">{{ tmpVolume }}%</span>
-            </div>
-            <v-slider
-              :model-value="tmpVolume"
-              :min="0"
-              :max="100"
-              :step="1"
-              color="primary"
-              thumb-label
-              @update:model-value="onVolumeChanging($event as number)"
-              @end="commitVolume(tmpVolume)"
-            />
-            <div class="text-caption text-medium-emphasis">
-              {{ t('aidj.player.volume_hint', '松手后重新校准响度基准') }}
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-menu>
+    <!-- bottom bar: volbal cycle + crossfade (left) + volume icon (right) — mirrors aidj.continuous -->
+    <div class="volume-footer d-flex align-center justify-space-between px-4 py-2">
+      <div class="d-flex align-center ga-2">
+        <v-chip
+          variant="flat"
+          class="volbal-chip"
+          :class="{ 'is-on': volbal.enabled }"
+          :title="t('aidj.player.volbal_hint', '点击切换响度平衡（off → LUFS → RMS）')"
+          @click="cycleVolbal"
+        >
+          <v-icon start size="18">mdi-gauge</v-icon>
+          <span class="volbal-value">{{ volbalLabel() }}</span>
+        </v-chip>
+
+        <v-chip
+          variant="flat"
+          class="volbal-chip"
+          :class="{ 'is-on': crossfade }"
+          :disabled="mode !== 'web'"
+          :title="t('aidj.player.crossfade_hint', '点击切换曲间淡入淡出')"
+          @click="toggleCrossfade"
+        >
+          <v-icon start size="18">mdi-transition-masked</v-icon>
+          <span class="volbal-value">{{ t('aidj.player.crossfade', '淡入淡出') }}</span>
+        </v-chip>
+      </div>
+
+      <div class="d-flex align-center ga-2">
+        <v-btn
+          icon
+          variant="flat"
+          class="ab-loop-fab"
+          :class="{ 'is-on': loopA != null }"
+          :disabled="mode !== 'web'"
+          :title="t('aidj.player.ab_hint_a', '在当前进度设置循环起点 A，再次点击清除循环')"
+          @click="toggleAbloop('a')"
+        >
+          <span class="ab-letter">A</span>
+        </v-btn>
+        <v-btn
+          icon
+          variant="flat"
+          class="ab-loop-fab"
+          :class="{ 'is-on': loopB != null }"
+          :disabled="mode !== 'web'"
+          :title="t('aidj.player.ab_hint_b', '在当前进度设置循环终点 B，再次点击清除循环')"
+          @click="toggleAbloop('b')"
+        >
+          <span class="ab-letter">B</span>
+        </v-btn>
+
+        <v-menu v-model="volumeMenu" :close-on-content-click="false" offset="8">
+          <template #activator="{ props: mp }">
+            <v-btn
+              v-bind="mp"
+              icon
+              variant="flat"
+              class="volume-fab"
+              :title="t('aidj.volume.desc', '音量')"
+            >
+              <v-icon
+                :icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
+                size="20"
+              />
+            </v-btn>
+          </template>
+          <v-card width="240" rounded="lg">
+            <v-card-text class="pa-4">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <span class="text-caption text-medium-emphasis">
+                  {{ t('aidj.player.volume', '音量') }}
+                </span>
+                <span class="text-body-2 tabular-nums font-weight-medium">{{ tmpVolume }}%</span>
+              </div>
+              <v-slider
+                :model-value="tmpVolume"
+                :min="0"
+                :max="100"
+                :step="1"
+                color="primary"
+                thumb-label
+                @update:model-value="onVolumeChanging($event as number)"
+                @end="commitVolume(tmpVolume)"
+              />
+              <div class="text-caption text-medium-emphasis">
+                {{ t('aidj.player.volume_hint', '松手后重新校准响度基准') }}
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-menu>
+      </div>
     </div>
   </div>
 </template>
@@ -650,9 +1165,10 @@ const hasTrack = computed(() => track.value !== '')
   flex-shrink: 0;
 }
 .volbal-chip {
-  height: 44px;
-  padding-inline: 14px;
-  font-size: 0.9rem;
+  height: 34px;
+  padding-block: 2px;
+  padding-inline: 12px;
+  font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   color: rgb(var(--v-theme-on-surface-variant));
   background: rgba(var(--v-theme-surface-bright), 0.1);
@@ -666,10 +1182,92 @@ const hasTrack = computed(() => track.value !== '')
   gap: 6px;
 }
 .volume-fab {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-surface-bright), 0.1);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+}
+.ab-loop-fab {
+  width: 34px;
+  height: 34px;
+  color: rgb(var(--v-theme-on-surface-variant));
+  background: rgba(var(--v-theme-surface-bright), 0.1);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+}
+.ab-loop-fab.is-on {
+  color: rgb(var(--v-theme-primary));
+  border: 1px solid rgba(var(--v-theme-primary), 0.45);
+}
+.ab-loop-fab.is-on:not(:disabled) {
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+.ab-loop-fab:disabled {
+  opacity: 0.45;
+}
+.ab-letter {
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.menu-chip {
+  min-height: 24px;
+  padding-block: 4px;
+}
+
+/* M4: submenu grid + spectrum */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px;
+}
+.menu-grid-item {
+  text-transform: none;
+}
+.flex-1-1 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Slim the custom-rate input down to match the adjacent button height. */
+.custom-rate-field {
+  flex: 0 1 auto;
+  width: 96px;
+  min-width: 96px;
+}
+.custom-rate-field :deep(.v-field) {
+  --v-field-control-height: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+.custom-rate-field :deep(.v-field__input) {
+  min-height: 32px;
+  padding-block: 0;
+  font-size: 0.85rem;
+}
+.custom-rate-field :deep(.v-field__outline) {
+  --v-field-border-width: 1px;
+}
+.link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  word-break: break-all;
+}
+.spectrum-wrap {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 2px 12px 0;
+  pointer-events: none;
+}
+.spectrum-canvas {
+  width: 100%;
+  max-width: 560px;
+  height: 44px;
+  opacity: 0.85;
+}
+.volbal-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 </style>
