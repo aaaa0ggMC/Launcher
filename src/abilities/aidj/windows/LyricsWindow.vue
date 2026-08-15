@@ -127,23 +127,41 @@ function parseLrc(lrc: string): LyricLine[] {
     if (!line.match(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/)) continue
     const parts = line.split(/(\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\])/g)
     const chunks: LyricChunk[] = []
+    // Leading timestamps that appear BEFORE any text — a repeated lyric such as
+    // `[02:53][02:28][01:08][00:42]敕勒川…` is sung multiple times, so each tag
+    // must produce its own line (LRC spec). Interleaved tags (karaoke) don't
+    // reach here because a text segment is flushed before them.
+    const leadingTimes: number[] = []
     let pendingTime = 0
     let pendingText = ''
     const flush = (): void => {
       if (pendingText) chunks.push({ text: pendingText, time: pendingTime + offset })
       pendingText = ''
     }
+    const parseTag = (m: RegExpMatchArray): number => {
+      const frac = Number(m[3] ?? '0')
+      return Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac)
+    }
     for (const part of parts) {
       const m = part.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]$/)
       if (m) {
         flush()
-        const frac = Number(m[3] ?? '0')
-        pendingTime = Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac)
+        const t = parseTag(m)
+        if (!chunks.length) leadingTimes.push(t + offset)
+        pendingTime = t
       } else {
         pendingText += part
       }
     }
     flush()
+    if (chunks.length === 1 && leadingTimes.length > 1) {
+      // `[02:53][02:28][01:08][00:42]句` — the same text repeats at each leading
+      // tag; expand to one line per tag so the lyric re-lights on each chorus.
+      for (const t of leadingTimes) {
+        lines.push({ time: t, text: chunks[0].text, chunks: [{ text: chunks[0].text, time: t }] })
+      }
+      continue
+    }
     if (!chunks.length) {
       lines.push({ time: pendingTime + offset, text: '', chunks: [] })
     } else {

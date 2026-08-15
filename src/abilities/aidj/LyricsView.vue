@@ -77,25 +77,50 @@ function parseLyrics(lrc: string): LyricLine[] {
     if (!line.match(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/)) continue
     const parts = line.split(/(\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\])/g)
     const chunks: LyricChunk[] = []
+    // Leading timestamps that appear BEFORE any text — a repeated lyric such as
+    // `[02:53][02:28][01:08][00:42]敕勒川…` is sung multiple times, so each tag
+    // must produce its own line (LRC spec). Interleaved tags (karaoke) don't
+    // reach here because a text segment is flushed before them.
+    const leadingTimes: number[] = []
     let pendingTime = 0
     let pendingText = ''
     const flush = (): void => {
-      const text = pendingText.trimStart()
-      if (text) chunks.push({ text, time: pendingTime + offset })
+      // Keep the raw segment text (WITH any leading space — Netease YRC
+      // attaches the inter-word space to the NEXT word, e.g. `[ts]Why[ts] you`;
+      // trimming here would jam the words together). Only the final joined
+      // line is trimmed.
+      if (pendingText) chunks.push({ text: pendingText, time: pendingTime + offset })
       pendingText = ''
     }
     for (const part of parts) {
       const m = part.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]$/)
       if (m) {
         flush()
-        pendingTime = parseTimeTag(m)
+        const t = parseTimeTag(m)
+        if (!chunks.length) leadingTimes.push(t + offset)
+        pendingTime = t
       } else {
         pendingText += part
       }
     }
     flush()
     if (!chunks.length) continue
-    lines.push({ time: chunks[0].time, text: chunks.map((c) => c.text).join(''), chunks })
+    if (chunks.length === 1 && leadingTimes.length > 1) {
+      // `[02:53][02:28][01:08][00:42]句` — the same text repeats at each leading
+      // tag; expand to one line per tag so the lyric re-lights on each chorus.
+      for (const t of leadingTimes) {
+        lines.push({ time: t, text: chunks[0].text, chunks: [{ text: chunks[0].text, time: t }] })
+      }
+      continue
+    }
+    lines.push({
+      time: chunks[0].time,
+      text: chunks
+        .map((c) => c.text)
+        .join('')
+        .trim(),
+      chunks
+    })
   }
   return lines.sort((a, b) => a.time - b.time)
 }

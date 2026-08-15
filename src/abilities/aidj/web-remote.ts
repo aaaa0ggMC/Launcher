@@ -166,7 +166,14 @@ async function handleRequest(
         if (typeof value === 'number') ok = await backend.seek(value)
         break
       case 'volume':
-        if (typeof value === 'number') ok = await backend.setVolume(Math.max(0, Math.min(1, value)))
+        if (typeof value === 'number') {
+          const v = Math.max(0, Math.min(1, value))
+          ok = await backend.setVolume(v)
+          // Mirror the player page: a manual volume change becomes the new
+          // loudness-balance base (rebase), so volbal doesn't overwrite it on
+          // the next auto-advance (applyVolbal re-targets relative to base).
+          if (backend instanceof WebPlayerBackend) await backend.rebase(v)
+        }
         break
       case 'rate':
         if (typeof value === 'number' && value > 0 && backend instanceof WebPlayerBackend) {
@@ -295,8 +302,10 @@ const REMOTE_PAGE = `<!DOCTYPE html>
   .lyric-scroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column;
     align-items: center; scrollbar-width: none; }
   .lyric-scroll::-webkit-scrollbar { display: none; }
+  .lyric-scroll > .lyric-line { width: 100%; box-sizing: border-box; flex-shrink: 0; }
   .lyric-line { font-size: 19px; font-weight: 500; line-height: 1.5; color: rgba(230,233,239,.5);
-    text-align: center; padding: 7px 18px; max-width: 100%; transition: color .2s, font-size .2s, opacity .2s; }
+    text-align: center; padding: 7px 18px; max-width: 100%; overflow-wrap: break-word;
+    transition: color .2s, font-size .2s, opacity .2s; }
   .lyric-line.is-current { font-size: 24px; font-weight: 700; color: #e6e9ef; }
   .lyric-line.is-current .kr { background-image: linear-gradient(90deg, #4f7cff var(--kfill),
     rgba(230,233,239,.92) var(--kfill)); -webkit-background-clip: text; background-clip: text;
@@ -365,7 +374,12 @@ const REMOTE_PAGE = `<!DOCTYPE html>
   </div>
 <script>
 (function(){
-  var seeking = false;
+  var seeking = false;       // seek drag / awaiting server confirmation
+  var seekTarget = -1;       // last commanded position (ms); -1 = none pending
+  var seekTimer = null;      // fallback: force-release the guard if no confirm
+  var volSeeking = false;    // volume drag / awaiting server confirmation
+  var volTarget = -1;        // last commanded volume (0-1); -1 = none pending
+  var volTimer = null;       // fallback: force-release the guard if no confirm
   var state = null;
   var rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
   var svgPause = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>';
@@ -383,15 +397,31 @@ const REMOTE_PAGE = `<!DOCTYPE html>
       if(off){ offset=Number(off[1]); continue; }
       if(!line.match(/\\[\\d{1,2}:\\d{2}(?:[.:]\\d{1,3})?\\]/)) continue;
       var parts=line.split(/(\\[\\d{1,2}:\\d{2}(?:[.:]\\d{1,3})?\\])/g);
-      var chunks=[]; var pendingTime=0; var pendingText='';
+      var chunks=[]; var leadingTimes=[]; var pendingTime=0; var pendingText='';
+      // Keep the raw segment text WITH any leading space (Netease YRC attaches
+      // the inter-word space to the next word); only the joined line is trimmed.
+      // leadingTimes collects tags that appear BEFORE any text: a repeated lyric
+      // like [02:53][02:28][01:08][00:42]句 is sung multiple times, so each tag
+      // must produce its own line (LRC spec). Interleaved karaoke tags don't get
+      // collected because a text segment is flushed before them.
       for(var j=0;j<parts.length;j++){
         var mm=parts[j].match(/^\\[(\\d{1,2}):(\\d{2})(?:[.:](\\d{1,3}))?\\]$/);
-        if(mm){ if(pendingText.trim()) chunks.push({text:pendingText.trim(),time:pendingTime+offset});
-          pendingTime=parseTimeTag(mm); pendingText=''; }
+        if(mm){ if(pendingText) chunks.push({text:pendingText,time:pendingTime+offset});
+          var t=parseTimeTag(mm);
+          if(!chunks.length) leadingTimes.push(t+offset);
+          pendingTime=t; pendingText=''; }
         else pendingText+=parts[j];
       }
-      if(pendingText.trim()) chunks.push({text:pendingText.trim(),time:pendingTime+offset});
-      if(chunks.length) lines.push({time:chunks[0].time,text:chunks.map(function(c){return c.text}).join(''),chunks:chunks});
+      if(pendingText) chunks.push({text:pendingText,time:pendingTime+offset});
+      if(chunks.length===1 && leadingTimes.length>1){
+        for(var k=0;k<leadingTimes.length;k++){
+          lines.push({time:leadingTimes[k],text:chunks[0].text,
+            chunks:[{text:chunks[0].text,time:leadingTimes[k]}]});
+        }
+        continue;
+      }
+      if(chunks.length) lines.push({time:chunks[0].time,
+        text:chunks.map(function(c){return c.text}).join('').trim(),chunks:chunks});
     }
     lines.sort(function(a,b){return a.time-b.time});
     return lines;
@@ -488,10 +518,27 @@ const REMOTE_PAGE = `<!DOCTYPE html>
     else { cover.style.display='none'; ph.style.display='flex'; bg.style.backgroundImage=''; }
     var len=s.lengthMs||0;
     var seek=document.getElementById('seek'); seek.max=len;
-    if(!seeking) seek.value=Math.min(s.positionMs||0,len);
+    var pos=s.positionMs||0;
+    // While the user drags (or a seek command hasn't been confirmed by the
+    // server yet), keep the slider where the user left it — a stale in-flight
+    // poll would otherwise snap it back to the pre-seek position. The guard
+    // drops once a poll returns a position near the commanded target.
+    if(seekTarget>=0 && Math.abs(pos-seekTarget)<800){
+      seeking=false; seekTarget=-1;
+      if(seekTimer){ clearTimeout(seekTimer); seekTimer=null; }
+    }
+    if(!seeking) seek.value=Math.min(pos,len);
     document.getElementById('len').textContent=fmt(len);
-    if(s.volume!=null){ document.getElementById('vol').value=s.volume;
-      document.getElementById('volv').textContent=Math.round(s.volume*100)+'%'; }
+    if(s.volume!=null){
+      var volEl=document.getElementById('vol');
+      // Same confirmation logic for volume.
+      if(volTarget>=0 && Math.abs(s.volume-volTarget)<0.01){
+        volSeeking=false; volTarget=-1;
+        if(volTimer){ clearTimeout(volTimer); volTimer=null; }
+      }
+      if(!volSeeking){ volEl.value=s.volume;
+        document.getElementById('volv').textContent=Math.round(s.volume*100)+'%'; }
+    }
     var rate=s.playbackRate||1;
     var rb=document.querySelectorAll('#rates button[data-rate]');
     for(var i=0;i<rb.length;i++){
@@ -538,11 +585,28 @@ const REMOTE_PAGE = `<!DOCTYPE html>
   document.getElementById('btnNext').onclick=function(){ send('next'); };
   document.getElementById('btnToggle').onclick=function(){ send('toggle'); };
   var seek=document.getElementById('seek');
-  seek.addEventListener('input',function(){ seeking=true; });
-  seek.addEventListener('change',function(){ seeking=false; send('seek',Number(seek.value)); });
+  seek.addEventListener('input',function(){ seeking=true; seekTarget=-1; });
+  seek.addEventListener('change',function(){
+    seekTarget=Number(seek.value);
+    if(seekTimer){ clearTimeout(seekTimer); }
+    // Safety net: if the server never confirms (e.g. paused/stale state),
+    // release the guard so the next poll can re-anchor the slider.
+    seekTimer=setTimeout(function(){ seeking=false; seekTarget=-1; seekTimer=null; }, 1200);
+    send('seek',seekTarget);
+  });
   var vol=document.getElementById('vol');
-  vol.addEventListener('input',function(){ document.getElementById('volv').textContent=Math.round(vol.value*100)+'%'; });
-  vol.addEventListener('change',function(){ send('volume',Number(vol.value)); });
+  vol.addEventListener('input',function(){
+    volSeeking=true; volTarget=-1;
+    document.getElementById('volv').textContent=Math.round(vol.value*100)+'%';
+  });
+  vol.addEventListener('change',function(){
+    volTarget=Number(vol.value);
+    if(volTimer){ clearTimeout(volTimer); }
+    volTimer=setTimeout(function(){ volSeeking=false; volTarget=-1; volTimer=null; }, 1200);
+    // Volume only POSTs on release, so the server-side rebase fires once per
+    // drag — never during the drag itself.
+    send('volume',volTarget);
+  });
   window.addEventListener('resize',function(){ repad(); rebuildLyrics(); updateLyrics(); });
 
   setInterval(poll,500); poll();
