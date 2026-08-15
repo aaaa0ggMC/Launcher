@@ -1992,7 +1992,9 @@ const commands: CommandSpec[] = [
     run: async (ctx) => {
       const name = String(ctx.named.name ?? '').trim()
       if (!name) return { ok: false, error: '需要 --name' }
-      const raw = String(ctx.named.gains ?? '')
+      // UI 直接传数组、CLI 传 JSON 字符串——两种形态都兼容
+      const gainsArg = ctx.named.gains
+      const raw = typeof gainsArg === 'string' ? gainsArg : JSON.stringify(gainsArg ?? [])
       let gains: number[]
       const range = await getEqGainRange()
       try {
@@ -2089,7 +2091,11 @@ const commands: CommandSpec[] = [
       let gains: number[]
       const range = await getEqGainRange()
       try {
-        const parsed = JSON.parse(String(ctx.named.gains))
+        // UI 传数组、CLI 传 JSON 字符串——两种形态都兼容
+        const gainsArg = ctx.named.gains
+        const parsed = JSON.parse(
+          typeof gainsArg === 'string' ? gainsArg : JSON.stringify(gainsArg)
+        )
         if (!Array.isArray(parsed) || !parsed.length) throw new Error('not array')
         gains = parsed
           .slice(0, EQ_BAND_COUNT)
