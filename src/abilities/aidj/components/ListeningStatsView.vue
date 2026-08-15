@@ -39,20 +39,46 @@ interface Period {
 }
 
 const DAY = 86_400_000
-/** 周期行高（与 CSS 保持一致，用于滚动位置估算） */
-const ROW_H = 84
+/** 行高兜底估算（cells 换行后高度不固定，实际行高由 ref 实测） */
+const ROW_FALLBACK = 70
 /** 已加载周期数上限（滑动窗口：超出即卸载远端） */
 const MAX_LOADED = 96
 /** 每次滚动加载的批量（一次 range 多读一点，用户查看是时间线性的） */
 const BATCH = { day: 31, month: 12, year: 6 } as const
 
+/** 粒度记忆（localStorage，下次打开恢复） */
+const GRAN_KEY = 'cockpit-aidj-stats-gran'
+
 const gran = ref<Gran>('day')
-const periods = ref<Period[]>([]) // 降序：最新在前
+const periods = ref<Period[]>([]) // 升序：最旧在上、最新在下
 const loading = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
 const hover = ref<{ x: number; y: number; period: string; cell: HeatCell } | null>(null)
 const jumpInput = ref('')
 const anchorLabel = ref('')
+/** 每周期实测行高（cells 自动换行后高度随容器宽度变化） */
+const rowHeights = new Map<string, number>()
+
+/** v-for 函数 ref：挂载/更新时记录该周期行高。 */
+function onRowRef(el: unknown, key: string): void {
+  if (el instanceof HTMLElement) rowHeights.set(key, el.offsetHeight)
+}
+
+function rowHeight(key: string): number {
+  return rowHeights.get(key) ?? ROW_FALLBACK
+}
+
+/** 前 idx 个周期累计高度（滚动定位 / 补偿用）。 */
+function heightBefore(idx: number): number {
+  let h = 0
+  for (let i = 0; i < idx && i < periods.value.length; i++) h += rowHeight(periods.value[i].key)
+  return h
+}
+
+/** 删除一批周期的行高记录（prune 卸载时清理）。 */
+function dropRowHeights(ps: Period[]): void {
+  for (const p of ps) rowHeights.delete(p.key)
+}
 
 // ---------------------------------------------------------------------------
 // 本地时区的周期数学（CSV 行是 UTC 小时起点，展示按本地日/月/年聚合）
@@ -233,7 +259,7 @@ async function reload(anchor?: number): Promise<void> {
             ? monthStartOf(targetTs)
             : yearStartOf(targetTs)
       const idx = periods.value.findIndex((p) => p.start >= targetStart)
-      el.scrollTop = Math.max(0, idx < 0 ? 0 : idx * ROW_H)
+      el.scrollTop = idx <= 0 ? 0 : heightBefore(idx)
       updateAnchor()
     }
   } finally {
@@ -288,21 +314,26 @@ async function loadNewer(): Promise<void> {
   }
 }
 
-/** 滑动窗口卸载：超出上限时裁掉离视口远的一端。 */
+/** 滑动窗口卸载：超出上限时裁掉离视口远的一端（按实测行高补偿滚动位置）。 */
 function prune(): void {
   const el = scrollEl.value
   if (periods.value.length <= MAX_LOADED) return
   const excess = periods.value.length - MAX_LOADED
   if (!el) {
+    dropRowHeights(periods.value.slice(MAX_LOADED))
     periods.value.length = MAX_LOADED
     return
   }
   if (el.scrollTop + el.clientHeight / 2 > el.scrollHeight / 2) {
-    // 视口靠下（接近最新）→ 裁掉顶部（最旧），补偿 scrollTop
+    // 视口靠下（接近最新）→ 裁掉顶部（最旧），按被裁行实际高度补偿 scrollTop
+    const removed = periods.value.slice(0, excess)
+    const removedH = removed.reduce((s, p) => s + rowHeight(p.key), 0)
+    dropRowHeights(removed)
     periods.value.splice(0, excess)
-    el.scrollTop = Math.max(0, el.scrollTop - excess * ROW_H)
+    el.scrollTop = Math.max(0, el.scrollTop - removedH)
   } else {
     // 视口靠上（在看历史）→ 裁掉底部（最新），无需补偿
+    dropRowHeights(periods.value.slice(MAX_LOADED))
     periods.value.length = MAX_LOADED
   }
 }
@@ -317,11 +348,23 @@ function onScroll(): void {
   updateAnchor()
 }
 
-/** 滚动时自动更新时间起点（顶部可见周期）。 */
+/** 滚动时自动更新时间起点（顶部可见周期，按实测行高定位）。 */
 function updateAnchor(): void {
   const el = scrollEl.value
   if (!el || !periods.value.length) return
-  const idx = Math.min(Math.floor(el.scrollTop / ROW_H), periods.value.length - 1)
+  const top = el.scrollTop
+  let acc = 0
+  let idx = 0
+  for (let i = 0; i < periods.value.length; i++) {
+    const h = rowHeight(periods.value[i].key)
+    if (acc + h > top) {
+      idx = i
+      break
+    }
+    acc += h
+    idx = i + 1
+  }
+  idx = Math.min(idx, periods.value.length - 1)
   anchorLabel.value = periods.value[idx].label
 }
 
@@ -334,10 +377,28 @@ function coveragePct(cell: HeatCell): number {
   return Math.min(100, Math.round((cell.minutes / cell.max) * 100))
 }
 
+/** 读取 --v-theme-* CSS 变量为 [r,g,b]（Vuetify 变量是逗号分隔三元组）。 */
+function themeRgb(name: string): [number, number, number] {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const parts = v.split(',').map((s) => Number(s.trim()))
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    return [parts[0], parts[1], parts[2]]
+  }
+  return [103, 80, 164] // 兜底（MD3 默认紫）
+}
+
+/** 格子着色：secondary → primary 双色插值（低覆盖偏灰蓝、高覆盖过渡到主题青），
+ *  透明度随 coverage 加深——跟随当前主题（--v-theme-*），非硬编码。 */
 function cellBg(cell: HeatCell): string {
-  const cov = cell.max > 0 ? Math.min(1, cell.minutes / cell.max) : 0
   if (cell.minutes <= 0) return 'rgba(128,128,128,0.07)'
-  return `rgba(var(--v-theme-primary), ${(0.08 + cov * 0.82).toFixed(3)})`
+  const cov = cell.max > 0 ? Math.min(1, cell.minutes / cell.max) : 0
+  const [sr, sg, sb] = themeRgb('--v-theme-secondary')
+  const [pr, pg, pb] = themeRgb('--v-theme-primary')
+  const r = Math.round(sr + (pr - sr) * cov)
+  const g = Math.round(sg + (pg - sg) * cov)
+  const b = Math.round(sb + (pb - sb) * cov)
+  const a = 0.15 + cov * 0.8
+  return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`
 }
 
 function fmt(mins: number): string {
@@ -373,6 +434,7 @@ function jump(): void {
 }
 
 function onGranChange(): void {
+  localStorage.setItem(GRAN_KEY, gran.value)
   void reload()
 }
 
@@ -382,6 +444,9 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 onMounted(() => {
+  // 记忆用户上次选的粒度（localStorage）
+  const saved = localStorage.getItem(GRAN_KEY)
+  if (saved === 'day' || saved === 'month' || saved === 'year') gran.value = saved
   void reload()
 })
 onBeforeUnmount(() => {
@@ -453,11 +518,19 @@ onBeforeUnmount(() => {
         }}
       </div>
 
-      <div v-for="p in periods" :key="p.key" class="period-row px-4">
+      <div
+        v-for="p in periods"
+        :key="p.key"
+        :ref="(el) => onRowRef(el, p.key)"
+        class="period-row px-4"
+      >
         <div class="period-head d-flex align-center">
           <span class="period-label text-body-2 font-weight-medium">{{ p.label }}</span>
+          <span class="period-total text-caption text-medium-emphasis">{{
+            tt('aidj.stats.total', { n: fmt(p.total) }, '共 ' + fmt(p.total))
+          }}</span>
         </div>
-        <div class="cells-row d-flex ga-px">
+        <div class="cells-row">
           <div
             v-for="(cell, i) in p.cells"
             :key="i"
@@ -469,9 +542,6 @@ onBeforeUnmount(() => {
           >
             <span class="cell-label">{{ cell.label }}</span>
           </div>
-        </div>
-        <div class="period-total text-caption text-medium-emphasis">
-          {{ tt('aidj.stats.total', { n: fmt(p.total) }, '共 ' + fmt(p.total)) }}
         </div>
       </div>
 
@@ -537,31 +607,29 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 .period-row {
-  height: 84px; /* 与 ROW_H 保持一致：head 24 + cells 26 + total 20 + padding 12 + 2px 行距 */
+  /* 高度不固定：cells 自动换行后随容器宽度变化，滚动定位用 ref 实测 */
   display: flex;
   flex-direction: column;
   padding-top: 6px;
   padding-bottom: 6px;
+  gap: 4px;
 }
 .period-head {
-  height: 24px;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 .cells-row {
-  height: 26px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18px, 26px));
   gap: 3px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  justify-content: center;
 }
 .heat-cell {
-  flex: none;
-  width: 26px;
-  height: 26px;
   aspect-ratio: 1 / 1;
+  min-height: 18px;
   border-radius: 3px;
   display: flex;
   align-items: flex-end;
@@ -582,8 +650,7 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 .period-total {
-  height: 20px;
-  line-height: 20px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 .stats-tooltip {
