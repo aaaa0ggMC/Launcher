@@ -444,150 +444,150 @@ defineExpose({ toMarkdown })
       <ChatView ref="chatRef" />
 
       <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
-      <button class="page-menu-handle" @click="toggleMenu">
-        <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-      </button>
+        <button class="page-menu-handle" @click="toggleMenu">
+          <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+        </button>
 
-      <Transition name="menu-pop">
-        <div v-if="menuOpen" class="page-menu-pop" :class="{ 'is-wide': menuStep === 'freq' }">
-          <template v-if="menuStep === 'main'">
-            <div class="menu-item" @click="newChat">
-              <v-icon size="18">mdi-message-plus-outline</v-icon>
-              <span>{{ t('aidj.subpage.newchat', '新建会话') }}</span>
-            </div>
-            <div class="menu-item" @click="enterSessions">
-              <v-icon size="18">mdi-history</v-icon>
-              <span>{{ t('aidj.subpage.sessions', '会话记录') }}</span>
-              <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
-            </div>
-            <div class="menu-item" @click="menuStep = 'freq'">
-              <v-icon size="18">mdi-poll</v-icon>
-              <span>{{ t('aidj.subpage.freq', '歌曲频率') }}</span>
-              <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
-            </div>
-            <div class="menu-item" @click="statsOpen = true">
-              <v-icon size="18">mdi-calendar-heat-map</v-icon>
-              <span>{{ t('aidj.subpage.listening_stats', '听歌时长统计') }}</span>
-            </div>
-            <div class="menu-item" @click="updateMetadata">
-              <v-icon size="18">mdi-database-sync-outline</v-icon>
-              <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
-            </div>
-            <div class="menu-item" @click="toggleLyricsWindow">
-              <v-icon size="18">mdi-music-note-plus</v-icon>
-              <span>{{
-                lyricsOpen
-                  ? t('aidj.lyrics_close', '关闭桌面歌词')
-                  : t('aidj.lyrics_open', '桌面歌词')
-              }}</span>
-              <v-icon v-if="lyricsOpen" size="14" class="ml-auto">mdi-check</v-icon>
-            </div>
-          </template>
-
-          <template v-else-if="menuStep === 'sessions'">
-            <div class="sessions-head d-flex align-center ga-2">
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                :title="t('aidj.sessions.back', '返回')"
-                @click="menuStep = 'main'"
-              >
-                <v-icon size="18">mdi-arrow-left</v-icon>
-              </v-btn>
-              <span class="text-body-2 font-weight-medium">{{
-                t('aidj.subpage.sessions', 'Chat Sessions')
-              }}</span>
-              <v-spacer />
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                :loading="sessionsLoading"
-                :title="t('aidj.sessions.refresh', '刷新')"
-                @click="refreshSessions"
-              >
-                <v-icon size="18">mdi-refresh</v-icon>
-              </v-btn>
-            </div>
-
-            <div class="px-1 pt-1">
-              <v-text-field
-                v-model="search"
-                density="compact"
-                variant="outlined"
-                hide-details
-                :placeholder="t('aidj.sessions.search', '搜索会话…')"
-                prepend-inner-icon="mdi-magnify"
-                clearable
-              />
-            </div>
-
-            <div class="session-count d-flex align-center ga-2 px-1 pt-2 pb-1">
-              <span class="text-caption text-medium-emphasis">{{
-                t('aidj.sessions.count', '会话')
-              }}</span>
-              <v-chip size="x-small" variant="flat">{{ filteredSessions.length }}</v-chip>
-            </div>
-
-            <div class="sessions-scroll">
-              <v-empty-state
-                v-if="!sessionsLoading && filteredSessions.length === 0"
-                icon="mdi-account-search-outline"
-                :title="t('aidj.sessions.empty', '没有会话')"
-                :text="t('aidj.sessions.empty_hint', '在 Chat 中对话后会在这里出现')"
-              />
-              <div v-else class="px-1 pb-1">
-                <template v-for="g in sessionGroups" :key="g.label">
-                  <div class="session-group-label">{{ g.label }}</div>
-                  <div
-                    v-for="s in g.sessions"
-                    :key="s.id"
-                    class="session-item"
-                    :class="{ 'is-active': s.id === currentId }"
-                    @click="openSession(s.id)"
-                    @contextmenu="openSessionCtx($event, s)"
-                  >
-                    <v-icon
-                      size="18"
-                      :icon="
-                        s.pinned
-                          ? 'mdi-pin'
-                          : s.type === 'chat'
-                            ? 'mdi-message-text-outline'
-                            : 'mdi-music-note-outline'
-                      "
-                    />
-                    <div class="min-w-0 flex-grow-1">
-                      <div class="session-title text-truncate">{{ s.title }}</div>
-                      <div class="session-meta">{{ s.messageCount ?? 0 }} 条</div>
-                    </div>
-                  </div>
-                </template>
+        <Transition name="menu-pop">
+          <div v-if="menuOpen" class="page-menu-pop" :class="{ 'is-wide': menuStep === 'freq' }">
+            <template v-if="menuStep === 'main'">
+              <div class="menu-item" @click="newChat">
+                <v-icon size="18">mdi-message-plus-outline</v-icon>
+                <span>{{ t('aidj.subpage.newchat', '新建会话') }}</span>
               </div>
-            </div>
-          </template>
+              <div class="menu-item" @click="enterSessions">
+                <v-icon size="18">mdi-history</v-icon>
+                <span>{{ t('aidj.subpage.sessions', '会话记录') }}</span>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+              <div class="menu-item" @click="menuStep = 'freq'">
+                <v-icon size="18">mdi-poll</v-icon>
+                <span>{{ t('aidj.subpage.freq', '歌曲频率') }}</span>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+              <div class="menu-item" @click="statsOpen = true">
+                <v-icon size="18">mdi-calendar-month</v-icon>
+                <span>{{ t('aidj.subpage.listening_stats', '听歌时长统计') }}</span>
+              </div>
+              <div class="menu-item" @click="updateMetadata">
+                <v-icon size="18">mdi-database-sync-outline</v-icon>
+                <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
+              </div>
+              <div class="menu-item" @click="toggleLyricsWindow">
+                <v-icon size="18">mdi-music-note-plus</v-icon>
+                <span>{{
+                  lyricsOpen
+                    ? t('aidj.lyrics_close', '关闭桌面歌词')
+                    : t('aidj.lyrics_open', '桌面歌词')
+                }}</span>
+                <v-icon v-if="lyricsOpen" size="14" class="ml-auto">mdi-check</v-icon>
+              </div>
+            </template>
 
-          <template v-else-if="menuStep === 'freq'">
-            <div class="sessions-head d-flex align-center ga-2">
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                :title="t('aidj.sessions.back', '返回')"
-                @click="menuStep = 'main'"
-              >
-                <v-icon size="18">mdi-arrow-left</v-icon>
-              </v-btn>
-              <span class="text-body-2 font-weight-medium">{{
-                t('aidj.subpage.freq', '歌曲频率')
-              }}</span>
-            </div>
-            <FreqList />
-          </template>
-        </div>
-      </Transition>
-    </div>
+            <template v-else-if="menuStep === 'sessions'">
+              <div class="sessions-head d-flex align-center ga-2">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.sessions.back', '返回')"
+                  @click="menuStep = 'main'"
+                >
+                  <v-icon size="18">mdi-arrow-left</v-icon>
+                </v-btn>
+                <span class="text-body-2 font-weight-medium">{{
+                  t('aidj.subpage.sessions', 'Chat Sessions')
+                }}</span>
+                <v-spacer />
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :loading="sessionsLoading"
+                  :title="t('aidj.sessions.refresh', '刷新')"
+                  @click="refreshSessions"
+                >
+                  <v-icon size="18">mdi-refresh</v-icon>
+                </v-btn>
+              </div>
+
+              <div class="px-1 pt-1">
+                <v-text-field
+                  v-model="search"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :placeholder="t('aidj.sessions.search', '搜索会话…')"
+                  prepend-inner-icon="mdi-magnify"
+                  clearable
+                />
+              </div>
+
+              <div class="session-count d-flex align-center ga-2 px-1 pt-2 pb-1">
+                <span class="text-caption text-medium-emphasis">{{
+                  t('aidj.sessions.count', '会话')
+                }}</span>
+                <v-chip size="x-small" variant="flat">{{ filteredSessions.length }}</v-chip>
+              </div>
+
+              <div class="sessions-scroll">
+                <v-empty-state
+                  v-if="!sessionsLoading && filteredSessions.length === 0"
+                  icon="mdi-account-search-outline"
+                  :title="t('aidj.sessions.empty', '没有会话')"
+                  :text="t('aidj.sessions.empty_hint', '在 Chat 中对话后会在这里出现')"
+                />
+                <div v-else class="px-1 pb-1">
+                  <template v-for="g in sessionGroups" :key="g.label">
+                    <div class="session-group-label">{{ g.label }}</div>
+                    <div
+                      v-for="s in g.sessions"
+                      :key="s.id"
+                      class="session-item"
+                      :class="{ 'is-active': s.id === currentId }"
+                      @click="openSession(s.id)"
+                      @contextmenu="openSessionCtx($event, s)"
+                    >
+                      <v-icon
+                        size="18"
+                        :icon="
+                          s.pinned
+                            ? 'mdi-pin'
+                            : s.type === 'chat'
+                              ? 'mdi-message-text-outline'
+                              : 'mdi-music-note-outline'
+                        "
+                      />
+                      <div class="min-w-0 flex-grow-1">
+                        <div class="session-title text-truncate">{{ s.title }}</div>
+                        <div class="session-meta">{{ s.messageCount ?? 0 }} 条</div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="menuStep === 'freq'">
+              <div class="sessions-head d-flex align-center ga-2">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.sessions.back', '返回')"
+                  @click="menuStep = 'main'"
+                >
+                  <v-icon size="18">mdi-arrow-left</v-icon>
+                </v-btn>
+                <span class="text-body-2 font-weight-medium">{{
+                  t('aidj.subpage.freq', '歌曲频率')
+                }}</span>
+              </div>
+              <FreqList />
+            </template>
+          </div>
+        </Transition>
+      </div>
     </template>
 
     <Teleport to="body">

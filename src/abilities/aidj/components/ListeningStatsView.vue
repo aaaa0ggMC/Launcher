@@ -40,7 +40,7 @@ interface Period {
 
 const DAY = 86_400_000
 /** 周期行高（与 CSS 保持一致，用于滚动位置估算） */
-const ROW_H = 116
+const ROW_H = 84
 /** 已加载周期数上限（滑动窗口：超出即卸载远端） */
 const MAX_LOADED = 96
 /** 每次滚动加载的批量（一次 range 多读一点，用户查看是时间线性的） */
@@ -141,7 +141,12 @@ async function fetchRows(startMs: number, endMs: number): Promise<Map<number, nu
   return map
 }
 
-function buildPeriods(g: Gran, fromStart: number, untilExclusive: number, rows: Map<number, number>): Period[] {
+function buildPeriods(
+  g: Gran,
+  fromStart: number,
+  untilExclusive: number,
+  rows: Map<number, number>
+): Period[] {
   const cfg = granCfgs[g]
   const specs: { start: number; end: number }[] = []
   let s = fromStart
@@ -209,7 +214,8 @@ async function reload(anchor?: number): Promise<void> {
     }
     const olderFrom = prevStart(g, from, BATCH[g])
     const rows = await fetchRows(olderFrom - DAY, until + DAY)
-    const newestCap = g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
+    const newestCap =
+      g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
     const built = buildPeriods(g, olderFrom, until, rows).filter((p) => p.start <= newestCap)
     periods.value = built.reverse()
     await nextTick()
@@ -249,7 +255,8 @@ async function loadNewer(): Promise<void> {
   const first = periods.value[0]
   if (!first) return
   const nowMs = Date.now()
-  const newestCap = g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
+  const newestCap =
+    g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
   if (first.start >= newestCap) return
   loading.value = true
   const el = scrollEl.value
@@ -363,7 +370,13 @@ onBeforeUnmount(() => {
   <div class="stats-shell d-flex flex-column">
     <!-- 顶栏：返回 + 粒度 + 时间起点 + 快速跳转 -->
     <div class="stats-topbar d-flex align-center ga-3 px-4">
-      <v-btn icon variant="text" size="small" :title="t('aidj.stats.close', '关闭')" @click="emit('close')">
+      <v-btn
+        icon
+        variant="text"
+        size="small"
+        :title="t('aidj.stats.close', '关闭')"
+        @click="emit('close')"
+      >
         <v-icon size="20">mdi-arrow-left</v-icon>
       </v-btn>
 
@@ -404,9 +417,7 @@ onBeforeUnmount(() => {
           class="stats-jump"
           @keydown="onKeydown"
         />
-        <v-btn size="small" variant="tonal" @click="jump">{{
-          t('aidj.stats.jump', '跳转')
-        }}</v-btn>
+        <v-btn size="small" variant="tonal" @click="jump">{{ t('aidj.stats.jump', '跳转') }}</v-btn>
         <v-btn size="small" variant="text" @click="reload()">{{
           t('aidj.stats.today', '回到当前')
         }}</v-btn>
@@ -495,7 +506,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 .period-row {
-  height: 116px; /* 与 ROW_H 保持一致 */
+  height: 84px; /* 与 ROW_H 保持一致：head 24 + cells 26 + total 20 + padding 12 + 2px 行距 */
   display: flex;
   flex-direction: column;
   padding-top: 6px;
@@ -506,14 +517,20 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .cells-row {
-  flex-grow: 1;
-  min-height: 0;
-  align-items: stretch;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .heat-cell {
-  flex: 1 1 0;
-  min-width: 12px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  aspect-ratio: 1 / 1;
   border-radius: 3px;
   display: flex;
   align-items: flex-end;
@@ -532,6 +549,11 @@ onBeforeUnmount(() => {
   padding-bottom: 2px;
   color: rgba(128, 128, 128, 0.85);
   user-select: none;
+}
+.period-total {
+  height: 20px;
+  line-height: 20px;
+  flex-shrink: 0;
 }
 .stats-tooltip {
   position: fixed;
