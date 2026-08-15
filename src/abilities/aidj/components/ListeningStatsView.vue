@@ -223,8 +223,15 @@ async function reload(anchor?: number): Promise<void> {
     await nextTick()
     const el = scrollEl.value
     if (el) {
-      // 默认时间起点 = 当前月份：滚到 anchor 月第一个周期在视口顶部
-      const targetStart = g === 'year' ? yearStartOf(anchorMonth) : anchorMonth
+      // 定位到"目标时间所在周期"在视口顶部：无参 = 现在（回到当前 → 今天），
+      // 跳转 = 目标月（日粒度 → 该月 1 日，月/年粒度 → 该月/年）
+      const targetTs = anchor ?? nowMs
+      const targetStart =
+        g === 'day'
+          ? dayStartOf(targetTs)
+          : g === 'month'
+            ? monthStartOf(targetTs)
+            : yearStartOf(targetTs)
       const idx = periods.value.findIndex((p) => p.start >= targetStart)
       el.scrollTop = Math.max(0, idx < 0 ? 0 : idx * ROW_H)
       updateAnchor()
@@ -384,8 +391,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="stats-shell d-flex flex-column">
-    <!-- 顶栏：返回 + 粒度 + 时间起点 + 快速跳转 -->
-    <div class="stats-topbar d-flex align-center ga-3 px-4">
+    <!-- 顶栏：返回 + 粒度 + 时间起点 + 快速跳转（窄屏 flex-wrap 换行不挤压） -->
+    <div class="stats-topbar d-flex align-center ga-3">
       <v-btn
         icon
         variant="text"
@@ -508,14 +515,21 @@ onBeforeUnmount(() => {
 }
 .stats-topbar {
   flex-shrink: 0;
-  height: 64px; /* 工具栏呼吸：py-3 起步，文字按钮默认密度不贴边 */
+  min-height: 56px;
+  padding: 8px 16px;
+  flex-wrap: wrap;
+  row-gap: 8px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.18);
 }
 .stats-gran {
+  flex-shrink: 1;
+  min-width: 130px;
   max-width: 220px;
 }
 .stats-jump {
-  max-width: 140px;
+  flex-shrink: 1;
+  min-width: 96px;
+  max-width: 150px;
 }
 .stats-scroll {
   flex-grow: 1;
