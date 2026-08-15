@@ -334,7 +334,9 @@ async function findFirstGe(
   return null
 }
 
-/** 读取 [startOffset, endOffset) 字节并解析为行（容忍残行）。 */
+/** 读取 [startOffset, endOffset) 字节并解析为行（容忍残行）。
+ *  循环读到满——单次 fs.read 可能短读（POSIX 不保证一次读满），
+ *  大区间（全量查询）必须循环补齐，否则会静默丢数据。 */
 async function loadRange(
   handle: FileHandle,
   startOffset: number,
@@ -342,10 +344,19 @@ async function loadRange(
 ): Promise<TimeStatRow[]> {
   const len = endOffset - startOffset
   if (len <= 0) return []
-  const buf = Buffer.alloc(len)
-  const { bytesRead } = await handle.read(buf, 0, len, startOffset)
+  const chunks: Buffer[] = []
+  const buf = Buffer.alloc(Math.min(len, BLOCK_BYTES * 16))
+  let pos = startOffset
+  let remaining = len
+  while (remaining > 0) {
+    const { bytesRead } = await handle.read(buf, 0, Math.min(buf.length, remaining), pos)
+    if (bytesRead <= 0) break // EOF/IO 异常——以实际读到的为准
+    chunks.push(Buffer.from(buf.subarray(0, bytesRead)))
+    pos += bytesRead
+    remaining -= bytesRead
+  }
   const rows: TimeStatRow[] = []
-  for (const line of buf.subarray(0, bytesRead).toString('utf-8').split('\n')) {
+  for (const line of Buffer.concat(chunks).toString('utf-8').split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
     const [tsRaw, durRaw] = trimmed.split(',')
