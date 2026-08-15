@@ -3,6 +3,8 @@
 Linux System Cockpit — 个人系统控制中心，当前面向 Arch Linux + KDE Plasma 6 (Wayland) 开发。
 Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的完整流程。
 
+> **UI 改动必须先读 `DESIGN.md`**（界面排版规范：尺寸底线、常见误区、检查清单）——本项目反复踩的坑是"界面设计得太紧"（元素贴边、文字挤顶部、间距不足）。文字按钮一律默认密度，`size="small"` 只留给图标按钮。
+
 > 核心（框架、命令注册表、UI、日志、后台任务、应用注册表、ft、logs 等）跨平台，不依赖具体发行版/桌面；
 > Linux/发行版相关逻辑都隔离在对应 ability 的 service 与 `scripts/`，保持命令接口不变即可改写适配（见 README「平台适配」）。
 

@@ -437,5 +437,6 @@
   "aidj.stats.duration": "Duration",
   "aidj.stats.coverage": "Coverage",
   "aidj.stats.loading": "Loading…",
-  "aidj.stats.empty": "No data"
+  "aidj.stats.empty": "No data",
+  "aidj.stats.at_latest": "At latest"
 }

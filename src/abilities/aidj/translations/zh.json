@@ -437,5 +437,6 @@
   "aidj.stats.duration": "时长",
   "aidj.stats.coverage": "覆盖",
   "aidj.stats.loading": "加载中…",
-  "aidj.stats.empty": "暂无数据"
+  "aidj.stats.empty": "暂无数据",
+  "aidj.stats.at_latest": "已到当前（最新）"
 }

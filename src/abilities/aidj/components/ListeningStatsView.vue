@@ -192,7 +192,9 @@ function buildPeriods(
   })
 }
 
-/** 以 anchor 月份为"时间起点"重新加载窗口（向下多预读一个批量）。 */
+/** 以 anchor 月份为"时间起点"重新加载窗口（向上多预读一个批量）。
+ *  periods 升序（旧在上、新在下）——打开时定位到 anchor 月，向上滑无限看历史，
+ *  向下滑到"现在"为止，是时间线式的无限卷轴。 */
 async function reload(anchor?: number): Promise<void> {
   if (loading.value) return
   loading.value = true
@@ -217,11 +219,11 @@ async function reload(anchor?: number): Promise<void> {
     const newestCap =
       g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
     const built = buildPeriods(g, olderFrom, until, rows).filter((p) => p.start <= newestCap)
-    periods.value = built.reverse()
+    periods.value = built // 升序：最旧在顶部
     await nextTick()
     const el = scrollEl.value
     if (el) {
-      // 默认时间起点 = 当前月份：滚到目标月份最新周期在顶部
+      // 默认时间起点 = 当前月份：滚到 anchor 月第一个周期在视口顶部
       const targetStart = g === 'year' ? yearStartOf(anchorMonth) : anchorMonth
       const idx = periods.value.findIndex((p) => p.start >= targetStart)
       el.scrollTop = Math.max(0, idx < 0 ? 0 : idx * ROW_H)
@@ -232,44 +234,47 @@ async function reload(anchor?: number): Promise<void> {
   }
 }
 
+/** 向上滑：加载更早的历史（prepend 到顶部，保持视口位置）。 */
 async function loadOlder(): Promise<void> {
   if (loading.value) return
   const g = gran.value
-  const last = periods.value[periods.value.length - 1]
-  if (!last) return
+  const first = periods.value[0]
+  if (!first) return
   loading.value = true
+  const el = scrollEl.value
+  const prevH = el ? el.scrollHeight : 0
   try {
-    const from = prevStart(g, last.start, BATCH[g])
-    const rows = await fetchRows(from - DAY, last.start + DAY)
-    const built = buildPeriods(g, from, last.start, rows)
-    periods.value = [...periods.value, ...built.reverse()]
+    const from = prevStart(g, first.start, BATCH[g])
+    const rows = await fetchRows(from - DAY, first.start + DAY)
+    const built = buildPeriods(g, from, first.start, rows)
+    if (!built.length) return
+    periods.value = [...built, ...periods.value]
+    await nextTick()
+    if (el) el.scrollTop += el.scrollHeight - prevH // 顶部插入后保持视口位置
     prune()
   } finally {
     loading.value = false
   }
 }
 
+/** 向下滑：加载更新的数据（append 到底部，直到"现在"）。 */
 async function loadNewer(): Promise<void> {
   if (loading.value) return
   const g = gran.value
-  const first = periods.value[0]
-  if (!first) return
+  const last = periods.value[periods.value.length - 1]
+  if (!last) return
   const nowMs = Date.now()
   const newestCap =
     g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
-  if (first.start >= newestCap) return
+  if (last.start >= newestCap) return
   loading.value = true
-  const el = scrollEl.value
-  const prevH = el ? el.scrollHeight : 0
   try {
-    const from = first.end
+    const from = last.end
     const until = nextStart(g, from, BATCH[g])
     const rows = await fetchRows(from - DAY, until + DAY)
     const built = buildPeriods(g, from, until, rows).filter((p) => p.start <= newestCap)
     if (!built.length) return
-    periods.value = [...built.reverse(), ...periods.value]
-    await nextTick()
-    if (el) el.scrollTop += el.scrollHeight - prevH // 顶部插入后保持视口位置
+    periods.value = [...periods.value, ...built]
     prune()
   } finally {
     loading.value = false
@@ -286,11 +291,11 @@ function prune(): void {
     return
   }
   if (el.scrollTop + el.clientHeight / 2 > el.scrollHeight / 2) {
-    // 视口靠下（在看历史）→ 裁掉顶部（最新），补偿 scrollTop
+    // 视口靠下（接近最新）→ 裁掉顶部（最旧），补偿 scrollTop
     periods.value.splice(0, excess)
     el.scrollTop = Math.max(0, el.scrollTop - excess * ROW_H)
   } else {
-    // 视口靠上 → 裁掉底部（最旧），无需补偿
+    // 视口靠上（在看历史）→ 裁掉底部（最新），无需补偿
     periods.value.length = MAX_LOADED
   }
 }
@@ -299,8 +304,9 @@ function onScroll(): void {
   const el = scrollEl.value
   if (!el) return
   const { scrollTop, scrollHeight, clientHeight } = el
-  if (scrollTop + clientHeight > scrollHeight - 240) void loadOlder()
-  else if (scrollTop < 240) void loadNewer()
+  // 升序时间线：向上滑 = 更早（无限），向下滑 = 更新（到 now 为止）
+  if (scrollTop < 240) void loadOlder()
+  else if (scrollTop + clientHeight > scrollHeight - 240) void loadNewer()
   updateAnchor()
 }
 
@@ -339,6 +345,16 @@ function fmt(mins: number): string {
 }
 
 const windowTotal = computed(() => periods.value.reduce((s, p) => s + p.total, 0))
+
+/** 已加载到"现在"（数组末尾最新周期 >= 当前周期起点）→ 底部提示。 */
+const atLatest = computed(() => {
+  if (!periods.value.length) return false
+  const g = gran.value
+  const nowMs = Date.now()
+  const cap =
+    g === 'day' ? dayStartOf(nowMs) : g === 'month' ? monthStartOf(nowMs) : yearStartOf(nowMs)
+  return periods.value[periods.value.length - 1].start >= cap
+})
 
 function jump(): void {
   const m = /^(\d{4})-(\d{1,2})$/.exec(jumpInput.value.trim())
@@ -398,7 +414,7 @@ onBeforeUnmount(() => {
         @update:model-value="onGranChange"
       />
 
-      <div class="d-flex align-center ga-1">
+      <div class="d-flex align-center ga-2">
         <span class="text-caption text-medium-emphasis">{{
           t('aidj.stats.anchor', '时间起点')
         }}</span>
@@ -407,7 +423,7 @@ onBeforeUnmount(() => {
 
       <v-spacer />
 
-      <div class="d-flex align-center ga-1">
+      <div class="d-flex align-center ga-2 flex-wrap">
         <v-text-field
           v-model="jumpInput"
           density="compact"
@@ -417,10 +433,8 @@ onBeforeUnmount(() => {
           class="stats-jump"
           @keydown="onKeydown"
         />
-        <v-btn size="small" variant="tonal" @click="jump">{{ t('aidj.stats.jump', '跳转') }}</v-btn>
-        <v-btn size="small" variant="text" @click="reload()">{{
-          t('aidj.stats.today', '回到当前')
-        }}</v-btn>
+        <v-btn variant="tonal" @click="jump">{{ t('aidj.stats.jump', '跳转') }}</v-btn>
+        <v-btn variant="text" @click="reload()">{{ t('aidj.stats.today', '回到当前') }}</v-btn>
       </div>
     </div>
 
@@ -460,6 +474,9 @@ onBeforeUnmount(() => {
       <div v-else-if="!periods.length" class="stats-empty text-caption text-medium-emphasis pa-6">
         {{ t('aidj.stats.empty', '暂无数据') }}
       </div>
+      <div v-else-if="atLatest" class="stats-end-hint text-caption text-medium-emphasis pa-3">
+        {{ t('aidj.stats.at_latest', '已到当前') }}
+      </div>
     </div>
 
     <!-- 悬停提示 -->
@@ -491,7 +508,7 @@ onBeforeUnmount(() => {
 }
 .stats-topbar {
   flex-shrink: 0;
-  height: 52px;
+  height: 64px; /* 工具栏呼吸：py-3 起步，文字按钮默认密度不贴边 */
   border-bottom: 1px solid rgba(128, 128, 128, 0.18);
 }
 .stats-gran {
@@ -572,7 +589,8 @@ onBeforeUnmount(() => {
   margin-bottom: 2px;
 }
 .stats-loading,
-.stats-empty {
+.stats-empty,
+.stats-end-hint {
   text-align: center;
 }
 </style>
