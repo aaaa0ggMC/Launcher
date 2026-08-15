@@ -14,7 +14,7 @@ Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的
 
 - Node.js ≥ 22 (开发机为 v26.5.0)
 - pnpm ≥ 11 (`corepack enable && corepack prepare pnpm@latest --activate`)
-- Electron 可运行的桌面环境（当前主要验证于 Arch Linux + KDE Plasma 6 / Wayland）
+- Electron 可运行的桌面环境（主要验证于 Arch Linux + KDE Plasma 6 / Wayland；Windows 已实机验证框架/UI/内置播放器/听歌时长统计等跨平台部分）
 
 **Linux / 发行版特定能力的系统工具**（可选，按需；缺失时仅对应能力不可用）：
 
