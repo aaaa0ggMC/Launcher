@@ -125,6 +125,29 @@ function resetAll(): void {
   spectrumEnabled.value = false
   webRemotePort.value = 17320
 }
+
+/** Deep export: current built-in player preferences. */
+defineExpose({
+  toMarkdown: (): string => {
+    const eqName = eqItems.value.find((i) => i.value === eqPreset.value)?.title ?? eqPreset.value
+    return [
+      `${t('aidj.player_settings.crossfade', '淡入淡出')}: ${
+        crossfadeEnabled.value
+          ? `${t('aidj.settings.on', '开')} (${crossfadeSeconds.value}s)`
+          : t('aidj.settings.off', '关')
+      }`,
+      `${t('aidj.player_settings.eq_preset', '均衡器预设')}: ${eqName}`,
+      `${t('aidj.player_settings.rate', '默认倍速')}: ${playbackRate.value}x`,
+      `${t('aidj.player_settings.default_volume', '默认音量')}: ${Math.round(defaultVolume.value * 100)}%`,
+      `${t('aidj.player_settings.spectrum', '频谱条默认显示')}: ${
+        spectrumEnabled.value ? t('aidj.settings.on', '开') : t('aidj.settings.off', '关')
+      }`,
+      `${t('aidj.player_settings.web_remote_port', '局域网遥控端口')}: ${
+        webRemotePort.value > 0 ? webRemotePort.value : t('aidj.settings.off', '关')
+      }`
+    ].join('\n')
+  }
+})
 </script>
 
 <template>

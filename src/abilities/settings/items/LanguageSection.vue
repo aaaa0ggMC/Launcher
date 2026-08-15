@@ -19,6 +19,14 @@ async function setLang(code: string | null): Promise<void> {
   selected.value = v
   await window.cockpit.setConfig({ language: v })
 }
+
+/** Deep export: current interface language. */
+defineExpose({
+  toMarkdown: (): string => {
+    const lang = availableLanguages.find((l) => l.code === selected.value)
+    return `${translate(uiLang.value, 'label.语言', 'Language')}: ${lang?.label ?? selected.value}`
+  }
+})
 </script>
 
 <template>

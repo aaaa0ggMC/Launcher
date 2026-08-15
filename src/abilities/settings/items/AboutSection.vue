@@ -6,6 +6,12 @@ import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+
+/** Deep export: tech stack summary. */
+defineExpose({
+  toMarkdown: (): string =>
+    `${translate(uiLang.value, 'about.title')}: Linux System Cockpit · Electron + Vue 3 + Vuetify 3 (Material 3)`
+})
 </script>
 
 <template>

@@ -36,6 +36,19 @@ async function clearRecords(): Promise<void> {
     clearing.value = false
   }
 }
+
+/** Deep export: current sidebar sort rule. */
+defineExpose({
+  toMarkdown: (): string => {
+    const label =
+      sort.value === 'frequency'
+        ? translate(uiLang.value, 'sidebar.frequency')
+        : sort.value === 'recent'
+          ? translate(uiLang.value, 'sidebar.recent')
+          : translate(uiLang.value, 'sidebar.alpha')
+    return `${translate(uiLang.value, 'sidebar.title')}: ${label}`
+  }
+})
 </script>
 
 <template>

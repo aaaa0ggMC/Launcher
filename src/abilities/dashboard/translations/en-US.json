@@ -65,5 +65,6 @@
   "desc.dashboard.dashboard": "Dashboard card layout",
   "dashboard.lock": "Lock layout (enable text selection)",
   "dashboard.unlock": "Unlock layout (drag to rearrange)",
-  "dashboard.mdUsage": "Usage"
+  "dashboard.mdUsage": "Usage",
+  "desc.dashboard.dashboard.reset-layout": "Reset dashboard card layout"
 }

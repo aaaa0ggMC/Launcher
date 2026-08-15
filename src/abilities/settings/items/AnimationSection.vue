@@ -76,6 +76,22 @@ async function setStyle(v: string | null): Promise<void> {
 async function setThemeTransition(v: string | null): Promise<void> {
   await save({ themeTransition: isThemeTransition(v) ? v : 'corner' })
 }
+
+/** Deep export: animation switches + transition style. */
+defineExpose({
+  toMarkdown: (): string => {
+    const on = translate(uiLang.value, 'settings.on', '开')
+    const off = translate(uiLang.value, 'settings.off', '关')
+    const style = PAGE_TRANSITIONS.find((x) => x.key === pageTransition.value)
+    return [
+      `${translate(uiLang.value, 'animation.modernMotion')}: ${modernMotion.value ? on : off}`,
+      `${translate(uiLang.value, 'animation.enabled')}: ${enabled.value ? on : off}`,
+      `${translate(uiLang.value, 'animation.style')}: ${
+        style ? translate(uiLang.value, style.labelKey, style.key) : pageTransition.value
+      }`
+    ].join('\n')
+  }
+})
 </script>
 
 <template>

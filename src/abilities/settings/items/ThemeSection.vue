@@ -23,6 +23,15 @@ async function setTheme(t: string | null): Promise<void> {
   await window.cockpit.setConfig({ theme: id })
 }
 
+/** Deep export: current theme name. */
+defineExpose({
+  toMarkdown: (): string => {
+    const s = schemeList.find((x) => x.id === theme.value)
+    const name = s ? translate(uiLang.value, s.name, s.id) : theme.value
+    return `${translate(uiLang.value, 'theme.title')}: ${name}`
+  }
+})
+
 /** Swatch chips for the preview strip: bg + primary + a couple accents. */
 function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: string[] } {
   const c = s.colors

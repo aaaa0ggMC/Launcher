@@ -104,6 +104,22 @@ async function commitBackgroundOpacity(): Promise<void> {
 async function commitFuseBlur(): Promise<void> {
   await saveWindow({ fuseBlur: fuseBlur.value })
 }
+
+/** Deep export: window chrome + background settings. */
+defineExpose({
+  toMarkdown: (): string => {
+    const on = translate(uiLang.value, 'settings.on', '开')
+    const off = translate(uiLang.value, 'settings.off', '关')
+    const bgName = bgItems.value.find((b) => b.id === background.value)?.name ?? background.value
+    return [
+      `${translate(uiLang.value, 'window.frameless')}: ${frameless.value ? on : off}`,
+      `${translate(uiLang.value, 'window.rounded')}: ${rounded.value ? on : off}`,
+      `${translate(uiLang.value, 'window.background')}: ${bgName}`,
+      `${translate(uiLang.value, 'window.fuseAlpha')}: ${fuseAlpha.value.toFixed(2)}`,
+      `${translate(uiLang.value, 'window.bgBlur')}: ${fuseBlur.value}px`
+    ].join('\n')
+  }
+})
 </script>
 
 <template>

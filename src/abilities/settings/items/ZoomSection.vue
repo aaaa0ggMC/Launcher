@@ -18,6 +18,11 @@ async function commitUiScale(): Promise<void> {
   window.cockpit.setZoom(uiScale.value)
   await window.cockpit.setConfig({ uiScale: uiScale.value })
 }
+
+/** Deep export: current UI scale. */
+defineExpose({
+  toMarkdown: (): string => `${translate(uiLang.value, 'zoom.title')}: ${uiScale.value}x`
+})
 </script>
 
 <template>

@@ -25,6 +25,16 @@ async function setConfirm(v: boolean | null): Promise<void> {
     }
   })
 }
+
+/** Deep export: confirm-before-launch state. */
+defineExpose({
+  toMarkdown: (): string =>
+    `${translate(uiLang.value, 'launch.title')}: ${
+      confirmBeforeLaunch.value
+        ? translate(uiLang.value, 'settings.on', '开')
+        : translate(uiLang.value, 'settings.off', '关')
+    }`
+})
 </script>
 
 <template>

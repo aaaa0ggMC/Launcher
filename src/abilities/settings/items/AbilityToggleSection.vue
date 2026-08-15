@@ -78,6 +78,16 @@ onBeforeUnmount(() => {
   unsub?.()
   unsub = null
 })
+
+/** Deep export: currently disabled abilities. */
+defineExpose({
+  toMarkdown: (): string => {
+    const list = disabled.value
+    if (!list.length)
+      return `${t('settings.ability.title', '能力开关')}: ${t('settings.none', '无')}`
+    return `${t('settings.ability.title', '能力开关')}:\n  ${list.map((id) => `- ${name(id)}`).join('\n  ')}`
+  }
+})
 </script>
 
 <template>

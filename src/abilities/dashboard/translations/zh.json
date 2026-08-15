@@ -65,5 +65,6 @@
   "desc.dashboard.dashboard": "总览页卡片排版",
   "dashboard.lock": "锁定布局 (可选中复制文字)",
   "dashboard.unlock": "解锁布局 (可拖动调整)",
-  "dashboard.mdUsage": "使用率"
+  "dashboard.mdUsage": "使用率",
+  "desc.dashboard.dashboard.reset-layout": "重置总览页卡片排版"
 }

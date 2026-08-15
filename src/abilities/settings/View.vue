@@ -11,7 +11,7 @@ import {
   onDeactivated,
   onBeforeUnmount
 } from 'vue'
-import type { Ref } from 'vue'
+import type { Ref, ComponentPublicInstance } from 'vue'
 import type { SettingsCategory, SettingsItem } from '@ui/ability-registry'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { translate, translateTemplate } from '@ui/i18n'
@@ -171,7 +171,27 @@ onBeforeUnmount(() => {
   bindScroll(false)
 })
 
-/** Export all injected settings sections as markdown (labels + descriptions). */
+/** 每个设置项组件的实例（ref 收集），用于 toMarkdown 深入导出当前配置值。 */
+const itemRefs = new Map<string, ComponentPublicInstance | null>()
+
+function setItemRef(el: unknown, itemId: string): void {
+  itemRefs.set(itemId, (el as ComponentPublicInstance | null) ?? null)
+}
+
+/** 分类 / 设置项的描述（走 desc.<id> 翻译，回退原文）。 */
+function catDesc(cat: SettingsCategory): string {
+  return translate(uiLang.value, 'desc.' + cat.id, cat.description)
+}
+function itemDesc(item: SettingsItem): string {
+  return translate(uiLang.value, 'desc.' + item.id, item.description)
+}
+
+/** 设置项组件可选的深入导出钩子：返回当前配置值的 markdown 文本。 */
+type MarkdownExport = { toMarkdown?: () => string }
+
+/** Export all injected settings sections as markdown: labels + descriptions
+ *  (localized), and — when an item component exposes `toMarkdown()` — the
+ *  actual current configuration values. */
 function toMarkdown(): string {
   const lines: string[] = [translate(uiLang.value, 'settings.mdHeading')]
   if (sections.value.length === 0) {
@@ -180,10 +200,18 @@ function toMarkdown(): string {
   }
   for (const cat of sections.value) {
     const label = translate(uiLang.value, 'label.' + cat.label, cat.label)
-    lines.push('', `### ${label}${cat.description ? ` — ${cat.description}` : ''}`)
+    const desc = catDesc(cat)
+    lines.push('', `### ${label}${desc ? ` — ${desc}` : ''}`)
     for (const item of cat.items) {
       const ilabel = translate(uiLang.value, 'label.' + item.label, item.label)
-      lines.push(`- **${ilabel}**${item.description ? ` — ${item.description}` : ''}`)
+      const idesc = itemDesc(item)
+      const inst = itemRefs.get(item.id)
+      const detail =
+        inst && typeof (inst as MarkdownExport).toMarkdown === 'function'
+          ? (inst as MarkdownExport).toMarkdown!()
+          : ''
+      const head = `- **${ilabel}**${idesc ? ` — ${idesc}` : ''}`
+      lines.push(detail ? `${head}\n  ${detail}` : head)
     }
   }
   return lines.join('\n')
@@ -255,7 +283,7 @@ defineExpose({ toMarkdown })
           </div>
           <v-row dense>
             <v-col v-for="item in g.items" :key="item.id" cols="12" :md="item.fullWidth ? 12 : 6">
-              <component :is="item.component" />
+              <component :is="item.component" :ref="(el) => setItemRef(el, item.id)" />
             </v-col>
           </v-row>
         </div>
@@ -287,7 +315,7 @@ defineExpose({ toMarkdown })
           cols="12"
           :md="item.fullWidth ? 12 : 6"
         >
-          <component :is="item.component" />
+          <component :is="item.component" :ref="(el) => setItemRef(el, item.id)" />
         </v-col>
       </v-row>
     </template>

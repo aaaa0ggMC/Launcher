@@ -47,6 +47,16 @@ async function pickDirectory(): Promise<void> {
   if (!path) return
   searching.value = path
 }
+
+/** Deep export: current scan root directories. */
+defineExpose({
+  toMarkdown: (): string => {
+    const title = translate(uiLang.value, 'apps.searchRoots', '搜索目录')
+    if (!roots.value.length)
+      return `${title}: ${translate(uiLang.value, 'apps.unconfigured', '未配置')}`
+    return `${title}:\n  ${roots.value.map((r) => `- ${r.path}${r.watch ? ' (watch)' : ''}`).join('\n  ')}`
+  }
+})
 </script>
 
 <template>

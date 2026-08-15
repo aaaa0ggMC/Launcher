@@ -82,9 +82,9 @@
   "dialog.selectIcon": "选择图标",
   "dialog.selectDir": "选择应用目录",
   "dialog.selectPath": "选择目录或脚本",
-  "desc.settings.appearance": "主题、界面缩放、窗口边框、背景与 Fuse 蒙层、总览排版、启动与关于",
+  "desc.settings.appearance": "主题、界面缩放、窗口边框、背景与 Fuse 蒙层、启动与关于",
   "desc.settings.appearance.theme": "多套配色方案 / 跟随系统",
-  "desc.settings.appearance.zoom": "整体 UI 等比例缩放",
+  "desc.settings.appearance.zoom": "整体 UI 等比缩放比例",
   "desc.settings.appearance.window": "无边框、圆角、背景与 Fuse 蒙层",
   "desc.settings.appearance.animations": "现代动效总开关、切换能力页面的过渡动画",
   "desc.settings.appearance.language": "Interface language (中文 / English)",
@@ -102,5 +102,13 @@
   "settings.ability.description": "运行时启用/禁用能力（仅当前会话，不持久化）。禁用后该能力的侧边栏入口与命令即时隐藏。",
   "settings.ability.enabled": "{name} 已启用",
   "settings.ability.disabled": "{name} 已禁用（侧边栏与命令即时隐藏）",
-  "settings.ability.disabledProtected": "{name} 无法禁用（受保护）"
+  "settings.ability.disabledProtected": "{name} 无法禁用（受保护）",
+  "label.能力": "能力",
+  "label.能力开关": "能力开关",
+  "desc.settings.appearance.sidebar": "侧栏排序规则：字母序 / 使用频次 / 最近使用",
+  "desc.settings.abilities": "运行时启用/禁用能力（临时，不持久化；禁用后侧边栏与命令即时隐藏）",
+  "desc.settings.abilities.ability-toggle": "切换各能力的可用状态",
+  "settings.on": "开",
+  "settings.off": "关",
+  "settings.none": "无"
 }

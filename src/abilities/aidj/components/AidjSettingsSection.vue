@@ -341,6 +341,38 @@ function resetDj(): void {
   persona.value = DEFAULT_PERSONA
   extraRules.value = ['']
 }
+
+/** Deep export: core AI DJ configuration (API key masked). */
+defineExpose({
+  toMarkdown: (): string => {
+    const on = t('aidj.settings.on', '开')
+    const off = t('aidj.settings.off', '关')
+    const backend =
+      playerMode.value === 'web'
+        ? t('aidj.settings.backend_web', '内置播放器')
+        : t('aidj.settings.backend_dbus', '外部播放器 (MPRIS / DBus)')
+    const ncm =
+      ncmMode.value === 'external'
+        ? t('aidj.settings.ncm_mode_external', '外部服务')
+        : ncmMode.value === 'builtin'
+          ? t('aidj.settings.ncm_mode_builtin', '内置')
+          : t('aidj.settings.ncm_mode_auto', 'Auto')
+    const keyMasked = apiKey.value
+      ? `****${apiKey.value.slice(-4)}`
+      : t('aidj.settings.none', '未设置')
+    return [
+      `${t('aidj.settings.backend', '播放后端')}: ${backend}`,
+      `${t('aidj.settings.model_label', '模型')}: ${model.value || '—'}`,
+      `${t('aidj.settings.base_url', 'API 地址')}: ${baseUrl.value || '—'}`,
+      `${t('aidj.settings.api_key', 'API 密钥')}: ${keyMasked}`,
+      `${t('aidj.settings.ncm_mode', 'NCM 模式')}: ${ncm}`,
+      `${t('aidj.settings.dbus_target', '默认播放器')}: ${dbusTarget.value}`,
+      `${t('aidj.settings.record_freq', '记录播放频率')}: ${recordFreq.value ? on : off}`,
+      `${t('aidj.settings.listening_stats', '听歌时长统计')}: ${listeningStats.value ? on : off}`,
+      `${t('aidj.settings.music_folders', '音乐目录')}: ${musicFolders.value.length}`
+    ].join('\n')
+  }
+})
 </script>
 
 <template>
