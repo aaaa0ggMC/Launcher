@@ -614,26 +614,26 @@ onBeforeUnmount(() => {
 }
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 152px); /* 一排自适应多个卡片，居中 */
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, 188px); /* 一排自适应多个卡片，居中 */
+  gap: 12px;
   justify-content: center;
 }
 .period-card {
-  width: 152px;
+  width: 188px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
   background: rgba(128, 128, 128, 0.07);
   border: 1px solid rgba(128, 128, 128, 0.12);
 }
 .period-head {
-  min-height: 22px;
+  min-height: 24px;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 .period-label {
@@ -646,14 +646,14 @@ onBeforeUnmount(() => {
 }
 .card-cells {
   display: grid;
-  grid-template-columns: repeat(var(--cols, 6), 20px); /* 卡内固定 20px 方形矩阵 */
-  gap: 3px;
+  grid-template-columns: repeat(var(--cols, 6), 24px); /* 卡内固定 24px 方形矩阵 */
+  gap: 4px;
   justify-content: center;
 }
 .heat-cell {
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -670,7 +670,7 @@ onBeforeUnmount(() => {
   outline-offset: 1px;
 }
 .cell-label {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
   padding-bottom: 2px;
   color: rgba(128, 128, 128, 0.85);
