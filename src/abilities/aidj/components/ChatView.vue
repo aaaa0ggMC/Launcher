@@ -502,6 +502,7 @@ const sbTracks = ref<number | null>(null)
 const sbMemory = ref(0)
 const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, method: 'lufs' })
 const sbRecordFreq = ref(false)
+const sbListening = ref(true)
 const sbBackgrounds = ref(0)
 const memoryConfirm = ref(false)
 const playAllConfirm = ref(false)
@@ -516,7 +517,8 @@ const sbOrder = ref<Record<string, number>>({
   memory: 4,
   volbal: 5,
   record_freq: 6,
-  backgrounds: 7
+  backgrounds: 7,
+  listening: 8
 })
 const availablePlayers = ref<string[]>([])
 const selectedPlayer = ref('')
@@ -579,6 +581,16 @@ async function toggleRecordFreq(): Promise<void> {
   })
   sbRecordFreq.value = next
   await pollStatus()
+}
+
+async function toggleListening(): Promise<void> {
+  const next = !sbListening.value
+  await window.cockpit.command('aidj.update-config', {
+    path: 'preferences.listening_stats',
+    value: next
+  })
+  await window.cockpit.command('aidj.save-config')
+  sbListening.value = next
 }
 
 async function clearMemory(): Promise<void> {
@@ -753,6 +765,7 @@ async function pollStatus(): Promise<void> {
       if (typeof result.memory === 'number') sbMemory.value = result.memory
       if (result.volbal) sbVolbal.value = result.volbal as { enabled: boolean; method: string }
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
+      if (typeof result.listeningStats === 'boolean') sbListening.value = result.listeningStats
       if (result.mode === 'dbus' || result.mode === 'web') mode.value = result.mode
       if (result.statusBar) {
         sbOrder.value = {
@@ -763,6 +776,7 @@ async function pollStatus(): Promise<void> {
           volbal: 5,
           record_freq: 6,
           backgrounds: 7,
+          listening: 8,
           ...(result.statusBar as Record<string, number>)
         }
       }
@@ -1650,6 +1664,23 @@ defineExpose({ toMarkdown, loadSession, newChat })
             >
               <span class="status-label">RecordFreq</span
               ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
+            </v-chip>
+
+            <v-chip
+              v-else-if="key === 'listening'"
+              variant="flat"
+              size="small"
+              class="status-chip clickable"
+              :class="{ 'is-on': sbListening }"
+              :title="
+                sbListening
+                  ? t('aidj.chat.listening_off', '点击关闭听歌时长统计')
+                  : t('aidj.chat.listening_on', '点击开启听歌时长统计')
+              "
+              @click="toggleListening"
+            >
+              <span class="status-label">Listen</span
+              ><span class="status-value">{{ sbListening ? 'on' : 'off' }}</span>
             </v-chip>
 
             <v-chip

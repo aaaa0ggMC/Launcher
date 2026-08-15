@@ -6,7 +6,7 @@ import { USER_CONFIG_DIR } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import { registerStartupHook } from '../../main/process/startup'
 import { DBusBackend, getPlayerMode, getWebPlayerBackend } from './player-backend'
-import { getDbusManager } from './service'
+import { getDbusManager, loadAidjConfig } from './service'
 
 const log = makeLogger('aidj-time-stats')
 
@@ -186,6 +186,9 @@ async function tick(): Promise<void> {
       bucketMinutes = 0
       replaceLast = false
     }
+    // 总开关（设置/状态栏可关）：关闭时只维持小时翻转，不累计
+    const cfg = await loadAidjConfig()
+    if (cfg?.preferences.listening_stats === false) return
     if (await isPlaying()) bucketMinutes += 0.5
   } catch (e) {
     log.warn('listening tick failed', { error: e instanceof Error ? e.message : String(e) })

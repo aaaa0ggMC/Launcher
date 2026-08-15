@@ -3,6 +3,7 @@ import { ref, inject, type Ref, computed, watch, nextTick, onMounted, onDeactiva
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
 import FreqList from './components/FreqList.vue'
+import ListeningStatsView from './components/ListeningStatsView.vue'
 
 defineOptions({ name: 'cockpit-aidj' })
 
@@ -13,6 +14,7 @@ const openBt = inject('cockpit:open-bt', null) as (() => void) | null
 
 const menuOpen = ref(false)
 const menuStep = ref<'main' | 'sessions' | 'freq'>('main')
+const statsOpen = ref(false)
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 
 interface SessionItem {
@@ -437,9 +439,11 @@ defineExpose({ toMarkdown })
 
 <template>
   <div class="aidj-shell">
-    <ChatView ref="chatRef" />
+    <ListeningStatsView v-if="statsOpen" @close="statsOpen = false" />
+    <template v-else>
+      <ChatView ref="chatRef" />
 
-    <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
+      <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
       <button class="page-menu-handle" @click="toggleMenu">
         <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
       </button>
@@ -460,6 +464,10 @@ defineExpose({ toMarkdown })
               <v-icon size="18">mdi-poll</v-icon>
               <span>{{ t('aidj.subpage.freq', '歌曲频率') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item" @click="statsOpen = true">
+              <v-icon size="18">mdi-calendar-heat-map</v-icon>
+              <span>{{ t('aidj.subpage.listening_stats', '听歌时长统计') }}</span>
             </div>
             <div class="menu-item" @click="updateMetadata">
               <v-icon size="18">mdi-database-sync-outline</v-icon>
@@ -580,6 +588,7 @@ defineExpose({ toMarkdown })
         </div>
       </Transition>
     </div>
+    </template>
 
     <Teleport to="body">
       <Transition name="ctx">

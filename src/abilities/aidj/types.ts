@@ -53,6 +53,8 @@ export interface AidjConfig {
       volbal: number
       record_freq: number
       backgrounds: number
+      /** 听歌时长统计开关（clickable toggle）。 */
+      listening: number
     }
     /** Customizable DJ persona — replaces the built-in ROLE DEFINITION. Empty = built-in default. */
     persona?: string
@@ -74,6 +76,8 @@ export interface AidjConfig {
     spectrum_enabled?: boolean
     /** Built-in player LAN web-remote server port (0 = disabled). */
     web_remote_port?: number
+    /** 听歌时长统计总开关（time.csv 后台跟踪；默认开）。 */
+    listening_stats?: boolean
   }
 }
 
@@ -123,7 +127,8 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
       memory: 4,
       volbal: 5,
       record_freq: 6,
-      backgrounds: 7
+      backgrounds: 7,
+      listening: 8
     },
     crossfade: { enabled: false, seconds: 2.5 },
     eq_preset: 'flat',
@@ -131,7 +136,8 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     playback_rate: 1.0,
     default_volume: 0.8,
     spectrum_enabled: false,
-    web_remote_port: 17320
+    web_remote_port: 17320,
+    listening_stats: true
   }
 }
 

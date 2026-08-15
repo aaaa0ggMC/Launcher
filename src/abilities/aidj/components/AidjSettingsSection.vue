@@ -34,7 +34,8 @@ const statusLabels: Record<string, string> = {
   memory: t('aidj.settings.status_memory', '记忆'),
   volbal: t('aidj.settings.status_volbal', '响度平衡'),
   record_freq: t('aidj.settings.status_record_freq', '播放频次'),
-  backgrounds: t('aidj.settings.status_backgrounds', '后台任务')
+  backgrounds: t('aidj.settings.status_backgrounds', '后台任务'),
+  listening: t('aidj.settings.status_listening', '时长统计')
 }
 
 /** Localized label for a dynamic field key (metadata inject / status bar). */
@@ -74,6 +75,7 @@ const dynamicBalance = ref(true)
 const adjMethod = ref<'lufs' | 'linear'>('lufs')
 const volumeCurve = ref(3.0)
 const recordFreq = ref(true)
+const listeningStats = ref(true)
 const metadataConcurrency = ref(8)
 const metadataCommentCount = ref(10)
 const maxHistoryLength = ref(10)
@@ -123,6 +125,7 @@ onMounted(async () => {
   adjMethod.value = (prefs.sound_adjust_method as 'lufs' | 'linear') || 'lufs'
   volumeCurve.value = (prefs.volume_curve as number) ?? 3.0
   recordFreq.value = (prefs.record_freq as boolean) ?? true
+  listeningStats.value = (prefs.listening_stats as boolean) ?? true
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
   metadataCommentCount.value = (prefs.metadata_comment_count as number) ?? 10
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
@@ -142,6 +145,7 @@ onMounted(async () => {
     volbal: 5,
     record_freq: 6,
     backgrounds: 7,
+    listening: 8,
     ...((prefs.status_bar as Record<string, number>) || {})
   }
   // Effective backend mode (config may not store it yet → platform default).
@@ -295,6 +299,7 @@ watch(dynamicBalance, (v) => update('preferences.dynamic_balance_volume', v))
 watch(adjMethod, (v) => update('preferences.sound_adjust_method', v))
 watch(volumeCurve, (v) => update('preferences.volume_curve', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
+watch(listeningStats, (v) => update('preferences.listening_stats', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(metadataCommentCount, (v) => update('preferences.metadata_comment_count', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
@@ -993,6 +998,15 @@ function resetDj(): void {
               v-model="recordFreq"
               color="primary"
               :label="t('aidj.settings.record_freq', '记录播放频率')"
+              hide-details
+              density="compact"
+            />
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-switch
+              v-model="listeningStats"
+              color="primary"
+              :label="t('aidj.settings.listening_stats', '听歌时长统计')"
               hide-details
               density="compact"
             />

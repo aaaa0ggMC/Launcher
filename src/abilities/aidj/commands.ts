@@ -950,6 +950,7 @@ const commands: CommandSpec[] = [
           method: _config?.preferences.sound_adjust_method ?? 'lufs'
         },
         recordFreq: _config?.preferences.record_freq ?? false,
+        listeningStats: _config?.preferences.listening_stats ?? true,
         statusBar: _config?.preferences.status_bar,
         mode: await getPlayerMode()
       }
