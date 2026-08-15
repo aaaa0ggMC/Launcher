@@ -88,6 +88,13 @@ const anchorClass = computed(() => `anchor-${lyricsCfg.value.anchor}`)
  */
 async function applyAnchorPlacement(): Promise<void> {
   const c = lyricsCfg.value
+  if (window.cockpit.windowDebug) {
+    console.warn(
+      `[win-debug] applyAnchorPlacement anchor=${c.anchor} margin=${c.margin} ` +
+        `screenX=${window.screenX} screenY=${window.screenY} ` +
+        `innerW=${window.innerWidth} innerH=${window.innerHeight}`
+    )
+  }
   void window.cockpit.centerWindow(c.anchor, c.margin)
 }
 
@@ -361,6 +368,12 @@ function onPointerDown(e: PointerEvent): void {
   dragging = true
   lastX = e.clientX
   lastY = e.clientY
+  if (window.cockpit.windowDebug) {
+    console.warn(
+      `[win-debug] drag start client=${e.clientX},${e.clientY} ` +
+        `screenX=${window.screenX} screenY=${window.screenY}`
+    )
+  }
   ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
 }
 
@@ -375,6 +388,12 @@ function onPointerMove(e: PointerEvent): void {
     requestAnimationFrame(() => {
       rafPending = false
       if (pendingDx || pendingDy) {
+        if (window.cockpit.windowDebug) {
+          console.warn(
+            `[win-debug] drag moveWindowBy dx=${Math.round(pendingDx)} dy=${Math.round(pendingDy)} ` +
+              `client=${lastX},${lastY} screenX=${window.screenX} screenY=${window.screenY}`
+          )
+        }
         void window.cockpit.moveWindowBy(Math.round(pendingDx), Math.round(pendingDy))
         pendingDx = 0
         pendingDy = 0
@@ -385,6 +404,12 @@ function onPointerMove(e: PointerEvent): void {
 
 function onPointerUp(e: PointerEvent): void {
   dragging = false
+  if (window.cockpit.windowDebug) {
+    console.warn(
+      `[win-debug] drag end client=${e.clientX},${e.clientY} ` +
+        `screenX=${window.screenX} screenY=${window.screenY}`
+    )
+  }
   ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
 }
 
@@ -451,11 +476,15 @@ function fitWindowToContent(): void {
     )
   }
   if (r.width < 4 || r.height < 4) return
+  const c = lyricsCfg.value
+  // The anchor roots pad the card by `margin` (--lyr-margin) INSIDE the
+  // window — without counting it the locked window is too short and clips
+  // the card's bottom half.
+  const pad = c.anchor === 'top' || c.anchor === 'bottom' ? Math.max(0, c.margin) : 0
   const w = Math.ceil(r.width) + 2
-  const h = Math.ceil(r.height) + 2
+  const h = Math.ceil(r.height) + 2 + pad
   if (w === lastFit.w && h === lastFit.h) return
   lastFit = { w, h }
-  const c = lyricsCfg.value
   void window.cockpit.autoFitWindow(w, h, c.anchor, c.margin)
 }
 
@@ -511,6 +540,10 @@ const fitCeilingW = ref(baseWinW.value)
 // re-anchored on EVERY poll (the "kwin script ran ×100+" spam).
 let lastFitW = 0
 function autoFitWidth(): void {
+  // Wayland LOCKED owns the size via fitWindowToContent (shrink-to-card) —
+  // letting the unlocked grow-only path run too (e.g. from our own resize
+  // events) fights it and makes the window flicker between two sizes.
+  if (locked.value && window.cockpit.wayland) return
   const card = cardEl.value
   if (!card) return
   const c = lyricsCfg.value

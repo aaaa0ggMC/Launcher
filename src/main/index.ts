@@ -14,7 +14,12 @@ import {
   shutdownBackgroundTasks,
   runningTaskCount
 } from './process/background-tasks'
-import { setMainWindow, setWindowBroadcast, closeAllChildren } from './process/windows'
+import {
+  setMainWindow,
+  setWindowBroadcast,
+  closeAllChildren,
+  startWindowDebug
+} from './process/windows'
 import { readJson } from './process/util'
 import { CONFIG_JSON } from './process/paths'
 import { setLogBroadcast, log } from './process/logger'
@@ -164,6 +169,7 @@ if (!gotLock) {
     setLogBroadcast((entry) => broadcast('cockpit:log', entry))
     setBackgroundBroadcast((event) => broadcast('cockpit:bt', event))
     setWindowBroadcast((event) => broadcast('cockpit:windows', event))
+    startWindowDebug()
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()

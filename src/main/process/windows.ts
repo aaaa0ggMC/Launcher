@@ -88,6 +88,7 @@ function debugWindow(win: BrowserWindow): void {
   const right = area.x + area.width - (b.x + b.width)
   log.info('[win-debug] geometry', {
     id: win.getTitle(),
+    pos: win.getPosition(),
     bounds: { x: b.x, y: b.y, width: b.width, height: b.height },
     workArea: { x: area.x, y: area.y, width: area.width, height: area.height },
     scale: disp.scaleFactor,
@@ -105,6 +106,79 @@ if (windowDebug) {
       if (!win.isDestroyed()) debugWindow(win)
     }
   }, 500)
+  setInterval(() => {
+    for (const { win } of children.values()) {
+      if (!win.isDestroyed()) void queryKwinGeo(win, 'heartbeat')
+    }
+  }, 1000)
+}
+
+// ---------------------------------------------------------------------------
+// KWin ground-truth tap (COCKPIT_WINDOW_DEBUG=1 only). Electron's getBounds()
+// lags behind compositor moves on Wayland, so to find out where a window
+// REALLY is we load a probe script into KWin which reports the compositor's
+// own frameGeometry back to us over D-Bus (KWin scripts expose callDBus).
+// ---------------------------------------------------------------------------
+let geoTapBus: { disconnect: () => void } | null = null
+
+async function initKwinGeoTap(): Promise<void> {
+  if (!isKdeWayland()) return
+  try {
+    const { sessionBus, interface: ifx } = await import('dbus-next')
+    const bus = sessionBus()
+    geoTapBus = bus
+    class GeoInterface extends ifx.Interface {
+      constructor() {
+        super('org.linuxcockpit.windebug')
+      }
+      Geo(caption: string, x: number, y: number, w: number, h: number): void {
+        log.info('[win-debug] kwin-geo', { caption, x, y, w, h })
+      }
+    }
+    GeoInterface.configureMembers({
+      methods: { Geo: { inSignature: 'siiii', outSignature: '' } }
+    })
+    const reply: number = await bus.requestName('org.linuxcockpit.windebug', 0)
+    bus.export('/Windebug', new GeoInterface())
+    log.info('[win-debug] kwin-geo tap', {
+      reply,
+      owned: reply === 1 || reply === 4,
+      busAttached: Boolean(geoTapBus)
+    })
+  } catch (e) {
+    log.info('[win-debug] kwin-geo tap failed', { error: String(e) })
+  }
+}
+
+/** KWin probe that reports the window's compositor-side frameGeometry. */
+function kwinGeoScript(title: string): string {
+  const id = escapeJs(title)
+  return `const list = workspace.windowList(); const w = list.find(x => x.caption === '${id}') || list.find(x => String(x.caption).includes('${id}')); if (w) { const g = w.frameGeometry; callDBus('org.linuxcockpit.windebug', '/Windebug', 'org.linuxcockpit.windebug', 'Geo', String(w.caption), Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height)); } else { callDBus('org.linuxcockpit.windebug', '/Windebug', 'org.linuxcockpit.windebug', 'Geo', 'NOT_FOUND ${id}', 0, 0, 0, 0); }`
+}
+
+/** Ask KWin for the window's real geometry (the Geo tap logs it). */
+async function queryKwinGeo(win: BrowserWindow, tag: string): Promise<void> {
+  if (!windowDebug || !isKdeWayland() || win.isDestroyed()) return
+  await kwinRunScript(kwinGeoScript(win.getTitle()))
+  log.info('[win-debug] kwin-geo-query', { tag, title: win.getTitle() })
+}
+
+/** Debug-mode startup facts (env, session backend, all displays + scales). */
+export function startWindowDebug(): void {
+  if (!windowDebug) return
+  log.info('[win-debug] env', {
+    xdgSessionType: process.env.XDG_SESSION_TYPE ?? '',
+    kdeFullSession: process.env.KDE_FULL_SESSION ?? '',
+    kdeWayland: isKdeWayland(),
+    ozone: app.commandLine.getSwitchValue('ozone-platform') || 'unset',
+    displays: screen.getAllDisplays().map((d) => ({
+      bounds: d.bounds,
+      workArea: d.workArea,
+      scale: d.scaleFactor,
+      primary: d.id === screen.getPrimaryDisplay().id
+    }))
+  })
+  void initKwinGeoTap()
 }
 
 export function setMainWindow(win: BrowserWindow): void {
@@ -271,22 +345,27 @@ async function kwinRunScript(script: string): Promise<void> {
         'org.kde.kwin.Scripting'
       ) as unknown as {
         loadScript: (filePath: string) => Promise<number>
-        unloadScript: (id: number) => Promise<void>
+        unloadScript: (scriptPath: string) => Promise<void>
       }
       const id = await scripting.loadScript(tmpFile)
       // KWin returns the script id (int) on Plasma 6 / an object path on older
       // versions — handle both.
       const scriptPath = typeof id === 'number' ? `/Scripting/Script${id}` : String(id)
+      if (windowDebug) {
+        log.info('[win-debug] kwin script loaded', { id: scriptPath, script })
+      }
       const scriptIface = (await bus.getProxyObject('org.kde.KWin', scriptPath)).getInterface(
         'org.kde.kwin.Script'
       ) as unknown as { run: () => Promise<void> }
       await scriptIface.run()
       try {
-        await scripting.unloadScript(id)
+        // unloadScript takes the object PATH string — passing the numeric id
+        // (Plasma 6's loadScript return) fails to marshal and leaks the script.
+        await scripting.unloadScript(scriptPath)
       } catch {
         // a lingering one-liner is harmless
       }
-      log.info('kwin script ran', { id })
+      log.info('kwin script ran', { id: scriptPath })
     } finally {
       try {
         bus.disconnect()
@@ -295,7 +374,8 @@ async function kwinRunScript(script: string): Promise<void> {
       }
     }
   } catch (e) {
-    log.debug('kwin scripting unavailable', { error: String(e) })
+    if (windowDebug) log.info('[win-debug] kwin scripting unavailable', { error: String(e) })
+    else log.debug('kwin scripting unavailable', { error: String(e) })
   } finally {
     try {
       await unlink(tmpFile)
@@ -310,28 +390,76 @@ async function kwinRunScript(script: string): Promise<void> {
  * the QJSEngine (frameGeometry reads as a JS copy), but assigning the WHOLE
  * object `w.frameGeometry = { x, y, width, height }` moves the window to the
  * absolute position. This is the only reliable way.
+ *
+ * `size` pins width/height explicitly; without it the script preserves KWin's
+ * current geometry — which can REVERT a client resize that the compositor has
+ * not applied yet (the "shrink never lands" race).
  */
-function kwinMoveScript(title: string, x: number, y: number): string {
+function kwinMoveScript(
+  title: string,
+  x: number,
+  y: number,
+  size?: { w: number; h: number }
+): string {
   const id = escapeJs(title)
+  const dims =
+    size !== undefined
+      ? `width: ${Math.round(size.w)}, height: ${Math.round(size.h)}`
+      : 'width: g.width, height: g.height'
   return `const list = workspace.windowList(); const w = list.find(x => x.caption === '${id}') || list.find(x => String(x.caption).includes('${id}')); if (w) { const g = w.frameGeometry; w.frameGeometry = { x: ${Math.round(
     x
-  )}, y: ${Math.round(y)}, width: g.width, height: g.height }; }`
+  )}, y: ${Math.round(y)}, ${dims} }; }`
 }
 
 /**
- * Move a child window to (x, y). Native positions apply on X11/Windows/macOS
- * automatically; on KDE Wayland we re-assert them via KWin scripting — retried
- * a few times so a late-mapped surface still lands correctly.
+ * Move a child window to (x, y) — optionally with an explicit size. Native
+ * positions apply on X11/Windows/macOS automatically; on KDE Wayland we
+ * re-assert them via KWin scripting — retried a few times so a late-mapped
+ * surface still lands correctly.
  */
-function moveChildWindow(win: BrowserWindow, x: number, y: number): void {
+function moveChildWindow(
+  win: BrowserWindow,
+  x: number,
+  y: number,
+  size?: { w: number; h: number }
+): void {
   const px = Math.round(x)
   const py = Math.round(y)
   if (!isKdeWayland()) return
-  const script = kwinMoveScript(win.getTitle(), px, py)
+  const script = kwinMoveScript(win.getTitle(), px, py, size)
+  if (windowDebug) {
+    log.info('[win-debug] kwin move scheduled', {
+      title: win.getTitle(),
+      x: px,
+      y: py,
+      size,
+      electronPos: win.getPosition(),
+      electronBounds: win.getBounds()
+    })
+  }
   // First attempt fast (80ms) to minimize the show→center gap; one retry for
   // the case the compositor hadn't mapped/placed the window yet.
   for (let i = 0; i < 2; i++) {
-    setTimeout(() => void kwinRunScript(script), 80 + i * 400)
+    setTimeout(
+      async () => {
+        if (win.isDestroyed()) return
+        if (windowDebug) {
+          log.info('[win-debug] kwin move attempt', { n: i, title: win.getTitle() })
+          await queryKwinGeo(win, `pre-move-${i}`)
+        }
+        await kwinRunScript(script)
+        if (windowDebug) {
+          await queryKwinGeo(win, `post-move-${i}`)
+          log.info('[win-debug] electron after move', {
+            n: i,
+            title: win.getTitle(),
+            pos: win.getPosition(),
+            bounds: win.getBounds()
+          })
+        }
+      },
+      80 + i * 400
+    )
   }
 }
 
@@ -347,24 +475,48 @@ function positionChildWindow(
 ): void {
   if (x === undefined && y === undefined) return
   if (!isKdeWayland()) return
+  if (windowDebug) {
+    log.info('[win-debug] positionChildWindow', {
+      title: win.getTitle(),
+      specX: x,
+      specY: y,
+      bounds: win.getBounds(),
+      pos: win.getPosition()
+    })
+  }
   moveChildWindow(win, x ?? win.getBounds().x, y ?? win.getBounds().y)
 }
 
 /**
  * Public sender-scoped move — native setPosition + KWin scripting on KDE
  * Wayland (renderer re-asserts once mounted, when the compositor definitely
- * knows the window).
+ * knows the window). `size` pins the KWin-scripted width/height (auto-fit).
  */
-export function moveWindowTo(win: BrowserWindow | null, x: number, y: number): boolean {
+export function moveWindowTo(
+  win: BrowserWindow | null,
+  x: number,
+  y: number,
+  size?: { w: number; h: number }
+): boolean {
   if (!win || win.isDestroyed()) return false
   const px = Math.round(x)
   const py = Math.round(y)
+  if (windowDebug) {
+    log.info('[win-debug] moveWindowTo request', {
+      title: win.getTitle(),
+      x: px,
+      y: py,
+      size,
+      electronPos: win.getPosition(),
+      electronBounds: win.getBounds()
+    })
+  }
   try {
     win.setPosition(px, py)
   } catch {
     /* ignore */
   }
-  moveChildWindow(win, px, py)
+  moveChildWindow(win, px, py, size)
   return true
 }
 
@@ -374,12 +526,15 @@ export function resizeWindowTo(win: BrowserWindow | null, w: number, h: number):
   const cw = Math.max(120, Math.round(w))
   const ch = Math.max(60, Math.round(h))
   try {
-    // Windows clamps setSize of a resizable:false window to its CURRENT
-    // minimum — a window that auto-grew can never shrink again, so the lyrics
-    // window stayed wide while re-centering by the (smaller) requested width
-    // and visibly drifted right. Lower the minimum first so SHRINK takes
-    // effect; the next grow re-raises it.
-    if (process.platform === 'win32') win.setMinimumSize(cw, ch)
+    // A resizable:false window clamps setSize to its CURRENT minimum — a
+    // window that auto-grew can never shrink again, so the lyrics window
+    // stayed wide while re-centering by the (smaller) requested width and
+    // visibly drifted right. Seen on Windows AND Linux (Wayland logs: shrink
+    // requests silently ignored, grows always land). Lower the minimum first
+    // so SHRINK takes effect; the next grow re-raises it.
+    if (process.platform === 'win32' || process.platform === 'linux') {
+      win.setMinimumSize(cw, ch)
+    }
     win.setSize(cw, ch)
   } catch (e) {
     log.warn('resizeWindowTo failed', { error: String(e) })
@@ -416,8 +571,16 @@ export function centerChildWindow(
   else if (anchor === 'top') y = area.y + margin
   else y = area.y + Math.round((area.height - b.height) / 2)
   const last = lastCenter.get(win)
-  if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height)
+  if (last && last.x === x && last.y === y && last.w === b.width && last.h === b.height) {
+    if (windowDebug) {
+      log.info('[win-debug] centerChildWindow skip (same target + same electron bounds)', {
+        id: win.getTitle(),
+        target: { x, y },
+        electronBounds: { x: b.x, y: b.y, width: b.width, height: b.height }
+      })
+    }
     return false
+  }
   lastCenter.set(win, { x, y, w: b.width, h: b.height })
   if (windowDebug) {
     log.info('[win-debug] centerChildWindow request', {
@@ -428,6 +591,7 @@ export function centerChildWindow(
       target: { x, y }
     })
     setTimeout(() => debugWindow(win), 300)
+    void queryKwinGeo(win, 'post-center')
   }
   return moveWindowTo(win, x, y)
 }
@@ -456,7 +620,15 @@ export function resizeAndCenterChildWindow(
   else if (anchor === 'top') y = area.y + margin
   else y = area.y + Math.round((area.height - ch) / 2)
   const last = lastCenter.get(win)
-  if (last && last.x === x && last.y === y && last.w === cw && last.h === ch) return false
+  if (last && last.x === x && last.y === y && last.w === cw && last.h === ch) {
+    if (windowDebug) {
+      log.info('[win-debug] auto-fit skip (same target)', {
+        id: win.getTitle(),
+        target: { x, y, width: cw, height: ch }
+      })
+    }
+    return false
+  }
   lastCenter.set(win, { x, y, w: cw, h: ch })
   if (windowDebug) {
     log.info('[win-debug] auto-fit request', {
@@ -467,9 +639,13 @@ export function resizeAndCenterChildWindow(
       target: { x, y, width: cw, height: ch }
     })
     setTimeout(() => debugWindow(win), 300)
+    void queryKwinGeo(win, 'post-autofit')
   }
   resizeWindowTo(win, cw, ch)
-  return moveWindowTo(win, x, y)
+  // Pin the KWin script to the TARGET dims — otherwise the script preserves
+  // KWin's current (pre-shrink) geometry and reverts the resize if the
+  // compositor has not applied it within the 80ms attempt window.
+  return moveWindowTo(win, x, y, { w: cw, h: ch })
 }
 
 function makeChild(
@@ -527,6 +703,24 @@ function makeChild(
   })
   win.on('resize', scheduleGeomChanged)
   win.on('move', scheduleGeomChanged)
+  if (windowDebug) {
+    // Electron's OWN notion of moves/resizes — compared against the KWin geo
+    // tap this shows whether/where bounds updates lag behind the compositor.
+    win.on('move', () => {
+      log.info('[win-debug] electron move event', {
+        id: win.getTitle(),
+        pos: win.getPosition(),
+        bounds: win.getBounds()
+      })
+    })
+    win.on('resize', () => {
+      log.info('[win-debug] electron resize event', {
+        id: win.getTitle(),
+        pos: win.getPosition(),
+        bounds: win.getBounds()
+      })
+    })
+  }
   return win
 }
 
@@ -679,7 +873,23 @@ export function setSenderWindowLocked(win: BrowserWindow | null, locked: boolean
 export function moveWindowBy(win: BrowserWindow | null, dx: number, dy: number): boolean {
   if (!win || win.isDestroyed()) return false
   const [x, y] = win.getPosition()
+  if (windowDebug) {
+    log.info('[win-debug] moveWindowBy', {
+      title: win.getTitle(),
+      dx,
+      dy,
+      posBefore: { x, y },
+      bounds: win.getBounds()
+    })
+  }
   win.setPosition(x + dx, y + dy)
+  if (windowDebug) {
+    log.info('[win-debug] moveWindowBy after setPosition', {
+      title: win.getTitle(),
+      pos: win.getPosition(),
+      bounds: win.getBounds()
+    })
+  }
   return true
 }
 
