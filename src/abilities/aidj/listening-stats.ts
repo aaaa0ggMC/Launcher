@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, writeFile } from 'fs/promises'
+import { appendFile, mkdir, open, readFile, writeFile } from 'fs/promises'
+import type { FileHandle } from 'fs/promises'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { USER_CONFIG_DIR } from '../../main/process/paths'
@@ -224,36 +225,197 @@ process.on('exit', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 读取端 —— 顺序聚合即可（写入侧已保证单调），容忍残行 / 最后一行不完整。
+// 读取端 —— range(t0, t1) API，非全量提取：
+//   - 内部固定容量 LRU 区间缓存（重复查询零 IO）；
+//   - 未命中 → 字节级二分定位 t0/t1 所在行（timestamp 单调递增），
+//     只读目标区间那一小段字节，复杂度 O(log n) 次 4KB 探测 + O(区间)。
 // ---------------------------------------------------------------------------
 
-/** 解析 time.csv 全部行（含当前未落盘的实时桶，用于"今天听了多久"）。 */
-export async function loadTimeStats(): Promise<{ rows: TimeStatRow[]; totalMinutes: number }> {
+const BLOCK_BYTES = 4096
+/** 区间缓存上限（LRU）。 */
+const RANGE_CACHE_MAX = 24
+/** 超过该行数的查询结果不入缓存（避免全量查询污染缓存）。 */
+const CACHE_MAX_ROWS = 512
+
+interface CachedRange {
+  start: number
+  end: number
+  rows: TimeStatRow[]
+}
+
+/** LRU，最近使用在前。 */
+const rangeCache: CachedRange[] = []
+
+function touchCache(entry: CachedRange): void {
+  const i = rangeCache.indexOf(entry)
+  if (i > 0) {
+    rangeCache.splice(i, 1)
+    rangeCache.unshift(entry)
+  }
+}
+
+function pushCache(entry: CachedRange): void {
+  rangeCache.unshift(entry)
+  while (rangeCache.length > RANGE_CACHE_MAX) rangeCache.pop()
+}
+
+/** 从句柄指定偏移读一行（防御：行跨块尾时用），解析出 timestamp。 */
+async function readTsAt(handle: FileHandle, offset: number): Promise<number> {
+  const buf = Buffer.alloc(128)
+  const { bytesRead } = await handle.read(buf, 0, 128, offset)
+  if (!bytesRead) return NaN
+  const s = buf.subarray(0, bytesRead).toString('utf-8')
+  const nl = s.indexOf('\n')
+  const ts = Number((nl >= 0 ? s.slice(0, nl) : s).split(',')[0])
+  return Number.isFinite(ts) ? ts : NaN
+}
+
+/**
+ * 二分：找到文件中第一个 `timestamp >= target` 的行。
+ * 返回 `{ offset, ts }`（行首偏移 + 该行 timestamp），不存在则 null。
+ * 行很短（< 64B）远小于 4KB 块，块内必有完整行，二分按行首偏移收敛。
+ */
+async function findFirstGe(
+  handle: FileHandle,
+  size: number,
+  target: number
+): Promise<{ offset: number; ts: number } | null> {
+  let lo = 0
+  let hi = size
+  const buf = Buffer.alloc(BLOCK_BYTES)
+  while (hi - lo > BLOCK_BYTES) {
+    const mid = (lo + hi) >> 1
+    const { bytesRead } = await handle.read(buf, 0, BLOCK_BYTES, mid)
+    if (!bytesRead) break
+    const chunk = buf.subarray(0, bytesRead).toString('utf-8')
+    const nl = chunk.indexOf('\n')
+    if (nl < 0) {
+      // 块内无换行（异常/尾部残行）——跳过该块继续向右
+      lo = mid + bytesRead
+      continue
+    }
+    const lineStart = mid + nl + 1
+    const lineEnd = chunk.indexOf('\n', nl + 1)
+    let ts: number
+    if (lineEnd >= 0) {
+      ts = Number(chunk.slice(nl + 1, lineEnd).split(',')[0])
+    } else {
+      ts = await readTsAt(handle, lineStart)
+    }
+    if (!Number.isFinite(ts) || ts < target) lo = lineStart
+    else hi = lineStart
+  }
+  // 顺序扫描 [lo, hi)（≤ 一块）：逐行找第一个 ts >= target
+  const scanLen = Math.min(BLOCK_BYTES, size - lo)
+  if (scanLen <= 0) return null
+  const { bytesRead } = await handle.read(buf, 0, scanLen, lo)
+  const chunk = buf.subarray(0, bytesRead).toString('utf-8')
+  let scanPos = 0
+  let lineStart = lo // 当前行在文件中的绝对偏移，逐行推进
+  while (scanPos < chunk.length) {
+    const nl = chunk.indexOf('\n', scanPos)
+    let line: string
+    if (nl < 0) {
+      line = chunk.slice(scanPos)
+      scanPos = chunk.length
+    } else {
+      line = chunk.slice(scanPos, nl)
+      scanPos = nl + 1
+    }
+    const trimmed = line.trim()
+    if (trimmed) {
+      const ts = Number(trimmed.split(',')[0])
+      if (Number.isFinite(ts) && ts >= target) {
+        return { offset: lineStart, ts }
+      }
+    }
+    lineStart += line.length + 1
+  }
+  return null
+}
+
+/** 读取 [startOffset, endOffset) 字节并解析为行（容忍残行）。 */
+async function loadRange(
+  handle: FileHandle,
+  startOffset: number,
+  endOffset: number
+): Promise<TimeStatRow[]> {
+  const len = endOffset - startOffset
+  if (len <= 0) return []
+  const buf = Buffer.alloc(len)
+  const { bytesRead } = await handle.read(buf, 0, len, startOffset)
   const rows: TimeStatRow[] = []
-  try {
-    const raw = await readFile(TIME_CSV, 'utf-8')
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      const [tsRaw, durRaw] = trimmed.split(',')
-      const ts = Number(tsRaw)
-      const dur = Number(durRaw)
-      if (!Number.isFinite(ts) || !Number.isFinite(dur)) continue // 残行/损坏行跳过
+  for (const line of buf.subarray(0, bytesRead).toString('utf-8').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const [tsRaw, durRaw] = trimmed.split(',')
+    const ts = Number(tsRaw)
+    const dur = Number(durRaw)
+    if (Number.isFinite(ts) && Number.isFinite(dur)) {
       rows.push({ timestamp: ts, duration: clampMinutes(dur) })
+    }
+  }
+  return rows
+}
+
+/** 把内存实时桶合并进查询结果（替换同小时旧行 / 补插新行）。 */
+function mergeLiveBucket(rows: TimeStatRow[], startMs: number, endMs: number): TimeStatRow[] {
+  if (bucketMinutes <= 0 || bucketStart < startMs || bucketStart > endMs) return rows
+  const live: TimeStatRow = { timestamp: bucketStart, duration: clampMinutes(bucketMinutes) }
+  const out = rows.slice()
+  const idx = out.findIndex((r) => r.timestamp === bucketStart)
+  if (idx >= 0) out[idx] = live
+  else {
+    out.push(live)
+    out.sort((a, b) => a.timestamp - b.timestamp)
+  }
+  return out
+}
+
+/**
+ * 区间查询：返回 timestamp ∈ [startMs, endMs] 的行。
+ * 缓存完全覆盖 → 直接返回；否则二分定位 + 只读目标区间。
+ */
+export async function queryTimeRange(startMs: number, endMs: number): Promise<TimeStatRow[]> {
+  if (startMs > endMs) return []
+  const hit = rangeCache.find((c) => c.start <= startMs && c.end >= endMs)
+  if (hit) {
+    touchCache(hit)
+    return mergeLiveBucket(
+      hit.rows.filter((r) => r.timestamp >= startMs && r.timestamp <= endMs),
+      startMs,
+      endMs
+    )
+  }
+  let rows: TimeStatRow[] = []
+  try {
+    const handle = await open(TIME_CSV, 'r')
+    try {
+      const { size } = await handle.stat()
+      if (size > 0) {
+        const s = await findFirstGe(handle, size, startMs)
+        if (s) {
+          // 上界用 endMs+1：第一个 ts > endMs 的行（ts 是整数毫秒）
+          const e = await findFirstGe(handle, size, endMs + 1)
+          rows = await loadRange(handle, s.offset, e ? e.offset : size)
+        }
+      }
+    } finally {
+      await handle.close()
     }
   } catch {
     /* 文件不存在 → 空 */
   }
-  // 合并内存中的实时桶。当前小时尚未落盘 → 补一行；尾行恰好是当前小时
-  // （重启续写场景，磁盘上是旧的部分值）→ 用实时值替换。
-  if (bucketMinutes > 0) {
-    const last = rows[rows.length - 1]
-    if (last && last.timestamp === bucketStart) {
-      last.duration = clampMinutes(bucketMinutes)
-    } else {
-      rows.push({ timestamp: bucketStart, duration: clampMinutes(bucketMinutes) })
-    }
+  rows = mergeLiveBucket(rows, startMs, endMs)
+  if (rows.length <= CACHE_MAX_ROWS) {
+    pushCache({ start: startMs, end: endMs, rows })
   }
+  return rows
+}
+
+/** 全量统计（range API 的薄包装，保持原有返回形状）。 */
+export async function loadTimeStats(): Promise<{ rows: TimeStatRow[]; totalMinutes: number }> {
+  const rows = await queryTimeRange(0, Number.MAX_SAFE_INTEGER)
   const totalMinutes = rows.reduce((sum, r) => sum + r.duration, 0)
   return { rows, totalMinutes }
 }

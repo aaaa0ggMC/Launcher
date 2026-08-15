@@ -96,7 +96,7 @@ import {
 } from './player-backend'
 import type { WebPlayerReport } from './player-backend'
 import { isWebRemoteRunning, getWebRemotePort, stopWebRemoteServer } from './web-remote'
-import { loadTimeStats } from './listening-stats'
+import { loadTimeStats, queryTimeRange } from './listening-stats'
 import { registerStartupHook } from '../../main/process/startup'
 
 const log = makeLogger('aidj')
@@ -2535,6 +2535,21 @@ const commands: CommandSpec[] = [
     usage: 'aidj.time-stats',
     run: async () => {
       const { rows, totalMinutes } = await loadTimeStats()
+      return { ok: true, totalMinutes, rows }
+    }
+  },
+  {
+    name: 'aidj.time-range',
+    description: '听歌时长区间查询（二分定位 + 缓存，只读目标区间）',
+    usage: 'aidj.time-range --start <ms> --end <ms>',
+    run: async (ctx) => {
+      const start = Number(ctx.named.start ?? 0)
+      const end = Number(ctx.named.end ?? Number.MAX_SAFE_INTEGER)
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return { ok: false, error: '--start/--end 需要毫秒时间戳' }
+      }
+      const rows = await queryTimeRange(start, end)
+      const totalMinutes = rows.reduce((s, r) => s + r.duration, 0)
       return { ok: true, totalMinutes, rows }
     }
   }
