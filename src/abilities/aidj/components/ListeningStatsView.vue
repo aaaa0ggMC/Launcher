@@ -39,8 +39,6 @@ interface Period {
 }
 
 const DAY = 86_400_000
-/** 行高兜底估算（cells 换行后高度不固定，实际行高由 ref 实测） */
-const ROW_FALLBACK = 70
 /** 已加载周期数上限（滑动窗口：超出即卸载远端） */
 const MAX_LOADED = 96
 /** 每次滚动加载的批量（一次 range 多读一点，用户查看是时间线性的） */
@@ -49,6 +47,13 @@ const BATCH = { day: 31, month: 12, year: 6 } as const
 /** 粒度记忆（localStorage，下次打开恢复） */
 const GRAN_KEY = 'cockpit-aidj-stats-gran'
 
+/** 卡片内网格规格：24h → 5×5（25 格补 1 空位）、一个月 → 6×6（36 格）、一年 → 6×2（12 月） */
+const CARD_GRID: Record<Gran, { cols: number; rows: number; size: number }> = {
+  day: { cols: 5, rows: 5, size: 25 },
+  month: { cols: 6, rows: 6, size: 36 },
+  year: { cols: 6, rows: 2, size: 12 }
+}
+
 const gran = ref<Gran>('day')
 const periods = ref<Period[]>([]) // 升序：最旧在上、最新在下
 const loading = ref(false)
@@ -56,28 +61,25 @@ const scrollEl = ref<HTMLElement | null>(null)
 const hover = ref<{ x: number; y: number; period: string; cell: HeatCell } | null>(null)
 const jumpInput = ref('')
 const anchorLabel = ref('')
-/** 每周期实测行高（cells 自动换行后高度随容器宽度变化） */
-const rowHeights = new Map<string, number>()
+/** 卡片 DOM 引用（key → 元素）。定位/时间起点全部用 DOM 几何，不手算排布。 */
+const cardEls = new Map<string, HTMLElement>()
 
-/** v-for 函数 ref：挂载/更新时记录该周期行高。 */
-function onRowRef(el: unknown, key: string): void {
-  if (el instanceof HTMLElement) rowHeights.set(key, el.offsetHeight)
+/** v-for 函数 ref：挂载/更新时记录卡片元素。 */
+function onCardRef(el: unknown, key: string): void {
+  if (el instanceof HTMLElement) cardEls.set(key, el)
 }
 
-function rowHeight(key: string): number {
-  return rowHeights.get(key) ?? ROW_FALLBACK
+/** 删除一批卡片的 DOM 引用（prune 卸载时清理）。 */
+function dropCardEls(ps: Period[]): void {
+  for (const p of ps) cardEls.delete(p.key)
 }
 
-/** 前 idx 个周期累计高度（滚动定位 / 补偿用）。 */
-function heightBefore(idx: number): number {
-  let h = 0
-  for (let i = 0; i < idx && i < periods.value.length; i++) h += rowHeight(periods.value[i].key)
-  return h
-}
-
-/** 删除一批周期的行高记录（prune 卸载时清理）。 */
-function dropRowHeights(ps: Period[]): void {
-  for (const p of ps) rowHeights.delete(p.key)
+/** 卡片内格子渲染数组：一维 cells 按网格规格补空位（不足部分为 null 占位）。 */
+function gridCells(p: Period): (HeatCell | null)[] {
+  const size = CARD_GRID[gran.value].size
+  const out: (HeatCell | null)[] = p.cells.slice(0, size)
+  while (out.length < size) out.push(null)
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +252,8 @@ async function reload(anchor?: number): Promise<void> {
     const el = scrollEl.value
     if (el) {
       // 定位到"目标时间所在周期"在视口顶部：无参 = 现在（回到当前 → 今天），
-      // 跳转 = 目标月（日粒度 → 该月 1 日，月/年粒度 → 该月/年）
+      // 跳转 = 目标月（日粒度 → 该月 1 日，月/年粒度 → 该月/年）。
+      // 卡片流不手算排布，直接 scrollIntoView 让浏览器精确滚动。
       const targetTs = anchor ?? nowMs
       const targetStart =
         g === 'day'
@@ -258,8 +261,10 @@ async function reload(anchor?: number): Promise<void> {
           : g === 'month'
             ? monthStartOf(targetTs)
             : yearStartOf(targetTs)
-      const idx = periods.value.findIndex((p) => p.start >= targetStart)
-      el.scrollTop = idx <= 0 ? 0 : heightBefore(idx)
+      const target = periods.value.find((p) => p.start >= targetStart)
+      const card = target ? cardEls.get(target.key) : undefined
+      if (card) card.scrollIntoView({ block: 'start' })
+      else el.scrollTop = 0
       updateAnchor()
     }
   } finally {
@@ -284,7 +289,7 @@ async function loadOlder(): Promise<void> {
     periods.value = [...built, ...periods.value]
     await nextTick()
     if (el) el.scrollTop += el.scrollHeight - prevH // 顶部插入后保持视口位置
-    prune()
+    await prune()
   } finally {
     loading.value = false
   }
@@ -308,32 +313,34 @@ async function loadNewer(): Promise<void> {
     const built = buildPeriods(g, from, until, rows).filter((p) => p.start <= newestCap)
     if (!built.length) return
     periods.value = [...periods.value, ...built]
-    prune()
+    await prune()
   } finally {
     loading.value = false
   }
 }
 
-/** 滑动窗口卸载：超出上限时裁掉离视口远的一端（按实测行高补偿滚动位置）。 */
-function prune(): void {
+/** 滑动窗口卸载：超出上限时裁掉离视口远的一端。
+ *  卡片流下用 scrollHeight 差值补偿（不依赖手算排布/行高）。 */
+async function prune(): Promise<void> {
   const el = scrollEl.value
   if (periods.value.length <= MAX_LOADED) return
   const excess = periods.value.length - MAX_LOADED
   if (!el) {
-    dropRowHeights(periods.value.slice(MAX_LOADED))
+    dropCardEls(periods.value.slice(MAX_LOADED))
     periods.value.length = MAX_LOADED
     return
   }
   if (el.scrollTop + el.clientHeight / 2 > el.scrollHeight / 2) {
-    // 视口靠下（接近最新）→ 裁掉顶部（最旧），按被裁行实际高度补偿 scrollTop
+    // 视口靠下（接近最新）→ 裁掉顶部（最旧），补偿 scrollTop
+    const prevH = el.scrollHeight
     const removed = periods.value.slice(0, excess)
-    const removedH = removed.reduce((s, p) => s + rowHeight(p.key), 0)
-    dropRowHeights(removed)
+    dropCardEls(removed)
     periods.value.splice(0, excess)
-    el.scrollTop = Math.max(0, el.scrollTop - removedH)
+    await nextTick()
+    el.scrollTop = Math.max(0, el.scrollTop - (prevH - el.scrollHeight))
   } else {
     // 视口靠上（在看历史）→ 裁掉底部（最新），无需补偿
-    dropRowHeights(periods.value.slice(MAX_LOADED))
+    dropCardEls(periods.value.slice(MAX_LOADED))
     periods.value.length = MAX_LOADED
   }
 }
@@ -348,24 +355,19 @@ function onScroll(): void {
   updateAnchor()
 }
 
-/** 滚动时自动更新时间起点（顶部可见周期，按实测行高定位）。 */
+/** 滚动时自动更新时间起点：视口内第一个可见卡片（DOM 几何，卡片流安全）。 */
 function updateAnchor(): void {
   const el = scrollEl.value
   if (!el || !periods.value.length) return
-  const top = el.scrollTop
-  let acc = 0
-  let idx = 0
-  for (let i = 0; i < periods.value.length; i++) {
-    const h = rowHeight(periods.value[i].key)
-    if (acc + h > top) {
-      idx = i
-      break
+  for (const [key, card] of cardEls) {
+    if (card.offsetTop + card.offsetHeight > el.scrollTop) {
+      const p = periods.value.find((x) => x.key === key)
+      if (p) {
+        anchorLabel.value = p.label
+        return
+      }
     }
-    acc += h
-    idx = i + 1
   }
-  idx = Math.min(idx, periods.value.length - 1)
-  anchorLabel.value = periods.value[idx].label
 }
 
 function onCellMove(e: MouseEvent, period: Period, cell: HeatCell): void {
@@ -518,29 +520,33 @@ onBeforeUnmount(() => {
         }}
       </div>
 
-      <div
-        v-for="p in periods"
-        :key="p.key"
-        :ref="(el) => onRowRef(el, p.key)"
-        class="period-row px-4"
-      >
-        <div class="period-head d-flex align-center">
-          <span class="period-label text-body-2 font-weight-medium">{{ p.label }}</span>
-          <span class="period-total text-caption text-medium-emphasis">{{
-            tt('aidj.stats.total', { n: fmt(p.total) }, '共 ' + fmt(p.total))
-          }}</span>
-        </div>
-        <div class="cells-row">
-          <div
-            v-for="(cell, i) in p.cells"
-            :key="i"
-            class="heat-cell"
-            :title="`${p.label} ${cell.label} · ${fmt(cell.minutes)} · ${coveragePct(cell)}%`"
-            :style="{ background: cellBg(cell) }"
-            @mousemove="onCellMove($event, p, cell)"
-            @mouseleave="hover = null"
-          >
-            <span class="cell-label">{{ cell.label }}</span>
+      <div class="cards-grid px-4 pb-4">
+        <div
+          v-for="p in periods"
+          :key="p.key"
+          :ref="(el) => onCardRef(el, p.key)"
+          class="period-card"
+        >
+          <div class="period-head">
+            <span class="period-label text-body-2 font-weight-medium">{{ p.label }}</span>
+            <span class="period-total text-caption text-medium-emphasis">{{
+              tt('aidj.stats.total', { n: fmt(p.total) }, '共 ' + fmt(p.total))
+            }}</span>
+          </div>
+          <div class="card-cells" :style="{ '--cols': CARD_GRID[gran].cols }">
+            <template v-for="(cell, i) in gridCells(p)" :key="i">
+              <div
+                v-if="cell"
+                class="heat-cell"
+                :title="`${p.label} ${cell.label} · ${fmt(cell.minutes)} · ${coveragePct(cell)}%`"
+                :style="{ background: cellBg(cell) }"
+                @mousemove="onCellMove($event, p, cell)"
+                @mouseleave="hover = null"
+              >
+                <span class="cell-label">{{ cell.label }}</span>
+              </div>
+              <div v-else class="heat-cell is-empty" />
+            </template>
           </div>
         </div>
       </div>
@@ -606,31 +612,47 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow-y: auto;
 }
-.period-row {
-  /* 高度不固定：cells 自动换行后随容器宽度变化，滚动定位用 ref 实测 */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 152px); /* 一排自适应多个卡片，居中 */
+  gap: 10px;
+  justify-content: center;
+}
+.period-card {
+  width: 152px;
   display: flex;
   flex-direction: column;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  gap: 4px;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.07);
+  border: 1px solid rgba(128, 128, 128, 0.12);
 }
 .period-head {
-  min-height: 24px;
+  min-height: 22px;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
   flex-shrink: 0;
 }
-.cells-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center; /* 格子组整行居中，两侧留白 */
+.period-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.period-total {
+  flex-shrink: 0;
+}
+.card-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 6), 20px); /* 卡内固定 20px 方形矩阵 */
   gap: 3px;
+  justify-content: center;
 }
 .heat-cell {
-  width: 26px;
-  height: 26px; /* 固定正方形，不随容器拉伸 */
-  flex: none;
+  width: 20px;
+  height: 20px;
   border-radius: 3px;
   display: flex;
   align-items: flex-end;
@@ -638,6 +660,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid rgba(128, 128, 128, 0.12);
   transition: outline 0.1s;
+}
+.heat-cell.is-empty {
+  border-color: transparent;
+  background: transparent;
 }
 .heat-cell:hover {
   outline: 1.5px solid rgba(var(--v-theme-primary), 0.9);
@@ -649,10 +675,6 @@ onBeforeUnmount(() => {
   padding-bottom: 2px;
   color: rgba(128, 128, 128, 0.85);
   user-select: none;
-}
-.period-total {
-  margin-left: auto;
-  flex-shrink: 0;
 }
 .stats-tooltip {
   position: fixed;
