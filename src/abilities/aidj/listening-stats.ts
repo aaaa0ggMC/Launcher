@@ -6,7 +6,7 @@ import { USER_CONFIG_DIR } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import { registerStartupHook } from '../../main/process/startup'
 import { DBusBackend, getPlayerMode, getWebPlayerBackend } from './player-backend'
-import { getDbusManager, loadAidjConfig } from './service'
+import { getDbusManager, initDbusManager, loadAidjConfig } from './service'
 
 const log = makeLogger('aidj-time-stats')
 
@@ -156,7 +156,11 @@ function flushBucketSync(): void {
   }
 }
 
-/** "在听"判定：当前模式的活动后端报告 Playing。无副作用（不触发懒连接）。 */
+/** "在听"判定：当前模式的活动后端报告 Playing。无副作用（不触发懒连接）。
+ *  dbus 模式（仅 Linux）下若共享 DBusManager 尚未初始化（用户从未打开
+ *  AIDJ 页面），在此懒初始化一次——保证"外部 MPRIS 播放器在播"在
+ *  不进入 AIDJ 界面时也能被后台计时；只在从未绑定过时创建，不干扰
+ *  正在使用中的连接。 */
 async function isPlaying(): Promise<boolean> {
   try {
     const mode = await getPlayerMode()
@@ -164,8 +168,17 @@ async function isPlaying(): Promise<boolean> {
       const st = await getWebPlayerBackend().getStatus()
       return st.status === 'Playing'
     }
-    const mgr = getDbusManager()
-    if (!mgr) return false
+    let mgr = getDbusManager()
+    if (!mgr) {
+      const cfg = await loadAidjConfig()
+      if (!cfg) return false
+      try {
+        mgr = await initDbusManager(cfg)
+        log.info('listening stats: lazy-initialized shared DBus manager')
+      } catch {
+        return false
+      }
+    }
     const st = await new DBusBackend(mgr).getStatus()
     return st.status === 'Playing'
   } catch {
