@@ -622,14 +622,15 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .cells-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18px, 26px));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center; /* 格子组整行居中，两侧留白 */
   gap: 3px;
-  justify-content: center;
 }
 .heat-cell {
-  aspect-ratio: 1 / 1;
-  min-height: 18px;
+  width: 26px;
+  height: 26px; /* 固定正方形，不随容器拉伸 */
+  flex: none;
   border-radius: 3px;
   display: flex;
   align-items: flex-end;
