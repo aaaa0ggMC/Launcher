@@ -67,6 +67,7 @@ import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG, DEFAULT_AIDJ_CONFIG } 
 import { EQ_BAND_COUNT } from './types'
 import type { EqProfile } from './types'
 import './jobs'
+import './listening-stats'
 import {
   getContinuousTasks,
   getContinuousTask,
@@ -95,6 +96,7 @@ import {
 } from './player-backend'
 import type { WebPlayerReport } from './player-backend'
 import { isWebRemoteRunning, getWebRemotePort, stopWebRemoteServer } from './web-remote'
+import { loadTimeStats } from './listening-stats'
 import { registerStartupHook } from '../../main/process/startup'
 
 const log = makeLogger('aidj')
@@ -2525,6 +2527,15 @@ const commands: CommandSpec[] = [
         return { ok: false, error: '需要 --config <json>' }
       }
       return saveLyricsPageConfig(config)
+    }
+  },
+  {
+    name: 'aidj.time-stats',
+    description: '听歌时长统计（time.csv，每小时一行，含当前未落盘的实时小时）',
+    usage: 'aidj.time-stats',
+    run: async () => {
+      const { rows, totalMinutes } = await loadTimeStats()
+      return { ok: true, totalMinutes, rows }
     }
   }
 ]
