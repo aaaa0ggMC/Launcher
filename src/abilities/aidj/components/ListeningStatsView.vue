@@ -47,13 +47,6 @@ const BATCH = { day: 31, month: 12, year: 6 } as const
 /** 粒度记忆（localStorage，下次打开恢复） */
 const GRAN_KEY = 'cockpit-aidj-stats-gran'
 
-/** 卡片内网格规格：24h → 5×5（25 格补 1 空位）、一个月 → 6×6（36 格）、一年 → 6×2（12 月） */
-const CARD_GRID: Record<Gran, { cols: number; rows: number; size: number }> = {
-  day: { cols: 5, rows: 5, size: 25 },
-  month: { cols: 6, rows: 6, size: 36 },
-  year: { cols: 6, rows: 2, size: 12 }
-}
-
 const gran = ref<Gran>('day')
 const periods = ref<Period[]>([]) // 升序：最旧在上、最新在下
 const loading = ref(false)
@@ -74,9 +67,16 @@ function dropCardEls(ps: Period[]): void {
   for (const p of ps) cardEls.delete(p.key)
 }
 
-/** 卡片内格子渲染数组：一维 cells 按网格规格补空位（不足部分为 null 占位）。 */
+/** 卡内方形网格规格：边 = ceil(sqrt(格子数))，24h → 5×5、一月 → 6×6、12 月 → 4×4。 */
+function cardGrid(p: Period): { cols: number; size: number } {
+  const cellCount = gran.value === 'day' ? 24 : gran.value === 'month' ? daysInMonth(p.start) : 12
+  const n = Math.ceil(Math.sqrt(cellCount))
+  return { cols: n, size: n * n }
+}
+
+/** 卡片内格子渲染数组：一维 cells 按方形网格补空位（不足部分为 null 占位）。 */
 function gridCells(p: Period): (HeatCell | null)[] {
-  const size = CARD_GRID[gran.value].size
+  const { size } = cardGrid(p)
   const out: (HeatCell | null)[] = p.cells.slice(0, size)
   while (out.length < size) out.push(null)
   return out
@@ -533,7 +533,7 @@ onBeforeUnmount(() => {
               tt('aidj.stats.total', { n: fmt(p.total) }, '共 ' + fmt(p.total))
             }}</span>
           </div>
-          <div class="card-cells" :style="{ '--cols': CARD_GRID[gran].cols }">
+          <div class="card-cells" :style="{ '--cols': cardGrid(p).cols }">
             <template v-for="(cell, i) in gridCells(p)" :key="i">
               <div
                 v-if="cell"
