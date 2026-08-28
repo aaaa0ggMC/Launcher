@@ -254,14 +254,28 @@ const sortMode = computed<SidebarSort>(() => {
 /** Custom order loaded from sidebar-order.json */
 const customOrder = ref<string[]>([])
 async function loadSidebarOrder(): Promise<void> {
-  const r = (await window.cockpit.command('sidebar.order.get').catch(() => null)) as {
-    ok?: boolean
-    order?: string[]
-  } | null
-  if (Array.isArray(r?.order)) {
-    customOrder.value = r.order
+  try {
+    const r = (await window.cockpit.command('sidebar.order.get').catch(() => null)) as {
+      ok?: boolean
+      order?: string[]
+    } | null
+    if (Array.isArray(r?.order)) {
+      customOrder.value = r.order
+    }
+  } catch {
+    /* noop */
   }
 }
+
+watch(
+  sortMode,
+  (mode) => {
+    if (mode === 'custom') {
+      void loadSidebarOrder()
+    }
+  },
+  { immediate: true }
+)
 
 /** Per-entry usage stats from apps.csv (sidebar frequency / recent rules). */
 const usageStats = ref<Record<string, { count: number; lastUsed: number }>>({})
@@ -301,8 +315,7 @@ const abilities = computed<SidebarAbility[]>(() => {
         const posA = idxA === -1 ? 999999 : idxA
         const posB = idxB === -1 ? 999999 : idxB
         if (posA !== posB) return posA - posB
-        const c = a.category.localeCompare(b.category, lang.value)
-        return c !== 0 ? c : a.name.localeCompare(b.name, lang.value)
+        return a.name.localeCompare(b.name, lang.value)
       }
       if (mode !== 'alpha') {
         const d = score(b) - score(a)

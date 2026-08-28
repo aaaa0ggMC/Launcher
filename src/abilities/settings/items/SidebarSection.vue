@@ -7,7 +7,7 @@ import { translate } from '@ui/i18n'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import { resolveSidebarAbilities } from '@ui/ability-registry'
 
-const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
+const config = inject<Ref<Record<string, unknown>>>('cockpit:config', ref({}))
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 export interface AbilityItem {
@@ -90,6 +90,9 @@ async function setSort(v: string | null): Promise<void> {
       sort: mode
     }
   })
+  if (mode === 'custom' && customList.value.length > 0) {
+    void saveCustomOrder(customList.value)
+  }
 }
 
 async function saveCustomOrder(list: AbilityItem[]): Promise<void> {
