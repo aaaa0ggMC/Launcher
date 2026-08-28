@@ -12,7 +12,7 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        // esbuild is a devDependency; load it at runtime from node_modules.
+        // esbuild stays a root dependency; load it at runtime from node_modules.
         external: ['esbuild'],
         output: {
           // keep native import() for ability-loader (.mjs external modules)

@@ -35,16 +35,16 @@
 
 基本形式：
 
-| 语法 | 含义 |
-| --- | --- |
-| `{name}` | 简单字符串变量 |
-| `{name:type}` | 指定类型：`string` / `number` / `select` / `textarea` / `bool` |
-| `{name:number:range(a,b)}` | 数值区间（`a`、`b` 可为小数）——表单自动变成滑块 + 数字框双控件 |
-| `{name:number:min(v)}` | 最小值约束 |
-| `{name:number:max(v)}` | 最大值约束 |
-| `{name:options(a,b,c)}` | 下拉选项（逗号分隔，可用引号包住选项值）——**自动识别为 select 类型** |
-| `{name:select:options(a,b,c)}` | 显式 select 类型 + 选项 |
-| `{name:...:default(v)}` | 默认值。`default(...)` 必须以 `:default(v)` 形式追加在**约束段之后**（解析器按 `...:default(...)` 在串尾提取），如 `{width:number:range(256,1024):default(512)}`、`{name:options(a,b):default(a)}`；`bool` 类型默认值为 `default(true/false)`，其余类型默认值可用引号包裹 |
+| 语法                           | 含义                                                                                                                                                                                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{name}`                       | 简单字符串变量                                                                                                                                                                                                                                                            |
+| `{name:type}`                  | 指定类型：`string` / `number` / `select` / `textarea` / `bool`                                                                                                                                                                                                            |
+| `{name:number:range(a,b)}`     | 数值区间（`a`、`b` 可为小数）——表单自动变成滑块 + 数字框双控件                                                                                                                                                                                                            |
+| `{name:number:min(v)}`         | 最小值约束                                                                                                                                                                                                                                                                |
+| `{name:number:max(v)}`         | 最大值约束                                                                                                                                                                                                                                                                |
+| `{name:options(a,b,c)}`        | 下拉选项（逗号分隔，可用引号包住选项值）——**自动识别为 select 类型**                                                                                                                                                                                                      |
+| `{name:select:options(a,b,c)}` | 显式 select 类型 + 选项                                                                                                                                                                                                                                                   |
+| `{name:...:default(v)}`        | 默认值。`default(...)` 必须以 `:default(v)` 形式追加在**约束段之后**（解析器按 `...:default(...)` 在串尾提取），如 `{width:number:range(256,1024):default(512)}`、`{name:options(a,b):default(a)}`；`bool` 类型默认值为 `default(true/false)`，其余类型默认值可用引号包裹 |
 
 类型可自动推断：数值类约束（`range`/`min`/`max`）自动判定为 `number`；`options(...)` 自动判定为 `select`。
 
@@ -82,15 +82,15 @@
 
 模板的「响应变换」区可添加一组变换，把原始响应逐级解析成最终结果。每个变换可折叠编辑，支持排序（上/下箭头）、删除与递归嵌套。
 
-| 类型 | 作用 |
-| --- | --- |
-| `text` | 按 `format` 模板提取文本。格式串里写 `{.json路径}`，如 `{.choices[0].message.content}`；命中数组时自动枚举为 `0. …` / `1. …`；用 `[X]` 同步多个数组路径（`{.data[X].id} {.data[X].name}` 逐行对齐）；不同数组根做笛卡尔积 |
-| `img` | 按 `entry` 路径取图片 URL 列表（如 `{.images}`），逐个渲染图片（可下载） |
-| `audio` | 按 `entry` 取**内联**音频数据（base64 或 `hex8` 编码），解码为可播放音频；`encoding` 选 Base64/Hex8，MIME 可留空自动检测（mp3/wav/ogg/flac 按文件头识别） |
-| `audio-url` | 按 `entry` 取 `http(s)` 音频 URL，主进程 `fetch` 抓取后转内联可播放（绕过跨域）；多个 URL 逐条枚举 |
-| `video-url` | 同 `audio-url`，渲染为视频播放器 |
-| `script` | 用户 JS。参数：`object` = 解析后的响应 JSON，`global_vars` = 全局变量映射，`context` = 结果注入器。用 `context.transform.add_text(lbl, text)` / `add_img(lbl, url\|url[])` / `add_audio(lbl, src, type?)` / `add_video(lbl, src, type?)` 追加结果段；`console.log` 可用（进主进程日志）。支持 `localVars`（`context.local.NAME`）。**脚本编辑区是草稿模式**：改完要点「更新」提交才生效（提交会重新执行，按钮出现 `*` 表示有未提交改动） |
-| `task` | 异步任务轮询：见下节 |
+| 类型        | 作用                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`      | 按 `format` 模板提取文本。格式串里写 `{.json路径}`，如 `{.choices[0].message.content}`；命中数组时自动枚举为 `0. …` / `1. …`；用 `[X]` 同步多个数组路径（`{.data[X].id} {.data[X].name}` 逐行对齐）；不同数组根做笛卡尔积                                                                                                                                                                                                                |
+| `img`       | 按 `entry` 路径取图片 URL 列表（如 `{.images}`），逐个渲染图片（可下载）                                                                                                                                                                                                                                                                                                                                                                 |
+| `audio`     | 按 `entry` 取**内联**音频数据（base64 或 `hex8` 编码），解码为可播放音频；`encoding` 选 Base64/Hex8，MIME 可留空自动检测（mp3/wav/ogg/flac 按文件头识别）                                                                                                                                                                                                                                                                                |
+| `audio-url` | 按 `entry` 取 `http(s)` 音频 URL，主进程 `fetch` 抓取后转内联可播放（绕过跨域）；多个 URL 逐条枚举                                                                                                                                                                                                                                                                                                                                       |
+| `video-url` | 同 `audio-url`，渲染为视频播放器                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `script`    | 用户 JS。参数：`object` = 解析后的响应 JSON，`global_vars` = 全局变量映射，`context` = 结果注入器。用 `context.transform.add_text(lbl, text)` / `add_img(lbl, url\|url[])` / `add_audio(lbl, src, type?)` / `add_video(lbl, src, type?)` 追加结果段；`console.log` 可用（进主进程日志）。支持 `localVars`（`context.local.NAME`）。**脚本编辑区是草稿模式**：改完要点「更新」提交才生效（提交会重新执行，按钮出现 `*` 表示有未提交改动） |
+| `task`      | 异步任务轮询：见下节                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 脚本示例：`context.transform.add_text('Reply', object.choices[0].message.content)`。
 
@@ -120,11 +120,11 @@
 
 配置导出导入与远程下载这三个涉及文件/网络的操作暴露为主进程命令，可在内置 CLI REPL（`cli` 能力）中使用；其余全部为纯前端功能：
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `playground.export` | 导出配置到 JSON 文件（`--path` 与 `--data` 必填）。写入 `{ version: 1, exportedAt, data }` | `playground.export --path /abs/playground.json --data '{"templates":[]}'` |
-| `playground.import` | 导入配置（`--path` 必填）。要求文件含 `data.templates` 数组 | `playground.import --path /abs/playground.json` |
-| `playground.download-url` | 下载远程资源到本地（`--path` + `--url` 或 `--text`） | `playground.download-url --url https://... --path /abs/file.jpg` |
+| 命令                      | 说明                                                                                       | 示例                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `playground.export`       | 导出配置到 JSON 文件（`--path` 与 `--data` 必填）。写入 `{ version: 1, exportedAt, data }` | `playground.export --path /abs/playground.json --data '{"templates":[]}'` |
+| `playground.import`       | 导入配置（`--path` 必填）。要求文件含 `data.templates` 数组                                | `playground.import --path /abs/playground.json`                           |
+| `playground.download-url` | 下载远程资源到本地（`--path` + `--url` 或 `--text`）                                       | `playground.download-url --url https://... --path /abs/file.jpg`          |
 
 返回值说明：
 
@@ -138,14 +138,14 @@ UI 的「导出配置 / 导入配置 / 各结果下载」按钮底层即调用�
 
 所有运行数据存于**渲染端 localStorage**（随应用数据目录持久化），键名：
 
-| 键 | 内容 |
-| --- | --- |
-| `rp_templates` | 请求模板数组 |
-| `rp_globals` | 全局变量数组 |
-| `rp_values` | 每个模板的已填变量值 |
-| `rp_history` | 发送历史 |
-| `rp_active` | 上次打开的模板 ID（失效时自动置空） |
-| `rp_panel_collapsed` | 右侧面板折叠态 |
+| 键                   | 内容                                |
+| -------------------- | ----------------------------------- |
+| `rp_templates`       | 请求模板数组                        |
+| `rp_globals`         | 全局变量数组                        |
+| `rp_values`          | 每个模板的已填变量值                |
+| `rp_history`         | 发送历史                            |
+| `rp_active`          | 上次打开的模板 ID（失效时自动置空） |
+| `rp_panel_collapsed` | 右侧面板折叠态                      |
 
 **导出配置**（顶部「导出配置」）：把模板 / 全局变量 / 已填值 / 历史整体写成一个 JSON 文件（默认名 `playground-<时间戳>.json`）。**导入配置**：从该文件整组恢复并**覆盖**当前数据。适合备份、换机迁移或在多台机器间同步。
 

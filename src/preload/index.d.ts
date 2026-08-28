@@ -26,6 +26,7 @@ export interface CockpitApi {
   platform: string
   wayland: boolean
   windowDebug: boolean
+  yarjDebug: boolean
   listApps: () => Promise<AppsListResult>
   getEntry: (root: string, id: string) => Promise<AppEntry | null>
   updateEntry: (root: string, id: string, patch: Partial<AppEntry>) => Promise<AppEntry>

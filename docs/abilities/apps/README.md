@@ -47,11 +47,11 @@
 
 点卡片上的「启动」按钮即可。按钮颜色编码风险等级（越深越危险）：
 
-| 风险 | 按钮样式 |
-| --- | --- |
-| `low` | 绿色 tonal |
-| `medium` | 橙色 tonal |
-| `high` | 红色 flat（实心） |
+| 风险     | 按钮样式          |
+| -------- | ----------------- |
+| `low`    | 绿色 tonal        |
+| `medium` | 橙色 tonal        |
+| `high`   | 红色 flat（实心） |
 
 **风险确认**：`medium` / `high` 的条目启动前弹确认框，显示自动检测出的风险说明（`auto_note`）与手工备注（`note`），可勾选「知道了，以后不再提醒」——勾选后写入 `security.acknowledged: true`，以后直接启动不再询问。
 
@@ -101,33 +101,33 @@ apps 能力向侧栏搜索框 / 右键菜单注入**快速动作**：每个应�
 
 所有操作都是注册命令，可在内置 CLI REPL（`cli` 能力）中使用。`--flag value` 为命名参数：
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `apps.list` | 列出所有搜索目录下的应用 | `apps.list` |
-| `apps.get` | 读取单个条目 | `apps.get --root ~/Apps --id bili-viewer` |
-| `apps.config` | 读取 Apps 能力配置（搜索目录等） | `apps.config` |
-| `apps.update` | 更新/创建条目（浅合并，`exec`/`security` 逐字段合并） | `apps.update --root ~/Apps --id bili-viewer --patch {"name":"x"}` |
-| `apps.delete` | 删除条目 | `apps.delete --root ~/Apps --id start-rdp` |
-| `apps.add-root` | 添加搜索目录 | `apps.add-root --path /home/aaaa0ggmc/Apps` |
-| `apps.remove-root` | 移除搜索目录 | `apps.remove-root --path /home/aaaa0ggmc/Apps` |
-| `apps.move-root` | 调整搜索目录顺序（`--dir -1` 上移 / `1` 下移） | `apps.move-root --path /home/aaaa0ggmc/Apps --dir 1` |
-| `apps.create` | 创建新条目（可选 `--mkdir true` 顺带创建项目目录） | `apps.create --root ~/Apps --id myapp --patch {"name":"My App","exec":{"type":"custom","command":["run.sh"]}} --mkdir true` |
-| `apps.rescan` | 重扫目录、生成草稿并合并 | `apps.rescan --root /home/aaaa0ggmc/Apps` |
-| `launch.run` | 启动应用 | `launch.run --root ~/Apps --id bili-viewer` |
-| `launch.action` | 运行应用的附加操作 | `launch.action --root ~/Apps --id new-api --action stop` |
+| 命令               | 说明                                                  | 示例                                                                                                                        |
+| ------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `apps.list`        | 列出所有搜索目录下的应用                              | `apps.list`                                                                                                                 |
+| `apps.get`         | 读取单个条目                                          | `apps.get --root ~/Apps --id bili-viewer`                                                                                   |
+| `apps.config`      | 读取 Apps 能力配置（搜索目录等）                      | `apps.config`                                                                                                               |
+| `apps.update`      | 更新/创建条目（浅合并，`exec`/`security` 逐字段合并） | `apps.update --root ~/Apps --id bili-viewer --patch {"name":"x"}`                                                           |
+| `apps.delete`      | 删除条目                                              | `apps.delete --root ~/Apps --id start-rdp`                                                                                  |
+| `apps.add-root`    | 添加搜索目录                                          | `apps.add-root --path /home/aaaa0ggmc/Apps`                                                                                 |
+| `apps.remove-root` | 移除搜索目录                                          | `apps.remove-root --path /home/aaaa0ggmc/Apps`                                                                              |
+| `apps.move-root`   | 调整搜索目录顺序（`--dir -1` 上移 / `1` 下移）        | `apps.move-root --path /home/aaaa0ggmc/Apps --dir 1`                                                                        |
+| `apps.create`      | 创建新条目（可选 `--mkdir true` 顺带创建项目目录）    | `apps.create --root ~/Apps --id myapp --patch {"name":"My App","exec":{"type":"custom","command":["run.sh"]}} --mkdir true` |
+| `apps.rescan`      | 重扫目录、生成草稿并合并                              | `apps.rescan --root /home/aaaa0ggmc/Apps`                                                                                   |
+| `launch.run`       | 启动应用                                              | `launch.run --root ~/Apps --id bili-viewer`                                                                                 |
+| `launch.action`    | 运行应用的附加操作                                    | `launch.action --root ~/Apps --id new-api --action stop`                                                                    |
 
 ### CLI 快捷词（REPL 层，apps 注入的词汇）
 
 除了命令，CLI REPL 还有一层按别名/标签解析的快捷方式：
 
-| 输入 | 说明 |
-| --- | --- |
-| `list` / `ls` | 列出全部应用（别名或 ID + 名称） |
-| `info <别名>` | 查看应用详情（名称/别名/路径/类型/风险/标签/操作） |
-| `launch <别名> [操作]` | 启动应用（或它的一个附加操作） |
-| `run <别名> [操作]` | `launch` 的别名 |
-| `<别名>` | 直接启动（裸别名解析：匹配 别名 / ID / 标签，忽略大小写） |
-| `<别名> <操作>` | 直接执行应用的附加操作（如 `new-api stop`） |
+| 输入                   | 说明                                                      |
+| ---------------------- | --------------------------------------------------------- |
+| `list` / `ls`          | 列出全部应用（别名或 ID + 名称）                          |
+| `info <别名>`          | 查看应用详情（名称/别名/路径/类型/风险/标签/操作）        |
+| `launch <别名> [操作]` | 启动应用（或它的一个附加操作）                            |
+| `run <别名> [操作]`    | `launch` 的别名                                           |
+| `<别名>`               | 直接启动（裸别名解析：匹配 别名 / ID / 标签，忽略大小写） |
+| `<别名> <操作>`        | 直接执行应用的附加操作（如 `new-api stop`）               |
 
 ## 配置文件与文件位置
 
@@ -135,9 +135,7 @@ apps 能力向侧栏搜索框 / 右键菜单注入**快速动作**：每个应�
 
 ```jsonc
 {
-  "searchRoots": [
-    { "path": "/home/you/Apps", "watch": true }
-  ],
+  "searchRoots": [{ "path": "/home/you/Apps", "watch": true }],
   "confirmBeforeLaunch": false
 }
 ```
@@ -190,16 +188,16 @@ apps 能力向侧栏搜索框 / 右键菜单注入**快速动作**：每个应�
 - **`exec`**：`{ type, command[], args?, cwd?, env?, terminal?, root?, background?, path? }`。
 - **`exec.type`** 与生成的实际命令：
 
-  | type | 实际执行 |
-  | --- | --- |
-  | `uv` | `uv run --directory <cwd> <command> <args>` |
-  | `python` | `<cwd>/.venv/bin/python`（存在时，否则 `python3`）`<command> <args>` |
-  | `node` | `node <command> <args>` |
-  | `docker` | `docker <command> <args>` |
+  | type      | 实际执行                                                              |
+  | --------- | --------------------------------------------------------------------- |
+  | `uv`      | `uv run --directory <cwd> <command> <args>`                           |
+  | `python`  | `<cwd>/.venv/bin/python`（存在时，否则 `python3`）`<command> <args>`  |
+  | `node`    | `node <command> <args>`                                               |
+  | `docker`  | `docker <command> <args>`                                             |
   | `systemd` | `systemctl [--user] <command> <args>`（`root: true` 时去掉 `--user`） |
-  | `script` | `bash <脚本路径> <args>` |
-  | `desktop` | `gio launch <desktop 文件>` |
-  | `custom` | `<command> <args>` |
+  | `script`  | `bash <脚本路径> <args>`                                              |
+  | `desktop` | `gio launch <desktop 文件>`                                           |
+  | `custom`  | `<command> <args>`                                                    |
 
   始终用 `spawn(argv)` 执行，**绝不做 shell 拼接**。`root: true` 时外层包一层 `pkexec scripts/run-as-root.sh <cwd> <argv...>`；`terminal: true` 时再包一层系统终端。所有提权只经 `pkexec`，绝不直接开 root shell。
 

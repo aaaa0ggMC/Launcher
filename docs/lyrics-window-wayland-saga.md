@@ -6,12 +6,12 @@
 
 Electron 应用的窗口能力在 Wayland 下被严重削弱，因为**合成器（KWin）拥有定位/置顶/输入路由**，客户端协议（xdg-shell）根本不提供这些。
 
-| 能力                  | 原生 Wayland（KDE）                          | X11 / Windows / macOS          |
-| --------------------- | -------------------------------------------- | ------------------------------ |
-| 窗口定位 `setPosition` | 被合成器忽略 ❌                              | 生效 ✅                        |
-| 置顶 `setAlwaysOnTop`  | 被忽略，需 KDE 手动置顶 ❌                   | 生效 ✅                        |
-| 鼠标穿透 `setIgnoreMouseEvents` | **no-op**，Electron/Chromium 在 Wayland 未实现 ❌ | 生效 ✅（真 X11 会话） |
-| 窗口类型（OSD）       | xdg-shell 无此概念，都是 Normal ❌           | `_NET_WM_WINDOW_TYPE_NOTIFICATION` ✅ |
+| 能力                            | 原生 Wayland（KDE）                               | X11 / Windows / macOS                 |
+| ------------------------------- | ------------------------------------------------- | ------------------------------------- |
+| 窗口定位 `setPosition`          | 被合成器忽略 ❌                                   | 生效 ✅                               |
+| 置顶 `setAlwaysOnTop`           | 被忽略，需 KDE 手动置顶 ❌                        | 生效 ✅                               |
+| 鼠标穿透 `setIgnoreMouseEvents` | **no-op**，Electron/Chromium 在 Wayland 未实现 ❌ | 生效 ✅（真 X11 会话）                |
+| 窗口类型（OSD）                 | xdg-shell 无此概念，都是 Normal ❌                | `_NET_WM_WINDOW_TYPE_NOTIFICATION` ✅ |
 
 ## 踩坑记录（按时间顺序）
 
@@ -45,9 +45,10 @@ AFTER_OBJ2 200,200               ← 整对象赋值：✅
 ```
 
 **正确写法（唯一可靠）**：
+
 ```js
-const g = w.frameGeometry;
-w.frameGeometry = { x: X, y: Y, width: g.width, height: g.height };
+const g = w.frameGeometry
+w.frameGeometry = { x: X, y: Y, width: g.width, height: g.height }
 ```
 
 此前所有"居中修复"都在空转——因为搬窗根本没生效。这解释了"越漂越右、永远不居中"。
@@ -55,6 +56,7 @@ w.frameGeometry = { x: X, y: Y, width: g.width, height: g.height };
 ### 5. `getBounds()` 在 Wayland 上滞后
 
 KWin 脚本移动窗口后，Electron 的 `win.getBounds()` / `getPosition()` **不会同步**，仍是旧值。所以：
+
 - 居中计算**绝不能依赖 `getBounds()` 的当前宽高**，要用**目标宽高**（`x = 工作区中心 − 目标宽/2`）。
 - 防重守卫要跟**上次请求值**比较，不能跟 `getBounds()` 比。
 
@@ -72,6 +74,7 @@ KWin 脚本移动窗口后，Electron 的 `win.getBounds()` / `getPosition()` **
 ### 8. `ELECTRON_OZONE_PLATFORM_HINT` 在 Electron 38 被移除
 
 想用 `ELECTRON_OZONE_PLATFORM_HINT=x11` 强制 XWayland → **无效**（Electron 38 起移除），需 `--ozone-platform=x11` 命令行开关。但 XWayland 路线也不通：
+
 - 硬件加速下 GPU 进程段错误（`exit_code=139`）。
 - 禁用硬件加速后，透明窗口走 `x11_software_bitmap_presenter` 又无法呈现（`XGetWindowAttributes failed`）。
 - **XWayland 彻底放弃**。

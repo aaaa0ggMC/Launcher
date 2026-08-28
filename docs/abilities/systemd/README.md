@@ -27,15 +27,21 @@
 
 ## CLI 命令参考
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `systemd.list` | 列出用户 systemd 服务 | `systemd.list` |
+| 命令             | 说明                                              | 示例                                               |
+| ---------------- | ------------------------------------------------- | -------------------------------------------------- |
+| `systemd.list`   | 列出用户 systemd 服务                             | `systemd.list`                                     |
 | `systemd.action` | 启动/停止/重启服务（需要 `--name` 和 `--action`） | `systemd.action --name myservice --action restart` |
 
 `--action` 取值为 `start` / `stop` / `restart`。返回 `SystemdUnit[]`：
 
 ```jsonc
-{ "name": "myservice.service", "loaded": true, "active": "active", "sub": "running", "description": "My service" }
+{
+  "name": "myservice.service",
+  "loaded": true,
+  "active": "active",
+  "sub": "running",
+  "description": "My service"
+}
 ```
 
 ## 常见问题 / 已知局限

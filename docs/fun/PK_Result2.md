@@ -1,12 +1,14 @@
 # AIDJ PK 对比报告 2 (PK_Result2)
 
 > 对比对象：
+>
 > - **AIDJ 独立版**：`~/Projs/AIDJ`（Python TUI 命令行应用）
 > - **Launcher 内嵌版**：`~/Projs/Launcher/src/abilities/aidj`（Electron + Vue 3 桌面应用的一个 Ability，含 `aidj` / `aidj-lyrics` / `aidj-player` 三个页面）
 >
 > 生成时间：2026-08-13　·　依据：直接阅读双方当前源码（独立版 `commands.py` / `core/*`；内嵌版 `service.ts` / `commands.ts` / `jobs.ts` / `player-backend.ts` / `web-player/engine.ts` / `ncm_api/*` / `View.vue` 等）
 >
 > 与 PK_Result 的关系：
+>
 > - **独立版**：2026-07-22 后无任何提交（仓库最后 commit `fcf477a`），PK_Result 里第一章描述仍然准确，本节基本照搬并复核。
 > - **Launcher 内嵌版**：PK_Result 之后又有一批大更新（`git log a360964..HEAD` 约 30 个文件、+4000 行），集中在**播放后端抽象 + 内置播放器**、**内置网易云访问（免外部服务）**、**跨平台支持**。第二章整体重写。
 >
@@ -21,6 +23,7 @@
 类 bash 的命令行听歌体验（`uv run main.py`），核心是「自然语言 → AI 从本地曲库选歌 → 串成一个有故事感的歌单」。全部通过 `/命令` 形式在终端操作。
 
 ### 1.1 AI 生成（Generation）
+
 - `p`/`prompt`/`gen`：自然语言生成歌单（Intro + `[---SONG_LIST---]` + 精确曲库 key）
 - `pr`：AI 精选随机（随机 N 首候选 → AI 排序去冲突 → 至少保留一半）
 - `r`：代码里实际是「随机选 N 首」（`cmd_random`），与 `help/generate.md` 文档写的「Regenerate 重生成」存在出入（旧报告已指出，依旧未改）
@@ -28,30 +31,39 @@
 - `auto`：AI 生成后自动执行预设播放命令
 
 ### 1.2 播放器控制（MPRIS / D-Bus，`dbus-send` 子进程）
+
 - `next/prev/play/pause/toggle/stop`、`send`（推送队列）、`mpv`/`vlc`（直接拉起）、`ls`（列播放器）、`init`（持久化目标）
 
 ### 1.3 歌单编辑与 IO
+
 - `add/rm/mv/swap/shuffle/reverse/dedup/clear/top/view`、`save`/`load`、`search`（rapidfuzz 模糊搜索）
 
 ### 1.4 曲库 / 元数据 / 分析
+
 - `analyse`（LANG_MAP/EMOTION_SYNONYMS/GENRE_MAP 归一化 + ASCII 条形图）、`freqtop`、`discover`、`show`、`sync`（增量元数据同步，启动自动补齐）、`concurrency`、`injects`、`record_freq`
 
 ### 1.5 动态音量平衡
+
 - `volbal`/`adjmethod`（linear RMS / lufs ITU-R BS.1770）/`volcurve`（MPRIS 音量曲线指数，`LoudnessCache` 带后台预分析）
 
 ### 1.6 歌词
+
 - `dlyrics`：终端内同步滚动 LRC（Rich Live 渲染，`immersive` 全屏独占模式）；本地 `.lrc` 缓存 → NeteaseCloudMusicApi 拉取并缓存
 
 ### 1.7 等待小游戏（特色）
+
 - AI 思考期间自动 `run_waiting_game`；`games` 自由玩 **snake、pong、slots、dino、flappybird、matrix、space、auto_2048**
 
 ### 1.8 系统 / 调试 / UI
+
 - `status` 分组仪表盘、`token` 用量、`model` 交互式切换、`refresh/reset`、`help`/`dhelp` 帮助浏览器（13 个 markdown 文档页）、Rich TUI、历史记录、prompt_toolkit 补全、`cfgedit.py` Textual 配置编辑器
 
 ### 1.9 附带工具（`tools/`）
+
 - `download_music`（pyncm 网易云下载）、`lyrics_sync`/`lyrics_sync_lyrica`、`simp_zhconv`、`leak_check`
 
 ### 1.10 平台与架构
+
 - Python 3.10 + uv；单进程阻塞式命令分发；数据全在 `./data/`；Linux 完整 / MacOS 大概率 / Windows 需改
 
 ---
@@ -87,6 +99,7 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 **dbus 模式（Linux）**：`aidj.next/prev/toggle/stop/volume/seek/status`、`send`（推送并记 record_freq）、`list-players`（2s TTL）/`select-player`、`get-cover`（封面，见 2.7）、`activate`（轻量共享 DBus 绑定）。`seek` 为**绝对定位**——MPRIS 只暴露相对 `Seek`，在 `DBusManager.seekTo` 里按当前播放位置换算偏移。
 
 **web 模式（内置播放器，跨平台）**：`PlayerView.vue` + `web-player/engine.ts`：
+
 - 隐藏 `<audio>` 元素 + 自带队列（`queue/next/prev` 自动播放、`ended` 自动推进）
 - **播放历史**（新）：已播栈去重、上限 50，`prev` 能跨「队列整体替换」回退到上一首——engine 的队列只整换不 splice，历史单独存活
 - **追加 vs 替换**（新）：web 模式下「播放全部」/`aidj.send --append` 把批次**追加到队列尾部**（当前曲不打断，`enqueue` 命令，未加载时才开播）；dbus MPRIS 仍为整体替换
@@ -158,60 +171,65 @@ Electron 桌面应用里的一个 Ability（主进程 TypeScript + 渲染端 Vue
 ## 三、PK 对比
 
 ### 3.1 同源内核（两者都有）
+
 - AI 生成歌单同一套协议：Intro + `[---SONG_LIST---]` + 精确曲库 key、禁幻觉 / 禁翻译曲名
 - 元数据 AI 增量生成（language / emotion / genre / loudness / review，JSONL）
 - MPRIS 播放器控制、动态音量平衡（LUFS/RMS + curve + anchor）、record_freq
 - 等价能力：随机选曲、AI 精选随机、发现冷门、频率 Top、分布分析、模糊搜索、歌单存/载、AI 连续轮播、`--anchor` 响度锚点
 
 ### 3.2 Launcher 内嵌版优势
-| 维度 | 说明 |
-|---|---|
-| GUI 全流程 | 图形聊天界面、后台任务面板、设置页、会话管理 UI，替代 TUI |
-| **会话系统** | 多会话持久化、fork 分支、revert 回退、置顶/重命名/AI 自动标题、按天分组——独立版仍为单会话内存 |
-| **上下文管理** | discard / compact（AI 摘要）双模式 + 可配历史长度——独立版 pc 仅粗暴剪到 10 条 |
-| **网络可靠** | `withNetworkRetry`、`network_retry_minutes` / `reconnect_minutes` 断线重连、推送失败每 10s 重推——独立版失败即报错 |
-| **歌词能力** | 桌面浮窗 + 歌词页 + 内置播放器三端、卡拉OK 逐字（YRC）、封面沉浸、锁定/鼠标穿透、多播放器多窗口——独立版只有终端内滚动 LRC |
-| **内置播放器（新）** | web 后端跨平台直出声音、自带队列/播放历史（prev 跨替换回退）/追加与 trim/seek/音量/媒体键、与 volbal 联动——独立版必须依赖外部 MPRIS 播放器 |
-| **M4 音效管线（新）** | **crossfade / 10 段图形式 EQ 曲线库（`eq.jsonl`，拖拽编辑）/ 倍速（≤16x 出声、>16x 静音快进）/ AB 循环 / 睡眠定时 / 实时频谱 / 局域网 Web 遥控**——独立版全无 |
-| **内置网易云（新）** | 进程内直连网易拿 LRC+YRC，`ncm_mode` 三档自动兜底——**不再强依赖外部 NeteaseCloudMusicApi 服务**（独立版仍然依赖） |
-| **跨平台（新）** | `platforms: []`，非 Linux 走内置播放器、dbus 命令自动门控不暴露——独立版 Windows 仍需改代码 |
-| **播放后端热切换（新）** | `aidj.player-mode` 运行期切 dbus/web，自动停 playback 任务、持久化、UI 即时反映 |
-| **/filter** | 布尔表达式过滤曲库，可搜歌词、简繁变体、大小写忽略——独立版无 |
-| **DBus 实现** | dbus-next 原生 + 绝对 seek（`Seek` 偏移换算）vs 独立版 `dbus-send` 子进程 |
-| **持续会话交互** | 用户消息注入（USER DIRECTED）、`/discard_follows`、web 模式下持续会话直接推内置播放器——独立版 pc 无法中途改方向 |
-| **性能工程** | token 索引、validKeys 缓存、80MB 变体缓存预算、会话载入进度流、播放器列表 2s TTL、历史写锁、封面同目录优先 |
-| 工程化 | winston 日志、i18n 双语、能力依赖注入、平台过滤、配置热更新、配置自动创建、`/models` 模型拉取 |
+
+| 维度                     | 说明                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GUI 全流程               | 图形聊天界面、后台任务面板、设置页、会话管理 UI，替代 TUI                                                                                                    |
+| **会话系统**             | 多会话持久化、fork 分支、revert 回退、置顶/重命名/AI 自动标题、按天分组——独立版仍为单会话内存                                                                |
+| **上下文管理**           | discard / compact（AI 摘要）双模式 + 可配历史长度——独立版 pc 仅粗暴剪到 10 条                                                                                |
+| **网络可靠**             | `withNetworkRetry`、`network_retry_minutes` / `reconnect_minutes` 断线重连、推送失败每 10s 重推——独立版失败即报错                                            |
+| **歌词能力**             | 桌面浮窗 + 歌词页 + 内置播放器三端、卡拉OK 逐字（YRC）、封面沉浸、锁定/鼠标穿透、多播放器多窗口——独立版只有终端内滚动 LRC                                    |
+| **内置播放器（新）**     | web 后端跨平台直出声音、自带队列/播放历史（prev 跨替换回退）/追加与 trim/seek/音量/媒体键、与 volbal 联动——独立版必须依赖外部 MPRIS 播放器                   |
+| **M4 音效管线（新）**    | **crossfade / 10 段图形式 EQ 曲线库（`eq.jsonl`，拖拽编辑）/ 倍速（≤16x 出声、>16x 静音快进）/ AB 循环 / 睡眠定时 / 实时频谱 / 局域网 Web 遥控**——独立版全无 |
+| **内置网易云（新）**     | 进程内直连网易拿 LRC+YRC，`ncm_mode` 三档自动兜底——**不再强依赖外部 NeteaseCloudMusicApi 服务**（独立版仍然依赖）                                            |
+| **跨平台（新）**         | `platforms: []`，非 Linux 走内置播放器、dbus 命令自动门控不暴露——独立版 Windows 仍需改代码                                                                   |
+| **播放后端热切换（新）** | `aidj.player-mode` 运行期切 dbus/web，自动停 playback 任务、持久化、UI 即时反映                                                                              |
+| **/filter**              | 布尔表达式过滤曲库，可搜歌词、简繁变体、大小写忽略——独立版无                                                                                                 |
+| **DBus 实现**            | dbus-next 原生 + 绝对 seek（`Seek` 偏移换算）vs 独立版 `dbus-send` 子进程                                                                                    |
+| **持续会话交互**         | 用户消息注入（USER DIRECTED）、`/discard_follows`、web 模式下持续会话直接推内置播放器——独立版 pc 无法中途改方向                                              |
+| **性能工程**             | token 索引、validKeys 缓存、80MB 变体缓存预算、会话载入进度流、播放器列表 2s TTL、历史写锁、封面同目录优先                                                   |
+| 工程化                   | winston 日志、i18n 双语、能力依赖注入、平台过滤、配置热更新、配置自动创建、`/models` 模型拉取                                                                |
 
 ### 3.3 独立版优势（不变）
-| 维度 | 说明 |
-|---|---|
-| **轻量** | 纯 Python TUI，`uv run main.py`；Launcher 需完整 Electron 环境 |
-| **等待小游戏** | AI 思考期间 8 款小游戏——Launcher 仍只有加载动画 |
-| **终端美学** | Rich 彩图表单、Markdown 面板、Live 面板、沉浸式全屏歌词 |
-| **命令哲学** | bash 化短别名密集（`q/?/n/b/s/sw/rev/unique/pl`…），playlist 管道式操作顺手 |
-| **dhelp 帮助浏览器** | markdown 文档 + `cmd:` 交叉引用 + AI 协作规范 |
-| **配套工具** | 网易云下载（pyncm）、双源歌词批量同步（NCM/Lyrica）、简繁转换、leak_check |
-| **音量曲线可调** | `volcurve` 1.0–3.0 用户可配；Launcher web 端内置播放器固定线性（外部 MPRIS 才用曲线） |
+
+| 维度                 | 说明                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| **轻量**             | 纯 Python TUI，`uv run main.py`；Launcher 需完整 Electron 环境                        |
+| **等待小游戏**       | AI 思考期间 8 款小游戏——Launcher 仍只有加载动画                                       |
+| **终端美学**         | Rich 彩图表单、Markdown 面板、Live 面板、沉浸式全屏歌词                               |
+| **命令哲学**         | bash 化短别名密集（`q/?/n/b/s/sw/rev/unique/pl`…），playlist 管道式操作顺手           |
+| **dhelp 帮助浏览器** | markdown 文档 + `cmd:` 交叉引用 + AI 协作规范                                         |
+| **配套工具**         | 网易云下载（pyncm）、双源歌词批量同步（NCM/Lyrica）、简繁转换、leak_check             |
+| **音量曲线可调**     | `volcurve` 1.0–3.0 用户可配；Launcher web 端内置播放器固定线性（外部 MPRIS 才用曲线） |
 
 ### 3.4 相互缺失
+
 - **Launcher 没有**：小游戏、终端全屏沉浸歌词、dhelp 帮助浏览器、pyncm 下载工具、细粒度终端开关命令
 - **独立版没有**：GUI、会话持久化/分支/回退、自动重试与断线重连、卡拉OK/桌面浮窗歌词、内置播放器（含 crossfade / EQ 曲线库 / 倍速 / AB 循环 / 睡眠定时 / 频谱 / 局域网遥控）、内置网易云兜底、/filter 表达式、简繁变体、多播放器管理面板、后台任务框架、封面提取、模型 API 拉取、配置热更新
 
 ### 3.5 技术栈对比表
-| 维度 | AIDJ 独立版 | Launcher 内嵌版 |
-|---|---|---|
-| 语言 | Python 3.10 | TypeScript（Electron 主进程 + Vue 3） |
-| 交互形态 | TUI（rich / questionary / prompt_toolkit） | GUI（Vuetify / Material 3） |
-| 进程模型 | 单进程阻塞 + threading 等待注入 | 主进程命令 + 后台任务框架（命名作业） |
-| 播放 | MPRIS（`dbus-send` 子进程） | **双后端**：dbus-next 原生 + 内置 HTML5 `<audio>`（web，含 Web Audio 音效管线） |
-| 播放器依赖 | 必须外部 MPRIS 播放器 | dbus 模式同左；**web 模式零依赖直出声音** |
-| 网易云访问 | NeteaseCloudMusicApi 外部服务 | 外部服务 + **内置直连兜底**（`ncm_api`，三档模式） |
-| 响度分析 | soundfile + numpy + pyloudnorm | 同算法 TypeScript 重写（LoudnessCache，双后端复用） |
-| 模糊搜索 | rapidfuzz（C 扩展） | 自实现 token_sort_ratio + Levenshtein + 索引 |
-| 歌词存储 | 本地 `.lrc` 文件 | JSONL（LRC + YRC 双份）+ 浮窗/页面/内置播放器三渲染端 |
-| 会话 | 单会话内存（刷新即失） | 多会话 JSONL 持久化 + fork/revert/pin |
-| 依赖规模 | ~10 个 Python 包 | 整个 Electron + Vue + 前后端工具链 |
-| 平台 | Linux 完整 / macOS 大概率 / Windows 需改 | **全平台**（非 Linux 自动切内置播放器） |
+
+| 维度       | AIDJ 独立版                                | Launcher 内嵌版                                                                 |
+| ---------- | ------------------------------------------ | ------------------------------------------------------------------------------- |
+| 语言       | Python 3.10                                | TypeScript（Electron 主进程 + Vue 3）                                           |
+| 交互形态   | TUI（rich / questionary / prompt_toolkit） | GUI（Vuetify / Material 3）                                                     |
+| 进程模型   | 单进程阻塞 + threading 等待注入            | 主进程命令 + 后台任务框架（命名作业）                                           |
+| 播放       | MPRIS（`dbus-send` 子进程）                | **双后端**：dbus-next 原生 + 内置 HTML5 `<audio>`（web，含 Web Audio 音效管线） |
+| 播放器依赖 | 必须外部 MPRIS 播放器                      | dbus 模式同左；**web 模式零依赖直出声音**                                       |
+| 网易云访问 | NeteaseCloudMusicApi 外部服务              | 外部服务 + **内置直连兜底**（`ncm_api`，三档模式）                              |
+| 响度分析   | soundfile + numpy + pyloudnorm             | 同算法 TypeScript 重写（LoudnessCache，双后端复用）                             |
+| 模糊搜索   | rapidfuzz（C 扩展）                        | 自实现 token_sort_ratio + Levenshtein + 索引                                    |
+| 歌词存储   | 本地 `.lrc` 文件                           | JSONL（LRC + YRC 双份）+ 浮窗/页面/内置播放器三渲染端                           |
+| 会话       | 单会话内存（刷新即失）                     | 多会话 JSONL 持久化 + fork/revert/pin                                           |
+| 依赖规模   | ~10 个 Python 包                           | 整个 Electron + Vue + 前后端工具链                                              |
+| 平台       | Linux 完整 / macOS 大概率 / Windows 需改   | **全平台**（非 Linux 自动切内置播放器）                                         |
 
 ---
 

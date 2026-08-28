@@ -31,6 +31,7 @@ Linux System Cockpit 的日志查看器：实时查看当前会话的全部日�
 日志能力注册了 3 个命令，均可从命令行页直接执行：
 
 ### `logs.query`
+
 查询当前会话日志（从内存环形缓冲读取，不读磁盘文件）。
 
 ```
@@ -47,6 +48,7 @@ logs.query [--level <debug|info|warn|error>] [--before <id>] [--limit <n>] [--sc
 返回值含 `entries`（由新到旧的列表）与 `total`（过滤后总条数）。
 
 ### `logs.export`
+
 把当前会话日志（可选过滤级别）导出到指定文件。
 
 ```
@@ -56,6 +58,7 @@ logs.export --path /abs/session.log [--level info]
 `--path` 为必填绝对路径；返回 `{ ok, count }`，失败时返回 `{ ok: false, error }`。
 
 ### `logs.post`
+
 向日志管道提交一条日志（供调试 / 外部集成用）。
 
 ```

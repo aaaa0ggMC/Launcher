@@ -1801,7 +1801,9 @@ const commands: CommandSpec[] = [
         if (set !== 'dbus' && set !== 'web') {
           return { ok: false, error: 'mode 必须是 dbus 或 web' }
         }
-        return setPlayerMode(set)
+        const r = await setPlayerMode(set)
+        if (r.ok) _config = await loadAidjConfig()
+        return r
       }
       const mode = await getPlayerMode()
       const backend = await getActiveBackend()

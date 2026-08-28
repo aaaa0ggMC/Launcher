@@ -1,0 +1,12 @@
+{
+  "name": "@cockpit/yarj",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Yet Another Recorded Journey — 照片足迹地图（EXIF GPS → 地图打点 / 探索区域）",
+  "dependencies": {
+    "@mapbox/vector-tile": "^2.0.5",
+    "exifr": "^7.1.3",
+    "maplibre-gl": "^5.24.0",
+    "pbf": "^4.0.2"
+  }
+}

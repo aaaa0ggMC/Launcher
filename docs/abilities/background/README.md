@@ -86,6 +86,7 @@
 后台能力自带一个演示级命名作业处理器：
 
 ### `download`
+
 把 URL 流式下载到本地文件，支持取消（中断下载并删除不完整文件）。
 
 ```
@@ -101,20 +102,20 @@ background.job --name download --args {"url":"https://example.com/a.zip","out":"
 
 后台能力注册了 12 个命令（全局面板的操作也是通过这些命令实现的）：
 
-| 命令 | 作用 | 示例 |
-| --- | --- | --- |
-| `background.list` | 列出所有后台任务 | `background.list` |
-| `background.output --id <id>` | 读取任务的缓冲输出 | `background.output --id bt-xxx` |
-| `background.export --id <id> --path <p>` | 导出任务缓冲输出到文件 | `background.export --id bt-xxx --path /tmp/out.log` |
-| `background.clear-output --id <id>` | 清空任务的缓冲输出 | `background.clear-output --id bt-xxx` |
-| `background.start --name <n> --command <argv>` | 启动一个进程任务 | `background.start --name ncm --command ["node","app.js"] --cwd ~/Apps/Music` |
-| `background.input --id <id> --data <s>` | 向任务写 stdin | `background.input --id bt-xxx --data "y\n"` |
-| `background.signal --id <id> --signal <s>` | 发送 POSIX 信号（默认 SIGINT） | `background.signal --id bt-xxx --signal SIGINT` |
-| `background.job --name <handler> --args <json>` | 启动一个命名作业 | `background.job --name download --args {"url":"...","out":"..."}` |
-| `background.stop --id <id>` | 停止任务（进程 SIGTERM→SIGKILL；作业取消） | `background.stop --id bt-xxx` |
-| `background.kill --id <id>` | 强制结束进程任务（SIGKILL） | `background.kill --id bt-xxx` |
-| `background.remove --id <id>` | 从列表移除已结束的任务 | `background.remove --id bt-xxx` |
-| `background.clear-finished` | 一键移除所有已结束的任务 | `background.clear-finished` |
+| 命令                                            | 作用                                       | 示例                                                                         |
+| ----------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------- |
+| `background.list`                               | 列出所有后台任务                           | `background.list`                                                            |
+| `background.output --id <id>`                   | 读取任务的缓冲输出                         | `background.output --id bt-xxx`                                              |
+| `background.export --id <id> --path <p>`        | 导出任务缓冲输出到文件                     | `background.export --id bt-xxx --path /tmp/out.log`                          |
+| `background.clear-output --id <id>`             | 清空任务的缓冲输出                         | `background.clear-output --id bt-xxx`                                        |
+| `background.start --name <n> --command <argv>`  | 启动一个进程任务                           | `background.start --name ncm --command ["node","app.js"] --cwd ~/Apps/Music` |
+| `background.input --id <id> --data <s>`         | 向任务写 stdin                             | `background.input --id bt-xxx --data "y\n"`                                  |
+| `background.signal --id <id> --signal <s>`      | 发送 POSIX 信号（默认 SIGINT）             | `background.signal --id bt-xxx --signal SIGINT`                              |
+| `background.job --name <handler> --args <json>` | 启动一个命名作业                           | `background.job --name download --args {"url":"...","out":"..."}`            |
+| `background.stop --id <id>`                     | 停止任务（进程 SIGTERM→SIGKILL；作业取消） | `background.stop --id bt-xxx`                                                |
+| `background.kill --id <id>`                     | 强制结束进程任务（SIGKILL）                | `background.kill --id bt-xxx`                                                |
+| `background.remove --id <id>`                   | 从列表移除已结束的任务                     | `background.remove --id bt-xxx`                                              |
+| `background.clear-finished`                     | 一键移除所有已结束的任务                   | `background.clear-finished`                                                  |
 
 参数说明：
 

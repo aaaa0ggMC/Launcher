@@ -28,15 +28,21 @@
 
 ## CLI 命令参考
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `autostart.list` | 列出开机自启动项 | `autostart.list` |
+| 命令               | 说明                                           | 示例                                                          |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------------- |
+| `autostart.list`   | 列出开机自启动项                               | `autostart.list`                                              |
 | `autostart.toggle` | 启用/禁用启动项（需要 `--file` 和 `--hidden`） | `autostart.toggle --file "Clash Verge.desktop" --hidden true` |
 
 返回 `AutostartEntry[]`：
 
 ```jsonc
-{ "file": "Clash Verge.desktop", "name": "Clash Verge", "exec": "...", "comment": "...", "hidden": false }
+{
+  "file": "Clash Verge.desktop",
+  "name": "Clash Verge",
+  "exec": "...",
+  "comment": "...",
+  "hidden": false
+}
 ```
 
 ## 启用/禁用原理

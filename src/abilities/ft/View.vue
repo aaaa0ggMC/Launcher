@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitFt' })
+defineOptions({ name: 'cockpit-ft' })
 
 import {
   inject,

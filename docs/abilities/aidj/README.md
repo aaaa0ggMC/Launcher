@@ -16,12 +16,12 @@
 
 AIDJ 依赖下面几个外部组件。**缺失时只是对应功能不可用，不会影响整个应用。**
 
-| 依赖 | 用途 | 缺失时的影响 |
-| --- | --- | --- |
-| **OpenAI 兼容 API 端点 + API 密钥** | 歌单生成（`aidj.generate`）、持续对话、元数据 AI 提取、会话标题生成 | 对话、`/pr`、持续模式全部不可用；`/random`、`/explore`、`/ftop`、`/filter` 等纯本地命令仍可用 |
-| **NeteaseCloudMusicApi 服务**（`ncm_base_url`） | 按歌名搜索歌曲 → 拉取 LRC 歌词与 YRC 卡拉 OK 数据，供元数据提取与歌词展示 | 元数据同步会以「网络错误」失败（看不到歌词就没有可提取的元数据）；已有本地 `.lrc` / `.yrc` 文件时歌词展示不受影响 |
-| **MPRIS 兼容播放器**（vlc / mpv 等）+ 会话 DBus | **dbus 模式**下的播放控制（上/下一首、播放/暂停、音量）、发送歌单、持续/连续播放、歌词页与桌面歌词的数据来源 | dbus 模式下播放控制/持久轮播/歌词页/桌面歌词不可用；**web 模式（内置播放器）不依赖此**，歌单仍能正常生成与播放 |
-| **ffprobe + ffmpeg** | 响度分析（动态音量平衡）、内嵌封面提取 | 响度平衡不生效（播放音量保持原样）、歌词页封面显示不出来 |
+| 依赖                                            | 用途                                                                                                         | 缺失时的影响                                                                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| **OpenAI 兼容 API 端点 + API 密钥**             | 歌单生成（`aidj.generate`）、持续对话、元数据 AI 提取、会话标题生成                                          | 对话、`/pr`、持续模式全部不可用；`/random`、`/explore`、`/ftop`、`/filter` 等纯本地命令仍可用                     |
+| **NeteaseCloudMusicApi 服务**（`ncm_base_url`） | 按歌名搜索歌曲 → 拉取 LRC 歌词与 YRC 卡拉 OK 数据，供元数据提取与歌词展示                                    | 元数据同步会以「网络错误」失败（看不到歌词就没有可提取的元数据）；已有本地 `.lrc` / `.yrc` 文件时歌词展示不受影响 |
+| **MPRIS 兼容播放器**（vlc / mpv 等）+ 会话 DBus | **dbus 模式**下的播放控制（上/下一首、播放/暂停、音量）、发送歌单、持续/连续播放、歌词页与桌面歌词的数据来源 | dbus 模式下播放控制/持久轮播/歌词页/桌面歌词不可用；**web 模式（内置播放器）不依赖此**，歌单仍能正常生成与播放    |
+| **ffprobe + ffmpeg**                            | 响度分析（动态音量平衡）、内嵌封面提取                                                                       | 响度平衡不生效（播放音量保持原样）、歌词页封面显示不出来                                                          |
 
 另外：
 
@@ -33,10 +33,10 @@ AIDJ 依赖下面几个外部组件。**缺失时只是对应功能不可用，�
 
 AIDJ 的播放层有两种后端，可在设置里切换（`preferences.player_mode`，或命令 `aidj.player-mode`）：
 
-| 模式 | 实现 | 适用 |
-| --- | --- | --- |
-| `dbus`（外部播放器） | 通过 MPRIS / 会话 DBus 控制 vlc / mpv 等 | 已有趁手的外部播放器；Linux 默认 |
-| `web`（内置播放器） | 渲染进程 HTML5 `<audio>` + Web Audio 图（EQ / 淡入淡出 / 频谱 / 响度） | 无外部播放器；跨平台（Windows / macOS 只能用它）；功能最全 |
+| 模式                 | 实现                                                                   | 适用                                                       |
+| -------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `dbus`（外部播放器） | 通过 MPRIS / 会话 DBus 控制 vlc / mpv 等                               | 已有趁手的外部播放器；Linux 默认                           |
+| `web`（内置播放器）  | 渲染进程 HTML5 `<audio>` + Web Audio 图（EQ / 淡入淡出 / 频谱 / 响度） | 无外部播放器；跨平台（Windows / macOS 只能用它）；功能最全 |
 
 - **非 Linux 平台只能用 web 模式**（没有会话 DBus）。
 - 内置播放器需要渲染端能读本地文件：已通过 `cockpit-audio://` 自定义协议 + CORS 白名单打通（`Access-Control-Allow-Origin`）。
@@ -55,12 +55,12 @@ AIDJ 的播放层有两种后端，可在设置里切换（`preferences.player_m
 
 最核心的四项（设置页「API 配置」「音乐库与播放器」）：
 
-| 配置项 | 含义 | 示例 |
-| --- | --- | --- |
-| `ai_settings.base_url` | OpenAI 兼容端点地址 | `http://localhost:1145/v1` |
-| `secrets.api_key` | API 密钥 | `sk-...` |
-| `music_folders` | 曲库目录（可多个，递归扫描；同名冲突靠前目录优先） | `["/home/you/Music"]` |
-| `ncm_base_url` | NeteaseCloudMusicApi 地址 | `http://localhost:3000` |
+| 配置项                 | 含义                                               | 示例                       |
+| ---------------------- | -------------------------------------------------- | -------------------------- |
+| `ai_settings.base_url` | OpenAI 兼容端点地址                                | `http://localhost:1145/v1` |
+| `secrets.api_key`      | API 密钥                                           | `sk-...`                   |
+| `music_folders`        | 曲库目录（可多个，递归扫描；同名冲突靠前目录优先） | `["/home/you/Music"]`      |
+| `ncm_base_url`         | NeteaseCloudMusicApi 地址                          | `http://localhost:3000`    |
 
 改完曲库目录后，建议先做一次「更新元数据」（见 §3.6），让 AI 为每首歌提取语言/情绪/流派等标签，歌单生成和 `/filter` 的元数据筛选才有料可依。
 
@@ -92,30 +92,30 @@ AIDJ 的播放层有两种后端，可在设置里切换（`preferences.player_m
 
 输入栏上方一排小徽标（显示哪些可在设置里调整顺序，数字 0 = 隐藏）：
 
-| 徽标 | 含义 | 交互 |
-| --- | --- | --- |
-| `Tokens` | 本会话累计消耗的 prompt+completion tokens | — |
-| `Context` / `Completion` | 最近一次请求的输入/输出 tokens | — |
-| `Tracks` | 曲库歌曲总数 | — |
-| `Memory` | 「已播记忆」里的歌曲数（AI 会回避这些歌） | 点击清空记忆（弹确认） |
-| `Volbal` | 响度平衡开关与当前方法 | 点击循环切换 `off → lufs → linear → off` |
-| `RecordFreq` | 播放频率记录开关（记入 `frequency.csv`） | 点击开关 |
-| `Backgrounds` | 运行中的后台任务数 | — |
+| 徽标                     | 含义                                      | 交互                                     |
+| ------------------------ | ----------------------------------------- | ---------------------------------------- |
+| `Tokens`                 | 本会话累计消耗的 prompt+completion tokens | —                                        |
+| `Context` / `Completion` | 最近一次请求的输入/输出 tokens            | —                                        |
+| `Tracks`                 | 曲库歌曲总数                              | —                                        |
+| `Memory`                 | 「已播记忆」里的歌曲数（AI 会回避这些歌） | 点击清空记忆（弹确认）                   |
+| `Volbal`                 | 响度平衡开关与当前方法                    | 点击循环切换 `off → lufs → linear → off` |
+| `RecordFreq`             | 播放频率记录开关（记入 `frequency.csv`）  | 点击开关                                 |
+| `Backgrounds`            | 运行中的后台任务数                        | —                                        |
 
 ### 3.3 斜杠命令
 
 输入以 `/` 开头的行会弹出命令提示（Tab 补全、上下键选择）。这些命令**不走 AI**，纯本地执行：
 
-| 命令 | 用法 | 效果 |
-| --- | --- | --- |
-| `/random N` | `/random 10` | 随机挑 N 首未听过的歌推入会话上下文 |
-| `/pr N` | `/pr 12` | AI 从 N 首随机候选中精选成一串连贯歌单（走 AI） |
-| `/explore N` | `/explore 8` | 优先挑「从未播放」的歌，全部听过后退化为「播放最少」 |
-| `/ftop` | `/ftop 20` / `/ftop -20` / `/ftop 5 15` | 推送播放频率 Top N / 倒数 N / 第 A–B 名 |
-| `/analyse 字段` | `/analyse emotion` | 以 system 消息输出某字段的分布统计（language / emotion / genre / loudness） |
-| `/filter 表达式` | 见下 | 按布尔表达式精确过滤曲库 |
-| `/persist 消息` | `/persist 来点氛围音乐` | 把当前会话分支为 `(Copy)` 并转后台持续轮播（见 §3.7） |
-| `/persist-stop` | `/persist-stop` | 停止运行中的持续会话 |
+| 命令             | 用法                                    | 效果                                                                        |
+| ---------------- | --------------------------------------- | --------------------------------------------------------------------------- |
+| `/random N`      | `/random 10`                            | 随机挑 N 首未听过的歌推入会话上下文                                         |
+| `/pr N`          | `/pr 12`                                | AI 从 N 首随机候选中精选成一串连贯歌单（走 AI）                             |
+| `/explore N`     | `/explore 8`                            | 优先挑「从未播放」的歌，全部听过后退化为「播放最少」                        |
+| `/ftop`          | `/ftop 20` / `/ftop -20` / `/ftop 5 15` | 推送播放频率 Top N / 倒数 N / 第 A–B 名                                     |
+| `/analyse 字段`  | `/analyse emotion`                      | 以 system 消息输出某字段的分布统计（language / emotion / genre / loudness） |
+| `/filter 表达式` | 见下                                    | 按布尔表达式精确过滤曲库                                                    |
+| `/persist 消息`  | `/persist 来点氛围音乐`                 | 把当前会话分支为 `(Copy)` 并转后台持续轮播（见 §3.7）                       |
+| `/persist-stop`  | `/persist-stop`                         | 停止运行中的持续会话                                                        |
 
 **`/filter` 表达式语法**（title/歌词/元数据混合）：
 
@@ -294,127 +294,127 @@ Electron 在 Wayland 上缺少窗口能力（定位/置顶/输入路由归合成
 
 ### 6.1 歌单生成与操作
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.generate` | `aidj.generate --prompt <text>` | AI 生成歌单（等价聊天发送） |
-| `aidj.curate` | `aidj.curate --count <n>` | 从随机候选中 AI 精选成连贯歌单（计入上下文） |
-| `aidj.random` | `aidj.random --count <n>` | 随机选 N 首未听过的歌，推入会话上下文 |
-| `aidj.explore` | `aidj.explore --count <n>` | 发现未听过/最少播放的歌 |
-| `aidj.filter` | `aidj.filter --query <表达式> [--compare=title\|lyrics\|all]` | 布尔表达式过滤曲库（语法见 §3.3） |
-| `aidj.ftop` | `aidj.ftop [--count N] [--bottom true] [--from A] [--to B] [--text <t>]` | 播放频率 Top N / 倒数 N / 第 A–B 名 |
-| `aidj.search` | `aidj.search --q <关键词>` | 模糊搜索曲库（按 token 相似度，阈值 80） |
-| `aidj.save` | `aidj.save --name <名称> --songs <文本>` | 把歌单保存到 `aidj/playlists/<名称>.txt` |
-| `aidj.load` | `aidj.load --name <名称>` | 读取已保存歌单 |
+| 命令            | 用法                                                                     | 说明                                         |
+| --------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
+| `aidj.generate` | `aidj.generate --prompt <text>`                                          | AI 生成歌单（等价聊天发送）                  |
+| `aidj.curate`   | `aidj.curate --count <n>`                                                | 从随机候选中 AI 精选成连贯歌单（计入上下文） |
+| `aidj.random`   | `aidj.random --count <n>`                                                | 随机选 N 首未听过的歌，推入会话上下文        |
+| `aidj.explore`  | `aidj.explore --count <n>`                                               | 发现未听过/最少播放的歌                      |
+| `aidj.filter`   | `aidj.filter --query <表达式> [--compare=title\|lyrics\|all]`            | 布尔表达式过滤曲库（语法见 §3.3）            |
+| `aidj.ftop`     | `aidj.ftop [--count N] [--bottom true] [--from A] [--to B] [--text <t>]` | 播放频率 Top N / 倒数 N / 第 A–B 名          |
+| `aidj.search`   | `aidj.search --q <关键词>`                                               | 模糊搜索曲库（按 token 相似度，阈值 80）     |
+| `aidj.save`     | `aidj.save --name <名称> --songs <文本>`                                 | 把歌单保存到 `aidj/playlists/<名称>.txt`     |
+| `aidj.load`     | `aidj.load --name <名称>`                                                | 读取已保存歌单                               |
 
 ### 6.2 播放控制（MPRIS）
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.next` / `aidj.prev` / `aidj.toggle` / `aidj.stop` | — | 下一首 / 上一首 / 播放暂停 / 停止 |
-| `aidj.send` | `aidj.send --path <文件>...` | 发送歌曲到播放器（单曲即播，多曲入队连播）；开启 `record_freq` 时会递增播放频率 |
-| `aidj.volume` | `aidj.volume [--set <0-1>]` | 获取或设置播放器音量 |
-| `aidj.status` | `aidj.status` | 播放器状态 + 曲库/记忆/响度平衡等概要 |
-| `aidj.list-players` | `aidj.list-players [--force true]` | 列出可用 MPRIS 播放器与当前绑定 |
-| `aidj.select-player` | `aidj.select-player --name <player>` | 切换播放器（`__auto__` = 自动跟随） |
-| `aidj.freq` | `aidj.freq` | 播放频率列表（按次数降序） |
-| `aidj.get-cover` | `aidj.get-cover --path <文件>` | 提取歌曲内嵌封面（base64 data URL） |
+| 命令                                                    | 用法                                 | 说明                                                                            |
+| ------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
+| `aidj.next` / `aidj.prev` / `aidj.toggle` / `aidj.stop` | —                                    | 下一首 / 上一首 / 播放暂停 / 停止                                               |
+| `aidj.send`                                             | `aidj.send --path <文件>...`         | 发送歌曲到播放器（单曲即播，多曲入队连播）；开启 `record_freq` 时会递增播放频率 |
+| `aidj.volume`                                           | `aidj.volume [--set <0-1>]`          | 获取或设置播放器音量                                                            |
+| `aidj.status`                                           | `aidj.status`                        | 播放器状态 + 曲库/记忆/响度平衡等概要                                           |
+| `aidj.list-players`                                     | `aidj.list-players [--force true]`   | 列出可用 MPRIS 播放器与当前绑定                                                 |
+| `aidj.select-player`                                    | `aidj.select-player --name <player>` | 切换播放器（`__auto__` = 自动跟随）                                             |
+| `aidj.freq`                                             | `aidj.freq`                          | 播放频率列表（按次数降序）                                                      |
+| `aidj.get-cover`                                        | `aidj.get-cover --path <文件>`       | 提取歌曲内嵌封面（base64 data URL）                                             |
 
 ### 6.2b 播放后端与内置播放器（web 模式）
 
 `aidj.player-*` / `aidj.eq-*` / `aidj.web-remote-*` 系列只在 `web` 模式下可用（dbus 模式下命令不注册）。
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.player-mode` | `aidj.player-mode [--set <dbus\|web>]` | 查询 / 切换播放后端模式 |
-| `aidj.player-state` | `aidj.player-state` | 内置播放器完整状态快照（含队列 / 倍速 / AB 循环 / 睡眠 / 淡入淡出 / EQ） |
-| `aidj.player-clear-queue` | `aidj.player-clear-queue` | 清空内置播放器队列（当前曲 + 播放历史保留，prev 仍可回退） |
-| `aidj.player-volbal` | `aidj.player-volbal [--enabled <bool>] [--method <lufs\|linear>]` | 内置播放器响度平衡（查询 / 设置，即时生效并持久化） |
-| `aidj.player-rebase` | `aidj.player-rebase --base <0-1>` | 把当前音量设为响度平衡的新基准 |
-| `aidj.player-rate` | `aidj.player-rate [--set <rate>]` | 倍速：任意正数，>16 为静音快进（见 §4.5.1）；持久化 |
-| `aidj.player-abloop` | `aidj.player-abloop [--a <sec>] [--b <sec>] [--off true]` | 设置 / 清除 AB 循环点（秒） |
-| `aidj.player-sleep` | `aidj.player-sleep --minutes <n>` | 睡眠定时（分钟，0 = 取消） |
-| `aidj.player-crossfade` | `aidj.player-crossfade [--enabled <bool>] [--seconds <n>]` | 曲间淡入淡出开关 + 时长（自动切歌时生效，手动切歌即时） |
-| `aidj.player-eq` | `aidj.player-eq [--gains "[..10 个 dB..]"]` | 查询当前 EQ 曲线 / 实时预览（不落盘） |
-| `aidj.eq-list` | `aidj.eq-list` | 列出 EQ 曲线库（内置 + 自定义）+ 激活项 + 最大范围 |
-| `aidj.eq-save` | `aidj.eq-save --name <名> --gains "[..]" [--id <id>]` | 新增 / 更新 EQ 曲线（upsert） |
-| `aidj.eq-delete` | `aidj.eq-delete --id <id>` | 删除用户 EQ 曲线（内置不可删；删激活项自动回退 flat） |
-| `aidj.eq-active` | `aidj.eq-active --id <id>` | 应用某个 EQ 曲线（持久化激活 id） |
-| `aidj.eq-range` | `aidj.eq-range [--set <12-60>]` | 查询 / 设置 EQ 最大增益范围（±dB） |
-| `aidj.eq-reset` | `aidj.eq-reset` | 重置内置 EQ 曲线为出厂值（用户自定义保留） |
-| `aidj.web-remote-status` | `aidj.web-remote-status` | 局域网遥控服务器运行状态 + 端口 |
-| `aidj.web-remote-start` | `aidj.web-remote-start` | 启动局域网遥控（后台任务 `aidj.web-remote`） |
-| `aidj.web-remote-stop` | `aidj.web-remote-stop` | 停止局域网遥控 |
+| 命令                      | 用法                                                              | 说明                                                                     |
+| ------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `aidj.player-mode`        | `aidj.player-mode [--set <dbus\|web>]`                            | 查询 / 切换播放后端模式                                                  |
+| `aidj.player-state`       | `aidj.player-state`                                               | 内置播放器完整状态快照（含队列 / 倍速 / AB 循环 / 睡眠 / 淡入淡出 / EQ） |
+| `aidj.player-clear-queue` | `aidj.player-clear-queue`                                         | 清空内置播放器队列（当前曲 + 播放历史保留，prev 仍可回退）               |
+| `aidj.player-volbal`      | `aidj.player-volbal [--enabled <bool>] [--method <lufs\|linear>]` | 内置播放器响度平衡（查询 / 设置，即时生效并持久化）                      |
+| `aidj.player-rebase`      | `aidj.player-rebase --base <0-1>`                                 | 把当前音量设为响度平衡的新基准                                           |
+| `aidj.player-rate`        | `aidj.player-rate [--set <rate>]`                                 | 倍速：任意正数，>16 为静音快进（见 §4.5.1）；持久化                      |
+| `aidj.player-abloop`      | `aidj.player-abloop [--a <sec>] [--b <sec>] [--off true]`         | 设置 / 清除 AB 循环点（秒）                                              |
+| `aidj.player-sleep`       | `aidj.player-sleep --minutes <n>`                                 | 睡眠定时（分钟，0 = 取消）                                               |
+| `aidj.player-crossfade`   | `aidj.player-crossfade [--enabled <bool>] [--seconds <n>]`        | 曲间淡入淡出开关 + 时长（自动切歌时生效，手动切歌即时）                  |
+| `aidj.player-eq`          | `aidj.player-eq [--gains "[..10 个 dB..]"]`                       | 查询当前 EQ 曲线 / 实时预览（不落盘）                                    |
+| `aidj.eq-list`            | `aidj.eq-list`                                                    | 列出 EQ 曲线库（内置 + 自定义）+ 激活项 + 最大范围                       |
+| `aidj.eq-save`            | `aidj.eq-save --name <名> --gains "[..]" [--id <id>]`             | 新增 / 更新 EQ 曲线（upsert）                                            |
+| `aidj.eq-delete`          | `aidj.eq-delete --id <id>`                                        | 删除用户 EQ 曲线（内置不可删；删激活项自动回退 flat）                    |
+| `aidj.eq-active`          | `aidj.eq-active --id <id>`                                        | 应用某个 EQ 曲线（持久化激活 id）                                        |
+| `aidj.eq-range`           | `aidj.eq-range [--set <12-60>]`                                   | 查询 / 设置 EQ 最大增益范围（±dB）                                       |
+| `aidj.eq-reset`           | `aidj.eq-reset`                                                   | 重置内置 EQ 曲线为出厂值（用户自定义保留）                               |
+| `aidj.web-remote-status`  | `aidj.web-remote-status`                                          | 局域网遥控服务器运行状态 + 端口                                          |
+| `aidj.web-remote-start`   | `aidj.web-remote-start`                                           | 启动局域网遥控（后台任务 `aidj.web-remote`）                             |
+| `aidj.web-remote-stop`    | `aidj.web-remote-stop`                                            | 停止局域网遥控                                                           |
 
 ### 6.3 元数据与曲库
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.sync` | `aidj.sync` | 同步新歌元数据（同步等待，单次） |
-| `aidj.metadata-sync` | `aidj.metadata-sync` | 同上，但跑成**后台任务**（推荐，UI「更新 MetaData」即此） |
-| `aidj.analyse` | `aidj.analyse --field <language\|emotion\|genre\|loudness>` | 输出某元数据字段的分布统计 |
-| `aidj.reload` | `aidj.reload` | 重载曲库/元数据，重建会话与 DBus |
-| `aidj.invalidate-library` | `aidj.invalidate-library` | 仅使曲库缓存失效（下次加载重扫） |
-| `aidj.get-models` | `aidj.get-models` | 从 API `/v1/models` 拉取可用模型列表 |
-| `aidj.network-test` | `aidj.network-test` | 测试 AI API 连通性 |
+| 命令                      | 用法                                                        | 说明                                                      |
+| ------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
+| `aidj.sync`               | `aidj.sync`                                                 | 同步新歌元数据（同步等待，单次）                          |
+| `aidj.metadata-sync`      | `aidj.metadata-sync`                                        | 同上，但跑成**后台任务**（推荐，UI「更新 MetaData」即此） |
+| `aidj.analyse`            | `aidj.analyse --field <language\|emotion\|genre\|loudness>` | 输出某元数据字段的分布统计                                |
+| `aidj.reload`             | `aidj.reload`                                               | 重载曲库/元数据，重建会话与 DBus                          |
+| `aidj.invalidate-library` | `aidj.invalidate-library`                                   | 仅使曲库缓存失效（下次加载重扫）                          |
+| `aidj.get-models`         | `aidj.get-models`                                           | 从 API `/v1/models` 拉取可用模型列表                      |
+| `aidj.network-test`       | `aidj.network-test`                                         | 测试 AI API 连通性                                        |
 
 ### 6.4 会话管理
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.sessions.list` | `aidj.sessions.list` | 列出所有会话（含置顶/预览/条数） |
-| `aidj.sessions.open` | `aidj.sessions.open --id <sessionId>` | 载入会话为当前活跃会话 |
-| `aidj.session-fork` | `aidj.session-fork [--keep <n>] [--become true]` | 分支会话；`--become` 载入为新会话 |
-| `aidj.sessions.delete` | `aidj.sessions.delete --id <sessionId>` | 删除会话 |
-| `aidj.sessions.pin` | `aidj.sessions.pin --id <sessionId>` | 置顶/取消置顶 |
-| `aidj.sessions.rename` | `aidj.sessions.rename --id <id> --title <标题>` | 重命名（空标题不改变） |
-| `aidj.sessions.gen-title` | `aidj.sessions.gen-title --id <sessionId>` | AI 异步生成标题（后台任务） |
-| `aidj.revert` | `aidj.revert --keep <count>` | 回退主界面会话到保留前 count 条 |
-| `aidj.refresh` | `aidj.refresh` | 清空已播记忆与历史 |
-| `aidj.session-new` | `aidj.session-new` | 新建会话（清空上下文） |
-| `aidj.abort` | `aidj.abort` | 中止当前 AI 请求 |
-| `aidj.stream-status` | `aidj.stream-status` | 流式生成字符数/重试状态 |
+| 命令                      | 用法                                             | 说明                              |
+| ------------------------- | ------------------------------------------------ | --------------------------------- |
+| `aidj.sessions.list`      | `aidj.sessions.list`                             | 列出所有会话（含置顶/预览/条数）  |
+| `aidj.sessions.open`      | `aidj.sessions.open --id <sessionId>`            | 载入会话为当前活跃会话            |
+| `aidj.session-fork`       | `aidj.session-fork [--keep <n>] [--become true]` | 分支会话；`--become` 载入为新会话 |
+| `aidj.sessions.delete`    | `aidj.sessions.delete --id <sessionId>`          | 删除会话                          |
+| `aidj.sessions.pin`       | `aidj.sessions.pin --id <sessionId>`             | 置顶/取消置顶                     |
+| `aidj.sessions.rename`    | `aidj.sessions.rename --id <id> --title <标题>`  | 重命名（空标题不改变）            |
+| `aidj.sessions.gen-title` | `aidj.sessions.gen-title --id <sessionId>`       | AI 异步生成标题（后台任务）       |
+| `aidj.revert`             | `aidj.revert --keep <count>`                     | 回退主界面会话到保留前 count 条   |
+| `aidj.refresh`            | `aidj.refresh`                                   | 清空已播记忆与历史                |
+| `aidj.session-new`        | `aidj.session-new`                               | 新建会话（清空上下文）            |
+| `aidj.abort`              | `aidj.abort`                                     | 中止当前 AI 请求                  |
+| `aidj.stream-status`      | `aidj.stream-status`                             | 流式生成字符数/重试状态           |
 
 ### 6.5 持久模式 / 持续会话 / 连续播放
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.start-persistent` | `aidj.start-persistent --prompt <text> [--anchor <n>]` | 启动持久模式（旧入口） |
-| `aidj.stop-persistent` | `aidj.stop-persistent` | 停止持久模式 |
-| `aidj.chat` | `aidj.chat --task <id> --text <消息>` | 向持续会话发消息；消息可附 `/discard_follows`（丢弃待播队列） |
-| `aidj.chat-player` | `aidj.chat-player --task <id> --player <name>` | 切换持续会话推送目标播放器 |
-| `aidj.chat-resend` | `aidj.chat-resend --task <id> --songs <json>` | 把歌单重新发送到持续会话的播放器 |
-| `aidj.chat-clear-memory` | `aidj.chat-clear-memory --task <id>` | 清空持续会话已播记忆 |
-| `aidj.chat-revert` | `aidj.chat-revert --task <id> --keep <count>` | 回退持续会话到保留前 count 条 |
-| `aidj.continuous-list` | `aidj.continuous-list` | 列出所有连续播放任务与队列 |
-| `aidj.continuous-switch` | `aidj.continuous-switch --task <id> --player <name>` | 切换任务绑定的播放器 |
-| `aidj.continuous-enqueue` | `aidj.continuous-enqueue --task <id> --songs <json>` | 向运行中的任务追加歌曲 |
-| `aidj.continuous-reorder` | `aidj.continuous-reorder --task <id> --songs <json>` | 重排待播队列 |
-| `aidj.continuous-volbal` | `aidj.continuous-volbal --task <id> --enabled <true\|false> [--method <lufs\|linear>]` | 切换响度平衡（即时生效并持久化） |
-| `aidj.continuous-recordfreq` | `aidj.continuous-recordfreq --task <id> --enabled <true\|false>` | 切换播放频率记录 |
-| `aidj.continuous-clear-memory` | `aidj.continuous-clear-memory --task <id>` | 重置已播记忆（从头重播） |
-| `aidj.continuous-volume` | `aidj.continuous-volume --task <id> [--set <0-1>]` | 获取/设置任务音量 |
-| `aidj.continuous-rebase` | `aidj.continuous-rebase --task <id> --base <0-1>` | 把当前音量设为响度平衡的新基准（自定义 anchor） |
+| 命令                           | 用法                                                                                   | 说明                                                          |
+| ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `aidj.start-persistent`        | `aidj.start-persistent --prompt <text> [--anchor <n>]`                                 | 启动持久模式（旧入口）                                        |
+| `aidj.stop-persistent`         | `aidj.stop-persistent`                                                                 | 停止持久模式                                                  |
+| `aidj.chat`                    | `aidj.chat --task <id> --text <消息>`                                                  | 向持续会话发消息；消息可附 `/discard_follows`（丢弃待播队列） |
+| `aidj.chat-player`             | `aidj.chat-player --task <id> --player <name>`                                         | 切换持续会话推送目标播放器                                    |
+| `aidj.chat-resend`             | `aidj.chat-resend --task <id> --songs <json>`                                          | 把歌单重新发送到持续会话的播放器                              |
+| `aidj.chat-clear-memory`       | `aidj.chat-clear-memory --task <id>`                                                   | 清空持续会话已播记忆                                          |
+| `aidj.chat-revert`             | `aidj.chat-revert --task <id> --keep <count>`                                          | 回退持续会话到保留前 count 条                                 |
+| `aidj.continuous-list`         | `aidj.continuous-list`                                                                 | 列出所有连续播放任务与队列                                    |
+| `aidj.continuous-switch`       | `aidj.continuous-switch --task <id> --player <name>`                                   | 切换任务绑定的播放器                                          |
+| `aidj.continuous-enqueue`      | `aidj.continuous-enqueue --task <id> --songs <json>`                                   | 向运行中的任务追加歌曲                                        |
+| `aidj.continuous-reorder`      | `aidj.continuous-reorder --task <id> --songs <json>`                                   | 重排待播队列                                                  |
+| `aidj.continuous-volbal`       | `aidj.continuous-volbal --task <id> --enabled <true\|false> [--method <lufs\|linear>]` | 切换响度平衡（即时生效并持久化）                              |
+| `aidj.continuous-recordfreq`   | `aidj.continuous-recordfreq --task <id> --enabled <true\|false>`                       | 切换播放频率记录                                              |
+| `aidj.continuous-clear-memory` | `aidj.continuous-clear-memory --task <id>`                                             | 重置已播记忆（从头重播）                                      |
+| `aidj.continuous-volume`       | `aidj.continuous-volume --task <id> [--set <0-1>]`                                     | 获取/设置任务音量                                             |
+| `aidj.continuous-rebase`       | `aidj.continuous-rebase --task <id> --base <0-1>`                                      | 把当前音量设为响度平衡的新基准（自定义 anchor）               |
 
 ### 6.6 歌词
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.lyrics` | `aidj.lyrics` | 当前播放状态 + 解析出的歌词（歌词窗口/页面轮询此接口） |
-| `aidj.lyrics-state` | `aidj.lyrics-state` | 当前播放器的桌面歌词窗口是否打开 |
-| `aidj.lyrics-open` / `aidj.lyrics-close` / `aidj.lyrics-toggle` | — | 打开 / 关闭 / 切换桌面歌词浮窗 |
-| `aidj.activate` | `aidj.activate` | 激活共享 DBus 播放器绑定（不启动 AI 会话） |
-| `aidj.lyrics-player` | `aidj.lyrics-player` | 歌词页当前绑定的播放器与可用列表 |
-| `aidj.lyrics-select-player` | `aidj.lyrics-select-player --name <player>` | 绑定歌词页到指定播放器（或 `__auto__`） |
-| `aidj.lyrics-page-config` / `aidj.lyrics-page-save` | `--config <json>` | 获取 / 保存歌词页显示配置 |
+| 命令                                                            | 用法                                        | 说明                                                   |
+| --------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| `aidj.lyrics`                                                   | `aidj.lyrics`                               | 当前播放状态 + 解析出的歌词（歌词窗口/页面轮询此接口） |
+| `aidj.lyrics-state`                                             | `aidj.lyrics-state`                         | 当前播放器的桌面歌词窗口是否打开                       |
+| `aidj.lyrics-open` / `aidj.lyrics-close` / `aidj.lyrics-toggle` | —                                           | 打开 / 关闭 / 切换桌面歌词浮窗                         |
+| `aidj.activate`                                                 | `aidj.activate`                             | 激活共享 DBus 播放器绑定（不启动 AI 会话）             |
+| `aidj.lyrics-player`                                            | `aidj.lyrics-player`                        | 歌词页当前绑定的播放器与可用列表                       |
+| `aidj.lyrics-select-player`                                     | `aidj.lyrics-select-player --name <player>` | 绑定歌词页到指定播放器（或 `__auto__`）                |
+| `aidj.lyrics-page-config` / `aidj.lyrics-page-save`             | `--config <json>`                           | 获取 / 保存歌词页显示配置                              |
 
 ### 6.7 配置
 
-| 命令 | 用法 | 说明 |
-| --- | --- | --- |
-| `aidj.get-config` | `aidj.get-config` | 读取当前配置 |
-| `aidj.save-config` | `aidj.save-config` | 持久化到 `aidj/config.json` |
+| 命令                 | 用法                                                  | 说明                                                  |
+| -------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
+| `aidj.get-config`    | `aidj.get-config`                                     | 读取当前配置                                          |
+| `aidj.save-config`   | `aidj.save-config`                                    | 持久化到 `aidj/config.json`                           |
 | `aidj.update-config` | `aidj.update-config --path <key.path> --value <json>` | 运行时改配置（支持 `preferences.model` 这类点号路径） |
-| `aidj.model` | `aidj.model --set <model>` | 切换对话模型（仅运行时，不持久化） |
+| `aidj.model`         | `aidj.model --set <model>`                            | 切换对话模型（仅运行时，不持久化）                    |
 
 ---
 
@@ -422,89 +422,89 @@ Electron 在 Wayland 上缺少窗口能力（定位/置顶/输入路由归合成
 
 ### 7.1 `~/.config/LinuxCockpit/aidj/config.json`
 
-| 配置路径 | 类型 / 取值 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `music_folders` | `string[]` | — | 曲库目录，递归扫描 |
-| `lyrics_folders` | `string[]` | — | 本地 `.lrc` / `.yrc` 歌词目录（NCM 结果可被其覆盖；同名取最长文件） |
-| `ncm_base_url` | `string` | `http://localhost:3000` | NeteaseCloudMusicApi 地址 |
-| `secrets.api_key` | `string` | — | OpenAI 兼容端点密钥 |
-| `ai_settings.base_url` | `string` | — | OpenAI 兼容端点地址 |
-| `ai_settings.metadata_model` | `string` | — | 元数据提取专用模型 |
-| `preferences.model` | `string` | — | 对话（歌单生成）模型 |
-| `preferences.auto_play` | `boolean` | `true` | 生成后自动播放 |
-| `preferences.dbus_target` | `string` | `vlc` | 首选 MPRIS 播放器名 |
-| `preferences.player_mode` | `'dbus' \| 'web'` | `dbus`（Linux） | 播放后端：外部 MPRIS 播放器 / 内置播放器（见 §1.1） |
-| `preferences.crossfade` | `{enabled, seconds}` | `{false, 2.5}` | 内置播放器曲间淡入淡出（自动切歌时生效） |
-| `preferences.eq_preset` | `string` | `flat` | 当前激活的 EQ 曲线 id（曲线库在 `eq.jsonl`，见 §4.5.2） |
-| `preferences.eq_gain_range` | `number` | `20` | EQ 最大增益范围 ±dB（12–60） |
-| `preferences.playback_rate` | `number` | `1.0` | 内置播放器默认倍速（任意正数，>16 静音快进） |
-| `preferences.default_volume` | `number` | `0.8` | 内置播放器初始软件音量（0–1） |
-| `preferences.spectrum_enabled` | `boolean` | `false` | 内置播放器频谱条默认显示 |
-| `preferences.web_remote_port` | `number` | `17320` | 局域网遥控端口（0 = 禁用） |
-| `preferences.record_freq` | `boolean` | `true` | 记录播放频率 |
-| `preferences.dynamic_balance_volume` | `boolean` | `true` | 动态响度平衡开关 |
-| `preferences.sound_adjust_method` | `'lufs' \| 'linear'` | `lufs` | 响度测量方法（LUFS / RMS） |
-| `preferences.volume_curve` | `number` | `3.0` | 音量映射曲线指数（1–5） |
-| `preferences.metadata_concurrency` | `number` | `8` | 元数据同步并发数 |
-| `preferences.context_mode` | `'discard' \| 'compact'` | `discard` | 历史超限处理：丢弃最旧 / AI 压缩成摘要 |
-| `preferences.max_history_length` | `number` | `10` | 历史消息上限（库提示词始终保留） |
-| `preferences.auto_title` | `boolean` | `false` | 首次 AI 输出后自动生成会话标题 |
-| `preferences.reconnect_minutes` | `number` | `0` | 播放器断开重连窗口（分钟）：0 = 立即结束，>0 = N 分钟内重连，<0 = 永不放弃 |
-| `preferences.network_retry_minutes` | `number` | `0` | AI 请求网络重试窗口（分钟）：0 = 快速失败，>0 = N 分钟内重试，<0 = 一直重试 |
-| `preferences.library_injects` | `{genre, emotion, language, loudness, review}: boolean` | 全开 | 哪些元数据字段注入给 AI 的曲库清单 |
-| `preferences.status_bar` | `{tokens, context, tracks, memory, volbal, record_freq, backgrounds}: number` | 顺序 1–7 | 状态栏徽标顺序，0 = 隐藏 |
-| `preferences.persona` | `string` | 内置 | 自定义 DJ 人设（替换 Role 定义；空 = 默认） |
-| `preferences.extra_rules` | `string` | — | 追加的行为规则（逐行），追加到每次提示词 |
-| `preferences.lyrics` | `LyricsDisplayConfig` 子集 | 见默认 | 桌面歌词浮窗显示配置（见下） |
+| 配置路径                             | 类型 / 取值                                                                   | 默认                    | 说明                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------- |
+| `music_folders`                      | `string[]`                                                                    | —                       | 曲库目录，递归扫描                                                          |
+| `lyrics_folders`                     | `string[]`                                                                    | —                       | 本地 `.lrc` / `.yrc` 歌词目录（NCM 结果可被其覆盖；同名取最长文件）         |
+| `ncm_base_url`                       | `string`                                                                      | `http://localhost:3000` | NeteaseCloudMusicApi 地址                                                   |
+| `secrets.api_key`                    | `string`                                                                      | —                       | OpenAI 兼容端点密钥                                                         |
+| `ai_settings.base_url`               | `string`                                                                      | —                       | OpenAI 兼容端点地址                                                         |
+| `ai_settings.metadata_model`         | `string`                                                                      | —                       | 元数据提取专用模型                                                          |
+| `preferences.model`                  | `string`                                                                      | —                       | 对话（歌单生成）模型                                                        |
+| `preferences.auto_play`              | `boolean`                                                                     | `true`                  | 生成后自动播放                                                              |
+| `preferences.dbus_target`            | `string`                                                                      | `vlc`                   | 首选 MPRIS 播放器名                                                         |
+| `preferences.player_mode`            | `'dbus' \| 'web'`                                                             | `dbus`（Linux）         | 播放后端：外部 MPRIS 播放器 / 内置播放器（见 §1.1）                         |
+| `preferences.crossfade`              | `{enabled, seconds}`                                                          | `{false, 2.5}`          | 内置播放器曲间淡入淡出（自动切歌时生效）                                    |
+| `preferences.eq_preset`              | `string`                                                                      | `flat`                  | 当前激活的 EQ 曲线 id（曲线库在 `eq.jsonl`，见 §4.5.2）                     |
+| `preferences.eq_gain_range`          | `number`                                                                      | `20`                    | EQ 最大增益范围 ±dB（12–60）                                                |
+| `preferences.playback_rate`          | `number`                                                                      | `1.0`                   | 内置播放器默认倍速（任意正数，>16 静音快进）                                |
+| `preferences.default_volume`         | `number`                                                                      | `0.8`                   | 内置播放器初始软件音量（0–1）                                               |
+| `preferences.spectrum_enabled`       | `boolean`                                                                     | `false`                 | 内置播放器频谱条默认显示                                                    |
+| `preferences.web_remote_port`        | `number`                                                                      | `17320`                 | 局域网遥控端口（0 = 禁用）                                                  |
+| `preferences.record_freq`            | `boolean`                                                                     | `true`                  | 记录播放频率                                                                |
+| `preferences.dynamic_balance_volume` | `boolean`                                                                     | `true`                  | 动态响度平衡开关                                                            |
+| `preferences.sound_adjust_method`    | `'lufs' \| 'linear'`                                                          | `lufs`                  | 响度测量方法（LUFS / RMS）                                                  |
+| `preferences.volume_curve`           | `number`                                                                      | `3.0`                   | 音量映射曲线指数（1–5）                                                     |
+| `preferences.metadata_concurrency`   | `number`                                                                      | `8`                     | 元数据同步并发数                                                            |
+| `preferences.context_mode`           | `'discard' \| 'compact'`                                                      | `discard`               | 历史超限处理：丢弃最旧 / AI 压缩成摘要                                      |
+| `preferences.max_history_length`     | `number`                                                                      | `10`                    | 历史消息上限（库提示词始终保留）                                            |
+| `preferences.auto_title`             | `boolean`                                                                     | `false`                 | 首次 AI 输出后自动生成会话标题                                              |
+| `preferences.reconnect_minutes`      | `number`                                                                      | `0`                     | 播放器断开重连窗口（分钟）：0 = 立即结束，>0 = N 分钟内重连，<0 = 永不放弃  |
+| `preferences.network_retry_minutes`  | `number`                                                                      | `0`                     | AI 请求网络重试窗口（分钟）：0 = 快速失败，>0 = N 分钟内重试，<0 = 一直重试 |
+| `preferences.library_injects`        | `{genre, emotion, language, loudness, review}: boolean`                       | 全开                    | 哪些元数据字段注入给 AI 的曲库清单                                          |
+| `preferences.status_bar`             | `{tokens, context, tracks, memory, volbal, record_freq, backgrounds}: number` | 顺序 1–7                | 状态栏徽标顺序，0 = 隐藏                                                    |
+| `preferences.persona`                | `string`                                                                      | 内置                    | 自定义 DJ 人设（替换 Role 定义；空 = 默认）                                 |
+| `preferences.extra_rules`            | `string`                                                                      | —                       | 追加的行为规则（逐行），追加到每次提示词                                    |
+| `preferences.lyrics`                 | `LyricsDisplayConfig` 子集                                                    | 见默认                  | 桌面歌词浮窗显示配置（见下）                                                |
 
 **桌面歌词显示配置 `preferences.lyrics`**（`LyricsDisplayConfig`，等价 `vp wshowlyrics` 参数，颜色一律 `RRGGBBAA` 十六进制，alpha 在最后）：
 
-| 键 | 默认 | 说明 |
-| --- | --- | --- |
-| `font_family` | `Iansui Regular` | 字体 |
-| `font_size` | `36` | 当前行字号 (px) |
-| `header_size` | `13` | 歌名字号 |
-| `candidate_size` | `22` | 非当前行字号 |
-| `bg_color` | `00000044` | 卡片背景（`00000000` = 全透明） |
-| `fg_color` | `EEEEFFEE` | 当前行文字色 |
-| `header_color` | `EEEEFF66` | 歌名文字色 |
-| `candidate_color` | `EEEEFF99` | 候选行文字色 |
-| `current_weight` / `candidate_weight` / `header_weight` | `700 / 500 / 600` | 各行字重 |
-| `shadow` | `0.5` | 当前行文字阴影强度 (0–1) |
-| `letter_spacing` | `0` | 字间距 (px) |
-| `line_height` | `1.3` | 行高倍数 |
-| `anchor` | `top` | 窗口锚点：`top` / `center` / `bottom` |
-| `margin` | `50` | 距锚点边缘的边距 (px) |
-| `width` | `560` | 初始窗口宽 (px)，`auto_width` 时自动扩张 |
-| `auto_width` | `true` | 自动扩张宽度以容纳长句（上限屏幕 90%） |
-| `lock_on_open` | `false` | 打开即锁定（不可拖动/右键） |
-| `lines_before` / `lines_after` | `0 / 1` | 当前行上/下方显示行数 |
-| `show_title` | `true` | 显示歌名 + 歌手标题行 |
-| `ignore_empty_lines` | `true` | 空时间戳行（间奏）保持上一句点亮；`false` 则整窗透明 |
-| `position_offset_ms` | `0` | 歌词时间偏移（正 = 提前显示） |
-| `card_radius` / `card_padding_y` / `card_padding_x` | `12 / 12 / 26` | 卡片圆角与内边距 |
-| `line_gap` | `6` | 歌词行间距 (px) |
+| 键                                                      | 默认              | 说明                                                 |
+| ------------------------------------------------------- | ----------------- | ---------------------------------------------------- |
+| `font_family`                                           | `Iansui Regular`  | 字体                                                 |
+| `font_size`                                             | `36`              | 当前行字号 (px)                                      |
+| `header_size`                                           | `13`              | 歌名字号                                             |
+| `candidate_size`                                        | `22`              | 非当前行字号                                         |
+| `bg_color`                                              | `00000044`        | 卡片背景（`00000000` = 全透明）                      |
+| `fg_color`                                              | `EEEEFFEE`        | 当前行文字色                                         |
+| `header_color`                                          | `EEEEFF66`        | 歌名文字色                                           |
+| `candidate_color`                                       | `EEEEFF99`        | 候选行文字色                                         |
+| `current_weight` / `candidate_weight` / `header_weight` | `700 / 500 / 600` | 各行字重                                             |
+| `shadow`                                                | `0.5`             | 当前行文字阴影强度 (0–1)                             |
+| `letter_spacing`                                        | `0`               | 字间距 (px)                                          |
+| `line_height`                                           | `1.3`             | 行高倍数                                             |
+| `anchor`                                                | `top`             | 窗口锚点：`top` / `center` / `bottom`                |
+| `margin`                                                | `50`              | 距锚点边缘的边距 (px)                                |
+| `width`                                                 | `560`             | 初始窗口宽 (px)，`auto_width` 时自动扩张             |
+| `auto_width`                                            | `true`            | 自动扩张宽度以容纳长句（上限屏幕 90%）               |
+| `lock_on_open`                                          | `false`           | 打开即锁定（不可拖动/右键）                          |
+| `lines_before` / `lines_after`                          | `0 / 1`           | 当前行上/下方显示行数                                |
+| `show_title`                                            | `true`            | 显示歌名 + 歌手标题行                                |
+| `ignore_empty_lines`                                    | `true`            | 空时间戳行（间奏）保持上一句点亮；`false` 则整窗透明 |
+| `position_offset_ms`                                    | `0`               | 歌词时间偏移（正 = 提前显示）                        |
+| `card_radius` / `card_padding_y` / `card_padding_x`     | `12 / 12 / 26`    | 卡片圆角与内边距                                     |
+| `line_gap`                                              | `6`               | 歌词行间距 (px)                                      |
 
 ### 7.2 `~/.config/LinuxCockpit/aidj-lyrics/config.json`（歌词页显示配置）
 
 页面颜色**始终跟随主题**，这里只含排版与呈现模式：
 
-| 键 | 默认 | 说明 |
-| --- | --- | --- |
-| `font_family` | `Iansui Regular` | 字体 |
-| `font_size` | `34` | 当前行字号 (px) |
-| `candidate_size` | `20` | 候选行字号 |
-| `current_weight` / `candidate_weight` | `700 / 500` | 行字重 |
-| `line_height` | `1.3` | 行高倍数 |
-| `letter_spacing` | `0` | 字间距 (px) |
-| `line_gap` | `10` | 行间距 (px) |
-| `position_offset_ms` | `0` | 歌词时间偏移 (ms) |
-| `karaoke` | `true` | 卡拉 OK 逐字高亮（需要内联时间戳歌词） |
-| `scroll_follow` | `true` | 滚动跟随并把当前行居中；关闭 = 静态窗口 |
-| `lines_before` / `lines_after` | `2 / 3` | 静态窗口模式下当前行上下行数 |
-| `dim_candidates` | `true` | 淡化非当前行 |
-| `show_header` | `true` | 显示头部（歌曲信息/控制/进度条） |
-| `immerse_mode` | `false` | 沉浸模式：有封面时模糊暗化封面铺满背景 |
+| 键                                    | 默认             | 说明                                    |
+| ------------------------------------- | ---------------- | --------------------------------------- |
+| `font_family`                         | `Iansui Regular` | 字体                                    |
+| `font_size`                           | `34`             | 当前行字号 (px)                         |
+| `candidate_size`                      | `20`             | 候选行字号                              |
+| `current_weight` / `candidate_weight` | `700 / 500`      | 行字重                                  |
+| `line_height`                         | `1.3`            | 行高倍数                                |
+| `letter_spacing`                      | `0`              | 字间距 (px)                             |
+| `line_gap`                            | `10`             | 行间距 (px)                             |
+| `position_offset_ms`                  | `0`              | 歌词时间偏移 (ms)                       |
+| `karaoke`                             | `true`           | 卡拉 OK 逐字高亮（需要内联时间戳歌词）  |
+| `scroll_follow`                       | `true`           | 滚动跟随并把当前行居中；关闭 = 静态窗口 |
+| `lines_before` / `lines_after`        | `2 / 3`          | 静态窗口模式下当前行上下行数            |
+| `dim_candidates`                      | `true`           | 淡化非当前行                            |
+| `show_header`                         | `true`           | 显示头部（歌曲信息/控制/进度条）        |
+| `immerse_mode`                        | `false`          | 沉浸模式：有封面时模糊暗化封面铺满背景  |
 
 ---
 

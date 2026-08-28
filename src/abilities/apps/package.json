@@ -1,0 +1,9 @@
+{
+  "name": "@cockpit/apps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "应用启动器",
+  "dependencies": {
+    "chokidar": "^5.0.0"
+  }
+}

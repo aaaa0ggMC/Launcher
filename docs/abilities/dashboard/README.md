@@ -6,13 +6,13 @@
 
 ## 前置依赖 / 系统工具
 
-| 能力块 | 依赖工具 | 缺失时表现 |
-| --- | --- | --- |
-| 处理器 / 内存 / 交换 / 磁盘 | 无（`os` / `/proc/meminfo` / `/sys/class/thermal` / `df`） | — |
-| GPU 卡片 | `nvidia-smi` | 显示「未检测到 GPU (nvidia-smi 不可用)」 |
-| Docker 卡片 | `docker`（守护进程运行中） | 显示「Docker 未运行或无容器」 |
-| 包计数（主机卡片） | `pacman` / `flatpak` | 对应计数显示 `—` |
-| NVIDIA 电源管理切换 | `pkexec`（polkit） | 切换失败，报错 |
+| 能力块                      | 依赖工具                                                   | 缺失时表现                               |
+| --------------------------- | ---------------------------------------------------------- | ---------------------------------------- |
+| 处理器 / 内存 / 交换 / 磁盘 | 无（`os` / `/proc/meminfo` / `/sys/class/thermal` / `df`） | —                                        |
+| GPU 卡片                    | `nvidia-smi`                                               | 显示「未检测到 GPU (nvidia-smi 不可用)」 |
+| Docker 卡片                 | `docker`（守护进程运行中）                                 | 显示「Docker 未运行或无容器」            |
+| 包计数（主机卡片）          | `pacman` / `flatpak`                                       | 对应计数显示 `—`                         |
+| NVIDIA 电源管理切换         | `pkexec`（polkit）                                         | 切换失败，报错                           |
 
 `system.stats` 采集会并发执行 GPU 查询与容器列表；任一项失败只是该卡片为空，不影响整页。
 
@@ -24,15 +24,15 @@
 
 默认 7 张卡片，每张默认宽度 6（占半行）：
 
-| 卡片 ID | 标题 | 内容 |
-| --- | --- | --- |
-| `host` | 主机 | 主机名、系统、架构、用户、桌面环境、Shell、运行时长、pacman/flatpak 包数 |
-| `cpu` | 处理器 | 型号、核数、使用率环形图、温度（>60°C 橙 / >80°C 红）、负载（1/5/15m）、频率 |
-| `mem` | 内存 | 内存使用率进度条（>70% 橙 / >85% 红）、已用/共、交换分区（无则显示「未启用交换分区」） |
-| `gpu` | GPU | 每张显卡：型号、驱动、显存用量与占比、利用率、温度、风扇、功耗/功耗上限 |
-| `pm` | NVIDIA 电源管理 | `NVreg_PreserveVideoMemoryAllocations` 当前值与切换按钮 |
-| `disk` | 磁盘 | 每个 `/dev/` 分区：挂载点、使用率进度条（>70% 橙 / >85% 红）、已用/共/可用 |
-| `docker` | 容器 | 运行/停止/总数统计 + 每个容器的名称与状态 |
+| 卡片 ID  | 标题            | 内容                                                                                   |
+| -------- | --------------- | -------------------------------------------------------------------------------------- |
+| `host`   | 主机            | 主机名、系统、架构、用户、桌面环境、Shell、运行时长、pacman/flatpak 包数               |
+| `cpu`    | 处理器          | 型号、核数、使用率环形图、温度（>60°C 橙 / >80°C 红）、负载（1/5/15m）、频率           |
+| `mem`    | 内存            | 内存使用率进度条（>70% 橙 / >85% 红）、已用/共、交换分区（无则显示「未启用交换分区」） |
+| `gpu`    | GPU             | 每张显卡：型号、驱动、显存用量与占比、利用率、温度、风扇、功耗/功耗上限                |
+| `pm`     | NVIDIA 电源管理 | `NVreg_PreserveVideoMemoryAllocations` 当前值与切换按钮                                |
+| `disk`   | 磁盘            | 每个 `/dev/` 分区：挂载点、使用率进度条（>70% 橙 / >85% 红）、已用/共/可用             |
+| `docker` | 容器            | 运行/停止/总数统计 + 每个容器的名称与状态                                              |
 
 - **拖动 / 缩放**：默认解锁状态，可拖动卡片、从边角调整大小。网格 `cellHeight: 48px`（细粒度垂直步进，卡高度可精细调节），水平按 12 列吸附；`float: true`，卡片停在放下位置，容器高度随最低卡片自适应。
 - **自动保存**：每次拖动/缩放结束，布局自动经 `dashboard.set-layout` 持久化（见「布局持久化」）。无需手动保存。
@@ -57,9 +57,7 @@ pm 卡片显示 `NVreg_PreserveVideoMemoryAllocations` 当前值（`0`/`1`/`—`
 
 ```jsonc
 {
-  "dashboardLayout": [
-    { "x": 0, "y": 0, "w": 6, "h": 8, "id": "host" }
-  ],
+  "dashboardLayout": [{ "x": 0, "y": 0, "w": 6, "h": 8, "id": "host" }],
   "dashboardLayoutVersion": 2
 }
 ```
@@ -77,17 +75,17 @@ pm 卡片显示 `NVreg_PreserveVideoMemoryAllocations` 当前值（`0`/`1`/`—`
 
 所有操作都是注册命令，可在内置 CLI REPL（`cli` 能力）中使用：
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `system.stats` | 系统实时状态（host/GPU/docker/RAM/disk） | `system.stats` |
-| `hardware.gpu` | GPU 信息（nvidia-smi） | `hardware.gpu` |
-| `hardware.pm` | 读取 `NVreg_PreserveVideoMemoryAllocations` 当前值 | `hardware.pm` |
-| `hardware.pm-toggle` | 切换 `0↔1`（pkexec，重启生效） | `hardware.pm-toggle` |
-| `docker.list` | 列出 Docker 容器（含停止的） | `docker.list` |
-| `docker.action` | 启动/停止/重启容器 | `docker.action --name new-api --action start` |
-| `dashboard.get-layout` | 读取总览排版 | `dashboard.get-layout` |
-| `dashboard.set-layout` | 保存总览排版（`--layout` 必须是数组） | `dashboard.set-layout --layout []` |
-| `dashboard.reset-layout` | 重置总览排版为默认（并广播刷新所有窗口） | `dashboard.reset-layout` |
+| 命令                     | 说明                                               | 示例                                          |
+| ------------------------ | -------------------------------------------------- | --------------------------------------------- |
+| `system.stats`           | 系统实时状态（host/GPU/docker/RAM/disk）           | `system.stats`                                |
+| `hardware.gpu`           | GPU 信息（nvidia-smi）                             | `hardware.gpu`                                |
+| `hardware.pm`            | 读取 `NVreg_PreserveVideoMemoryAllocations` 当前值 | `hardware.pm`                                 |
+| `hardware.pm-toggle`     | 切换 `0↔1`（pkexec，重启生效）                     | `hardware.pm-toggle`                          |
+| `docker.list`            | 列出 Docker 容器（含停止的）                       | `docker.list`                                 |
+| `docker.action`          | 启动/停止/重启容器                                 | `docker.action --name new-api --action start` |
+| `dashboard.get-layout`   | 读取总览排版                                       | `dashboard.get-layout`                        |
+| `dashboard.set-layout`   | 保存总览排版（`--layout` 必须是数组）              | `dashboard.set-layout --layout []`            |
+| `dashboard.reset-layout` | 重置总览排版为默认（并广播刷新所有窗口）           | `dashboard.reset-layout`                      |
 
 返回值要点：
 

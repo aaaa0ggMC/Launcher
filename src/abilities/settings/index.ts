@@ -84,8 +84,20 @@ export default {
           key: 'sidebar',
           label: '侧边栏',
           icon: 'mdi-view-dashboard-outline',
-          description: '侧栏排序规则：字母序 / 使用频次 / 最近使用',
-          keywords: ['侧边栏', '排序', '顺序', '频次', '最近', 'sidebar', 'sort', 'frequency'],
+          description: '侧栏排序规则：字母序 / 使用频次 / 最近使用 / 自定义排序',
+          keywords: [
+            '侧边栏',
+            '排序',
+            '顺序',
+            '频次',
+            '最近',
+            '自定义',
+            'sidebar',
+            'sort',
+            'frequency',
+            'custom'
+          ],
+          fullWidth: true,
           component: defineAsyncComponent(() => import('./items/SidebarSection.vue'))
         },
         {

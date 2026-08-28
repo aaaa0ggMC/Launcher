@@ -119,16 +119,16 @@ registerJobHandler('download-batch', async (control, args) => {
 
 **Linux / 发行版特定（需按平台改写 service）**
 
-| 能力                   | 当前实现                                                                           | 适配其它平台                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `mirror`               | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写                             | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变                           |
-| `systemd`              | `systemctl --user`                                                                 | 换成 launchd / OpenRC / 服务管理器                                        |
-| `dashboard`            | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi` | 换成对应平台的采集实现（`system.ts` / `gpu.ts`）                          |
-| `autostart`            | `~/.config/autostart` (XDG)                                                        | macOS LaunchAgents / Windows 启动项目录                                   |
-| `display`              | `plasma-apply-wallpaperimage` / `kscreen-doctor`                                   | 对应 DE / OS 的壁纸与输出工具                                             |
-| `background/wallpaper` | 解析 KDE plasma 配置                                                               | 对应 DE 的壁纸读取                                                        |
+| 能力                   | 当前实现                                                                                                                             | 适配其它平台                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `mirror`               | 解析 `/etc/pacman.d/mirrorlist`，`pkexec` + 脚本原子写                                                                               | 换 apt/dnf/其他源的解析与写入逻辑，命令接口不变                                                     |
+| `systemd`              | `systemctl --user`                                                                                                                   | 换成 launchd / OpenRC / 服务管理器                                                                  |
+| `dashboard`            | `/sys/class/thermal`、`/proc/meminfo`、`df`、`pacman`/`flatpak` 计数、`nvidia-smi`                                                   | 换成对应平台的采集实现（`system.ts` / `gpu.ts`）                                                    |
+| `autostart`            | `~/.config/autostart` (XDG)                                                                                                          | macOS LaunchAgents / Windows 启动项目录                                                             |
+| `display`              | `plasma-apply-wallpaperimage` / `kscreen-doctor`                                                                                     | 对应 DE / OS 的壁纸与输出工具                                                                       |
+| `background/wallpaper` | 解析 KDE plasma 配置                                                                                                                 | 对应 DE 的壁纸读取                                                                                  |
 | `aidj`                 | 双播放后端：dbus 走 MPRIS DBus 控制 + OpenAI 歌单/元数据 + `ffprobe` 响度平衡；web 走内置 HTML5 播放器（Web Audio EQ/淡入淡出/频谱） | 播放器控制换对应平台（macOS AppleScript / Windows COM）；内置播放器路径本就跨平台，其余逻辑平台无关 |
-| `scripts/`             | `pkexec` + shell helper                                                            | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services）       |
+| `scripts/`             | `pkexec` + shell helper                                                                                                              | 提权机制换成对应平台（如 macOS `osascript`/Authorization Services）                                 |
 
 `src/main/process/paths.ts` 集中了所有系统路径，适配时优先改这里；`scripts/` 按平台替换即可。改一个能力 = 只动那个文件夹，不影响其它能力与框架。
 
@@ -136,13 +136,13 @@ registerJobHandler('download-batch', async (control, args) => {
 
 Electron 在 **Wayland 下的窗口能力缺失**（合成器拥有定位/置顶/输入路由），当前只能部分缓解：
 
-| 能力                    | 原生 Wayland（KDE）                                                                                             | X11 / Windows / macOS                        |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| 窗口定位（anchor/margin）| 经 KWin D-Bus scripting 搬窗（`frameGeometry.x/y`，caption 匹配）                                                | 原生 `setPosition` ✓                         |
-| 水平居中                | 主进程主屏工作区计算 + KWin 搬窗 ✓                                                                               | ✓                                            |
-| 置顶                    | 合成器忽略，需 KDE 手动置顶                                                                                      | `setAlwaysOnTop` ✓                           |
-| 锁定（鼠标穿透）        | 不可穿透：`setIgnoreMouseEvents` 在 Wayland 是 no-op；锁定时仅「窗口内部不响应」+ 自动缩窗到贴合内容以减少遮挡      | 真穿透 ✓（X11 需真实 X11 会话）              |
-| 子窗口标题              | `[AIDJ-Lyrics] <player>`（固定、KWin Rules 可直接按 `[AIDJ-Lyrics]` 匹配）                    | ✓ |
+| 能力                      | 原生 Wayland（KDE）                                                                                            | X11 / Windows / macOS           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| 窗口定位（anchor/margin） | 经 KWin D-Bus scripting 搬窗（`frameGeometry.x/y`，caption 匹配）                                              | 原生 `setPosition` ✓            |
+| 水平居中                  | 主进程主屏工作区计算 + KWin 搬窗 ✓                                                                             | ✓                               |
+| 置顶                      | 合成器忽略，需 KDE 手动置顶                                                                                    | `setAlwaysOnTop` ✓              |
+| 锁定（鼠标穿透）          | 不可穿透：`setIgnoreMouseEvents` 在 Wayland 是 no-op；锁定时仅「窗口内部不响应」+ 自动缩窗到贴合内容以减少遮挡 | 真穿透 ✓（X11 需真实 X11 会话） |
+| 子窗口标题                | `[AIDJ-Lyrics] <player>`（固定、KWin Rules 可直接按 `[AIDJ-Lyrics]` 匹配）                                     | ✓                               |
 
 补充：
 

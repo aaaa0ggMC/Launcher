@@ -77,11 +77,11 @@ sudo chmod 644 /usr/share/polkit-1/rules.d/49-cockpit-pkexec.rules
 
 所有操作都是注册命令，可在内置 CLI REPL（`cli` 能力）中使用：
 
-| 命令 | 说明 | 示例 |
-| --- | --- | --- |
-| `mirror.get` | 当前镜像源列表与状态 | `mirror.get` |
+| 命令            | 说明                                           | 示例                                      |
+| --------------- | ---------------------------------------------- | ----------------------------------------- |
+| `mirror.get`    | 当前镜像源列表与状态                           | `mirror.get`                              |
 | `mirror.toggle` | 启用/禁用镜像源（需要 `--name` 和 `--enable`） | `mirror.toggle --name USTC --enable true` |
-| `mirror.test` | 测试所有镜像源连通性与速度 | `mirror.test` |
+| `mirror.test`   | 测试所有镜像源连通性与速度                     | `mirror.test`                             |
 
 返回值说明：
 

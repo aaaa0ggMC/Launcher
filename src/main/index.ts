@@ -41,6 +41,13 @@ protocol.registerSchemesAsPrivileged([
     // graph). Responses carry `Access-Control-Allow-Origin: *`. `stream` is
     // required for the media stack.
     privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
+  },
+  {
+    scheme: 'cockpit-tile',
+    // yarj 能力：MapLibre 经 fetch() 拉取 MBTiles 瓦片（cockpit-tile://<mapId>/<z>/<x>/<y>）。
+    // supportFetchAPI 让渲染端 fetch 可用；corsEnabled + ACAO:* 保持瓦片源 origin-clean。
+    // handler 由能力自身注册（src/abilities/yarj/tile-protocol.ts），此处只需声明特权。
+    privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
   }
 ])
 

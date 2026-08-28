@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitCli' })
+defineOptions({ name: 'cockpit-cli' })
 
 import { ref, shallowRef, nextTick, onMounted, onActivated, inject } from 'vue'
 import type { Ref } from 'vue'

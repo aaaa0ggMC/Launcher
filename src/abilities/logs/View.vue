@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitLogs' })
+defineOptions({ name: 'cockpit-logs' })
 
 import { ref, shallowRef, computed, watch, inject, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Ref } from 'vue'

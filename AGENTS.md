@@ -53,6 +53,41 @@ git submodule update --remote src/main/ui/assets/game-icon-pack
 
 渲染端 `GameIcon.vue` 用 `import.meta.glob('../assets/game-icon-pack/svg/**/*.svg')` 读取，SVG 结构与上游一致 (`svg/no-padding` + `svg/padding`)。
 
+### 2.2 每个 Ability 自带 package.json — 依赖声明即插件清单
+
+项目是 pnpm workspace：`pnpm-workspace.yaml` 的 `packages: ['src/abilities/*']`，**每个 ability 文件夹就是一个小包**，用 `package.json` 声明自己的第三方依赖。根目录 `pnpm install` 一键安装全部（共享 `.pnpm` store 去重）。
+
+**根目录 `package.json` 只允许框架依赖 + esbuild**（框架 = `src/main` / `src/main/ui` / `preload` / `shared` 用到的：electron 系、vue、vuetify、@mdi/font、winston、pidusage、dbus-next、esbuild 与全部构建工具）。凡是"某个 ability 专属"的 npm 依赖一律放该 ability 的 `package.json`：
+
+```jsonc
+// src/abilities/aidj/package.json
+{
+  "name": "@cockpit/aidj",
+  "private": true,
+  "dependencies": {
+    "dbus-next": "^0.10.2",
+    "openai": "^7.4.0",
+    "opencc-js": "^1.4.1"
+  }
+}
+```
+
+当前能力依赖归属：
+
+- `aidj` → `dbus-next` / `openai` / `opencc-js`
+- `apps` → `chokidar`
+- `dashboard` → `gridstack`
+- `rungame` → `three`（+ devDeps `@types/three`）
+- 其余 ability 只用框架提供的东西（vue/vuetify 等），`package.json` 留空
+
+**规则与机制**：
+
+- 能力专属依赖被主进程打包时**内联进 `out/main/index.js`**（`externalizeDepsPlugin` 只读根 package.json，移出根的依赖自动被 rollup 打进产物）→ 运行时无需 node_modules，天然适配 zip 分发。框架运行时依赖（esbuild/dbus-next/winston/pidusage 等）保持 external，从 node_modules require。
+- `dbus-next` 是特例：`windows.ts`（框架，KWin 定位）也动态 require 它，所以**根目录保留** + aidj 再声明一份（同版本去重，便于 aidj 单独分发）。
+- **zip 分发**：一个 ability 打包时带上自己的 `package.json`（含 `node_modules/` 不入库、不入 zip，重新 install 自动补齐）。解压丢进 `src/abilities/<id>/` → `pnpm install` 即自动识别为 workspace 成员并安装其依赖。gitignored 的整包能力（fnaf/ut/mt/rungame）就是这么分发的。
+- 新增第三方依赖：把包名写进对应 ability 的 `package.json`，不要加进根 `package.json`。
+- 能力自己的 `node_modules/` 由 pnpm 生成（符号链接），已在 .gitignore 的 `node_modules` 规则覆盖下。
+
 ## 3. 系统级配置 (迁移时必须手动执行)
 
 ### 3.1 polkit 规则 — pkexec 免重复输密码
@@ -209,6 +244,7 @@ src/
     index.ts          # 加载器: globs abilities/*/index.ts, 暴露列表 + settings 聚合
     types.ts          # Ability / AbilitySetting 契约
     <id>/             # 每个能力一个文件夹
+      package.json    # 能力自己的依赖声明 (workspace 成员, 见 §2.2)
       index.ts        # 统筹加载: Ability 元数据
       View.vue        # 页面组件 (可省略 → 纯后端能力)
       commands.ts     # 主进程命令 CommandSpec[] (由 abilities-loader 自动注册)
@@ -256,6 +292,7 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 - **一文件夹多 Ability**：`index.ts` 可 default-export `Ability | Ability[]`——一个能力注册多个侧栏条目（如 AIDJ 注册 `aidj` 主页面 + `aidj-lyrics` 歌词页），`id` 必须唯一
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
 - 增删能力 = 增删 `src/abilities/<id>` 文件夹即可，无需改任何 yaml/注册表
+- **依赖声明 = `package.json`**：每个 ability 文件夹是 pnpm workspace 成员，专属 npm 依赖写进自己的 `package.json`（见 §2.2），根目录 `pnpm install` 一键安装全部，主进程构建时自动内联进 `out/main`
 
 ### 图标
 
@@ -347,11 +384,12 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 
 1. **渲染端页面** `src/abilities/<id>/index.ts`（`Ability | Ability[]` 对象）+ `View.vue`
 2. **主进程命令** `src/abilities/<id>/commands.ts`（导出 `CommandSpec[]`）——由 `src/main/process/abilities-loader.ts` 自动 glob 注册，无需改任何 import
-3. **领域类型** `src/abilities/<id>/types.ts`（不进 shared）
-4. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
-5. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
-6. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
-7. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
+3. **依赖声明** `src/abilities/<id>/package.json`（workspace 成员；有专属第三方依赖就写 `dependencies`，没有就留空，见 §2.2）
+4. **领域类型** `src/abilities/<id>/types.ts`（不进 shared）
+5. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
+6. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
+7. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
+8. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
 
 **无需改任何 yaml/注册表**——侧栏按 `category`/`name` 字母序自注入（见上）。
 

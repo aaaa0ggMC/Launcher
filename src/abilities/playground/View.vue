@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitPlayground' })
+defineOptions({ name: 'cockpit-playground' })
 
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'

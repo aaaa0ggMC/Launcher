@@ -10,10 +10,10 @@
 
 ## 前置依赖（系统工具）
 
-| 工具 | 用途 | 缺失时行为 |
-| --- | --- | --- |
-| `plasma-apply-wallpaperimage` | 应用壁纸 | `display.apply` 返回 `{ ok: false }` |
-| `kscreen-doctor` | 查询显示输出 | `display.outputs` 返回空列表 |
+| 工具                          | 用途         | 缺失时行为                           |
+| ----------------------------- | ------------ | ------------------------------------ |
+| `plasma-apply-wallpaperimage` | 应用壁纸     | `display.apply` 返回 `{ ok: false }` |
+| `kscreen-doctor`              | 查询显示输出 | `display.outputs` 返回空列表         |
 
 均为 KDE Plasma 自带工具；缺失不影响其它能力。
 
@@ -64,9 +64,9 @@ display.outputs
 ### 渲染端 preload 包装
 
 ```ts
-await window.cockpit.wallpapers('/abs/dir')          // 同 display.wallpapers
+await window.cockpit.wallpapers('/abs/dir') // 同 display.wallpapers
 await window.cockpit.applyWallpaper('/abs/file.jpg') // 同 display.apply，返回 boolean
-await window.cockpit.outputs()                       // 同 display.outputs
+await window.cockpit.outputs() // 同 display.outputs
 ```
 
 ## 如何被其它能力使用

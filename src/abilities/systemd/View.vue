@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-systemd' })
+
 import { ref, shallowRef, computed, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import type { SystemdUnit } from './types'

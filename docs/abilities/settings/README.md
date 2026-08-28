@@ -24,16 +24,16 @@ Linux System Cockpit 的设置中心：集中管理主题/配色、界面缩放�
 
 「外观」分类位于第一个，包含以下设置项：
 
-| 设置项 | 作用 |
-| --- | --- |
-| **主题** | 多套配色方案 / 跟随系统。点击色块即切换（见下「主题 / 配色」） |
-| **界面缩放** | 整体 UI 等比例缩放（0.8–1.8，拖动滑块，松手应用并保存） |
-| **窗口** | 无边框、圆角、背景与 Fuse 蒙层等窗口外观 |
-| **界面动画** | 现代动效总开关、能力页面切换过渡、主题切换动画 |
-| **语言** | 界面语言（中文 / English） |
-| **侧边栏** | 侧栏排序规则：字母序 / 使用频次 / 最近使用；清空使用记录 |
-| **启动** | 所有应用启动前是否弹确认 |
-| **关于** | 版本与技术栈信息 |
+| 设置项       | 作用                                                           |
+| ------------ | -------------------------------------------------------------- |
+| **主题**     | 多套配色方案 / 跟随系统。点击色块即切换（见下「主题 / 配色」） |
+| **界面缩放** | 整体 UI 等比例缩放（0.8–1.8，拖动滑块，松手应用并保存）        |
+| **窗口**     | 无边框、圆角、背景与 Fuse 蒙层等窗口外观                       |
+| **界面动画** | 现代动效总开关、能力页面切换过渡、主题切换动画                 |
+| **语言**     | 界面语言（中文 / English）                                     |
+| **侧边栏**   | 侧栏排序规则：字母序 / 使用频次 / 最近使用；清空使用记录       |
+| **启动**     | 所有应用启动前是否弹确认                                       |
+| **关于**     | 版本与技术栈信息                                               |
 
 #### 主题 / 配色
 
@@ -84,6 +84,7 @@ Linux System Cockpit 的设置中心：集中管理主题/配色、界面缩放�
 设置能力注册了 5 个命令：
 
 ### `config.get`
+
 读取全局配置。
 
 ```
@@ -93,6 +94,7 @@ config.get
 返回 `~/.config/LinuxCockpit/config.json` 的完整内容。
 
 ### `config.set`
+
 更新全局配置并广播给所有窗口（主题、缩放等即时生效）。
 
 ```
@@ -102,6 +104,7 @@ config.set --patch {"theme":"pureblack"}
 `--patch` 为 JSON 对象（整体覆盖顶层字段，请传完整子对象）。写入失败或 patch 不是合法 JSON 时返回错误。
 
 ### `stats.record`
+
 记录一次使用（供侧边栏「使用频次 / 最近使用」排序）。
 
 ```
@@ -109,6 +112,7 @@ stats.record --id apps
 ```
 
 ### `stats.list`
+
 读取使用频次统计（`~/.config/LinuxCockpit/apps.csv`）。
 
 ```
@@ -118,6 +122,7 @@ stats.list
 返回 `{ ok, stats }`。
 
 ### `stats.clear`
+
 清空全部使用记录（`apps.csv` 归零并广播刷新）。
 
 ```
@@ -130,34 +135,34 @@ stats.clear
 
 ```jsonc
 {
-  "theme": "dark",            // 配色方案 id，见上「主题 / 配色」
-  "language": "zh",           // 界面语言: zh | en
-  "uiScale": 1.1,             // 界面缩放 (0.8–1.8, 经 webFrame.setZoomFactor 等比缩放)
+  "theme": "dark", // 配色方案 id，见上「主题 / 配色」
+  "language": "zh", // 界面语言: zh | en
+  "uiScale": 1.1, // 界面缩放 (0.8–1.8, 经 webFrame.setZoomFactor 等比缩放)
   "animations": {
-    "modernMotion": true,     // 现代动效总开关
-    "enabled": true,          // 页面切换动画开关
+    "modernMotion": true, // 现代动效总开关
+    "enabled": true, // 页面切换动画开关
     "pageTransition": "fade", // fade | slide | slide-up | zoom | flip
     "themeTransition": "corner" // 主题切换扩散起点: corner | cursor
   },
   "window": {
-    "width": 1280,            // 初始窗口宽（下次启动生效）
-    "height": 800,            // 初始窗口高（下次启动生效）
-    "frameless": true,        // 无边框（下次启动生效）
-    "rounded": true,          // 圆角（frameless 时生效，下次启动生效）
-    "radius": 12,             // 圆角半径 px (0–40)
+    "width": 1280, // 初始窗口宽（下次启动生效）
+    "height": 800, // 初始窗口高（下次启动生效）
+    "frameless": true, // 无边框（下次启动生效）
+    "rounded": true, // 圆角（frameless 时生效，下次启动生效）
+    "radius": 12, // 圆角半径 px (0–40)
     "background": "transparent", // transparent | image | wallpaper
-    "backgroundImage": "",    // background=image 时的图片路径
-    "backgroundOpacity": 1,   // 背景图片不透明度 (0–1)
-    "fuseAlpha": 0.85,        // Fuse 蒙层不透明度 (0–1)
-    "fuseBlur": 28            // 背景模糊 (px)
+    "backgroundImage": "", // background=image 时的图片路径
+    "backgroundOpacity": 1, // 背景图片不透明度 (0–1)
+    "fuseAlpha": 0.85, // Fuse 蒙层不透明度 (0–1)
+    "fuseBlur": 28 // 背景模糊 (px)
   },
   "runtime": {
     "terminal": ["konsole", "--hold", "-e"], // 终端类应用启动命令
-    "confirmBeforeLaunch": true              // 启动前确认
+    "confirmBeforeLaunch": true // 启动前确认
   },
   "sidebar": {
-    "default": "cli",          // 初始页面（缺失/无效时回落第一个能力）
-    "sort": "alpha"            // alpha | frequency | recent
+    "default": "cli", // 初始页面（缺失/无效时回落第一个能力）
+    "sort": "alpha" // alpha | frequency | recent
   }
 }
 ```

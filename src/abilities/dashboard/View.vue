@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitDashboard' })
+defineOptions({ name: 'cockpit-dashboard' })
 
 import {
   ref,

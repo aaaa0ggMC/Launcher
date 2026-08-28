@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-autostart' })
+
 import { ref, shallowRef, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import type { AutostartEntry } from './types'

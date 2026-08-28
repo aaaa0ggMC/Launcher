@@ -284,6 +284,7 @@ watch(ncmMode, (v) => update('preferences.ncm_mode', v))
 watch(dbusTarget, (v) => update('preferences.dbus_target', v))
 watch(playerMode, (v) => {
   if (!v) return
+  update('preferences.player_mode', v)
   window.cockpit
     .command('aidj.player-mode', { set: v })
     .then((r) => {

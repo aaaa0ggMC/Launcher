@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'cockpit-apps' })
+
 import { ref, shallowRef, computed, inject, onMounted, onBeforeUnmount } from 'vue'
 import type { Ref } from 'vue'
 import type { AppAction, AppEntry, AppExecSpec, LaunchResult, RiskLevel } from './types'

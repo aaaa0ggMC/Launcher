@@ -291,12 +291,34 @@ export async function loadFrequency(): Promise<Map<string, number>> {
   try {
     const raw = await readFile(getFreqPath(), 'utf-8')
     for (const line of raw.split('\n').filter(Boolean)) {
-      const idx = line.lastIndexOf(',')
-      if (idx > 0) {
-        const name = line.slice(0, idx)
-        const times = Number(line.slice(idx + 1))
-        if (name && Number.isFinite(times)) freq.set(name, times)
+      if (line === 'name,times') continue
+      let name: string
+      let rest: string
+      if (line.startsWith('"')) {
+        let i = 1
+        let quoted = ''
+        while (i < line.length) {
+          if (line[i] === '"' && i + 1 < line.length && line[i + 1] === '"') {
+            quoted += '"'
+            i += 2
+          } else if (line[i] === '"') {
+            i++
+            break
+          } else {
+            quoted += line[i]
+            i++
+          }
+        }
+        name = quoted
+        rest = line.slice(i + 1)
+      } else {
+        const idx = line.lastIndexOf(',')
+        if (idx <= 0) continue
+        name = line.slice(0, idx)
+        rest = line.slice(idx + 1)
       }
+      const times = Number(rest)
+      if (name && Number.isFinite(times)) freq.set(name, times)
     }
   } catch {
     /* noop */
@@ -305,11 +327,18 @@ export async function loadFrequency(): Promise<Map<string, number>> {
   return freq
 }
 
+function csvEscape(s: string): string {
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
 export async function saveFrequency(freq: Map<string, number>): Promise<void> {
   _freqCache = freq
   await ensureAidjDir()
   const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
-  const lines = ['name,times', ...sorted.map(([name, times]) => `${name},${times}`)]
+  const lines = ['name,times', ...sorted.map(([name, times]) => `${csvEscape(name)},${times}`)]
   await writeTextFile(getFreqPath(), lines.join('\n') + '\n')
 }
 

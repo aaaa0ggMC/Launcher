@@ -29,6 +29,8 @@ const cockpit = {
   wayland: process.platform === 'linux' && !!process.env.WAYLAND_DISPLAY,
   /** Window-geometry debug heartbeat (COCKPIT_WINDOW_DEBUG=1) — lyrics-window drift diagnosis. */
   windowDebug: process.env.COCKPIT_WINDOW_DEBUG === '1',
+  /** yarj 地图能力调试日志 (COCKPIT_YARJ_DEBUG=1) — 输出实际生效的 style/filter/LOD 状态。 */
+  yarjDebug: process.env.COCKPIT_YARJ_DEBUG === '1',
 
   // apps registry
   listApps: (): Promise<unknown> => cockpit.command('apps.list'),

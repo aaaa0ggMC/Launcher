@@ -243,12 +243,25 @@ function restoreUiState(): void {
 }
 
 /** Sidebar sort rules — `config.json` `sidebar.sort`: 'alpha' (default,
- * category+name), 'frequency' (use count desc), 'recent' (last-used desc). */
-type SidebarSort = 'alpha' | 'frequency' | 'recent'
+ * category+name), 'frequency' (use count desc), 'recent' (last-used desc),
+ * 'custom' (user custom order in sidebar-order.json). */
+type SidebarSort = 'alpha' | 'frequency' | 'recent' | 'custom'
 const sortMode = computed<SidebarSort>(() => {
   const s = (runtimeConfig.value.sidebar as { sort?: string } | undefined)?.sort
-  return s === 'frequency' || s === 'recent' ? s : 'alpha'
+  return s === 'frequency' || s === 'recent' || s === 'custom' ? s : 'alpha'
 })
+
+/** Custom order loaded from sidebar-order.json */
+const customOrder = ref<string[]>([])
+async function loadSidebarOrder(): Promise<void> {
+  const r = (await window.cockpit.command('sidebar.order.get').catch(() => null)) as {
+    ok?: boolean
+    order?: string[]
+  } | null
+  if (Array.isArray(r?.order)) {
+    customOrder.value = r.order
+  }
+}
 
 /** Per-entry usage stats from apps.csv (sidebar frequency / recent rules). */
 const usageStats = ref<Record<string, { count: number; lastUsed: number }>>({})
@@ -270,6 +283,7 @@ const abilities = computed<SidebarAbility[]>(() => {
     const u = usageStats.value[a.id]
     return mode === 'recent' ? (u?.lastUsed ?? 0) : (u?.count ?? 0)
   }
+  const order = customOrder.value
   return sidebarReport.value.loaded
     .map((meta) => ({
       id: meta.id,
@@ -281,6 +295,15 @@ const abilities = computed<SidebarAbility[]>(() => {
       comp: meta.component ? markRaw(meta.component) : undefined
     }))
     .sort((a, b) => {
+      if (mode === 'custom') {
+        const idxA = order.indexOf(a.id)
+        const idxB = order.indexOf(b.id)
+        const posA = idxA === -1 ? 999999 : idxA
+        const posB = idxB === -1 ? 999999 : idxB
+        if (posA !== posB) return posA - posB
+        const c = a.category.localeCompare(b.category, lang.value)
+        return c !== 0 ? c : a.name.localeCompare(b.name, lang.value)
+      }
       if (mode !== 'alpha') {
         const d = score(b) - score(a)
         if (d !== 0) return d
@@ -666,6 +689,7 @@ let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
 let usageUnsub: (() => void) | null = null
 let abilityUnsub: (() => void) | null = null
+let orderUnsub: (() => void) | null = null
 
 /** Pull the authoritative disabled set from the main process (a renderer reload
  *  must not resurrect abilities that were disabled earlier this session). */
@@ -715,11 +739,16 @@ onMounted(async () => {
   // Usage stats drive the sidebar frequency / recent sort; reload on change
   // so a click re-sorts the sidebar live.
   usageUnsub = window.cockpit.on('cockpit:usage-changed', () => void loadUsage())
+  // Custom sidebar order changed via sidebar.order.set
+  orderUnsub = window.cockpit.on('cockpit:sidebar-order-changed', (order) => {
+    if (Array.isArray(order)) customOrder.value = order.map(String)
+  })
   // Runtime ability enable/disable — re-resolve the sidebar live and bail out
   // of a page that was just disabled.
   abilityUnsub = subscribeAbilityChanges()
   void loadAbilityStates()
   void loadUsage()
+  void loadSidebarOrder()
   window.cockpit.isMaximized().then((v) => (isMaximized.value = v))
   winUnsub = window.cockpit.on('cockpit:window-maximized', (v) => {
     isMaximized.value = Boolean(v)
@@ -750,6 +779,7 @@ onBeforeUnmount(() => {
   unsub?.()
   usageUnsub?.()
   abilityUnsub?.()
+  orderUnsub?.()
   winUnsub?.()
   configUnsub?.()
   commandErrorUnsub?.()
@@ -860,10 +890,9 @@ onBeforeUnmount(() => {
 
       <template v-if="!rail">
         <v-list density="compact" nav class="px-2">
-          <template v-for="g in groups" :key="g.label">
-            <v-list-subheader>{{ g.label }}</v-list-subheader>
+          <template v-if="sortMode === 'custom'">
             <v-list-item
-              v-for="a in g.items"
+              v-for="a in filteredAbilities"
               :key="a.id"
               :title="a.name"
               density="compact"
@@ -875,6 +904,24 @@ onBeforeUnmount(() => {
                 <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
               </template>
             </v-list-item>
+          </template>
+          <template v-else>
+            <template v-for="g in groups" :key="g.label">
+              <v-list-subheader>{{ g.label }}</v-list-subheader>
+              <v-list-item
+                v-for="a in g.items"
+                :key="a.id"
+                :title="a.name"
+                density="compact"
+                :active="currentId === a.id"
+                rounded="lg"
+                @click="openAbility(a.id)"
+              >
+                <template #prepend>
+                  <AbilityIcon :icon="a.icon" :size="sidebarIconSize" />
+                </template>
+              </v-list-item>
+            </template>
           </template>
         </v-list>
       </template>

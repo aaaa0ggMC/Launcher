@@ -1,3 +1,5 @@
+packages:
+  - 'src/abilities/*'
 allowBuilds:
   electron: true
   electron-winstaller: true

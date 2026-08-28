@@ -1,0 +1,11 @@
+{
+  "name": "@cockpit/aidj",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI DJ — AI 歌单生成 + 本地播放器控制 (MPRIS/DBus)",
+  "dependencies": {
+    "dbus-next": "^0.10.2",
+    "openai": "^7.4.0",
+    "opencc-js": "^1.4.1"
+  }
+}

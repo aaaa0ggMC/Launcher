@@ -1,0 +1,9 @@
+{
+  "name": "@cockpit/dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "仪表盘 (gridstack 拖拽网格)",
+  "dependencies": {
+    "gridstack": "^13.0.2"
+  }
+}

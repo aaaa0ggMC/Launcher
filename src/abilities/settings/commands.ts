@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
-import { CONFIG_JSON } from '../../main/process/paths'
+import { CONFIG_JSON, SIDEBAR_ORDER_JSON } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import { registerStartupHook } from '../../main/process/startup'
 import { loadUsageStats, recordUsage, clearUsageStats } from '../../main/process/usage-stats'
@@ -83,6 +83,24 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
   }
 }
 
+async function loadSidebarOrder(): Promise<string[]> {
+  try {
+    const data = await readJson<string[] | { order?: string[] }>(SIDEBAR_ORDER_JSON)
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.order)) return data.order
+    return []
+  } catch {
+    return []
+  }
+}
+
+async function saveSidebarOrder(order: string[]): Promise<void> {
+  await writeJsonAtomic(SIDEBAR_ORDER_JSON, order)
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('cockpit:sidebar-order-changed', order)
+  }
+}
+
 export default [
   {
     name: 'config.get',
@@ -108,6 +126,36 @@ export default [
         }
       }
       return await applyConfigPatch(patch ?? {})
+    }
+  },
+  {
+    name: 'sidebar.order.get',
+    description: '读取侧边栏自定义排序列表 (sidebar-order.json)',
+    usage: 'sidebar.order.get',
+    run: async () => {
+      const order = await loadSidebarOrder()
+      return { ok: true, order }
+    }
+  },
+  {
+    name: 'sidebar.order.set',
+    description: '更新侧边栏自定义排序列表 (--order <json>)',
+    usage: 'sidebar.order.set --order \'["apps","aidj"]\'',
+    run: async (ctx) => {
+      let order = ctx.named.order as unknown
+      if (typeof order === 'string') {
+        try {
+          order = JSON.parse(order)
+        } catch {
+          return { ok: false, error: 'order 不是合法 JSON 数组' }
+        }
+      }
+      if (!Array.isArray(order)) {
+        return { ok: false, error: 'order 必须是数组' }
+      }
+      const list = order.map(String)
+      await saveSidebarOrder(list)
+      return { ok: true, order: list }
     }
   },
   {

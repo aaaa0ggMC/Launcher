@@ -23,18 +23,12 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@mdi/font": "^7.4.47",
-    "chokidar": "^5.0.0",
     "dbus-next": "^0.10.2",
     "esbuild": "^0.28.1",
-    "fuse.js": "^7.5.0",
-    "gridstack": "^13.0.2",
-    "openai": "^7.4.0",
-    "opencc-js": "^1.4.1",
     "pidusage": "^4.0.1",
     "vuetify": "^3.13.0",
     "winston": "^3.19.0",
-    "winston-daily-rotate-file": "^5.0.0",
-    "yaml": "^2.9.0"
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",

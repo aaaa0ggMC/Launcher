@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineOptions({ name: 'CockpitSettings' })
+defineOptions({ name: 'cockpit-settings' })
 
 import {
   computed,
@@ -330,12 +330,19 @@ defineExpose({ toMarkdown })
 </template>
 
 <style scoped>
+.settings-topbar {
+  min-width: 0;
+}
+
 .settings-search {
+  width: 280px;
+  min-width: 240px;
   max-width: 320px;
   flex-shrink: 0;
 }
 
 .settings-chips {
   min-width: 0;
+  flex: 1 1 0;
 }
 </style>

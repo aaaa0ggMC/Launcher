@@ -18,10 +18,13 @@
 ### 1.1 末尾命令被识别
 
 **步骤**：在持续会话发：
+
 ```
 从C418的the weirdest xxx 开始，语种多样化好吧 /discard_follows
 ```
+
 **预期**：
+
 - `/discard_follows` 生效（待播队列被丢弃）
 - 剩余文本「从C418的…语种多样化」作为新指令注入，**不是**原样塞给 AI
 - AI 立即开始重新生成（无需等队列降到 8 首以下）
@@ -29,9 +32,11 @@
 ### 1.2 用户消息是最高优先级
 
 **步骤**：等 AI 自主播放几轮（fetchCount ≥ 2）后，发一条明确方向的消息（可带 `/discard_follows`）：
+
 ```
 接下来多放点安静的中文民谣 /discard_follows
 ```
+
 **预期**：下一批歌单明显贴合新方向，**不再**被「AUTONOMOUS RADIO FLOW · ignore the positive part of the initial prompt」压过（日志应出现 `### USER DIRECTED REQUEST`）。
 
 ### 1.3 不提前清空播放列表
