@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS photos (
   gps_lat     REAL,
   gps_lon     REAL,
   gps_alt     REAL,
+  hash        TEXT,
   appendix    TEXT NOT NULL DEFAULT '{}',
   scanned_at  TEXT
 );
@@ -69,6 +70,19 @@ export function getMetadataDb(): DatabaseSync {
   db = new DatabaseSync(path)
   db.exec('PRAGMA journal_mode = WAL')
   db.exec(SCHEMA)
+
+  // 迁移：检查 photos 表是否有 hash 字段
+  try {
+    const cols = db.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
+    if (cols.length && !cols.some((c) => c.name === 'hash')) {
+      db.exec('ALTER TABLE photos ADD COLUMN hash TEXT')
+      log.info('migrated photos table: added hash column')
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash)')
+  } catch (err) {
+    log.warn('migrate photos table check failed', { error: String(err) })
+  }
+
   log.info('metadata db ready', { path })
   return db
 }
@@ -107,14 +121,15 @@ export interface PhotoUpsertInput {
   gps_lat: number | null
   gps_lon: number | null
   gps_alt: number | null
+  hash?: string | null
 }
 
 const UPSERT_SQL = `
 INSERT INTO photos (
   path, root, file_size, mtime, width, height, orientation, taken_at,
   camera_make, camera_model, lens_model, focal_length, f_number, exposure_time,
-  iso, gps_lat, gps_lon, gps_alt, scanned_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  iso, gps_lat, gps_lon, gps_alt, hash, scanned_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(path) DO UPDATE SET
   root = excluded.root,
   file_size = excluded.file_size,
@@ -133,6 +148,7 @@ ON CONFLICT(path) DO UPDATE SET
   gps_lat = excluded.gps_lat,
   gps_lon = excluded.gps_lon,
   gps_alt = excluded.gps_alt,
+  hash = COALESCE(excluded.hash, photos.hash),
   scanned_at = excluded.scanned_at
   -- appendix 保留用户数据，扫描器永不覆盖
 `
@@ -160,6 +176,7 @@ export function upsertPhoto(input: PhotoUpsertInput): void {
     input.gps_lat,
     input.gps_lon,
     input.gps_alt,
+    input.hash ?? null,
     new Date().toISOString()
   )
 }
@@ -168,6 +185,37 @@ export function upsertPhoto(input: PhotoUpsertInput): void {
 export function getPhotoRow(path: string): PhotoRow | null {
   const row = getMetadataDb().prepare('SELECT * FROM photos WHERE path = ?').get(path)
   return row ? (row as unknown as PhotoRow) : null
+}
+
+/** 按内容哈希查一行（用于重命名/移动追踪与去重识别）。 */
+export function getPhotoByHash(hash: string): PhotoRow | null {
+  const row = getMetadataDb().prepare('SELECT * FROM photos WHERE hash = ? LIMIT 1').get(hash)
+  return row ? (row as unknown as PhotoRow) : null
+}
+
+/**
+ * 文件移动/重命名：将 oldPath 的记录直接迁移到 newPath（完整保留 appendix、GPS 等所有元数据）。
+ */
+export function updatePhotoPath(
+  oldPath: string,
+  newPath: string,
+  root: string,
+  fileSize: number,
+  mtime: number,
+  hash?: string | null
+): void {
+  getMetadataDb()
+    .prepare(
+      `UPDATE photos
+       SET path = ?, root = ?, file_size = ?, mtime = ?, hash = COALESCE(?, hash), scanned_at = ?
+       WHERE path = ?`
+    )
+    .run(newPath, root, fileSize, mtime, hash ?? null, new Date().toISOString(), oldPath)
+}
+
+/** 单独补充更新某照片的 hash。 */
+export function updatePhotoHash(path: string, hash: string): void {
+  getMetadataDb().prepare('UPDATE photos SET hash = ? WHERE path = ?').run(hash, path)
 }
 
 export interface PhotoUpdateOptions {
@@ -215,6 +263,37 @@ export function updatePhotoAppendix(path: string, patch: Record<string, unknown>
   return updatePhoto(path, { patch })
 }
 
+export interface BatchGpsUpdateItem {
+  path: string
+  lat: number | null
+  lon: number | null
+  alt?: number | null
+}
+
+/** 批量更新一组照片的 GPS 坐标（在事务中极速执行）。 */
+export function batchUpdatePhotoGps(updates: BatchGpsUpdateItem[]): number {
+  if (!updates.length) return 0
+  const d = getMetadataDb()
+  const stmt = d.prepare(
+    'UPDATE photos SET gps_lat = ?, gps_lon = ?, gps_alt = COALESCE(?, gps_alt) WHERE path = ?'
+  )
+  d.exec('BEGIN IMMEDIATE')
+  try {
+    for (const item of updates) {
+      stmt.run(item.lat, item.lon, item.alt ?? null, item.path)
+    }
+    d.exec('COMMIT')
+    return updates.length
+  } catch (err) {
+    try {
+      d.exec('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
+}
+
 /** 照片行 → 渲染端 Photo 视图（appendix 解析为对象）。 */
 export function photoFromRow(row: PhotoRow): Photo {
   let appendix: Record<string, unknown> = {}
@@ -242,6 +321,7 @@ export function photoFromRow(row: PhotoRow): Photo {
     f_number: row.f_number,
     exposure_time: row.exposure_time,
     iso: row.iso,
+    hash: row.hash,
     appendix
   }
 }
@@ -253,6 +333,7 @@ export function queryPhotos(filters: {
   since?: string
   q?: string
   bbox?: [number, number, number, number]
+  orderGpsFirst?: boolean
 }): Photo[] {
   const conds: string[] = []
   const params: (string | number)[] = []
@@ -278,8 +359,12 @@ export function queryPhotos(filters: {
     params.push(minLon, maxLon, minLat, maxLat)
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+  const orderBy = filters.orderGpsFirst
+    ? 'ORDER BY (CASE WHEN gps_lat IS NOT NULL AND gps_lon IS NOT NULL THEN 0 ELSE 1 END) ASC, taken_at DESC, id ASC'
+    : 'ORDER BY taken_at DESC'
+
   const rows = getMetadataDb()
-    .prepare(`SELECT * FROM photos ${where} ORDER BY taken_at DESC`)
+    .prepare(`SELECT * FROM photos ${where} ${orderBy}`)
     .all(...params)
   return (rows as unknown as PhotoRow[]).map(photoFromRow)
 }

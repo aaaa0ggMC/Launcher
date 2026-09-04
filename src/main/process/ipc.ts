@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, clipboard } from 'electron'
+import { ipcMain, BrowserWindow, dialog, clipboard, shell } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
@@ -190,6 +190,13 @@ export function registerIpc(): void {
   // Clipboard write (copy current view as markdown etc).
   ipcMain.handle('clipboard:write', (_e, text: string) => {
     clipboard.writeText(text ?? '')
+  })
+
+  // Open external URL in default browser.
+  ipcMain.handle('shell:open-external', (_e, url: string) => {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      void shell.openExternal(url)
+    }
   })
 
   // CLI-first dispatcher: single source of truth for every ability action.

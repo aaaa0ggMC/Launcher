@@ -242,29 +242,57 @@ defineExpose({
           <template #item="{ props: itemProps, item }">
             <v-list-item v-bind="itemProps">
               <template #append>
-                <v-chip
-                  size="x-small"
-                  variant="tonal"
-                  :color="
-                    item.raw.category === 'google'
-                      ? 'primary'
-                      : item.raw.category === 'google-official'
-                        ? 'warning'
-                        : item.raw.isLocal
-                          ? 'secondary'
-                          : 'default'
-                  "
-                >
-                  {{
-                    item.raw.category === 'google-official'
-                      ? 'TILES API'
-                      : item.raw.category.toUpperCase()
-                  }}
-                </v-chip>
+                <div class="d-flex align-center ga-1">
+                  <v-chip
+                    v-if="item.raw.coordSystem === 'gcj02'"
+                    size="x-small"
+                    variant="flat"
+                    color="warning"
+                  >
+                    GCJ-02
+                  </v-chip>
+                  <v-chip
+                    size="x-small"
+                    variant="tonal"
+                    :color="
+                      item.raw.category === 'google'
+                        ? 'primary'
+                        : item.raw.category === 'google-official'
+                          ? 'warning'
+                          : item.raw.category === 'amap' || item.raw.category === 'tencent'
+                            ? 'warning'
+                            : item.raw.isLocal
+                              ? 'secondary'
+                              : 'default'
+                    "
+                  >
+                    {{
+                      item.raw.category === 'google-official'
+                        ? 'TILES API'
+                        : item.raw.category.toUpperCase()
+                    }}
+                  </v-chip>
+                </div>
               </template>
             </v-list-item>
           </template>
         </v-select>
+
+        <v-alert
+          v-if="providers.find((p) => p.id === activeId)?.coordSystem === 'gcj02'"
+          type="warning"
+          variant="tonal"
+          density="comfortable"
+          icon="mdi-alert-circle-outline"
+          class="max-w-lg mb-4 text-caption"
+        >
+          {{
+            t(
+              'yarj.providers.gcj02Alert',
+              '当前图源使用高德/腾讯火星坐标系 (GCJ-02)，带有国内非线性加密偏移（约数百米）。在此图源下拾取或微调的照片 GPS 坐标已带有此偏移，主要用于与国内底图路网对齐，在国际标准 WGS-84 地图（如谷歌卫星/OSM）中可能略有偏差。'
+            )
+          }}
+        </v-alert>
 
         <div class="text-caption font-weight-medium mb-1">
           {{ t('yarj.settings.mapLangTitle', '地图注记语言') }}

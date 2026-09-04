@@ -18,16 +18,28 @@ import type { Map as MlMap, Popup, GeoJSONSource, FilterSpecification } from 'ma
 import 'maplibre-gl/dist/maplibre-gl.css'
 import PhotoSideDrawer from './components/PhotoSideDrawer.vue'
 import PhotoLightboxModal from './components/PhotoLightboxModal.vue'
+import MapPreferencesSection from './components/MapPreferencesSection.vue'
 import type {
   GeocodeResult,
   ReverseGeocodeResult,
   Photo,
   ExploredGranularity,
   TileCacheStats,
-  ProviderItem
+  ProviderItem,
+  JourneyData,
+  JourneyStage,
+  JourneyLeg,
+  YarjConfig
 } from './types'
-import { GRANULARITY_PRESETS } from './types'
-import { generateExploredGeoJSON } from './explored-area'
+import { DEFAULT_YARJ_CONFIG, GRANULARITY_PRESETS, photoThumbUrl } from './types'
+import { generateExploredGeoJSON, haversineDistM } from './explored-area'
+import {
+  buildJourneyData,
+  generateJourneyLinesGeoJSON,
+  generateJourneyNodesGeoJSON
+} from './journey'
+import { wgs84ToGcj02, gcj02ToWgs84 } from './coord-transform'
+import { filterPhotosByRules } from './photo-filter'
 
 interface LodFeature {
   lvl: 'ADM1' | 'ADM2'
@@ -141,6 +153,56 @@ const hierarchyStatus = ref<HierarchyStatusRow[]>([])
 const showPhotosLayer = ref(true)
 const showExploredLayer = ref(true)
 const exploredGranularity = ref<ExploredGranularity>('standard')
+const yarjConfig = ref<YarjConfig>({ ...DEFAULT_YARJ_CONFIG })
+const preferencesDialogOpen = ref(false)
+
+function openPreferences(): void {
+  preferencesDialogOpen.value = true
+  menuOpen.value = false
+}
+
+function closePreferencesModal(): void {
+  preferencesDialogOpen.value = false
+  void reloadPreferences()
+}
+
+// 「我的探索」状态与数据
+const GRANULARITY_LIST: ExploredGranularity[] = ['fine', 'standard', 'trip', 'coarse', 'massive']
+const explorationActive = ref(false)
+const explorationScope = ref<'global' | 'region'>('global')
+const explorationPhotos = ref<Photo[]>([])
+const explorationGranularity = ref<ExploredGranularity>('standard')
+const currentStageIndex = ref(0)
+const journeyData = ref<JourneyData | null>(null)
+const isPlaying = ref(false)
+let playTimer: number | null = null
+
+// 探索视距与自定义站点数
+const journeyFocusRange = ref(5)
+const customStageCount = ref<number | null>(null)
+const customTargetCountInput = ref('')
+const jumpStageInput = ref('')
+const jumpMenuOpen = ref(false)
+const targetCountMenuOpen = ref(false)
+const focusRangeMenuOpen = ref(false)
+
+const currentGranularityIndex = computed(() => {
+  return GRANULARITY_LIST.indexOf(explorationGranularity.value)
+})
+
+const currentStage = computed<JourneyStage | null>(() => {
+  if (!journeyData.value?.stages.length) return null
+  return journeyData.value.stages[currentStageIndex.value] || null
+})
+
+const currentLeg = computed<JourneyLeg | null>(() => {
+  if (!journeyData.value?.legs.length) return null
+  if (currentStageIndex.value === 0) {
+    return journeyData.value.legs[0] || null
+  }
+  return journeyData.value.legs[currentStageIndex.value - 1] || null
+})
+
 const isGlobe = ref(true)
 const pruneConfirmDialogOpen = ref(false)
 const pruneRunning = ref(false)
@@ -155,9 +217,31 @@ function showSnack(text: string, color = 'success'): void {
   snackOpen.value = true
 }
 
+const activeProvider = computed<ProviderItem | undefined>(() => {
+  return providers.value.find((x) => x.id === activeProviderId.value)
+})
+
 const activeProviderName = computed(() => {
-  const p = providers.value.find((x) => x.id === activeProviderId.value)
+  const p = activeProvider.value
   return p ? p.name : activeProviderId.value
+})
+
+const isGcj02Active = computed<boolean>(() => {
+  return activeProvider.value?.coordSystem === 'gcj02'
+})
+
+const displayPhotos = computed<Photo[]>(() => {
+  const filtered = filterPhotosByRules(photos.value, yarjConfig.value.photoFilterRules)
+  if (!isGcj02Active.value) return filtered
+  return filtered.map((p) => {
+    if (p.gps_lon == null || p.gps_lat == null) return p
+    const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
+    return {
+      ...p,
+      gps_lon: gLng,
+      gps_lat: gLat
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -361,32 +445,34 @@ async function initMap(targetProviderId?: string): Promise<void> {
   activePopup = null
   mapError.value = ''
 
-  const cfg = (await window.cockpit.command('yarj.config')) as {
-    activeProviderId?: string
-    exploredRadiusM?: number
-    exploredGranularity?: ExploredGranularity
-    adm1MinZoom?: number
-    showPhotosLayer?: boolean
-    showExploredLayer?: boolean
-    adm2MinZoom?: number
-    lodScreenFraction?: number
-    lastView?: { projection: string; center: [number, number]; zoom: number } | null
-  }
-  showPhotosLayer.value = cfg.showPhotosLayer !== false
-  showExploredLayer.value = cfg.showExploredLayer !== false
+  const cfg = (await window.cockpit.command('yarj.config')) as YarjConfig
+  yarjConfig.value = { ...DEFAULT_YARJ_CONFIG, ...cfg }
+  showPhotosLayer.value = yarjConfig.value.showPhotosLayer !== false
+  showExploredLayer.value = yarjConfig.value.showExploredLayer !== false
   exploredRadiusM.value =
-    cfg.exploredRadiusM != null && cfg.exploredRadiusM < 400 ? cfg.exploredRadiusM : 60
-  exploredGranularity.value = cfg.exploredGranularity ?? 'standard'
-  adm1MinZoom.value = cfg.adm1MinZoom ?? 4
-  adm2MinZoom.value = cfg.adm2MinZoom ?? 6
-  lodScreenFraction.value = cfg.lodScreenFraction ?? 0.2
-  lastView.value = cfg.lastView ?? null
+    yarjConfig.value.exploredRadiusM != null && yarjConfig.value.exploredRadiusM < 400
+      ? yarjConfig.value.exploredRadiusM
+      : 60
+  exploredGranularity.value = yarjConfig.value.exploredGranularity ?? 'standard'
+  explorationGranularity.value =
+    yarjConfig.value.explorationGranularity || yarjConfig.value.exploredGranularity || 'standard'
+  adm1MinZoom.value = yarjConfig.value.adm1MinZoom ?? 4
+  adm2MinZoom.value = yarjConfig.value.adm2MinZoom ?? 6
+  lodScreenFraction.value = yarjConfig.value.lodScreenFraction ?? 0.2
+  lastView.value = yarjConfig.value.lastView ?? null
 
-  const pId = targetProviderId || cfg.activeProviderId || 'google-hybrid'
+  const pId = targetProviderId || yarjConfig.value.activeProviderId || 'google-hybrid'
   activeProviderId.value = pId
 
   try {
-    const proj = (lastView.value?.projection as 'globe' | 'mercator') ?? 'globe'
+    let proj: 'globe' | 'mercator' = 'globe'
+    if (yarjConfig.value.defaultProjection === 'mercator') {
+      proj = 'mercator'
+    } else if (yarjConfig.value.defaultProjection === 'globe') {
+      proj = 'globe'
+    } else {
+      proj = (lastView.value?.projection as 'globe' | 'mercator') ?? 'globe'
+    }
     const style = buildStyleForProvider(pId, proj)
     map = new maplibregl.Map({
       container: mapEl.value,
@@ -400,6 +486,10 @@ async function initMap(targetProviderId?: string): Promise<void> {
       maxTileCacheSize: 500,
       fadeDuration: 50
     })
+
+    if (yarjConfig.value.doubleClickAction === 'none') {
+      map.doubleClickZoom.disable()
+    }
   } catch (err) {
     mapError.value = String(err)
     return
@@ -417,14 +507,32 @@ async function initMap(targetProviderId?: string): Promise<void> {
     setupExploredLayer()
     updateExplored()
     setupPhotosLayer()
+    setupJourneyLayers()
+    updateJourneyLayers()
     if (pId.startsWith('local:')) {
       renderLabels()
     }
   })
 
   map.on('click', (e) => {
+    if (relocatingPhotos.value) {
+      let { lng, lat } = e.lngLat
+      if (isGcj02Active.value) {
+        const [wgsLng, wgsLat] = gcj02ToWgs84(lng, lat)
+        lng = wgsLng
+        lat = wgsLat
+      }
+      pendingRelocateTarget.value = { lat, lon: lng }
+      confirmRelocateDialogOpen.value = true
+      return
+    }
     if (pickingGpsPhoto.value) {
-      const { lng, lat } = e.lngLat
+      let { lng, lat } = e.lngLat
+      if (isGcj02Active.value) {
+        const [wgsLng, wgsLat] = gcj02ToWgs84(lng, lat)
+        lng = wgsLng
+        lat = wgsLat
+      }
       pendingGpsCoords.value = { lat, lon: lng }
       pendingGpsAddress.value = null
       pendingGpsGeocoding.value = false
@@ -497,6 +605,22 @@ async function switchProvider(newId: string): Promise<void> {
     setupExploredLayer()
     updateExplored()
     setupPhotosLayer()
+    setupJourneyLayers()
+    if (explorationActive.value) {
+      explorationPhotos.value = isGcj02Active.value
+        ? photos.value.map((p) => {
+            if (p.gps_lon == null || p.gps_lat == null) return p
+            const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
+            return { ...p, gps_lon: gLng, gps_lat: gLat }
+          })
+        : photos.value
+      journeyData.value = buildJourneyData(
+        explorationPhotos.value,
+        explorationGranularity.value,
+        customStageCount.value ?? undefined
+      )
+    }
+    updateJourneyLayers()
     if (newId.startsWith('local:')) {
       const mapId = newId.slice('local:'.length)
       const m = maps.value.find((x) => x.id === mapId)
@@ -1048,8 +1172,8 @@ function setupExploredLayer(): void {
     type: 'fill',
     source: 'yarj-explored',
     paint: {
-      'fill-color': themeRgba(0.2),
-      'fill-opacity': 0.72
+      'fill-color': themeRgba(0.25),
+      'fill-opacity': yarjConfig.value.footprintOpacity ?? 0.52
     }
   })
 
@@ -1059,9 +1183,9 @@ function setupExploredLayer(): void {
     type: 'line',
     source: 'yarj-explored',
     paint: {
-      'line-color': themeRgba(0.75),
-      'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 12, 1.5, 17, 2.5],
-      'line-blur': 0.6,
+      'line-color': themeRgba(0.8),
+      'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 12, 1.5, 17, 2.2],
+      'line-blur': 0.5,
       'line-opacity': 0.85
     }
   })
@@ -1072,7 +1196,7 @@ function updateExplored(): void {
   const src = map.getSource('yarj-explored') as GeoJSONSource | undefined
   if (!src) return
   const geojson = generateExploredGeoJSON(
-    photos.value,
+    displayPhotos.value,
     exploredGranularity.value,
     exploredRadiusM.value
   )
@@ -1087,6 +1211,526 @@ async function setExploredGranularity(g: ExploredGranularity): Promise<void> {
       patch: { exploredGranularity: g }
     })
     .catch(() => undefined)
+}
+
+// ---------------------------------------------------------------------------
+// 「我的探索」图层与交互逻辑
+// ---------------------------------------------------------------------------
+
+function setupJourneyLayers(): void {
+  if (!map) return
+  if (map.getSource('yarj-journey-lines')) return
+
+  // 1. 全部大圆航线与轨迹
+  map.addSource('yarj-journey-lines', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  })
+
+  // 2. 当前高亮航段
+  map.addSource('yarj-journey-active-leg', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  })
+
+  // 3. 阶段节点
+  map.addSource('yarj-journey-nodes', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  })
+
+  // 底层轨迹发光光晕
+  map.addLayer({
+    id: 'yarj-journey-line-glow',
+    type: 'line',
+    source: 'yarj-journey-lines',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 4.5,
+      'line-opacity': 0.38,
+      'line-blur': 2
+    }
+  })
+
+  // 主轨迹线
+  map.addLayer({
+    id: 'yarj-journey-line-main',
+    type: 'line',
+    source: 'yarj-journey-lines',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 2.8,
+      'line-opacity': ['coalesce', ['get', 'opacity'], 0.6]
+    }
+  })
+
+  // 激活航段发光
+  map.addLayer({
+    id: 'yarj-journey-active-glow',
+    type: 'line',
+    source: 'yarj-journey-active-leg',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 7,
+      'line-opacity': 0.65,
+      'line-blur': 3
+    }
+  })
+
+  // 激活航段白亮实线
+  map.addLayer({
+    id: 'yarj-journey-active-line',
+    type: 'line',
+    source: 'yarj-journey-active-leg',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': '#ffffff',
+      'line-width': 3.5,
+      'line-opacity': 0.95
+    }
+  })
+
+  // 节点外围脉冲光晕
+  map.addLayer({
+    id: 'yarj-journey-node-glow',
+    type: 'circle',
+    source: 'yarj-journey-nodes',
+    paint: {
+      'circle-radius': ['coalesce', ['get', 'glowRadius'], 14],
+      'circle-color': ['case', ['get', 'isActive'], themeRgba(0.9), 'rgba(255, 255, 255, 0.5)'],
+      'circle-blur': 0.5,
+      'circle-opacity': ['coalesce', ['get', 'glowOpacity'], 0.8]
+    }
+  })
+
+  // 节点实心底盘
+  map.addLayer({
+    id: 'yarj-journey-node-circle',
+    type: 'circle',
+    source: 'yarj-journey-nodes',
+    paint: {
+      'circle-radius': ['coalesce', ['get', 'radius'], 9],
+      'circle-color': ['case', ['get', 'isActive'], '#ffffff', 'rgba(15, 23, 42, 0.9)'],
+      'circle-stroke-width': 2,
+      'circle-stroke-color': [
+        'case',
+        ['get', 'isActive'],
+        themeRgba(1),
+        'rgba(255, 255, 255, 0.85)'
+      ],
+      'circle-opacity': ['coalesce', ['get', 'opacity'], 1.0],
+      'circle-stroke-opacity': ['coalesce', ['get', 'opacity'], 1.0]
+    }
+  })
+
+  // 节点序号
+  map.addLayer({
+    id: 'yarj-journey-node-text',
+    type: 'symbol',
+    source: 'yarj-journey-nodes',
+    layout: {
+      'text-field': ['get', 'displayNumber'],
+      'text-size': 11,
+      'text-allow-overlap': true,
+      'text-ignore-placement': true
+    },
+    paint: {
+      'text-color': ['case', ['get', 'isActive'], '#0f172a', '#ffffff'],
+      'text-opacity': ['coalesce', ['get', 'opacity'], 1.0]
+    }
+  })
+
+  map.on('click', 'yarj-journey-node-circle', (e) => {
+    const p = e.features?.[0]?.properties
+    if (p && typeof p.index === 'number') {
+      goToStage(p.index)
+    }
+  })
+}
+
+function updateJourneyLayers(): void {
+  if (!map) return
+  const linesSrc = map.getSource('yarj-journey-lines') as GeoJSONSource | undefined
+  const activeLegSrc = map.getSource('yarj-journey-active-leg') as GeoJSONSource | undefined
+  const nodesSrc = map.getSource('yarj-journey-nodes') as GeoJSONSource | undefined
+
+  if (!explorationActive.value || !journeyData.value || !journeyData.value.stages.length) {
+    linesSrc?.setData({ type: 'FeatureCollection', features: [] })
+    activeLegSrc?.setData({ type: 'FeatureCollection', features: [] })
+    nodesSrc?.setData({ type: 'FeatureCollection', features: [] })
+    return
+  }
+
+  const { allLines, activeLeg } = generateJourneyLinesGeoJSON(
+    journeyData.value.legs,
+    currentStageIndex.value,
+    journeyFocusRange.value
+  )
+  const nodes = generateJourneyNodesGeoJSON(
+    journeyData.value.stages,
+    currentStageIndex.value,
+    journeyFocusRange.value
+  )
+
+  linesSrc?.setData(allLines)
+  activeLegSrc?.setData(activeLeg)
+  nodesSrc?.setData(nodes)
+}
+
+function setJourneyFocusRange(range: number): void {
+  journeyFocusRange.value = range
+  updateJourneyLayers()
+}
+
+function jumpToStageNum(num: number): void {
+  if (journeyData.value?.stages.length) {
+    const targetIdx = Math.max(0, Math.min(num - 1, journeyData.value.stages.length - 1))
+    goToStage(targetIdx)
+  }
+  jumpMenuOpen.value = false
+}
+
+function handleJumpStage(): void {
+  const num = parseInt(jumpStageInput.value, 10)
+  if (!Number.isNaN(num)) {
+    jumpToStageNum(num)
+  } else {
+    jumpMenuOpen.value = false
+  }
+}
+
+function setTargetCount(count: number): void {
+  customStageCount.value = count
+  customTargetCountInput.value = String(count)
+  targetCountMenuOpen.value = false
+  rebuildJourney()
+}
+
+function applyCustomTargetCount(): void {
+  const count = parseInt(customTargetCountInput.value, 10)
+  if (!Number.isNaN(count) && count >= 2) {
+    customStageCount.value = count
+    targetCountMenuOpen.value = false
+    rebuildJourney()
+  }
+}
+
+function resetToGranularity(): void {
+  customStageCount.value = null
+  customTargetCountInput.value = ''
+  targetCountMenuOpen.value = false
+  rebuildJourney()
+}
+
+// ---------------------------------------------------------------------------
+// 旅途时空穿梭时间指示器
+// ---------------------------------------------------------------------------
+const displayedTimestamp = ref<number | null>(null)
+const isTimeShuttling = ref(false)
+let timeShuttleAnimId: number | null = null
+
+const displayDatePart = computed(() => {
+  if (!displayedTimestamp.value || Number.isNaN(displayedTimestamp.value)) return '----.--.--'
+  const d = new Date(displayedTimestamp.value)
+  if (Number.isNaN(d.getTime())) return '----.--.--'
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}.${mm}.${dd}`
+})
+
+const displayTimePart = computed(() => {
+  if (!displayedTimestamp.value || Number.isNaN(displayedTimestamp.value)) return '--:--:--'
+  const d = new Date(displayedTimestamp.value)
+  if (Number.isNaN(d.getTime())) return '--:--:--'
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${hh}:${min}:${ss}`
+})
+
+function animateTimeTo(targetMs: number | null, durationMs = 1200): void {
+  if (timeShuttleAnimId != null) {
+    cancelAnimationFrame(timeShuttleAnimId)
+    timeShuttleAnimId = null
+  }
+  if (targetMs == null) {
+    displayedTimestamp.value = null
+    isTimeShuttling.value = false
+    return
+  }
+  const startMs = displayedTimestamp.value ?? targetMs
+  if (startMs === targetMs) {
+    displayedTimestamp.value = targetMs
+    isTimeShuttling.value = false
+    return
+  }
+
+  isTimeShuttling.value = true
+  const startTime = performance.now()
+
+  function step(now: number): void {
+    const elapsed = now - startTime
+    const progress = Math.min(1, elapsed / durationMs)
+    const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2
+    displayedTimestamp.value = Math.round(startMs + (targetMs! - startMs) * ease)
+
+    if (progress < 1) {
+      timeShuttleAnimId = requestAnimationFrame(step)
+    } else {
+      displayedTimestamp.value = targetMs
+      timeShuttleAnimId = null
+      isTimeShuttling.value = false
+    }
+  }
+
+  timeShuttleAnimId = requestAnimationFrame(step)
+}
+
+function rebuildJourney(): void {
+  if (!explorationActive.value || !explorationPhotos.value.length) return
+  journeyData.value = buildJourneyData(
+    explorationPhotos.value,
+    explorationGranularity.value,
+    customStageCount.value ?? undefined
+  )
+  const maxIdx = Math.max(0, journeyData.value.stages.length - 1)
+  currentStageIndex.value = Math.min(currentStageIndex.value, maxIdx)
+  const targetStage = journeyData.value.stages[currentStageIndex.value]
+  if (targetStage?.startTime != null) {
+    animateTimeTo(targetStage.startTime, 600)
+  }
+  updateJourneyLayers()
+  focusStage(currentStageIndex.value)
+
+  if (drawerOpen.value && currentStage.value) {
+    drawerPhotos.value = currentStage.value.photos
+    drawerCoords.value = currentStage.value.center
+  }
+}
+
+function getFlightDurationMs(): number {
+  switch (yarjConfig.value.flightSpeed) {
+    case 'cinematic':
+      return 2500
+    case 'brisk':
+      return 800
+    case 'instant':
+      return 0
+    case 'smooth':
+    default:
+      return 1400
+  }
+}
+
+function getCruiseIntervalMs(): number {
+  const staySec = yarjConfig.value.cruiseStayDurationSec ?? 2.2
+  return Math.max(1000, Math.round(staySec * 1000))
+}
+
+function focusStage(index: number): void {
+  if (!map || !journeyData.value?.stages.length) return
+  const stage = journeyData.value.stages[index]
+  if (!stage) return
+
+  const [minLon, minLat, maxLon, maxLat] = stage.bounds
+  const spanLon = Math.abs(maxLon - minLon)
+  const spanLat = Math.abs(maxLat - minLat)
+  const duration = getFlightDurationMs()
+
+  // 如果阶段包含多张较分散照片，fitBounds 自适应视野
+  if (spanLon > 0.005 || spanLat > 0.005) {
+    map.fitBounds(
+      [
+        [minLon, minLat],
+        [maxLon, maxLat]
+      ],
+      {
+        padding: { top: 80, bottom: 200, left: 80, right: 80 },
+        maxZoom: 14,
+        duration
+      }
+    )
+  } else {
+    map.flyTo({
+      center: stage.center,
+      zoom: Math.min(Math.max(map.getZoom(), 11), 14),
+      duration
+    })
+  }
+}
+
+function goToStage(index: number): void {
+  if (!journeyData.value?.stages.length) return
+  const maxIdx = journeyData.value.stages.length - 1
+  currentStageIndex.value = Math.max(0, Math.min(index, maxIdx))
+  const targetStage = journeyData.value.stages[currentStageIndex.value]
+
+  if (targetStage?.startTime != null) {
+    animateTimeTo(targetStage.startTime, isPlaying.value ? 2200 : 1200)
+  }
+
+  updateJourneyLayers()
+  focusStage(currentStageIndex.value)
+
+  if (
+    currentStage.value &&
+    (drawerOpen.value || (isPlaying.value && yarjConfig.value.autoOpenDrawerOnCruise))
+  ) {
+    drawerPhotos.value = currentStage.value.photos
+    drawerCoords.value = currentStage.value.center
+    if (!drawerOpen.value) {
+      drawerOpen.value = true
+    }
+  }
+}
+
+function prevStage(): void {
+  if (currentStageIndex.value > 0) {
+    goToStage(currentStageIndex.value - 1)
+  }
+}
+
+function nextStage(): void {
+  if (
+    journeyData.value?.stages.length &&
+    currentStageIndex.value < journeyData.value.stages.length - 1
+  ) {
+    goToStage(currentStageIndex.value + 1)
+  } else if (isPlaying.value) {
+    stopPlay()
+  }
+}
+
+function startExploration(subsetPhotos?: Photo[]): void {
+  const basePhotos = subsetPhotos && subsetPhotos.length ? subsetPhotos : photos.value
+  const targetPhotos = isGcj02Active.value
+    ? basePhotos.map((p) => {
+        if (p.gps_lon == null || p.gps_lat == null) return p
+        const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
+        return { ...p, gps_lon: gLng, gps_lat: gLat }
+      })
+    : basePhotos
+  const valid = targetPhotos.filter((p) => p.gps_lat != null && p.gps_lon != null)
+  if (!valid.length) {
+    showSnack(
+      t('yarj.map.noGpsPhotos', '当前范围内暂无包含 GPS 定位的照片，无法生成探索轨迹'),
+      'warning'
+    )
+    return
+  }
+
+  explorationScope.value = subsetPhotos ? 'region' : 'global'
+  explorationPhotos.value = targetPhotos
+  explorationActive.value = true
+  drawerOpen.value = false
+  applyLayerVisibility()
+
+  journeyData.value = buildJourneyData(
+    targetPhotos,
+    explorationGranularity.value,
+    customStageCount.value ?? undefined
+  )
+  currentStageIndex.value = 0
+  displayedTimestamp.value = journeyData.value.stages[0]?.startTime ?? null
+  updateJourneyLayers()
+  focusStage(0)
+
+  if (yarjConfig.value.autoPlayOnExplore) {
+    startPlay()
+  }
+}
+
+function startExplorationFromMenu(): void {
+  menuOpen.value = false
+  startExploration()
+}
+
+function exitExploration(): void {
+  stopPlay()
+  if (timeShuttleAnimId != null) {
+    cancelAnimationFrame(timeShuttleAnimId)
+    timeShuttleAnimId = null
+  }
+  isTimeShuttling.value = false
+  displayedTimestamp.value = null
+  explorationActive.value = false
+  applyLayerVisibility()
+  updateJourneyLayers()
+}
+
+function cycleExplorationGranularity(delta: -1 | 1): void {
+  const idx = currentGranularityIndex.value
+  const nextIdx = idx + delta
+  if (nextIdx >= 0 && nextIdx < GRANULARITY_LIST.length) {
+    void setExplorationGranularity(GRANULARITY_LIST[nextIdx])
+  }
+}
+
+async function setExplorationGranularity(g: ExploredGranularity): Promise<void> {
+  customStageCount.value = null
+  explorationGranularity.value = g
+  await window.cockpit
+    .command('yarj.save-config', {
+      patch: { explorationGranularity: g }
+    })
+    .catch(() => undefined)
+
+  rebuildJourney()
+}
+
+function startPlay(): void {
+  if (!journeyData.value?.stages.length) return
+  isPlaying.value = true
+  if (currentStageIndex.value >= journeyData.value.stages.length - 1) {
+    currentStageIndex.value = 0
+    updateJourneyLayers()
+    focusStage(0)
+  }
+  if (playTimer) clearInterval(playTimer)
+  const interval = getCruiseIntervalMs() + getFlightDurationMs()
+  playTimer = window.setInterval(() => {
+    if (!isPlaying.value) {
+      stopPlay()
+      return
+    }
+    if (currentStageIndex.value < (journeyData.value?.stages.length ?? 1) - 1) {
+      nextStage()
+    } else {
+      stopPlay()
+    }
+  }, interval)
+}
+
+function stopPlay(): void {
+  isPlaying.value = false
+  if (playTimer) {
+    clearInterval(playTimer)
+    playTimer = null
+  }
+}
+
+function togglePlay(): void {
+  if (isPlaying.value) {
+    stopPlay()
+  } else {
+    startPlay()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,9 +1751,9 @@ function openPhotoDrawer(items: Photo[], coords: [number, number] | null): void 
   if (coords && map) {
     map.easeTo({
       center: coords,
-      zoom: Math.max(15, map.getZoom()),
+      zoom: Math.min(Math.max(13, map.getZoom()), 15),
       padding: isGlobe.value
-        ? undefined
+        ? { top: 0, bottom: 0, left: 0, right: 0 }
         : { top: 0, bottom: 0, left: 0, right: DRAWER_PADDING_RIGHT },
       duration: 500
     })
@@ -1128,11 +1772,12 @@ function closePhotoDrawer(): void {
 
 function locateCoords(coords: [number, number]): void {
   if (!map) return
+  const center = isGcj02Active.value ? wgs84ToGcj02(coords[0], coords[1]) : coords
   const rightPad = !isGlobe.value && drawerOpen.value ? DRAWER_PADDING_RIGHT : 0
   map.easeTo({
-    center: coords,
-    zoom: Math.max(16, map.getZoom()),
-    padding: rightPad ? { top: 0, bottom: 0, left: 0, right: rightPad } : undefined,
+    center,
+    zoom: Math.min(Math.max(14, map.getZoom()), 15.5),
+    padding: { top: 0, bottom: 0, left: 0, right: rightPad },
     duration: 500
   })
 }
@@ -1237,6 +1882,150 @@ async function confirmSaveGps(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 侧栏照片组 GPS 整体平移（保留组内各照片相对间距）
+// ---------------------------------------------------------------------------
+
+const relocatingPhotos = ref<Photo[] | null>(null)
+const relocatingAnchor = ref<{ lat: number; lon: number } | null>(null)
+const confirmRelocateDialogOpen = ref(false)
+const pendingRelocateTarget = ref<{ lat: number; lon: number } | null>(null)
+const relocatingLoading = ref(false)
+
+function formatDistance(distM: number): string {
+  if (distM < 1000) {
+    return `${Math.round(distM)} m`
+  }
+  return `${(distM / 1000).toFixed(2)} km`
+}
+
+const relocateDistanceStr = computed(() => {
+  if (!relocatingAnchor.value || !pendingRelocateTarget.value) return ''
+  const m = haversineDistM(
+    relocatingAnchor.value.lon,
+    relocatingAnchor.value.lat,
+    pendingRelocateTarget.value.lon,
+    pendingRelocateTarget.value.lat
+  )
+  return formatDistance(m)
+})
+
+function startRelocateGroup(targetPhotos: Photo[]): void {
+  if (!targetPhotos.length) return
+  relocatingPhotos.value = targetPhotos
+
+  // 计算这组照片的质心锚点
+  const valid = targetPhotos.filter((p) => p.gps_lat != null && p.gps_lon != null)
+  if (valid.length > 0) {
+    const sumLat = valid.reduce((acc, p) => acc + p.gps_lat!, 0)
+    const sumLon = valid.reduce((acc, p) => acc + p.gps_lon!, 0)
+    relocatingAnchor.value = {
+      lat: sumLat / valid.length,
+      lon: sumLon / valid.length
+    }
+  } else if (drawerCoords.value) {
+    relocatingAnchor.value = {
+      lat: drawerCoords.value[1],
+      lon: drawerCoords.value[0]
+    }
+  } else {
+    const c = map?.getCenter() || { lat: 0, lng: 0 }
+    relocatingAnchor.value = { lat: c.lat, lon: c.lng }
+  }
+
+  drawerWasOpenBeforePick = drawerOpen.value
+  drawerOpen.value = false
+  if (lightboxOpen.value) {
+    lightboxOpen.value = false
+  }
+  if (map) map.getCanvas().style.cursor = PIN_CURSOR
+  showSnack(
+    t(
+      'yarj.drawer.relocatePickHint',
+      '请在地图上点击任意位置以整体平移这组照片（保留组内各照片相对间距）'
+    ),
+    'info'
+  )
+}
+
+function cancelRelocateGroup(): void {
+  relocatingPhotos.value = null
+  relocatingAnchor.value = null
+  confirmRelocateDialogOpen.value = false
+  pendingRelocateTarget.value = null
+  relocatingLoading.value = false
+  if (map) map.getCanvas().style.cursor = ''
+  if (drawerWasOpenBeforePick) {
+    drawerOpen.value = true
+  }
+}
+
+async function confirmSaveRelocate(): Promise<void> {
+  if (!relocatingPhotos.value || !relocatingAnchor.value || !pendingRelocateTarget.value) return
+  relocatingLoading.value = true
+
+  const anchor = relocatingAnchor.value
+  const target = pendingRelocateTarget.value
+  const dLat = target.lat - anchor.lat
+  const dLon = target.lon - anchor.lon
+
+  const updates: Array<{ path: string; lat: number; lon: number }> = []
+
+  for (const p of relocatingPhotos.value) {
+    let newLat: number
+    let newLon: number
+    if (p.gps_lat != null && p.gps_lon != null) {
+      newLat = Math.max(-90, Math.min(90, p.gps_lat + dLat))
+      let wrappedLon = p.gps_lon + dLon
+      while (wrappedLon > 180) wrappedLon -= 360
+      while (wrappedLon < -180) wrappedLon += 360
+      newLon = wrappedLon
+    } else {
+      newLat = target.lat
+      newLon = target.lon
+    }
+    updates.push({ path: p.path, lat: newLat, lon: newLon })
+  }
+
+  try {
+    await window.cockpit.command('yarj.batch-update-gps', { updates })
+
+    const updateMap = new Map(updates.map((u) => [u.path, u]))
+    for (const p of photos.value) {
+      const u = updateMap.get(p.path)
+      if (u) {
+        p.gps_lat = u.lat
+        p.gps_lon = u.lon
+      }
+    }
+    for (const p of drawerPhotos.value || []) {
+      const u = updateMap.get(p.path)
+      if (u) {
+        p.gps_lat = u.lat
+        p.gps_lon = u.lon
+      }
+    }
+
+    showSnack(
+      t('yarj.drawer.relocateSuccess', `成功将 ${updates.length} 张照片整体平移至新位置！`),
+      'success'
+    )
+    cancelRelocateGroup()
+    await refreshPhotos()
+
+    if (map) {
+      map.easeTo({
+        center: [target.lon, target.lat],
+        duration: 800
+      })
+    }
+  } catch (err) {
+    showSnack(t('yarj.drawer.relocateError', `平移失败: ${String(err)}`), 'error')
+  } finally {
+    relocatingLoading.value = false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 谷歌 Geocoding 地名搜索与定位
 // ---------------------------------------------------------------------------
 
@@ -1272,7 +2061,7 @@ function flyToGeocode(r: GeocodeResult): void {
   map.easeTo({
     center: [r.lon, r.lat],
     zoom: 14,
-    padding: rightPad ? { top: 0, bottom: 0, left: 0, right: rightPad } : undefined,
+    padding: { top: 0, bottom: 0, left: 0, right: rightPad },
     duration: 800
   })
 }
@@ -1302,8 +2091,29 @@ function matchPhotoItem(p: Photo, query: string): boolean {
     : ''
   const city = (typeof p.appendix?.city === 'string' ? p.appendix.city : '').toLowerCase()
   const country = (typeof p.appendix?.country === 'string' ? p.appendix.country : '').toLowerCase()
+  const aiType = (
+    typeof p.appendix?.ai_generated?.type === 'string'
+      ? p.appendix.ai_generated.type
+      : typeof p.appendix?.aigenerated?.type === 'string'
+        ? p.appendix.aigenerated.type
+        : ''
+  ).toLowerCase()
+  const aiBrief = (
+    typeof p.appendix?.ai_generated?.brief === 'string'
+      ? p.appendix.ai_generated.brief
+      : typeof p.appendix?.aigenerated?.brief === 'string'
+        ? p.appendix.aigenerated.brief
+        : ''
+  ).toLowerCase()
+  const aiOcr = (
+    typeof p.appendix?.ai_generated?.ocr === 'string'
+      ? p.appendix.ai_generated.ocr
+      : typeof p.appendix?.aigenerated?.ocr === 'string'
+        ? p.appendix.aigenerated.ocr
+        : ''
+  ).toLowerCase()
 
-  const combined = `${filename} ${path} ${camera} ${comment} ${address} ${tags} ${city} ${country}`
+  const combined = `${filename} ${path} ${camera} ${comment} ${address} ${tags} ${city} ${country} ${aiType} ${aiBrief} ${aiOcr}`
   return qTerms.every((term) => combined.includes(term))
 }
 
@@ -1336,7 +2146,7 @@ function selectSearchResultPhoto(p: Photo): void {
 
 function setupPhotosLayer(): void {
   if (!map) return
-  const validPhotos = photos.value.filter((p) => p.gps_lat != null && p.gps_lon != null)
+  const validPhotos = displayPhotos.value.filter((p) => p.gps_lat != null && p.gps_lon != null)
   const features = validPhotos.map((p) => ({
     type: 'Feature' as const,
     geometry: {
@@ -1434,6 +2244,7 @@ function setupPhotosLayer(): void {
 
   // 点击聚合：打开右侧浮动抽屉 + 平滑下钻
   map.on('click', 'yarj-clusters', async (e) => {
+    if (pickingGpsPhoto.value || relocatingPhotos.value) return
     const feats = map!.queryRenderedFeatures(e.point, { layers: ['yarj-clusters'] })
     const clusterId = feats[0]?.properties?.cluster_id
     if (clusterId == null) return
@@ -1461,9 +2272,9 @@ function setupPhotosLayer(): void {
       if (map!.getZoom() < zoom) {
         map!.easeTo({
           center: coords,
-          zoom: Math.min(zoom + 0.3, 19),
+          zoom: Math.min(zoom + 0.3, 16.5),
           padding: isGlobe.value
-            ? undefined
+            ? { top: 0, bottom: 0, left: 0, right: 0 }
             : { top: 0, bottom: 0, left: 0, right: DRAWER_PADDING_RIGHT },
           duration: 450
         })
@@ -1475,6 +2286,7 @@ function setupPhotosLayer(): void {
 
   // 点击单点：打开右侧浮动照片抽屉（聚合附近/同坐标所有照片，解决多张照片重叠无法分开的问题）
   map.on('click', 'yarj-unclustered-point', (e) => {
+    if (pickingGpsPhoto.value || relocatingPhotos.value) return
     const feat = e.features?.[0]
     if (!feat) return
     const geom = feat.geometry as unknown as { coordinates: [number, number] }
@@ -1495,37 +2307,44 @@ function setupPhotosLayer(): void {
     openPhotoDrawer(nearby.length ? nearby : [clickedPhoto], coords)
   })
 
+  const isPickingOrRelocating = (): boolean =>
+    Boolean(pickingGpsPhoto.value || relocatingPhotos.value)
+
   map.on('mouseenter', 'yarj-clusters', () => {
-    if (map) map.getCanvas().style.cursor = pickingGpsPhoto.value ? PIN_CURSOR : 'pointer'
+    if (map) map.getCanvas().style.cursor = isPickingOrRelocating() ? PIN_CURSOR : 'pointer'
   })
   map.on('mouseleave', 'yarj-clusters', () => {
-    if (map) map.getCanvas().style.cursor = pickingGpsPhoto.value ? PIN_CURSOR : ''
+    if (map) map.getCanvas().style.cursor = isPickingOrRelocating() ? PIN_CURSOR : ''
   })
   map.on('mouseenter', 'yarj-unclustered-point', () => {
-    if (map) map.getCanvas().style.cursor = pickingGpsPhoto.value ? PIN_CURSOR : 'pointer'
+    if (map) map.getCanvas().style.cursor = isPickingOrRelocating() ? PIN_CURSOR : 'pointer'
   })
   map.on('mouseleave', 'yarj-unclustered-point', () => {
-    if (map) map.getCanvas().style.cursor = pickingGpsPhoto.value ? PIN_CURSOR : ''
+    if (map) map.getCanvas().style.cursor = isPickingOrRelocating() ? PIN_CURSOR : ''
   })
 }
 
 function applyLayerVisibility(): void {
   if (!map) return
   const vis = (on: boolean): 'visible' | 'none' => (on ? 'visible' : 'none')
+  // 旅途漫游模式激活时，暂时隐藏探索区域图层与照片点聚合图层，专注于展示各站点与航段轨迹
+  const exploredVisible = explorationActive.value ? false : showExploredLayer.value
+  const photosVisible = explorationActive.value ? false : showPhotosLayer.value
+
   if (map.getLayer('yarj-explored-fill')) {
-    map.setLayoutProperty('yarj-explored-fill', 'visibility', vis(showExploredLayer.value))
+    map.setLayoutProperty('yarj-explored-fill', 'visibility', vis(exploredVisible))
   }
   if (map.getLayer('yarj-explored-line')) {
-    map.setLayoutProperty('yarj-explored-line', 'visibility', vis(showExploredLayer.value))
+    map.setLayoutProperty('yarj-explored-line', 'visibility', vis(exploredVisible))
   }
   if (map.getLayer('yarj-clusters')) {
-    map.setLayoutProperty('yarj-clusters', 'visibility', vis(showPhotosLayer.value))
+    map.setLayoutProperty('yarj-clusters', 'visibility', vis(photosVisible))
   }
   if (map.getLayer('yarj-cluster-count')) {
-    map.setLayoutProperty('yarj-cluster-count', 'visibility', vis(showPhotosLayer.value))
+    map.setLayoutProperty('yarj-cluster-count', 'visibility', vis(photosVisible))
   }
   if (map.getLayer('yarj-unclustered-point')) {
-    map.setLayoutProperty('yarj-unclustered-point', 'visibility', vis(showPhotosLayer.value))
+    map.setLayoutProperty('yarj-unclustered-point', 'visibility', vis(photosVisible))
   }
 }
 
@@ -1676,6 +2495,20 @@ function formatRunStatus(s: string): string {
   return t('yarj.scan.failed', '扫描失败')
 }
 
+function onGlobalKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    if (confirmRelocateDialogOpen.value) {
+      confirmRelocateDialogOpen.value = false
+    } else if (relocatingPhotos.value) {
+      cancelRelocateGroup()
+    } else if (confirmGpsDialogOpen.value) {
+      confirmGpsDialogOpen.value = false
+    } else if (pickingGpsPhoto.value) {
+      cancelPickGps()
+    }
+  }
+}
+
 async function executePrune(): Promise<void> {
   pruneRunning.value = true
   try {
@@ -1710,19 +2543,44 @@ async function executePrune(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeyDown)
   labelFontFamily = getComputedStyle(document.body).fontFamily || 'sans-serif'
-  const pRes = (await window.cockpit.command('yarj.providers')) as {
-    activeId: string
-    providers: ProviderItem[]
+  try {
+    const pRes = (await window.cockpit.command('yarj.providers')) as {
+      activeId: string
+      providers: ProviderItem[]
+    }
+    if (pRes?.providers) {
+      providers.value = pRes.providers
+      activeProviderId.value = pRes.activeId || 'google-hybrid'
+    }
+  } catch (e) {
+    console.warn('Failed to load providers', e)
   }
-  if (pRes?.providers) {
-    providers.value = pRes.providers
-    activeProviderId.value = pRes.activeId || 'google-hybrid'
+
+  try {
+    maps.value = ((await window.cockpit.command('yarj.maps')) as MapFileInfo[]) ?? []
+  } catch (e) {
+    console.warn('Failed to load maps', e)
   }
-  maps.value = ((await window.cockpit.command('yarj.maps')) as MapFileInfo[]) ?? []
-  await refreshStats()
-  await initMap(activeProviderId.value)
-  await refreshPhotos()
+
+  try {
+    await refreshStats()
+  } catch (e) {
+    console.warn('Failed to refresh stats', e)
+  }
+
+  try {
+    await initMap(activeProviderId.value)
+  } catch (e) {
+    console.warn('Failed to init map', e)
+  }
+
+  try {
+    await refreshPhotos()
+  } catch (e) {
+    console.warn('Failed to refresh photos', e)
+  }
 
   if (mapEl.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -1740,6 +2598,7 @@ onActivated(() => {
 })
 
 onDeactivated(() => {
+  stopPlay()
   menuCleanup?.()
   menuCleanup = null
   if (viewSaveTimer) {
@@ -1749,6 +2608,8 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeyDown)
+  stopPlay()
   menuCleanup?.()
   menuCleanup = null
   resizeObserver?.disconnect()
@@ -1817,7 +2678,55 @@ function resetView(): void {
       return
     }
   }
+  const validPhotos = photos.value.filter((p) => p.gps_lat != null && p.gps_lon != null)
+  if (validPhotos.length > 0) {
+    let minLon = 180
+    let minLat = 90
+    let maxLon = -180
+    let maxLat = -90
+    for (const p of validPhotos) {
+      if (p.gps_lon! < minLon) minLon = p.gps_lon!
+      if (p.gps_lat! < minLat) minLat = p.gps_lat!
+      if (p.gps_lon! > maxLon) maxLon = p.gps_lon!
+      if (p.gps_lat! > maxLat) maxLat = p.gps_lat!
+    }
+    if (minLon < maxLon && minLat < maxLat) {
+      map.fitBounds(
+        [
+          [minLon, minLat],
+          [maxLon, maxLat]
+        ],
+        { padding: 80, maxZoom: 14, duration: 800 }
+      )
+      return
+    }
+  }
   map.easeTo({ center: [116.4, 39.9], zoom: 3, duration: 600 })
+}
+
+async function reloadPreferences(): Promise<void> {
+  try {
+    const cfg = (await window.cockpit.command('yarj.config')) as YarjConfig
+    yarjConfig.value = { ...DEFAULT_YARJ_CONFIG, ...cfg }
+    if (map) {
+      if (map.getLayer('yarj-explored-fill')) {
+        map.setPaintProperty(
+          'yarj-explored-fill',
+          'fill-opacity',
+          yarjConfig.value.footprintOpacity ?? 0.52
+        )
+      }
+      if (yarjConfig.value.doubleClickAction === 'none') {
+        map.doubleClickZoom.disable()
+      } else {
+        map.doubleClickZoom.enable()
+      }
+      setupPhotosLayer()
+      setupExploredLayer()
+    }
+  } catch {
+    /* ignore */
+  }
 }
 </script>
 
@@ -1837,8 +2746,65 @@ function resetView(): void {
             {{ t('yarj.pick.banner', '正在拾取位置：请点击地图选择目标坐标') }} —
             <b>{{ pickingGpsPhoto.path.split('/').pop() }}</b>
           </span>
+          <v-chip
+            v-if="isGcj02Active"
+            size="x-small"
+            color="warning"
+            variant="flat"
+            class="flex-shrink-0"
+            :title="
+              t(
+                'yarj.providers.gcj02Hint',
+                '提示：当前底图为高德/腾讯火星坐标系 (GCJ-02)，带有国内非线性加密偏移（约数百米）。调整后的 GPS 坐标适用于当前国内底图对齐。'
+              )
+            "
+          >
+            {{ t('yarj.providers.gcj02Badge', 'GCJ-02 火星坐标系') }}
+          </v-chip>
         </div>
         <v-btn variant="tonal" color="error" class="ml-4 flex-shrink-0" @click="cancelPickGps">
+          {{ t('yarj.drawer.cancel', '取消') }}
+        </v-btn>
+      </div>
+    </Transition>
+
+    <!-- 地图批量平移坐标顶栏提示 -->
+    <Transition name="fade">
+      <div v-if="relocatingPhotos" class="yarj-pick-banner">
+        <div class="d-flex align-center ga-3 min-w-0">
+          <v-icon size="20" color="primary" class="spin">mdi-map-marker-distance</v-icon>
+          <span class="text-body-2 font-weight-medium text-truncate">
+            {{
+              t(
+                'yarj.drawer.relocatingBanner',
+                '正在批量平移位置：请点击地图选择新中心（保留各照片间距）'
+              )
+            }}
+            —
+            <b>{{ relocatingPhotos.length }} 张照片</b>
+          </span>
+          <v-chip
+            v-if="isGcj02Active"
+            size="x-small"
+            color="warning"
+            variant="flat"
+            class="flex-shrink-0"
+            :title="
+              t(
+                'yarj.providers.gcj02Hint',
+                '提示：当前底图为高德/腾讯火星坐标系 (GCJ-02)，带有国内非线性加密偏移（约数百米）。调整后的 GPS 坐标适用于当前国内底图对齐。'
+              )
+            "
+          >
+            {{ t('yarj.providers.gcj02Badge', 'GCJ-02 火星坐标系') }}
+          </v-chip>
+        </div>
+        <v-btn
+          variant="tonal"
+          color="error"
+          class="ml-4 flex-shrink-0"
+          @click="cancelRelocateGroup"
+        >
           {{ t('yarj.drawer.cancel', '取消') }}
         </v-btn>
       </div>
@@ -1848,11 +2814,18 @@ function resetView(): void {
     <Transition name="fade">
       <div v-if="pickingGpsPhoto" class="yarj-pick-floating-preview">
         <div class="preview-inner">
-          <img
-            :src="`cockpit-icon://${encodeURIComponent(pickingGpsPhoto.path)}`"
+          <v-img
+            :src="photoThumbUrl(pickingGpsPhoto.path)"
             :alt="pickingGpsPhoto.path"
             class="preview-img"
-          />
+            cover
+          >
+            <template #placeholder>
+              <div class="d-flex align-center justify-center fill-height bg-surface-variant-subtle">
+                <v-progress-circular indeterminate color="primary" size="20" width="2" />
+              </div>
+            </template>
+          </v-img>
           <div class="preview-badge">
             <v-icon size="14" color="white" class="mr-1">mdi-map-marker</v-icon>
             <span>{{ t('yarj.pick.targetBadge', '待定位') }}</span>
@@ -1874,6 +2847,30 @@ function resetView(): void {
       <div v-if="mapError" class="yarj-map-error">
         <v-icon size="16" color="error">mdi-alert-circle-outline</v-icon>
         <span class="ml-1">{{ mapError }}</span>
+      </div>
+    </Transition>
+
+    <!-- 探索模式顶部「时空穿梭 / 当前时间」醒目 HUD 胶囊栏 -->
+    <Transition name="fade">
+      <div
+        v-if="explorationActive && journeyData?.stages.length"
+        class="yarj-journey-time-badge"
+        :class="{ 'has-drawer-open': drawerOpen }"
+      >
+        <div class="time-badge-inner">
+          <v-icon
+            size="24"
+            color="primary"
+            class="time-shuttle-icon mr-1"
+            :class="{ 'is-shuttling': isTimeShuttling || isPlaying }"
+          >
+            {{ isPlaying ? 'mdi-timelapse' : 'mdi-clock-time-four-outline' }}
+          </v-icon>
+          <div class="d-flex align-center ga-2 font-mono time-display">
+            <span class="time-date-text">{{ displayDatePart }}</span>
+            <span class="time-clock-text">{{ displayTimePart }}</span>
+          </div>
+        </div>
       </div>
     </Transition>
 
@@ -1899,6 +2896,16 @@ function resetView(): void {
 
     <!-- 右下角竖排按钮阵列 -->
     <div class="yarj-controls">
+      <v-btn
+        icon
+        variant="flat"
+        class="yarj-ctrl-btn"
+        :class="{ active: explorationActive }"
+        :title="t('yarj.exploration.title', '我的探索')"
+        @click="explorationActive ? exitExploration() : startExploration()"
+      >
+        <v-icon :color="explorationActive ? 'primary' : undefined">mdi-compass</v-icon>
+      </v-btn>
       <v-btn
         icon
         variant="flat"
@@ -1948,6 +2955,14 @@ function resetView(): void {
         <div v-if="menuOpen" class="page-menu-pop">
           <!-- 主菜单 -->
           <template v-if="menuStep === 'main'">
+            <div class="menu-item" @click="startExplorationFromMenu">
+              <v-icon size="18" color="primary">mdi-compass-outline</v-icon>
+              <span>{{ t('yarj.exploration.title', '我的探索') }}</span>
+              <v-chip size="x-small" variant="tonal" color="primary" class="ml-auto">
+                {{ t('yarj.exploration.badge', '旅途漫游') }}
+              </v-chip>
+              <v-icon size="16" class="ml-1">mdi-chevron-right</v-icon>
+            </div>
             <div class="menu-item" @click="menuStep = 'photo-search'">
               <v-icon size="18">mdi-image-search-outline</v-icon>
               <span>{{ t('yarj.menu.photoSearch', '照片搜索') }}</span>
@@ -2001,6 +3016,11 @@ function resetView(): void {
             <div class="menu-item" @click="menuStep = 'layers'">
               <v-icon size="18">mdi-layers-outline</v-icon>
               <span>{{ t('yarj.menu.layers', '图层') }}</span>
+              <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+            </div>
+            <div class="menu-item" @click="openPreferences">
+              <v-icon size="18">mdi-tune-vertical</v-icon>
+              <span>{{ t('yarj.menu.preferences', '偏好设置') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
             <div class="menu-item text-error" @click="pruneConfirmDialogOpen = true">
@@ -2213,11 +3233,21 @@ function resetView(): void {
                 class="menu-item d-flex align-center ga-2"
                 @click="selectSearchResultPhoto(p)"
               >
-                <img
-                  :src="`cockpit-icon://${encodeURIComponent(p.path)}`"
+                <v-img
+                  :src="photoThumbUrl(p.path)"
+                  width="36"
+                  height="36"
+                  cover
                   class="rounded-md flex-shrink-0"
-                  style="width: 36px; height: 36px; object-fit: cover"
-                />
+                >
+                  <template #placeholder>
+                    <div
+                      class="d-flex align-center justify-center fill-height bg-surface-variant-subtle"
+                    >
+                      <v-progress-circular indeterminate color="primary" size="14" width="1.5" />
+                    </div>
+                  </template>
+                </v-img>
                 <div class="min-w-0 flex-grow-1">
                   <div class="text-caption font-weight-bold text-truncate">
                     {{ p.path.split('/').pop() }}
@@ -2268,21 +3298,33 @@ function resetView(): void {
                 <span class="text-caption font-weight-medium text-truncate flex-grow-1">{{
                   p.name
                 }}</span>
-                <v-chip
-                  size="x-small"
-                  variant="tonal"
-                  :color="
-                    p.category === 'google'
-                      ? 'primary'
-                      : p.category === 'google-official'
-                        ? 'warning'
-                        : p.isLocal
-                          ? 'secondary'
-                          : 'default'
-                  "
-                >
-                  {{ p.category === 'google-official' ? 'TILES API' : p.category.toUpperCase() }}
-                </v-chip>
+                <div class="d-flex align-center ga-1 flex-shrink-0">
+                  <v-chip
+                    v-if="p.coordSystem === 'gcj02'"
+                    size="x-small"
+                    variant="flat"
+                    color="warning"
+                  >
+                    GCJ-02
+                  </v-chip>
+                  <v-chip
+                    size="x-small"
+                    variant="tonal"
+                    :color="
+                      p.category === 'google'
+                        ? 'primary'
+                        : p.category === 'google-official'
+                          ? 'warning'
+                          : p.category === 'amap' || p.category === 'tencent'
+                            ? 'warning'
+                            : p.isLocal
+                              ? 'secondary'
+                              : 'default'
+                    "
+                  >
+                    {{ p.category === 'google-official' ? 'TILES API' : p.category.toUpperCase() }}
+                  </v-chip>
+                </div>
               </div>
             </div>
           </template>
@@ -2441,15 +3483,451 @@ function resetView(): void {
       </Transition>
     </div>
 
+    <!-- 「我的探索」沉浸式浮动控制面板 -->
+    <Transition name="fade">
+      <div
+        v-if="explorationActive && journeyData?.stages.length"
+        class="yarj-exploration-bar"
+        :class="{ 'has-drawer-open': drawerOpen }"
+      >
+        <div class="exploration-card">
+          <!-- 第一行：阶段信息、时空跃迁与退出按钮 -->
+          <div class="d-flex align-center justify-space-between ga-3 mb-3">
+            <div class="d-flex align-center ga-2 min-w-0 flex-grow-1">
+              <!-- 支持点击键入站点编号快速精准跳转 -->
+              <v-menu
+                v-model="jumpMenuOpen"
+                :close-on-content-click="false"
+                location="bottom start"
+              >
+                <template #activator="{ props: jumpProps }">
+                  <v-chip
+                    v-bind="jumpProps"
+                    color="primary"
+                    variant="flat"
+                    class="font-weight-bold px-3 cursor-pointer flex-shrink-0"
+                    :title="
+                      t('yarj.exploration.jumpHint', '输入站点编号直接跳转 (1 ~ {total})').replace(
+                        '{total}',
+                        String(journeyData.stages.length)
+                      )
+                    "
+                  >
+                    {{
+                      t('yarj.exploration.stageCount', '第 {curr} / {total} 站')
+                        .replace('{curr}', String(currentStageIndex + 1))
+                        .replace('{total}', String(journeyData.stages.length))
+                    }}
+                    <v-icon end size="14" class="ml-1 opacity-80">mdi-menu-swap</v-icon>
+                  </v-chip>
+                </template>
+                <v-card
+                  class="pa-4 rounded-xl elevation-6"
+                  min-width="300"
+                  style="
+                    background: rgba(var(--v-theme-surface), 0.95);
+                    backdrop-filter: blur(24px);
+                  "
+                >
+                  <div class="text-subtitle-2 font-weight-bold mb-1">
+                    {{
+                      t('yarj.exploration.jumpTitle', '跳转至指定站点 (1 ~ {total})').replace(
+                        '{total}',
+                        String(journeyData.stages.length)
+                      )
+                    }}
+                  </div>
+                  <div class="text-caption on-surface-variant mb-3">
+                    {{
+                      t(
+                        'yarj.exploration.jumpDesc',
+                        '直接键入目标站点编号，一键快速飞往并穿梭到该时间点。'
+                      )
+                    }}
+                  </div>
+                  <div class="d-flex align-center ga-2 mb-3">
+                    <v-text-field
+                      v-model="jumpStageInput"
+                      type="number"
+                      :min="1"
+                      :max="journeyData.stages.length"
+                      density="compact"
+                      variant="outlined"
+                      hide-details
+                      :placeholder="String(currentStageIndex + 1)"
+                      @keyup.enter="handleJumpStage"
+                    />
+                    <v-btn
+                      color="primary"
+                      variant="flat"
+                      density="comfortable"
+                      @click="handleJumpStage"
+                    >
+                      {{ t('yarj.exploration.jumpBtn', '前往') }}
+                    </v-btn>
+                  </div>
+                  <!-- 快捷节点跳转 -->
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="jumpToStageNum(1)"
+                    >
+                      {{ t('yarj.exploration.firstStage', '首站 (1)') }}
+                    </v-chip>
+                    <v-chip
+                      v-if="journeyData.stages.length >= 4"
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="jumpToStageNum(Math.round(journeyData.stages.length * 0.25))"
+                    >
+                      25%
+                    </v-chip>
+                    <v-chip
+                      v-if="journeyData.stages.length >= 2"
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="jumpToStageNum(Math.round(journeyData.stages.length * 0.5))"
+                    >
+                      50%
+                    </v-chip>
+                    <v-chip
+                      v-if="journeyData.stages.length >= 4"
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="jumpToStageNum(Math.round(journeyData.stages.length * 0.75))"
+                    >
+                      75%
+                    </v-chip>
+                    <v-chip
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="jumpToStageNum(journeyData.stages.length)"
+                    >
+                      {{
+                        t('yarj.exploration.lastStage', '末站 ({total})').replace(
+                          '{total}',
+                          String(journeyData.stages.length)
+                        )
+                      }}
+                    </v-chip>
+                  </div>
+                </v-card>
+              </v-menu>
+
+              <div class="min-w-0 flex-grow-1">
+                <div class="text-subtitle-2 font-weight-bold text-truncate">
+                  {{ currentStage?.title || '旅途节点' }}
+                </div>
+                <div
+                  v-if="currentStage?.formattedTimeRange"
+                  class="text-caption on-surface-variant font-mono text-truncate"
+                >
+                  {{ currentStage.formattedTimeRange }}
+                </div>
+              </div>
+            </div>
+
+            <!-- 右侧：交通推测 Chip 与 退出按钮 -->
+            <div class="d-flex align-center ga-2 flex-shrink-0">
+              <v-chip
+                v-if="currentLeg"
+                variant="tonal"
+                :style="{
+                  color: currentLeg.modeMeta.color,
+                  borderColor: currentLeg.modeMeta.color
+                }"
+                class="px-3"
+              >
+                <v-icon start size="16">{{ currentLeg.modeMeta.icon }}</v-icon>
+                <span class="font-weight-medium">{{
+                  t(currentLeg.modeMeta.nameKey, currentLeg.modeMeta.defaultName)
+                }}</span>
+                <span class="ml-1 opacity-80 font-mono">
+                  ·
+                  {{ (currentLeg.distanceM / 1000).toFixed(currentLeg.distanceM > 10000 ? 0 : 1) }}
+                  km
+                  <template v-if="currentLeg.speedKmH">
+                    ({{ currentLeg.speedKmH.toFixed(0) }} km/h)
+                  </template>
+                </span>
+              </v-chip>
+
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="error"
+                :title="t('yarj.exploration.exit', '退出探索')"
+                @click="exitExploration"
+              >
+                <v-icon size="20">mdi-close</v-icon>
+              </v-btn>
+            </div>
+          </div>
+
+          <v-divider class="mb-3 opacity-20" />
+
+          <!-- 第二行：操作控制工具栏（左侧粒度/设置 + 右侧播放与照片动作，自然两端对齐） -->
+          <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
+            <!-- 左侧：粒度选择器、自定义目标站数与视距聚焦 -->
+            <div class="d-flex align-center ga-2 flex-wrap">
+              <div class="d-flex align-center ga-1 granularity-stepper">
+                <span class="text-caption on-surface-variant mr-1"
+                  >{{ t('yarj.exploration.granularity', '粒度') }}:</span
+                >
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :disabled="currentGranularityIndex <= 0"
+                  @click="cycleExplorationGranularity(-1)"
+                >
+                  <v-icon size="16">mdi-chevron-left</v-icon>
+                </v-btn>
+                <v-menu location="top">
+                  <template #activator="{ props: menuProps }">
+                    <v-btn
+                      v-bind="menuProps"
+                      variant="tonal"
+                      density="comfortable"
+                      class="text-caption font-weight-medium px-2"
+                    >
+                      {{
+                        customStageCount != null
+                          ? `${customStageCount} 站 (自定义)`
+                          : t(
+                              GRANULARITY_PRESETS[explorationGranularity]?.nameKey,
+                              GRANULARITY_PRESETS[explorationGranularity]?.defaultName
+                            ).split(' ')[0] || '标准'
+                      }}
+                      <v-icon end size="14">mdi-menu-down</v-icon>
+                    </v-btn>
+                  </template>
+                  <v-list density="compact">
+                    <v-list-item
+                      v-for="preset in Object.values(GRANULARITY_PRESETS)"
+                      :key="preset.id"
+                      :active="customStageCount == null && explorationGranularity === preset.id"
+                      @click="setExplorationGranularity(preset.id)"
+                    >
+                      <v-list-item-title class="text-caption">
+                        {{ t(preset.nameKey, preset.defaultName) }}
+                      </v-list-item-title>
+                    </v-list-item>
+                    <v-divider class="my-1 opacity-20" />
+                    <v-list-item @click="targetCountMenuOpen = true">
+                      <template #prepend>
+                        <v-icon size="16">mdi-map-marker-distance</v-icon>
+                      </template>
+                      <v-list-item-title class="text-caption">
+                        {{ t('yarj.exploration.customCountBtn', '自定义总站数...') }}
+                      </v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :disabled="currentGranularityIndex >= GRANULARITY_LIST.length - 1"
+                  @click="cycleExplorationGranularity(1)"
+                >
+                  <v-icon size="16">mdi-chevron-right</v-icon>
+                </v-btn>
+              </div>
+
+              <!-- 跳转至指定站点按钮 -->
+              <v-btn
+                variant="tonal"
+                density="comfortable"
+                class="text-caption font-weight-medium px-2"
+                prepend-icon="mdi-ray-start-arrow"
+                :title="
+                  t('yarj.exploration.jumpHint', '输入站点编号直接跳转 (1 ~ {total})').replace(
+                    '{total}',
+                    String(journeyData.stages.length)
+                  )
+                "
+                @click="jumpMenuOpen = true"
+              >
+                {{ t('yarj.exploration.jumpBtnTitle', '跳转站点') }}
+              </v-btn>
+
+              <!-- 自定义目标站点数量弹窗 -->
+              <v-dialog v-model="targetCountMenuOpen" max-width="360">
+                <v-card
+                  class="pa-4 rounded-xl elevation-6"
+                  style="
+                    background: rgba(var(--v-theme-surface), 0.95);
+                    backdrop-filter: blur(24px);
+                  "
+                >
+                  <div class="text-subtitle-2 font-weight-bold mb-1">
+                    {{ t('yarj.exploration.customCountTitle', '键入目标站点数量') }}
+                  </div>
+                  <div class="text-caption on-surface-variant mb-3">
+                    {{
+                      t(
+                        'yarj.exploration.customCountDesc',
+                        '设定目标站数，自动将海量照片智能聚类为指定数量的代表站点，省去过多琐碎跳转。'
+                      )
+                    }}
+                  </div>
+                  <div class="d-flex align-center ga-2 mb-3">
+                    <v-text-field
+                      v-model="customTargetCountInput"
+                      type="number"
+                      :min="2"
+                      :max="Math.min(100, explorationPhotos.length)"
+                      density="compact"
+                      variant="outlined"
+                      hide-details
+                      :placeholder="String(journeyData.stages.length)"
+                      @keyup.enter="applyCustomTargetCount"
+                    />
+                    <v-btn
+                      color="primary"
+                      variant="flat"
+                      density="comfortable"
+                      @click="applyCustomTargetCount"
+                    >
+                      {{ t('yarj.exploration.apply', '生成') }}
+                    </v-btn>
+                  </div>
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip
+                      v-for="presetCount in [5, 8, 12, 20].filter(
+                        (c) => c < explorationPhotos.length
+                      )"
+                      :key="presetCount"
+                      size="small"
+                      variant="tonal"
+                      class="cursor-pointer"
+                      @click="setTargetCount(presetCount)"
+                    >
+                      {{ presetCount }} 站
+                    </v-chip>
+                    <v-chip
+                      v-if="customStageCount != null"
+                      size="small"
+                      variant="tonal"
+                      color="secondary"
+                      class="cursor-pointer"
+                      @click="resetToGranularity"
+                    >
+                      {{ t('yarj.exploration.resetGranularity', '恢复预设') }}
+                    </v-chip>
+                  </div>
+                </v-card>
+              </v-dialog>
+
+              <!-- 视距聚焦与远距离淡化控制 -->
+              <v-menu v-model="focusRangeMenuOpen" location="top">
+                <template #activator="{ props: focusProps }">
+                  <v-btn
+                    v-bind="focusProps"
+                    icon
+                    size="small"
+                    variant="tonal"
+                    :color="journeyFocusRange > 0 ? 'primary' : undefined"
+                    :title="
+                      t('yarj.exploration.focusHint', '聚焦视距：远距离站点与航线自动淡化/隐藏')
+                    "
+                  >
+                    <v-icon size="18">mdi-eye-circle-outline</v-icon>
+                  </v-btn>
+                </template>
+                <v-list density="compact" min-width="160">
+                  <v-list-item
+                    v-for="item in [
+                      { value: 3, label: t('yarj.exploration.focus3', '前后 3 站 (紧凑聚焦)') },
+                      { value: 5, label: t('yarj.exploration.focus5', '前后 5 站 (推荐标准)') },
+                      { value: 8, label: t('yarj.exploration.focus8', '前后 8 站 (开阔视野)') },
+                      { value: 0, label: t('yarj.exploration.focusAll', '全部显示 (全局透视)') }
+                    ]"
+                    :key="item.value"
+                    :active="journeyFocusRange === item.value"
+                    @click="setJourneyFocusRange(item.value)"
+                  >
+                    <v-list-item-title class="text-caption">
+                      {{ item.label }}
+                    </v-list-item-title>
+                  </v-list-item>
+                </v-list>
+              </v-menu>
+            </div>
+
+            <!-- 右侧：本站照片 + 巡航播放控制 -->
+            <div class="d-flex align-center ga-2 flex-wrap">
+              <v-btn
+                v-if="currentStage?.photos.length"
+                variant="tonal"
+                density="comfortable"
+                prepend-icon="mdi-image-multiple-outline"
+                @click="openPhotoDrawer(currentStage.photos, currentStage.center)"
+              >
+                {{ t('yarj.exploration.viewPhotos', '本站照片') }} ({{
+                  currentStage.photos.length
+                }})
+              </v-btn>
+
+              <v-btn
+                icon
+                size="small"
+                variant="tonal"
+                :disabled="currentStageIndex <= 0"
+                @click="prevStage"
+              >
+                <v-icon size="20">mdi-skip-previous</v-icon>
+              </v-btn>
+
+              <v-btn
+                :color="isPlaying ? 'secondary' : 'primary'"
+                variant="flat"
+                density="comfortable"
+                :prepend-icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
+                @click="togglePlay"
+              >
+                {{
+                  isPlaying
+                    ? t('yarj.exploration.pause', '暂停')
+                    : t('yarj.exploration.play', '自动巡航')
+                }}
+              </v-btn>
+
+              <v-btn
+                icon
+                size="small"
+                variant="tonal"
+                :disabled="currentStageIndex >= journeyData.stages.length - 1"
+                @click="nextStage"
+              >
+                <v-icon size="20">mdi-skip-next</v-icon>
+              </v-btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 右侧浮动多照片检视/编辑抽屉（解决同一地点连拍重叠无法展开的问题） -->
     <PhotoSideDrawer
       :open="drawerOpen"
       :photos="drawerPhotos"
       :coords="drawerCoords"
+      :page-size="yarjConfig.drawerPageSize || 30"
       @close="closePhotoDrawer"
       @locate="locateCoords"
       @preview="openLightbox"
       @pick-gps="startPickGps"
+      @explore="startExploration"
+      @relocate-group="startRelocateGroup"
       @updated="refreshPhotos"
     />
 
@@ -2482,11 +3960,19 @@ function resetView(): void {
           class="d-flex align-center ga-3 pa-3 rounded-xl mb-4"
           style="background: rgba(var(--v-theme-surface-bright), 0.18)"
         >
-          <img
-            :src="`cockpit-icon://${encodeURIComponent(pickingGpsPhoto.path)}`"
-            class="rounded-lg"
-            style="width: 60px; height: 60px; object-fit: cover"
-          />
+          <v-img
+            :src="photoThumbUrl(pickingGpsPhoto.path)"
+            width="60"
+            height="60"
+            cover
+            class="rounded-lg flex-shrink-0"
+          >
+            <template #placeholder>
+              <div class="d-flex align-center justify-center fill-height bg-surface-variant-subtle">
+                <v-progress-circular indeterminate color="primary" size="20" width="2" />
+              </div>
+            </template>
+          </v-img>
           <div class="min-w-0 flex-grow-1">
             <div class="text-body-1 font-weight-bold text-truncate">
               {{ pickingGpsPhoto.path.split('/').pop() }}
@@ -2496,6 +3982,22 @@ function resetView(): void {
             </div>
           </div>
         </div>
+
+        <v-alert
+          v-if="isGcj02Active"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          icon="mdi-alert-circle-outline"
+          class="mb-4 text-caption"
+        >
+          {{
+            t(
+              'yarj.providers.gcj02Hint',
+              '提示：当前底图为高德/腾讯火星坐标系 (GCJ-02)，带有国内非线性加密偏移（约数百米）。调整后的 GPS 坐标适用于当前国内底图对齐。'
+            )
+          }}
+        </v-alert>
 
         <div class="mb-4 text-body-2 d-flex flex-column ga-2">
           <div class="d-flex justify-space-between align-center">
@@ -2552,6 +4054,106 @@ function resetView(): void {
       </v-card>
     </v-dialog>
 
+    <!-- 确认批量平移照片 GPS 定位对话框 -->
+    <v-dialog v-model="confirmRelocateDialogOpen" max-width="480" persistent>
+      <v-card
+        class="pa-5 rounded-2xl"
+        style="background: rgba(var(--v-theme-surface), 0.95); backdrop-filter: blur(24px)"
+      >
+        <div class="d-flex align-center ga-3 mb-4">
+          <v-icon size="26" color="primary">mdi-map-marker-distance</v-icon>
+          <span class="text-h6 font-weight-bold">{{
+            t('yarj.drawer.relocateConfirmTitle', '确认批量平移照片 GPS 定位')
+          }}</span>
+        </div>
+
+        <div
+          class="d-flex align-center ga-3 pa-3 rounded-xl mb-4"
+          style="background: rgba(var(--v-theme-surface-bright), 0.18)"
+        >
+          <v-avatar color="primary" variant="tonal" size="44">
+            <v-icon size="24">mdi-image-multiple</v-icon>
+          </v-avatar>
+          <div class="min-w-0 flex-grow-1">
+            <div class="text-body-1 font-weight-bold text-truncate">
+              {{
+                t(
+                  'yarj.drawer.relocateCountDesc',
+                  `共 ${relocatingPhotos?.length ?? 0} 张照片`
+                ).replace('{n}', String(relocatingPhotos?.length ?? 0))
+              }}
+            </div>
+            <div class="text-caption on-surface-variant mt-1">
+              {{
+                t(
+                  'yarj.drawer.relocateKeepOffsetTip',
+                  '系统将以新位置为锚点，保留组内各照片相对间距'
+                )
+              }}
+            </div>
+          </div>
+        </div>
+
+        <v-alert
+          v-if="isGcj02Active"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          icon="mdi-alert-circle-outline"
+          class="mb-4 text-caption"
+        >
+          {{
+            t(
+              'yarj.providers.gcj02Hint',
+              '提示：当前底图为高德/腾讯火星坐标系 (GCJ-02)，带有国内非线性加密偏移（约数百米）。调整后的 GPS 坐标适用于当前国内底图对齐。'
+            )
+          }}
+        </v-alert>
+
+        <div class="mb-4 text-body-2 d-flex flex-column ga-2">
+          <div class="d-flex justify-space-between align-center">
+            <span class="on-surface-variant"
+              >{{ t('yarj.drawer.relocateOldCenter', '原位置中心') }}:</span
+            >
+            <span class="on-surface-variant font-mono">
+              {{ relocatingAnchor?.lat.toFixed(5) }}°N, {{ relocatingAnchor?.lon.toFixed(5) }}°E
+            </span>
+          </div>
+          <div class="d-flex justify-space-between align-center">
+            <span class="on-surface-variant"
+              >{{ t('yarj.drawer.relocateNewCenter', '平移后新中心') }}:</span
+            >
+            <span class="font-weight-bold font-mono text-primary">
+              {{ pendingRelocateTarget?.lat.toFixed(5) }}°N,
+              {{ pendingRelocateTarget?.lon.toFixed(5) }}°E
+            </span>
+          </div>
+          <div v-if="relocateDistanceStr" class="d-flex justify-space-between align-center">
+            <span class="on-surface-variant"
+              >{{ t('yarj.drawer.relocateDistance', '平移位移距离') }}:</span
+            >
+            <span class="font-weight-bold font-mono text-success">
+              ≈ {{ relocateDistanceStr }}
+            </span>
+          </div>
+        </div>
+
+        <v-card-actions class="px-0 pb-0 pt-3 ga-3 justify-end d-flex border-t">
+          <v-btn variant="text" :disabled="relocatingLoading" @click="cancelRelocateGroup">
+            {{ t('yarj.drawer.cancel', '取消') }}
+          </v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="relocatingLoading"
+            @click="confirmSaveRelocate"
+          >
+            {{ t('yarj.drawer.confirmRelocate', '确认平移') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 确认清理失效照片记录对话框 -->
     <v-dialog v-model="pruneConfirmDialogOpen" max-width="480" persistent>
       <v-card
@@ -2589,6 +4191,38 @@ function resetView(): void {
             {{ t('yarj.prune.confirmBtn', '确认清理') }}
           </v-btn>
         </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 偏好与行为设置对话框 -->
+    <v-dialog v-model="preferencesDialogOpen" max-width="880" scrollable>
+      <v-card
+        class="pa-6 rounded-2xl"
+        style="
+          background: rgba(var(--v-theme-surface), 0.95);
+          backdrop-filter: blur(28px);
+          max-height: 85vh;
+        "
+      >
+        <div class="d-flex align-center justify-space-between pb-4 border-b mb-4">
+          <div class="d-flex align-center ga-3">
+            <v-icon color="primary" size="26">mdi-tune-vertical</v-icon>
+            <div>
+              <div class="text-h6 font-weight-bold">
+                {{ t('yarj.menu.preferences', '偏好设置') }}
+              </div>
+              <div class="text-caption on-surface-variant">
+                {{ t('yarj.prefs.viewDesc', '设置默认投影模式、初始缩放聚焦规则与地图操作手感') }}
+              </div>
+            </div>
+          </div>
+          <v-btn icon size="small" variant="text" @click="closePreferencesModal">
+            <v-icon size="20">mdi-close</v-icon>
+          </v-btn>
+        </div>
+        <v-card-text class="px-1 py-0">
+          <MapPreferencesSection />
+        </v-card-text>
       </v-card>
     </v-dialog>
 
@@ -3056,5 +4690,106 @@ function resetView(): void {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 「我的探索」沉浸式浮动控制面板 */
+.yarj-exploration-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 48px);
+  max-width: 860px;
+  z-index: 20;
+  pointer-events: none;
+  transition:
+    left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.yarj-exploration-bar.has-drawer-open {
+  left: 24px;
+  transform: none;
+  width: calc(100% - 420px - 56px);
+  max-width: calc(100% - 420px - 56px);
+}
+
+.exploration-card {
+  pointer-events: auto;
+  background: rgba(var(--v-theme-surface), 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+}
+
+.granularity-stepper {
+  background: rgba(var(--v-theme-surface-bright), 0.12);
+  border-radius: 8px;
+  padding: 2px 6px;
+}
+
+/* 顶部时空穿梭时间指示栏 */
+.yarj-journey-time-badge {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  pointer-events: none;
+  transition:
+    left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.yarj-journey-time-badge.has-drawer-open {
+  left: calc((100% - 420px - 16px) / 2);
+  transform: translateX(-50%);
+}
+
+.time-badge-inner {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  background: rgba(var(--v-theme-surface), 0.94);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1.5px solid rgba(var(--v-theme-primary), 0.55);
+  border-radius: 36px;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.55),
+    0 0 28px rgba(var(--v-theme-primary), 0.22);
+  user-select: none;
+}
+
+.time-display {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.8px;
+}
+
+.time-date-text {
+  color: rgb(var(--v-theme-on-surface));
+  opacity: 0.95;
+}
+
+.time-clock-text {
+  color: rgb(var(--v-theme-primary));
+  text-shadow: 0 0 14px rgba(var(--v-theme-primary), 0.45);
+}
+
+.time-shuttle-icon {
+  filter: drop-shadow(0 0 8px rgba(var(--v-theme-primary), 0.6));
+}
+
+.time-shuttle-icon.is-shuttling {
+  animation: yarj-spin 1.2s linear infinite;
 }
 </style>

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
-import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
-import { inject } from 'vue'
+import { computed, ref, watch, nextTick, inject } from 'vue'
 import type { Ref } from 'vue'
+import type { BtOutputMessage, BtTaskInfo } from '@shared/types'
 import { translate } from '@ui/i18n'
 import { ansiToHtml } from '@ui/ansi'
 

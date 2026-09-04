@@ -42,7 +42,8 @@ import {
   saveEqProfiles,
   findEqProfile,
   getEqGainRange,
-  BUILTIN_EQ_PROFILES
+  BUILTIN_EQ_PROFILES,
+  getCurrentDbusTrackInfo
 } from './service'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
@@ -90,6 +91,7 @@ import {
   getPlayerMode,
   setPlayerMode,
   getWebPlayerBackend,
+  WebPlayerBackend,
   resetPlayerMode,
   reconcilePlayerAbilityVisibility,
   PLAYBACK_TAG
@@ -989,13 +991,12 @@ const commands: CommandSpec[] = [
       if (pathArray.length === 0) return { ok: false, error: '未指定文件路径' }
       const append = String(ctx.named.append ?? '') === 'true'
       await backend.sendFiles(pathArray, { append })
-      // record_freq — immediate mode bumps every sent track.
+      const lib = await loadLibrary()
+      const pathToName = new Map<string, string>()
+      for (const [name, p] of lib.musicPaths) pathToName.set(p, name)
+      const names = pathArray.map((p) => pathToName.get(p) ?? '').filter(Boolean)
       if (!_config) _config = await loadAidjConfig()
       if (_config?.preferences.record_freq) {
-        const lib = await loadLibrary()
-        const pathToName = new Map<string, string>()
-        for (const [name, p] of lib.musicPaths) pathToName.set(p, name)
-        const names = pathArray.map((p) => pathToName.get(p) ?? '').filter(Boolean)
         await bumpFrequency(names)
       }
       return { ok: true }
@@ -1673,7 +1674,12 @@ const commands: CommandSpec[] = [
         _config = await loadAidjConfig()
       }
       if (!_config) return { ok: false, error: '配置未加载' }
-      return saveAidjConfig(_config)
+      const res = await saveAidjConfig(_config)
+      const backend = await getActiveBackend()
+      if (backend instanceof WebPlayerBackend) {
+        await backend.syncPrefs()
+      }
+      return res
     }
   },
   {
@@ -1789,6 +1795,15 @@ const commands: CommandSpec[] = [
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器名称' }
       const ok = await switchPlayer(name)
       return ok ? { ok: true, player: name } : { ok: false, error: `切换到 ${name} 失败` }
+    }
+  },
+  {
+    name: 'aidj.current-dbus-track',
+    description: '获取当前 DBus 播放器的歌曲信息（用于“从此刻开始”）',
+    usage: 'aidj.current-dbus-track',
+    enabled: dbusMode,
+    run: async () => {
+      return await getCurrentDbusTrackInfo()
     }
   },
   {
@@ -2284,14 +2299,13 @@ const commands: CommandSpec[] = [
       if (!taskId || !player) return { ok: false, error: '需要 --task 和 --player 参数' }
       const st = getContinuousTask(taskId)
       if (!st) return { ok: false, error: '任务不存在或已结束' }
+      const short = (n: string): string => n.replace(/^org\.mpris\.MediaPlayer2\./, '')
+      const same = (a: string, b: string): boolean => short(a) === short(b)
       const taken = getContinuousTasks().some(
-        (t) => t.playerKey === player && t.control.id !== taskId
+        (t) => same(t.playerKey, player) && t.control.id !== taskId
       )
       if (taken) return { ok: false, error: `播放器 ${player} 已被其他连续播放任务绑定` }
-      if (!st.dbus) return { ok: false, error: '连续播放任务尚未连接播放器' }
-      const ok = await st.dbus.switchToPlayer(player)
-      if (!ok) return { ok: false, error: `切换到 ${player} 失败` }
-      const r = switchContinuousPlayer(taskId, player)
+      const r = await switchContinuousPlayer(taskId, player)
       if (!r.ok) return r
       return {
         ok: true,
@@ -2357,6 +2371,7 @@ const commands: CommandSpec[] = [
       if (r.ok && _config) {
         _config.preferences.dynamic_balance_volume = enabled
         if (method) _config.preferences.sound_adjust_method = method as 'lufs' | 'linear'
+        await saveAidjConfig(_config)
       }
       return r.ok ? { ok: true } : { ok: false, error: r.error }
     }
@@ -2371,7 +2386,10 @@ const commands: CommandSpec[] = [
       if (!taskId) return { ok: false, error: '需要 --task 参数' }
       const enabled = String(ctx.named.enabled ?? '') !== 'false'
       const r = setContinuousRecordFreq(taskId, enabled)
-      if (r.ok && _config) _config.preferences.record_freq = enabled
+      if (r.ok && _config) {
+        _config.preferences.record_freq = enabled
+        await saveAidjConfig(_config)
+      }
       return r.ok ? { ok: true } : { ok: false, error: r.error }
     }
   },

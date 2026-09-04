@@ -58,6 +58,7 @@ export interface CockpitApi {
   btRemove: (id: string) => Promise<{ ok: boolean; error?: string }>
   btClearFinished: () => Promise<{ ok: boolean; removed?: number; error?: string }>
   btExport: (id: string, path: string) => Promise<{ ok: boolean; lines?: number; error?: string }>
+  btRestart: (id: string) => Promise<{ ok: boolean; error?: string }>
   getMirror: () => Promise<MirrorInfo>
   listAutostart: () => Promise<AutostartEntry[]>
   toggleAutostart: (file: string, hidden: boolean) => Promise<AutostartEntry[]>
@@ -111,6 +112,7 @@ export interface CockpitApi {
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
   copyText: (text: string) => Promise<void>
+  openExternal: (url: string) => Promise<void>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

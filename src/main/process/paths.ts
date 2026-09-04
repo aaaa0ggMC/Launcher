@@ -16,6 +16,9 @@ export const EXTERNAL_ABILITIES_DIR = join(USER_CONFIG_DIR, 'abilities')
 /** Rotating log output (daily files, auto-archived). */
 export const LOG_DIR = join(USER_CONFIG_DIR, 'logs')
 
+/** Cache directory for generated thumbnails (e.g. video covers). */
+export const THUMBNAIL_CACHE_DIR = join(USER_CONFIG_DIR, 'thumbnails')
+
 /** Resolve an ability's config.json path under USER_CONFIG_DIR. */
 export function abilityConfigPath(abilityId: string): string {
   return join(USER_CONFIG_DIR, abilityId, 'config.json')

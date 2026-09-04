@@ -11,6 +11,7 @@ import {
   removeTask,
   clearFinishedTasks,
   startProcessTask,
+  restartTask,
   startJobByName,
   type StartProcessOptions
 } from '../../main/process/background-tasks'
@@ -218,6 +219,19 @@ export default [
       const n = clearFinishedTasks()
       log.info('background.clear-finished', { removed: n })
       return { ok: true, removed: n }
+    }
+  },
+  {
+    name: 'background.restart',
+    description: '重启后台进程任务 (--id)',
+    usage: 'background.restart --id bt-xxx',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const ok = await restartTask(id)
+      if (!ok) return { ok: false, error: `重启失败或任务不支持重启: ${id}` }
+      log.info('background.restart ok', { id })
+      return { ok: true }
     }
   }
 ] satisfies CommandSpec[]

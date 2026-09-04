@@ -1210,9 +1210,15 @@ export class DBusManager {
             null
           )
           if (!obj) continue
-          const props = obj.getInterface(
-            'org.freedesktop.DBus.Properties'
-          ) as unknown as PropertiesInterface
+          let props: PropertiesInterface | null = null
+          try {
+            props = obj.getInterface(
+              'org.freedesktop.DBus.Properties'
+            ) as unknown as PropertiesInterface
+          } catch {
+            continue
+          }
+          if (!props) continue
           const statusV = await withTimeout(
             props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'),
             3000,
@@ -1283,16 +1289,29 @@ export class DBusManager {
         return { status: 'Unknown', track: '', volume: null, player: '' }
       }
       const props = this.propsProxy as unknown as PropertiesInterface
-      const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus')
+      const statusV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'),
+        3000,
+        null
+      )
+      if (!statusV) return { status: 'Unknown', track: '', volume: null, player: '' }
       const status = statusV.value as string
-      const metaV = await props.Get('org.mpris.MediaPlayer2.Player', 'Metadata')
-      const rawMeta = metaV.value as Record<string, unknown>
+      const metaV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'Metadata'),
+        3000,
+        null
+      )
+      const rawMeta = (metaV?.value ?? {}) as Record<string, unknown>
       const meta: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(rawMeta ?? {})) {
         meta[k] = unwrapVariant(v)
       }
-      const volV = await props.Get('org.mpris.MediaPlayer2.Player', 'Volume')
-      const vol = volV.value as number
+      const volV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'Volume'),
+        3000,
+        null
+      )
+      const vol = volV?.value as number
       const track = this.resolveTrackName(meta)
       log.info('getStatus ok', { status, track, player: this.playerName })
       return {
@@ -1344,10 +1363,23 @@ export class DBusManager {
         return unreachable
       }
       const props = this.propsProxy as unknown as PropertiesInterface
-      const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus')
-      const metaV = await props.Get('org.mpris.MediaPlayer2.Player', 'Metadata')
-      const posV = await props.Get('org.mpris.MediaPlayer2.Player', 'Position')
-      const rawMeta = metaV.value as Record<string, unknown>
+      const statusV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'),
+        3000,
+        null
+      )
+      if (!statusV) return unreachable
+      const metaV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'Metadata'),
+        3000,
+        null
+      )
+      const posV = await withTimeout(
+        props.Get('org.mpris.MediaPlayer2.Player', 'Position'),
+        3000,
+        null
+      )
+      const rawMeta = (metaV?.value ?? {}) as Record<string, unknown>
       const meta: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(rawMeta ?? {})) {
         meta[k] = unwrapVariant(v)
@@ -1358,7 +1390,7 @@ export class DBusManager {
         : String(artistRaw ?? '')
       const album = String(meta['xesam:album'] ?? '')
       const length = Number(meta['mpris:length'] ?? 0)
-      const position = Number(unwrapVariant(posV.value) ?? 0)
+      const position = Number(unwrapVariant(posV?.value) ?? 0)
       return {
         ok: true,
         status: statusV.value as string as PlayerStatus['status'],
@@ -1540,11 +1572,32 @@ export class DBusManager {
   async listPlayers(): Promise<string[]> {
     try {
       const dbus = await import('dbus-next')
-      const bus = dbus.sessionBus()
-      const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus')
+      const ownBus = !this.bus
+      const bus = this.bus || dbus.sessionBus()
+      const obj = await withTimeout(
+        bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus'),
+        3000,
+        null
+      )
+      if (!obj) {
+        if (ownBus) {
+          try {
+            bus.disconnect()
+          } catch {
+            /* noop */
+          }
+        }
+        return []
+      }
       const iface = obj.getInterface('org.freedesktop.DBus') as unknown as DBusDaemon
-      const names: string[] = await iface.ListNames()
-      bus.disconnect()
+      const names: string[] = await withTimeout(iface.ListNames(), 3000, [])
+      if (ownBus) {
+        try {
+          bus.disconnect()
+        } catch {
+          /* noop */
+        }
+      }
       return names.filter((n: string) => n.startsWith('org.mpris.MediaPlayer2'))
     } catch (e) {
       log.warn('listPlayers failed', { error: String(e) })
@@ -2998,5 +3051,110 @@ export class SessionManager {
       }
     })
     return result
+  }
+}
+
+/**
+ * Parse and resolve song information from DBus playback detail.
+ * Prioritizes `xesam:url` (xurl) first (decoding file path and extracting song title/artist),
+ * then falls back to `xesam:title` / `xesam:artist` / `xesam:album`.
+ */
+export function resolveDbusTrackInfo(detail: {
+  url?: string
+  track?: string
+  artist?: string
+  album?: string
+}): { info: string; track: string; artist: string; album: string } | null {
+  const url = String(detail.url ?? '').trim()
+  const track = String(detail.track ?? '').trim()
+  const artist = String(detail.artist ?? '').trim()
+  const album = String(detail.album ?? '').trim()
+
+  let info = ''
+
+  // 1. Prioritize xesam:url (xurl) if it is a local file URL
+  if (url.startsWith('file://')) {
+    let rawFile = url.replace(/^file:\/\/(localhost\/)?/, '')
+    try {
+      rawFile = decodeURIComponent(rawFile)
+    } catch {
+      /* ignore decode error */
+    }
+    const lastSegment = rawFile.split('/').pop()?.split('?')[0] ?? ''
+    const extIdx = lastSegment.lastIndexOf('.')
+    const baseName = extIdx > 0 ? lastSegment.slice(0, extIdx).trim() : lastSegment.trim()
+
+    if (baseName) {
+      if (artist && !baseName.toLowerCase().includes(artist.toLowerCase())) {
+        info = `${artist}-${baseName}`
+      } else {
+        info = baseName
+      }
+    }
+  }
+
+  // 2. Fall back to track / artist / album fields
+  if (!info) {
+    if (artist && track) {
+      if (track.toLowerCase().includes(artist.toLowerCase())) {
+        info = track
+      } else {
+        info = `${artist}-${track}`
+      }
+    } else if (track) {
+      info = track
+    } else if (artist) {
+      info = artist
+    } else if (album) {
+      info = album
+    }
+  }
+
+  if (!info) return null
+
+  return {
+    info,
+    track: track || info,
+    artist,
+    album
+  }
+}
+
+/**
+ * Get the current song information from the active DBus player.
+ */
+export async function getCurrentDbusTrackInfo(): Promise<{
+  ok: boolean
+  info?: string
+  track?: string
+  artist?: string
+  album?: string
+  error?: string
+}> {
+  let dbus = getDbusManager()
+  if (!dbus) {
+    const config = await loadAidjConfig()
+    if (config) dbus = await initDbusManager(config)
+  }
+  if (!dbus) {
+    return { ok: false, error: 'DBus 未连接或未能初始化' }
+  }
+
+  const detail = await dbus.getPlaybackDetail()
+  if (!detail.ok && !detail.track && !detail.url && !detail.artist) {
+    return { ok: false, error: '未能获取当前播放信息，请确认播放器正在运行并播放歌曲' }
+  }
+
+  const resolved = resolveDbusTrackInfo(detail)
+  if (!resolved) {
+    return { ok: false, error: '未能从 DBus 解析出歌曲信息' }
+  }
+
+  return {
+    ok: true,
+    info: resolved.info,
+    track: resolved.track,
+    artist: resolved.artist,
+    album: resolved.album
   }
 }

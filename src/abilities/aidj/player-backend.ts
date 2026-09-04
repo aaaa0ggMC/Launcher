@@ -18,6 +18,7 @@ import {
 } from './service'
 import { EQ_BAND_COUNT } from './types'
 import type { PlayerStatus } from './types'
+import { recordSongTimeline } from './song-timeline'
 
 const log = makeLogger('aidj-player')
 
@@ -304,6 +305,9 @@ export class WebPlayerBackend implements PlayerBackend {
     const path = state.path ?? null
     if (path && path !== this.lastTrackPath) {
       this.lastTrackPath = path
+      if (state.track) {
+        void recordSongTimeline(state.track).catch(() => {})
+      }
       if (this.recordFreq && state.track) {
         void bumpFrequency([state.track]).catch(() => {})
       }

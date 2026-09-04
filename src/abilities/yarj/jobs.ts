@@ -31,7 +31,14 @@ registerJobHandler('yarj.scan', async (control: JobControl, args: Record<string,
   const ac = new AbortController()
   control.setCancel(() => ac.abort())
 
-  const grand: RootScanSummary = { total: 0, scanned: 0, skipped: 0, withGps: 0, failed: 0 }
+  const grand: RootScanSummary = {
+    total: 0,
+    scanned: 0,
+    skipped: 0,
+    moved: 0,
+    withGps: 0,
+    failed: 0
+  }
 
   for (let i = 0; i < roots.length; i++) {
     const root = roots[i].path
@@ -49,6 +56,7 @@ registerJobHandler('yarj.scan', async (control: JobControl, args: Record<string,
       grand.total += summary.total
       grand.scanned += summary.scanned
       grand.skipped += summary.skipped
+      grand.moved += summary.moved
       grand.withGps += summary.withGps
       grand.failed += summary.failed
       if (ac.signal.aborted) {
@@ -58,8 +66,9 @@ registerJobHandler('yarj.scan', async (control: JobControl, args: Record<string,
         return
       }
       finishScanRun(runId, 'done', summary.total, summary.withGps, summary.failed)
+      const movedPart = summary.moved > 0 ? ` / 迁移 ${summary.moved}` : ''
       control.pushLine(
-        `完成 ${root}: 解析 ${summary.scanned} / 含定位 ${summary.withGps} / 失败 ${summary.failed} / 跳过 ${summary.skipped}`
+        `完成 ${root}: 解析 ${summary.scanned}${movedPart} / 含定位 ${summary.withGps} / 失败 ${summary.failed} / 跳过 ${summary.skipped}`
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -72,8 +81,9 @@ registerJobHandler('yarj.scan', async (control: JobControl, args: Record<string,
   }
 
   control.setProgress(100)
+  const grandMoved = grand.moved > 0 ? `，移动迁移 ${grand.moved}` : ''
   control.pushLine(
-    `全部完成: 共 ${grand.total} 张图片（解析 ${grand.scanned}，含定位 ${grand.withGps}，失败 ${grand.failed}）`
+    `全部完成: 共 ${grand.total} 张图片（解析 ${grand.scanned}${grandMoved}，含定位 ${grand.withGps}，失败 ${grand.failed}）`
   )
   control.finish('exited')
 })

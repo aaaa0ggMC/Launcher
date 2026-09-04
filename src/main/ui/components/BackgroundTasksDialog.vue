@@ -6,6 +6,9 @@ import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields } from '@ui/composables/search'
 import { resolveBtView } from '@ui/bt-views'
 import BtWindowView from './BackgroundTaskViews/BtWindowView.vue'
+import BtResourceView from './BackgroundTaskViews/BtResourceView.vue'
+
+const activeTab = ref<'view' | 'resources'>('view')
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -219,7 +222,10 @@ const selectedView = computed(() => {
 
 async function selectEntry(id: string): Promise<void> {
   selectedId.value = id
-  if (id.startsWith(WINDOW_PREFIX)) return // windows have no output buffer
+  if (id.startsWith(WINDOW_PREFIX)) {
+    activeTab.value = 'view'
+    return // windows have no output buffer
+  }
   // Backfill from the service ring buffer (covers messages emitted while the
   // panel was closed / before mount). Replace only when it's strictly longer,
   // so live messages that raced in are never lost.
@@ -273,6 +279,16 @@ async function exportConsole(): Promise<void> {
     exportSnackOpen.value = true
   } finally {
     exporting.value = false
+  }
+}
+
+async function restartSelected(): Promise<void> {
+  if (!selectedId.value) return
+  busy.value = true
+  try {
+    await window.cockpit.btRestart(selectedId.value)
+  } finally {
+    busy.value = false
   }
 }
 
@@ -584,10 +600,30 @@ onBeforeUnmount(() => {
                 <v-chip variant="tonal" :color="statusColor(selected.task.status)">
                   {{ statusLabel(selected.task.status) }}
                 </v-chip>
+
+                <!-- Sub-page switcher for process tasks: 控制台 / 资源监控 -->
+                <v-btn-toggle
+                  v-if="selected.task.kind === 'process'"
+                  v-model="activeTab"
+                  mandatory
+                  density="compact"
+                  color="primary"
+                  variant="tonal"
+                  rounded="lg"
+                  class="ml-2"
+                >
+                  <v-btn value="view" prepend-icon="mdi-console">
+                    {{ t('bt.tabConsole') }}
+                  </v-btn>
+                  <v-btn value="resources" prepend-icon="mdi-chart-box-outline">
+                    {{ t('bt.tabResources') }}
+                  </v-btn>
+                </v-btn-toggle>
+
                 <v-spacer />
 
-                <!-- view tools (icon-only, compact) -->
-                <div class="d-flex align-center ga-1">
+                <!-- view tools (icon-only, compact) - on console/view sub-page -->
+                <div v-if="activeTab === 'view'" class="d-flex align-center ga-1">
                   <v-tooltip :text="t('bt.clear')" location="bottom">
                     <template #activator="{ props: tp }">
                       <v-btn v-bind="tp" size="small" variant="text" icon @click="clearConsole">
@@ -613,6 +649,16 @@ onBeforeUnmount(() => {
 
                 <!-- lifecycle actions (text buttons, separated) -->
                 <div class="d-flex align-center ga-2">
+                  <v-btn
+                    v-if="selected.task.kind === 'process'"
+                    variant="tonal"
+                    color="primary"
+                    prepend-icon="mdi-restart"
+                    :loading="busy"
+                    @click="restartSelected"
+                  >
+                    {{ t('bt.restart') }}
+                  </v-btn>
                   <v-btn
                     v-if="selected.task.status === 'running'"
                     variant="tonal"
@@ -643,7 +689,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div v-if="selected.task.command" class="px-4 pb-3">
+              <div v-if="activeTab === 'view' && selected.task.command" class="px-4 pb-3">
                 <span class="text-caption on-surface-variant font-family-mono bt-cmd">{{
                   selected.task.command
                 }}</span>
@@ -655,12 +701,20 @@ onBeforeUnmount(() => {
                    Wrapped in a flex:1 min-height:0 container so the view fills the
                    remaining detail area without overflowing the dialog. -->
               <div v-if="selectedView && selected" class="bt-view">
+                <!-- 1. Console / Custom View -->
                 <component
                   :is="selectedView.component"
+                  v-if="activeTab === 'view' || selected.task.kind !== 'process'"
                   :key="selected.task.id"
                   :task="selected.task"
                   :messages="selectedMessages"
                   v-bind="selectedView.props ?? {}"
+                />
+                <!-- 2. Resources Sub-Page View -->
+                <BtResourceView
+                  v-else-if="activeTab === 'resources' && selected.task.kind === 'process'"
+                  :key="'res-' + selected.task.id"
+                  :task="selected.task"
                 />
               </div>
             </template>

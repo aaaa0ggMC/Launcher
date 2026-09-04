@@ -55,6 +55,7 @@ const ncmModeItems = [
   { title: t('aidj.settings.ncm_mode_builtin', '内置（进程内直连网易）'), value: 'builtin' }
 ]
 const dbusTarget = ref('vlc')
+const startFromNowTemplate = ref('从 {info} 开始')
 const playerMode = ref<'dbus' | 'web' | ''>('')
 const isLinux = window.cockpit?.platform === 'linux'
 const playerModeItems = computed(() =>
@@ -76,6 +77,7 @@ const adjMethod = ref<'lufs' | 'linear'>('lufs')
 const volumeCurve = ref(3.0)
 const recordFreq = ref(true)
 const listeningStats = ref(true)
+const songTimeline = ref(true)
 const metadataConcurrency = ref(8)
 const metadataCommentCount = ref(10)
 const maxHistoryLength = ref(10)
@@ -113,6 +115,7 @@ onMounted(async () => {
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
   ncmMode.value = (prefs.ncm_mode as 'auto' | 'external' | 'builtin') || 'auto'
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
+  startFromNowTemplate.value = (prefs.start_from_now_template as string) || '从 {info} 开始'
   playerMode.value = (prefs.player_mode as 'dbus' | 'web' | undefined) ?? ''
   musicFolders.value = Array.isArray(cfg.music_folders) ? (cfg.music_folders as string[]) : []
   lyricsFolders.value = Array.isArray(cfg.lyrics_folders) ? (cfg.lyrics_folders as string[]) : []
@@ -126,6 +129,7 @@ onMounted(async () => {
   volumeCurve.value = (prefs.volume_curve as number) ?? 3.0
   recordFreq.value = (prefs.record_freq as boolean) ?? true
   listeningStats.value = (prefs.listening_stats as boolean) ?? true
+  songTimeline.value = (prefs.song_timeline as boolean) ?? true
   metadataConcurrency.value = (prefs.metadata_concurrency as number) ?? 8
   metadataCommentCount.value = (prefs.metadata_comment_count as number) ?? 10
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
@@ -282,6 +286,7 @@ watch(apiKey, (v) => update('secrets.api_key', v))
 watch(ncmBaseUrl, (v) => update('ncm_base_url', v))
 watch(ncmMode, (v) => update('preferences.ncm_mode', v))
 watch(dbusTarget, (v) => update('preferences.dbus_target', v))
+watch(startFromNowTemplate, (v) => update('preferences.start_from_now_template', v))
 watch(playerMode, (v) => {
   if (!v) return
   update('preferences.player_mode', v)
@@ -301,6 +306,7 @@ watch(adjMethod, (v) => update('preferences.sound_adjust_method', v))
 watch(volumeCurve, (v) => update('preferences.volume_curve', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(listeningStats, (v) => update('preferences.listening_stats', v))
+watch(songTimeline, (v) => update('preferences.song_timeline', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(metadataCommentCount, (v) => update('preferences.metadata_comment_count', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
@@ -370,6 +376,7 @@ defineExpose({
       `${t('aidj.settings.dbus_target', '默认播放器')}: ${dbusTarget.value}`,
       `${t('aidj.settings.record_freq', '记录播放频率')}: ${recordFreq.value ? on : off}`,
       `${t('aidj.settings.listening_stats', '听歌时长统计')}: ${listeningStats.value ? on : off}`,
+      `${t('aidj.settings.song_timeline', '记录听歌时间线')}: ${songTimeline.value ? on : off}`,
       `${t('aidj.settings.music_folders', '音乐目录')}: ${musicFolders.value.length}`
     ].join('\n')
   }
@@ -497,6 +504,22 @@ defineExpose({
               :label="t('aidj.settings.dbus_target', 'DBus 播放器目标')"
               placeholder="vlc"
               hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-text-field
+              v-model="startFromNowTemplate"
+              :label="t('aidj.settings.start_from_now_template', '“从此刻开始”提示词模板')"
+              placeholder="从 {info} 开始"
+              :hint="
+                t(
+                  'aidj.settings.start_from_now_hint',
+                  '自动 /persist 提示词格式，支持 {info}、{track}、{artist}、{album}'
+                )
+              "
+              persistent-hint
               density="compact"
               variant="outlined"
             />
@@ -1040,6 +1063,15 @@ defineExpose({
               v-model="listeningStats"
               color="primary"
               :label="t('aidj.settings.listening_stats', '听歌时长统计')"
+              hide-details
+              density="compact"
+            />
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-switch
+              v-model="songTimeline"
+              color="primary"
+              :label="t('aidj.settings.song_timeline', '记录听歌时间线')"
               hide-details
               density="compact"
             />

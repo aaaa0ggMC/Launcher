@@ -1,15 +1,18 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-yarj-photo-drawer' })
 
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, watch, nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import type { Photo, ReverseGeocodeResult } from '../types'
+import { isVideoFile, photoThumbUrl } from '../types'
+import JsonTreeView from './JsonTreeView.vue'
 
 const props = defineProps<{
   open: boolean
   photos: Photo[]
   coords: [number, number] | null
+  pageSize?: number
 }>()
 
 const emit = defineEmits<{
@@ -18,12 +21,46 @@ const emit = defineEmits<{
   (e: 'updated'): void
   (e: 'preview', payload: { photo: Photo; index: number }): void
   (e: 'pick-gps', photo: Photo): void
+  (e: 'explore', photos: Photo[]): void
+  (e: 'relocate-group', photos: Photo[]): void
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const filterQuery = ref('')
+const expandedJsonPaths = ref<Set<string>>(new Set())
+
+function toggleJsonTree(path: string): void {
+  if (expandedJsonPaths.value.has(path)) {
+    expandedJsonPaths.value.delete(path)
+  } else {
+    expandedJsonPaths.value.add(path)
+  }
+}
+
+async function onSaveDrawerJsonTree(p: Photo, updatedObj: unknown): Promise<void> {
+  if (!p || !updatedObj || typeof updatedObj !== 'object') return
+  const data = updatedObj as Record<string, unknown>
+  const patch = (
+    data.appendix && typeof data.appendix === 'object' ? data.appendix : data
+  ) as Record<string, unknown>
+  saving.value = true
+  try {
+    const res = (await window.cockpit.command('yarj.update-photo', {
+      path: p.path,
+      patch
+    })) as { ok: boolean; photo?: Photo }
+    if (res?.ok && res.photo) {
+      p.appendix = { ...res.photo.appendix }
+      emit('updated')
+    }
+  } catch (err) {
+    console.error('Failed to save appendix JSON in drawer:', err)
+  } finally {
+    saving.value = false
+  }
+}
 
 function matchPhoto(p: Photo, query: string): boolean {
   if (!query) return true
@@ -52,6 +89,101 @@ function matchPhoto(p: Photo, query: string): boolean {
 const filteredPhotos = computed(() => {
   return props.photos.filter((p) => matchPhoto(p, filterQuery.value))
 })
+
+// ---------------------------------------------------------------------------
+// 滑动加载窗口（Sliding Window）— 避免数千张照片同时挂载 DOM 导致卡死
+// ---------------------------------------------------------------------------
+const getPageSize = computed(() => props.pageSize || 30)
+const visibleLimit = ref(getPageSize.value)
+const drawerBodyRef = ref<HTMLElement | null>(null)
+
+const displayedPhotos = computed(() => {
+  return filteredPhotos.value.slice(0, visibleLimit.value)
+})
+
+const hasMore = computed(() => {
+  return visibleLimit.value < filteredPhotos.value.length
+})
+
+function loadMore(): void {
+  if (visibleLimit.value < filteredPhotos.value.length) {
+    visibleLimit.value = Math.min(
+      filteredPhotos.value.length,
+      visibleLimit.value + getPageSize.value
+    )
+  }
+}
+
+function handleScroll(e: Event): void {
+  const target = e.target as HTMLElement
+  if (!target) return
+  if (target.scrollHeight - target.scrollTop - target.clientHeight < 600) {
+    loadMore()
+  }
+}
+
+watch(
+  () => [props.photos, filterQuery.value, props.open, props.pageSize],
+  () => {
+    visibleLimit.value = getPageSize.value
+    nextTick(() => {
+      if (drawerBodyRef.value) {
+        drawerBodyRef.value.scrollTop = 0
+      }
+    })
+  }
+)
+
+// ---------------------------------------------------------------------------
+// 多选模式与批量平移
+// ---------------------------------------------------------------------------
+const isMultiSelectMode = ref(false)
+const selectedPaths = ref<Set<string>>(new Set())
+
+const selectedPhotos = computed<Photo[]>(() => {
+  return props.photos.filter((p) => selectedPaths.value.has(p.path))
+})
+
+const selectedCount = computed<number>(() => selectedPaths.value.size)
+
+const isAllSelected = computed<boolean>(() => {
+  if (!filteredPhotos.value.length) return false
+  return filteredPhotos.value.every((p) => selectedPaths.value.has(p.path))
+})
+
+function toggleSelect(path: string): void {
+  const next = new Set(selectedPaths.value)
+  if (next.has(path)) {
+    next.delete(path)
+  } else {
+    next.add(path)
+  }
+  selectedPaths.value = next
+}
+
+function toggleSelectAll(): void {
+  if (isAllSelected.value) {
+    const next = new Set(selectedPaths.value)
+    for (const p of filteredPhotos.value) {
+      next.delete(p.path)
+    }
+    selectedPaths.value = next
+  } else {
+    const next = new Set(selectedPaths.value)
+    for (const p of filteredPhotos.value) {
+      next.add(p.path)
+    }
+    selectedPaths.value = next
+  }
+}
+
+function triggerRelocate(): void {
+  if (selectedCount.value > 0) {
+    emit('relocate-group', selectedPhotos.value)
+  } else {
+    emit('relocate-group', filteredPhotos.value.length ? filteredPhotos.value : props.photos)
+  }
+}
 
 const editingPhotoPath = ref<string | null>(null)
 const editingTags = ref<string>('')
@@ -149,6 +281,14 @@ async function triggerReverseGeocode(p: Photo): Promise<void> {
   }
 }
 
+function handlePhotoCardClick(p: Photo, idx: number): void {
+  if (isMultiSelectMode.value) {
+    toggleSelect(p.path)
+  } else {
+    emit('preview', { photo: p, index: idx })
+  }
+}
+
 function getPhotoAddress(p: Photo): string | null {
   if (reverseGeocodeMap.value[p.path]) {
     return reverseGeocodeMap.value[p.path].formattedAddress
@@ -204,7 +344,7 @@ function getPhotoComment(p: Photo): string {
 
 async function openInFolder(filePath: string): Promise<void> {
   try {
-    await window.cockpit.command('system.show-item-in-folder', { path: filePath })
+    await window.cockpit.command('yarj.show-item-in-folder', { path: filePath })
   } catch {
     /* ignore */
   }
@@ -238,22 +378,60 @@ async function copyPath(filePath: string): Promise<void> {
           </div>
         </div>
 
-        <v-btn
-          icon
-          size="small"
-          variant="text"
-          class="close-btn"
-          :title="t('yarj.drawer.close', '关闭')"
-          @click="emit('close')"
-        >
-          <v-icon size="20">mdi-close</v-icon>
-        </v-btn>
+        <div class="d-flex align-center ga-1 flex-shrink-0">
+          <v-btn
+            v-if="photos.length > 0"
+            icon
+            size="small"
+            variant="text"
+            color="primary"
+            class="mr-1"
+            :title="
+              selectedCount > 0
+                ? t(
+                    'yarj.drawer.relocateSelectedHint',
+                    `平移所选 ${selectedCount} 张照片位置`
+                  ).replace('{n}', String(selectedCount))
+                : t(
+                    'yarj.drawer.relocateGroupHint',
+                    '整体平移这组照片的 GPS 定位（保留各照片相对间距）'
+                  )
+            "
+            @click="triggerRelocate"
+          >
+            <v-badge v-if="selectedCount > 0" :content="selectedCount" color="primary" floating>
+              <v-icon size="20">mdi-map-marker-distance</v-icon>
+            </v-badge>
+            <v-icon v-else size="20">mdi-map-marker-distance</v-icon>
+          </v-btn>
+          <v-btn
+            v-if="photos.length > 0"
+            variant="tonal"
+            color="primary"
+            class="mr-1"
+            prepend-icon="mdi-compass-outline"
+            :title="t('yarj.drawer.exploreHint', '以当前照片开启旅途探索回放')"
+            @click="emit('explore', filteredPhotos.length ? filteredPhotos : photos)"
+          >
+            {{ t('yarj.exploration.title', '我的探索') }}
+          </v-btn>
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            class="close-btn"
+            :title="t('yarj.drawer.close', '关闭')"
+            @click="emit('close')"
+          >
+            <v-icon size="20">mdi-close</v-icon>
+          </v-btn>
+        </div>
       </div>
 
       <v-divider />
 
       <!-- 照片列表卡片流（过滤搜索框嵌入此文档流最顶部，随内容滚动，不占固定视口高度） -->
-      <div class="drawer-body px-4 py-4">
+      <div ref="drawerBodyRef" class="drawer-body px-4 py-4" @scroll.passive="handleScroll">
         <div v-if="photos.length > 0" class="mb-4">
           <v-text-field
             v-model="filterQuery"
@@ -280,29 +458,82 @@ async function copyPath(filePath: string): Promise<void> {
 
         <div class="d-flex flex-column ga-4">
           <v-card
-            v-for="(p, idx) in filteredPhotos"
+            v-for="(p, idx) in displayedPhotos"
             :key="p.id || idx"
             variant="tonal"
             rounded="xl"
             class="photo-card"
+            :class="{ 'is-selected': selectedPaths.has(p.path) }"
           >
-            <!-- 缩略图区域（点击打开 Lightbox 放大预览） -->
+            <!-- 缩略图区域（点击打开 Lightbox 放大预览，多选模式下点击切换勾选） -->
             <div
-              class="photo-img-wrap cursor-zoom-in"
-              :title="t('yarj.drawer.previewHint', '点击全屏查看与缩放拖拽')"
-              @click="emit('preview', { photo: p, index: idx })"
+              class="photo-img-wrap"
+              :class="{
+                'cursor-zoom-in': !isMultiSelectMode,
+                'cursor-pointer': isMultiSelectMode
+              }"
+              :title="
+                isMultiSelectMode
+                  ? selectedPaths.has(p.path)
+                    ? t('yarj.drawer.deselectPhoto', '取消勾选')
+                    : t('yarj.drawer.selectPhoto', '勾选此照片')
+                  : t('yarj.drawer.previewHint', '点击全屏查看与缩放拖拽')
+              "
+              @click="handlePhotoCardClick(p, filteredPhotos.indexOf(p))"
             >
-              <img
-                :src="`cockpit-icon://${encodeURIComponent(p.path)}`"
+              <!-- 快捷勾选框（多选模式或悬浮时显示） -->
+              <div
+                class="photo-select-checkbox"
+                :class="{ 'show-always': isMultiSelectMode || selectedPaths.has(p.path) }"
+                :title="
+                  selectedPaths.has(p.path)
+                    ? t('yarj.drawer.deselectPhoto', '取消勾选')
+                    : t('yarj.drawer.selectPhoto', '勾选此照片')
+                "
+                @click.stop="toggleSelect(p.path)"
+              >
+                <v-icon size="20" :color="selectedPaths.has(p.path) ? 'primary' : 'white'">
+                  {{
+                    selectedPaths.has(p.path) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'
+                  }}
+                </v-icon>
+              </div>
+
+              <v-img
+                :src="photoThumbUrl(p.path)"
                 :alt="getFileName(p.path)"
                 class="photo-img"
-                loading="lazy"
-              />
-              <div class="photo-img-badge text-caption">
-                {{ p.camera_model || p.camera_make || 'Photo' }}
+                cover
+                height="200"
+              >
+                <template #placeholder>
+                  <div
+                    class="d-flex align-center justify-center fill-height"
+                    style="background: rgba(0, 0, 0, 0.25)"
+                  >
+                    <v-progress-circular indeterminate color="primary" size="28" width="2.5" />
+                  </div>
+                </template>
+                <template #error>
+                  <div
+                    class="d-flex flex-column align-center justify-center fill-height text-caption on-surface-variant ga-1"
+                    style="background: rgba(0, 0, 0, 0.35)"
+                  >
+                    <v-icon size="26" color="warning">mdi-image-broken-variant</v-icon>
+                    <span>{{ t('yarj.drawer.loadFailed', '加载失败') }}</span>
+                  </div>
+                </template>
+              </v-img>
+              <div class="photo-img-badge text-caption d-flex align-center ga-1">
+                <v-icon v-if="isVideoFile(p.path)" size="14" color="white">mdi-video</v-icon>
+                <span>{{
+                  p.camera_model || p.camera_make || (isVideoFile(p.path) ? 'Video' : 'Photo')
+                }}</span>
               </div>
-              <div class="photo-zoom-icon">
-                <v-icon size="26" color="white">mdi-magnify-plus-outline</v-icon>
+              <div v-if="!isMultiSelectMode" class="photo-zoom-icon">
+                <v-icon size="26" color="white">{{
+                  isVideoFile(p.path) ? 'mdi-play-circle-outline' : 'mdi-magnify-plus-outline'
+                }}</v-icon>
               </div>
             </div>
 
@@ -312,7 +543,7 @@ async function copyPath(filePath: string): Promise<void> {
                 <div
                   class="text-body-2 font-weight-bold text-truncate flex-grow-1 mr-3 cursor-pointer"
                   :title="p.path"
-                  @click="emit('preview', { photo: p, index: idx })"
+                  @click="handlePhotoCardClick(p, idx)"
                 >
                   {{ getFileName(p.path) }}
                 </div>
@@ -422,6 +653,18 @@ async function copyPath(filePath: string): Promise<void> {
                   </v-btn>
                 </div>
               </div>
+
+              <!-- 完整元数据 (JSON 树) -->
+              <v-expand-transition>
+                <div v-if="expandedJsonPaths.has(p.path)" class="mt-3">
+                  <JsonTreeView
+                    :data="p"
+                    root-name="photo"
+                    :editable="editingPhotoPath === p.path"
+                    @save="(patch) => onSaveDrawerJsonTree(p, patch)"
+                  />
+                </div>
+              </v-expand-transition>
             </v-card-text>
 
             <!-- 底部操作区（遵循 apps 参考规范：分组、间距与呼吸感） -->
@@ -435,6 +678,16 @@ async function copyPath(filePath: string): Promise<void> {
                   @click="startEdit(p)"
                 >
                   <v-icon size="18">mdi-pencil-outline</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :color="expandedJsonPaths.has(p.path) ? 'primary' : undefined"
+                  :title="t('yarj.lightbox.metadataTree', '查看完整数据库元数据 (JSON)')"
+                  @click="toggleJsonTree(p.path)"
+                >
+                  <v-icon size="18">mdi-code-json</v-icon>
                 </v-btn>
                 <v-btn
                   v-if="p.gps_lat != null && p.gps_lon != null"
@@ -489,6 +742,66 @@ async function copyPath(filePath: string): Promise<void> {
             </v-card-actions>
           </v-card>
         </div>
+
+        <!-- 滑动加载更多提示与操作 -->
+        <div v-if="hasMore" class="d-flex flex-column align-center py-4 ga-2">
+          <v-btn
+            variant="tonal"
+            color="primary"
+            density="comfortable"
+            prepend-icon="mdi-arrow-down"
+            @click="loadMore"
+          >
+            {{
+              t('yarj.drawer.loadMore', '加载更多照片 ({current}/{total})')
+                .replace('{current}', String(displayedPhotos.length))
+                .replace('{total}', String(filteredPhotos.length))
+            }}
+          </v-btn>
+        </div>
+      </div>
+
+      <!-- 抽屉底部多选控制底栏 -->
+      <v-divider />
+      <div class="drawer-footer px-4 py-2 d-flex align-center justify-space-between">
+        <!-- 多选开关与选中计数 -->
+        <div class="d-flex align-center ga-2">
+          <v-switch
+            v-model="isMultiSelectMode"
+            color="primary"
+            density="compact"
+            hide-details
+            :label="t('yarj.drawer.multiSelect', '多选')"
+          />
+          <span v-if="isMultiSelectMode" class="text-caption on-surface-variant font-mono">
+            ({{ selectedCount }}/{{ filteredPhotos.length }})
+          </span>
+        </div>
+
+        <!-- 多选模式下的操作按钮 -->
+        <div v-if="isMultiSelectMode" class="d-flex align-center ga-2">
+          <v-btn
+            variant="text"
+            size="small"
+            :disabled="!filteredPhotos.length"
+            @click="toggleSelectAll"
+          >
+            {{
+              isAllSelected
+                ? t('yarj.drawer.deselectAll', '全不选')
+                : t('yarj.drawer.selectAll', '全选')
+            }}
+          </v-btn>
+          <v-btn
+            variant="flat"
+            color="primary"
+            prepend-icon="mdi-map-marker-distance"
+            :disabled="selectedCount === 0"
+            @click="triggerRelocate"
+          >
+            {{ t('yarj.drawer.relocateSelectedBtn', '平移所选') }}
+          </v-btn>
+        </div>
       </div>
     </div>
   </Transition>
@@ -518,6 +831,53 @@ async function copyPath(filePath: string): Promise<void> {
 .drawer-header {
   flex-shrink: 0;
   background: rgba(var(--v-theme-surface), 0.4);
+}
+
+.drawer-footer {
+  flex-shrink: 0;
+  background: rgba(var(--v-theme-surface), 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  min-height: 52px;
+}
+
+.photo-card.is-selected {
+  border-color: rgb(var(--v-theme-primary)) !important;
+  box-shadow:
+    0 0 0 1px rgb(var(--v-theme-primary)),
+    0 4px 16px rgba(var(--v-theme-primary), 0.25);
+}
+
+.photo-select-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.photo-select-checkbox.show-always,
+.photo-img-wrap:hover .photo-select-checkbox {
+  opacity: 1;
+}
+
+.photo-select-checkbox:hover {
+  transform: scale(1.1);
+  background: rgba(0, 0, 0, 0.78);
 }
 
 .drawer-body {

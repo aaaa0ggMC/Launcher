@@ -569,6 +569,7 @@ async function toggleVolbal(): Promise<void> {
     path: 'preferences.sound_adjust_method',
     value: next.method
   })
+  await window.cockpit.command('aidj.save-config')
   sbVolbal.value = next
   await pollStatus()
 }
@@ -579,6 +580,7 @@ async function toggleRecordFreq(): Promise<void> {
     path: 'preferences.record_freq',
     value: next
   })
+  await window.cockpit.command('aidj.save-config')
   sbRecordFreq.value = next
   await pollStatus()
 }
@@ -1435,7 +1437,7 @@ async function newChat(): Promise<void> {
   showSnack(t('aidj.chat_new', '已新建会话'))
 }
 
-defineExpose({ toMarkdown, loadSession, newChat })
+defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 </script>
 
 <template>

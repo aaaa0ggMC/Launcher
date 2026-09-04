@@ -36,14 +36,15 @@
 
 ## 2. 技术选型（含实测依据）
 
-| 用途         | 选型                                                | 理由 / 实测                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MBTiles 读取 | **Node 内置 `node:sqlite`**（`DatabaseSync`）       | 实测：Electron 39.8.10（Node 22.22.1）下直接 `require('node:sqlite')` 可用（仅 ExperimentalWarning，无需 flag、无需任何 npm 依赖）。374MB 的 `GlobalMap_ADM0_2.mbtiles` 以 `readOnly` 打开、查询 `tiles`/`map`+`images` 双布局、读到 gzip 数据均成功。**零原生依赖** → zip 分发不需要 electron-rebuild，这是选它而非 `@mapbox/mbtiles`（依赖 node-sqlite3 原生模块）的决定性理由 |
-| 元数据库     | **同一 `node:sqlite`**                              | 一个 SQLite 方案通吃 MBTiles 与元数据，减少依赖面；API 变化风险用「封装在 `db.ts` 单文件，可替换 better-sqlite3」缓解                                                                                                                                                                                                                                                            |
-| 地图渲染     | **MapLibre GL JS（`maplibre-gl`，^5.x）**           | 实测目标文件 `format = pbf`（tippecanoe 矢量瓦片），**只有 MapLibre 类库能原生渲染 pbf + 支持 globe 投影**（v4 起 `projection: 'globe'`；Leaflet 渲染不了 pbf，CesiumJS 过重）。BSD 许可。备选：若未来纯光栅 mbtiles 优先可再评估                                                                                                                                                |
-| EXIF 解析    | **`exifr`**（纯 JS，MIT）                           | 主进程扫描用；支持 GPS（`gps.latitude/longitude/altitude`）、`DateTimeOriginal`、相机/镜头字段，异步 API 适合长任务循环                                                                                                                                                                                                                                                          |
-| 瓦片传输     | 自定义协议 **`cockpit-tile://<mapId>/<z>/<x>/<y>`** | 仿 `cockpit-icon`/`cockpit-audio` 现有模式（`protocol.registerSchemesAsPrivileged` + `protocol.handle`），无需 HTTP 端口/CORS 管理；`supportFetchAPI + stream + corsEnabled` 特权。备选（不推荐）：主进程起 localhost HTTP 服务                                                                                                                                                  |
-| 照片缩略图   | 现有 **`cockpit-icon://<abs-path>`**                | `<img>` 直接引用，无需新代码                                                                                                                                                                                                                                                                                                                                                     |
+| 用途          | 选型                                                | 理由 / 实测                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MBTiles 读取  | **Node 内置 `node:sqlite`**（`DatabaseSync`）       | 实测：Electron 39.8.10（Node 22.22.1）下直接 `require('node:sqlite')` 可用（仅 ExperimentalWarning，无需 flag、无需任何 npm 依赖）。374MB 的 `GlobalMap_ADM0_2.mbtiles` 以 `readOnly` 打开、查询 `tiles`/`map`+`images` 双布局、读到 gzip 数据均成功。**零原生依赖** → zip 分发不需要 electron-rebuild，这是选它而非 `@mapbox/mbtiles`（依赖 node-sqlite3 原生模块）的决定性理由 |
+| 元数据库      | **同一 `node:sqlite`**                              | 一个 SQLite 方案通吃 MBTiles 与元数据，减少依赖面；API 变化风险用「封装在 `db.ts` 单文件，可替换 better-sqlite3」缓解                                                                                                                                                                                                                                                            |
+| 地图渲染      | **MapLibre GL JS（`maplibre-gl`，^5.x）**           | 实测目标文件 `format = pbf`（tippecanoe 矢量瓦片），**只有 MapLibre 类库能原生渲染 pbf + 支持 globe 投影**（v4 起 `projection: 'globe'`；Leaflet 渲染不了 pbf，CesiumJS 过重）。BSD 许可。备选：若未来纯光栅 mbtiles 优先可再评估                                                                                                                                                |
+| EXIF 解析     | **`exifr`**（纯 JS，MIT）                           | 主进程扫描用；支持 GPS（`gps.latitude/longitude/altitude`）、`DateTimeOriginal`、相机/镜头字段，异步 API 适合长任务循环                                                                                                                                                                                                                                                          |
+| 视频 GPS 解析 | **`ffprobe` (ffmpeg)** + ISO 6709 解析器            | 主进程扫描用；提取 QuickTime/MP4 的 `creation_time` 与 `location`（ISO 6709 格式如 `+31.2304+121.4737+12.000/`），支持手机/无人机/运动相机拍摄的短片足迹                                                                                                                                                                                                                         |
+| 瓦片传输      | 自定义协议 **`cockpit-tile://<mapId>/<z>/<x>/<y>`** | 仿 `cockpit-icon`/`cockpit-audio` 现有模式（`protocol.registerSchemesAsPrivileged` + `protocol.handle`），无需 HTTP 端口/CORS 管理；`supportFetchAPI + stream + corsEnabled` 特权。备选（不推荐）：主进程起 localhost HTTP 服务                                                                                                                                                  |
+| 照片缩略图    | 现有 **`cockpit-icon://<abs-path>`**                | `<img>` 直接引用，无需新代码                                                                                                                                                                                                                                                                                                                                                     |
 
 ### 2.1 `node:sqlite` 使用要点
 
@@ -133,12 +134,14 @@ CREATE TABLE IF NOT EXISTS photos (
   camera_make TEXT, camera_model TEXT, lens_model TEXT,
   focal_length REAL, f_number REAL, exposure_time TEXT, iso INTEGER,
   gps_lat REAL, gps_lon REAL, gps_alt REAL,
+  hash        TEXT,                        -- 文件 SHA-256 内容哈希（用于移动/重命名追踪与去重）
   appendix    TEXT NOT NULL DEFAULT '{}',  -- JSON 字符串：动态数据（用户 tag 等），见 4.3
   scanned_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_photos_gps ON photos (gps_lat, gps_lon);
 CREATE INDEX IF NOT EXISTS idx_photos_root ON photos (root);
 CREATE INDEX IF NOT EXISTS idx_photos_taken ON photos (taken_at);
+CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash);
 
 CREATE TABLE IF NOT EXISTS scan_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

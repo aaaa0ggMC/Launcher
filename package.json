@@ -1,6 +1,6 @@
 {
   "name": "linux-cockpit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Linux System Cockpit — Electron + Vue3 + Vuetify3 launcher",
   "main": "./out/main/index.js",
   "author": "aaaa0ggmc (RockonDreaming)",
@@ -17,7 +17,9 @@
     "dev:lts": "node scripts/dev-lts.mjs",
     "build": "npm run typecheck && electron-vite build",
     "build:win": "npm run build && electron-builder --win",
-    "build:linux": "npm run build && electron-builder --linux"
+    "build:win:portable": "npm run build && electron-builder --win portable",
+    "build:linux": "npm run build && electron-builder --linux",
+    "build:linux:appimage": "npm run build && electron-builder --linux AppImage"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

@@ -18,6 +18,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'jpg',
+    coordSystem: 'wgs84',
     attribution: '© Google'
   },
   {
@@ -32,6 +33,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'jpg',
+    coordSystem: 'wgs84',
     attribution: '© Google'
   },
   {
@@ -46,6 +48,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
+    coordSystem: 'wgs84',
     attribution: '© Google'
   },
   {
@@ -60,55 +63,51 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
+    coordSystem: 'wgs84',
     attribution: '© Google'
   },
   {
-    id: 'google-official-hybrid',
-    name: 'Google 官方卫星混合 (Map Tiles API · 计费)',
-    category: 'google-official',
+    id: 'amap-roads',
+    name: '高德 街道矢量图 (普通免翻直连)',
+    category: 'amap',
     type: 'raster',
-    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
-    minZoom: 0,
-    maxZoom: 22,
-    tileSize: 512,
-    ext: 'jpg',
-    attribution: '© Google Maps Platform'
-  },
-  {
-    id: 'google-official-roadmap',
-    name: 'Google 官方街道图 (Map Tiles API · 计费)',
-    category: 'google-official',
-    type: 'raster',
-    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
-    minZoom: 0,
-    maxZoom: 22,
-    tileSize: 512,
+    urlTemplate:
+      'https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+    subdomains: ['1', '2', '3', '4'],
+    minZoom: 3,
+    maxZoom: 18,
+    tileSize: 256,
     ext: 'png',
-    attribution: '© Google Maps Platform'
+    coordSystem: 'gcj02',
+    attribution: '© 高德地图 AutoNavi (GCJ-02 国测局火星坐标系)'
   },
   {
-    id: 'google-official-satellite',
-    name: 'Google 官方纯卫星 (Map Tiles API · 计费)',
-    category: 'google-official',
+    id: 'amap-sat',
+    name: '高德 卫星影像 (普通免翻直连)',
+    category: 'amap',
     type: 'raster',
-    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
-    minZoom: 0,
-    maxZoom: 22,
-    tileSize: 512,
+    urlTemplate: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+    subdomains: ['1', '2', '3', '4'],
+    minZoom: 3,
+    maxZoom: 18,
+    tileSize: 256,
     ext: 'jpg',
-    attribution: '© Google Maps Platform'
+    coordSystem: 'gcj02',
+    attribution: '© 高德地图 AutoNavi (GCJ-02 国测局火星坐标系)'
   },
   {
-    id: 'google-official-terrain',
-    name: 'Google 官方地形图 (Map Tiles API · 计费)',
-    category: 'google-official',
+    id: 'tencent-roads',
+    name: '腾讯 街道图 (普通免翻直连)',
+    category: 'tencent',
     type: 'raster',
-    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
-    minZoom: 0,
-    maxZoom: 22,
-    tileSize: 512,
+    urlTemplate: 'https://rt{s}.map.gtimg.com/tile?z={z}&x={x}&y={-y}&styleid=1&version=297',
+    subdomains: ['0', '1', '2', '3'],
+    minZoom: 3,
+    maxZoom: 18,
+    tileSize: 256,
     ext: 'png',
-    attribution: '© Google Maps Platform'
+    coordSystem: 'gcj02',
+    attribution: '© 腾讯地图 Tencent Map (GCJ-02 国测局火星坐标系)'
   },
   {
     id: 'carto-dark',
@@ -121,6 +120,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
+    coordSystem: 'wgs84',
     attribution: '© CARTO © OpenStreetMap'
   },
   {
@@ -134,6 +134,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
+    coordSystem: 'wgs84',
     attribution: '© CARTO © OpenStreetMap'
   },
   {
@@ -147,6 +148,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 19,
     tileSize: 256,
     ext: 'jpg',
+    coordSystem: 'wgs84',
     attribution: '© Esri, Maxar, Earthstar Geographics'
   },
   {
@@ -160,11 +162,26 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 19,
     tileSize: 256,
     ext: 'png',
+    coordSystem: 'wgs84',
     attribution: '© OpenStreetMap contributors'
   },
   {
+    id: 'opentopo',
+    name: 'OpenTopo 等高线地形图',
+    category: 'osm',
+    type: 'raster',
+    urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c'],
+    minZoom: 0,
+    maxZoom: 17,
+    tileSize: 256,
+    ext: 'png',
+    coordSystem: 'wgs84',
+    attribution: '© OpenTopoMap © OpenStreetMap'
+  },
+  {
     id: 'tianditu-img',
-    name: '天地图 卫星影像',
+    name: '天地图 卫星影像 (WGS-84/CGCS2000)',
     category: 'tianditu',
     type: 'raster',
     urlTemplate:
@@ -175,7 +192,76 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     tileSize: 256,
     ext: 'jpg',
     requireApiKey: true,
+    coordSystem: 'wgs84',
     attribution: '© 天地图 GS(2024)0001号'
+  },
+  {
+    id: 'tianditu-vec',
+    name: '天地图 街道矢量 (WGS-84/CGCS2000)',
+    category: 'tianditu',
+    type: 'raster',
+    urlTemplate:
+      'https://t{s}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk={apiKey}',
+    subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+    minZoom: 0,
+    maxZoom: 18,
+    tileSize: 256,
+    ext: 'png',
+    requireApiKey: true,
+    coordSystem: 'wgs84',
+    attribution: '© 天地图 GS(2024)0001号'
+  },
+  {
+    id: 'google-official-hybrid',
+    name: 'Google 官方卫星混合 (Map Tiles API · 计费)',
+    category: 'google-official',
+    type: 'raster',
+    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
+    minZoom: 0,
+    maxZoom: 22,
+    tileSize: 512,
+    ext: 'jpg',
+    coordSystem: 'wgs84',
+    attribution: '© Google Maps Platform'
+  },
+  {
+    id: 'google-official-roadmap',
+    name: 'Google 官方街道图 (Map Tiles API · 计费)',
+    category: 'google-official',
+    type: 'raster',
+    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
+    minZoom: 0,
+    maxZoom: 22,
+    tileSize: 512,
+    ext: 'png',
+    coordSystem: 'wgs84',
+    attribution: '© Google Maps Platform'
+  },
+  {
+    id: 'google-official-satellite',
+    name: 'Google 官方纯卫星 (Map Tiles API · 计费)',
+    category: 'google-official',
+    type: 'raster',
+    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
+    minZoom: 0,
+    maxZoom: 22,
+    tileSize: 512,
+    ext: 'jpg',
+    coordSystem: 'wgs84',
+    attribution: '© Google Maps Platform'
+  },
+  {
+    id: 'google-official-terrain',
+    name: 'Google 官方地形图 (Map Tiles API · 计费)',
+    category: 'google-official',
+    type: 'raster',
+    urlTemplate: 'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
+    minZoom: 0,
+    maxZoom: 22,
+    tileSize: 512,
+    ext: 'png',
+    coordSystem: 'wgs84',
+    attribution: '© Google Maps Platform'
   },
   {
     id: 'custom',
@@ -187,6 +273,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     minZoom: 0,
     maxZoom: 20,
     tileSize: 256,
+    coordSystem: 'wgs84',
     ext: 'png'
   }
 ]

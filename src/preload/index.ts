@@ -71,6 +71,7 @@ const cockpit = {
   btClearFinished: (): Promise<unknown> => cockpit.command('background.clear-finished'),
   btExport: (id: string, path: string): Promise<unknown> =>
     cockpit.command('background.export', { id, path }),
+  btRestart: (id: string): Promise<unknown> => cockpit.command('background.restart', { id }),
 
   // mirror
   getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
@@ -165,6 +166,7 @@ const cockpit = {
     filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke('dialog:save-file', opts),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {

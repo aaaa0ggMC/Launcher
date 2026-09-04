@@ -3,6 +3,7 @@
  * 模块加载时（abilities-loader eager 导入，早于 app ready）注册 yarj.scan
  * 命名作业与 cockpit-tile 协议的 startup hook（协议需 ready 后才可 handle）。
  */
+import { shell } from 'electron'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { makeLogger } from '../../main/process/logger'
 import { startJobByName } from '../../main/process/background-tasks'
@@ -29,7 +30,7 @@ import {
   reverseGeocode,
   pruneMissingPhotos
 } from './service'
-import { queryPhotos, updatePhoto } from './db'
+import { queryPhotos, updatePhoto, batchUpdatePhotoGps, type BatchGpsUpdateItem } from './db'
 import { readLodData } from './lod'
 import { readHierarchy } from './hierarchy'
 import { registerStartupHook } from '../../main/process/startup'
@@ -196,12 +197,14 @@ export default [
       const bbox = Array.isArray(ctx.named.bbox)
         ? (ctx.named.bbox as [number, number, number, number])
         : undefined
+      const orderGpsFirst = ctx.named.orderGpsFirst === true || ctx.named.orderGpsFirst === 'true'
       return queryPhotos({
         root: typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined,
         hasGps: hasGps || undefined,
         since: typeof ctx.named.since === 'string' ? ctx.named.since : undefined,
         q: typeof ctx.named.q === 'string' && ctx.named.q ? ctx.named.q : undefined,
-        bbox
+        bbox,
+        orderGpsFirst: orderGpsFirst || undefined
       })
     }
   },
@@ -242,6 +245,30 @@ export default [
       const photo = updatePhoto(path, { patch, lat, lon, alt })
       if (!photo) return { ok: false, error: '照片不在元数据库中，请先扫描' }
       return { ok: true, photo }
+    }
+  },
+  {
+    name: 'yarj.batch-update-gps',
+    description: '批量更新一组照片的 GPS 坐标 (--updates <json>)',
+    usage: 'yarj.batch-update-gps --updates \'[{"path":"/a.jpg","lat":35.1,"lon":139.2}]\'',
+    run: async (ctx) => {
+      let updates: BatchGpsUpdateItem[] = []
+      if (Array.isArray(ctx.named.updates)) {
+        updates = ctx.named.updates as BatchGpsUpdateItem[]
+      } else if (typeof ctx.named.updates === 'string') {
+        try {
+          updates = JSON.parse(ctx.named.updates) as BatchGpsUpdateItem[]
+        } catch {
+          return { ok: false, error: '无效的 JSON updates 参数' }
+        }
+      }
+      if (!updates.length) return { ok: true, count: 0 }
+      try {
+        const count = batchUpdatePhotoGps(updates)
+        return { ok: true, count }
+      } catch (err) {
+        return { ok: false, error: String(err) }
+      }
     }
   },
   {
@@ -355,6 +382,26 @@ export default [
     run: async (ctx) => {
       const id = typeof ctx.named.id === 'string' && ctx.named.id ? ctx.named.id : undefined
       await clearTileCache(id)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'yarj.show-item-in-folder',
+    description: '在系统文件管理器中定位显示指定文件 (--path)',
+    usage: 'yarj.show-item-in-folder --path /path/to/file',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      if (path) shell.showItemInFolder(path)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'yarj.open-path',
+    description: '使用系统默认关联程序打开指定文件或目录 (--path)',
+    usage: 'yarj.open-path --path /path/to/file',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      if (path) await shell.openPath(path)
       return { ok: true }
     }
   }

@@ -11,5 +11,6 @@
   "background.stop.desc": "Stop a task (--id, process: SIGTERM→SIGKILL; job: cancel)",
   "background.kill.desc": "Force-kill a process task (--id, SIGKILL)",
   "background.remove.desc": "Remove a finished task from the list (--id)",
-  "background.clear-finished.desc": "Remove all stopped/finished tasks at once"
+  "background.clear-finished.desc": "Remove all stopped/finished tasks at once",
+  "background.restart.desc": "Restart a background process task (--id)"
 }

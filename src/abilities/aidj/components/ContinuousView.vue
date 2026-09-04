@@ -67,11 +67,22 @@ function shortPlayer(name: string): string {
   return short.slice(0, 5) + '…' + short.slice(-4)
 }
 
+const selectedPlayer = computed(() => {
+  const cur = info.value?.player
+  if (!cur) return null
+  const exact = players.value.find((p) => p === cur)
+  if (exact) return exact
+  const byShort = players.value.find((p) => shortPlayer(p) === shortPlayer(cur))
+  return byShort ?? cur
+})
+
 const playerItems = computed(() =>
   players.value.map((p) => ({
     title: shortPlayer(p),
     value: p,
-    disabled: p !== info.value?.player && takenByOthers.value.includes(p)
+    disabled:
+      shortPlayer(p) !== shortPlayer(info.value?.player ?? '') &&
+      takenByOthers.value.some((o) => shortPlayer(o) === shortPlayer(p))
   }))
 )
 
@@ -132,10 +143,15 @@ async function switchPlayer(name: string): Promise<void> {
   if (!props.task?.id || switching.value || !name) return
   switching.value = true
   try {
-    await window.cockpit.command('aidj.continuous-switch', {
-      task: props.task.id,
-      player: name
-    })
+    const res = (await window.cockpit
+      .command('aidj.continuous-switch', {
+        task: props.task.id,
+        player: name
+      })
+      .catch(() => null)) as { ok?: boolean; error?: string } | null
+    if (res && !res.ok && res.error) {
+      console.warn('aidj.continuous-switch failed:', res.error)
+    }
     await refresh()
   } finally {
     switching.value = false
@@ -268,7 +284,7 @@ onUnmounted(() => {
         }}</span>
         <v-spacer />
         <v-select
-          :model-value="info?.player ?? null"
+          :model-value="selectedPlayer"
           :items="playerItems"
           :item-props="(item: any) => ({ disabled: item.raw?.disabled })"
           density="compact"

@@ -78,6 +78,10 @@ export interface AidjConfig {
     web_remote_port?: number
     /** 听歌时长统计总开关（time.csv 后台跟踪；默认开）。 */
     listening_stats?: boolean
+    /** 听歌历史时间线记录开关（songs_timeline.csv 追加写入；默认开）。 */
+    song_timeline?: boolean
+    /** DBus 模式下“从此刻开始”的提示词模板（默认 "从 {info} 开始"）。 */
+    start_from_now_template?: string
   }
 }
 
@@ -137,7 +141,9 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     default_volume: 0.8,
     spectrum_enabled: false,
     web_remote_port: 17320,
-    listening_stats: true
+    listening_stats: true,
+    song_timeline: true,
+    start_from_now_template: '从 {info} 开始'
   }
 }
 

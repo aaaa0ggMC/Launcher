@@ -113,36 +113,6 @@ export function makeCapsuleRing(
   return ring
 }
 
-/** 计算平面经纬度点集的 2D 凸包（Monotone Chain 算法）。 */
-function computeConvexHull(points: [number, number][]): [number, number][] {
-  if (points.length <= 2) return points
-  const sorted = [...points].sort((a, b) => (a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]))
-
-  const cross = (o: [number, number], a: [number, number], b: [number, number]): number =>
-    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-  const lower: [number, number][] = []
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-      lower.pop()
-    }
-    lower.push(p)
-  }
-
-  const upper: [number, number][] = []
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i]
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-      upper.pop()
-    }
-    upper.push(p)
-  }
-
-  lower.pop()
-  upper.pop()
-  return lower.concat(upper)
-}
-
 /** 聚类单元。 */
 export interface PhotoCluster {
   id: string
@@ -158,9 +128,12 @@ export interface PhotoCluster {
  */
 export function clusterPhotosSpatiotemporal(
   photos: Photo[],
-  granularity: ExploredGranularity = 'standard'
+  granularity: ExploredGranularity = 'standard',
+  userRadiusM?: number
 ): PhotoCluster[] {
   const cfg: GranularityConfig = GRANULARITY_PRESETS[granularity] || GRANULARITY_PRESETS.standard
+  const baseRadius =
+    userRadiusM != null && userRadiusM > 0 && userRadiusM < 400 ? userRadiusM : cfg.baseRadiusM
   const timeLimitMs = cfg.timeWindowHours * 3600 * 1000
   const maxDistM = cfg.maxLinkDistM
 
@@ -220,15 +193,18 @@ export function clusterPhotosSpatiotemporal(
       const dist = haversineDistM(a.lon, a.lat, b.lon, b.lat)
       if (dist > maxDistM) continue // 超出人类单次活动距离上限，无论时间多近都不属于同一连续探索区
 
-      // 时间差异判定
+      // (1) 空间相交/重叠（在 2.2 倍基础足迹半径内）：
+      // 两点在地理上直接接触相交，无论何时拍摄都物理融合成单个连续多边形，杜绝内部同心圈与透明度叠层发糊
+      if (dist <= baseRadius * 2.2) {
+        union(i, j)
+        continue
+      }
+
+      // (2) 空间在同一探索走廊（dist <= maxDistM）且时间在同一窗口内：
+      // 合并为同一次出行的连续探索多边形
       if (a.t != null && b.t != null) {
         const timeDiff = Math.abs(a.t - b.t)
         if (timeDiff <= timeLimitMs) {
-          union(i, j)
-        }
-      } else {
-        // 无时间戳时，若空间在极近距离（2倍基础半径内）则聚类
-        if (dist <= cfg.baseRadiusM * 2) {
           union(i, j)
         }
       }
@@ -270,15 +246,15 @@ export function clusterPhotosSpatiotemporal(
   return clusters
 }
 
+import polygonClipping from 'polygon-clipping'
+
 /**
- * 为一组照片群（PhotoCluster）生成带圆角（半径为 R）的测地线凸图形（Smooth Convex Rounded Polygon）：
- * - 1 个点：正圆盘（Circle）
- * - 2 个点：两端圆角平滑连接的胶囊体 / 双原子（Capsule / Dumbbell）
- * - 3 个点：带平滑圆角的三角形（Rounded Triangle）
- * - N 个点：带平滑圆角的凸多边形（Rounded Convex Polygon）
- *
- * 数学原理：计算聚类群中所有照片点测地线圆盘（半径 R）的整体测地线凸包（Convex Hull of Disks）。
- * 保证每个聚类群只生成一个干净、闭合、外围带圆角且无任何内部重叠暗斑的多边形。
+ * 为一组照片群（PhotoCluster）生成真实的地理空间足迹包络（True Organic Fog-of-War Footprint）：
+ * - 每个照片点拥有自身的探索半径 Range（测地线圆盘）；
+ * - 使用 Martinez 2D 几何布尔并集引擎（polygon-clipping union）将相交重叠的足迹圆盘精准溶解（Dissolve）为一体；
+ * - 密集沿街拍摄时自然融合成蜿蜒起伏的多叶/条状有机足迹走廊；
+ * - 稀疏跳跃点保持各自真实的探索圆盘，绝不在未曾拍摄的远距离区域强行拉出虚假走廊；
+ * - 彻底消除内部重叠接缝、同心杂线与半透明叠加暗斑。
  */
 export function generateExploredGeoJSON(
   photos: Photo[],
@@ -288,7 +264,7 @@ export function generateExploredGeoJSON(
   const cfg = GRANULARITY_PRESETS[granularity] || GRANULARITY_PRESETS.standard
   const baseRadius =
     userRadiusM != null && userRadiusM > 0 && userRadiusM < 400 ? userRadiusM : cfg.baseRadiusM
-  const clusters = clusterPhotosSpatiotemporal(photos, granularity)
+  const clusters = clusterPhotosSpatiotemporal(photos, granularity, userRadiusM)
 
   const features: GeoJSON.Feature[] = []
 
@@ -317,34 +293,58 @@ export function generateExploredGeoJSON(
           coordinates: [ring]
         }
       })
-    } else {
-      // 2个点（胶囊/双原子）、3个点（圆角三角形）、N个点（圆角凸多边形）
-      // 采集各点测地线圆盘边界点，统一计算整体 2D 测地凸包
-      const samplePoints: [number, number][] = []
-      const circleSteps = n === 2 ? 24 : 16
+      continue
+    }
 
-      for (const p of list) {
-        const r =
-          Number(p.appendix?.explored_radius_m) && Number(p.appendix?.explored_radius_m) < 400
-            ? Number(p.appendix.explored_radius_m)
-            : baseRadius
-        const cRing = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, circleSteps)
-        samplePoints.push(...cRing)
-      }
+    // 多点聚类群：生成各个照片点真实 Range 半径的测地线圆盘
+    const rawPolygons: [number, number][][][] = []
 
-      const hull = computeConvexHull(samplePoints)
-      if (hull.length >= 3) {
-        hull.push([hull[0][0], hull[0][1]]) // 闭合环
+    for (const p of list) {
+      const r =
+        Number(p.appendix?.explored_radius_m) && Number(p.appendix?.explored_radius_m) < 400
+          ? Number(p.appendix.explored_radius_m)
+          : baseRadius
+      const cRing = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, 24)
+      rawPolygons.push([cRing])
+    }
+
+    // 执行几何布尔并集（Boolean Union），将相交圆盘融合成千奇百怪、蜿蜒流动的真实足迹形状
+    try {
+      const unionResult =
+        rawPolygons.length === 1
+          ? [rawPolygons[0]]
+          : polygonClipping.union(
+              rawPolygons[0],
+              ...(rawPolygons.slice(1) as [polygonClipping.Polygon, ...polygonClipping.Polygon[]])
+            )
+
+      for (const poly of unionResult) {
         features.push({
           type: 'Feature',
           properties: {
             clusterId: cluster.id,
             count: n,
-            type: n === 2 ? 'capsule' : n === 3 ? 'rounded-triangle' : 'rounded-convex-hull'
+            type: 'organic-footprint'
           },
           geometry: {
             type: 'Polygon',
-            coordinates: [hull]
+            coordinates: poly as [number, number][][]
+          }
+        })
+      }
+    } catch {
+      // 容错降级
+      for (const p of rawPolygons) {
+        features.push({
+          type: 'Feature',
+          properties: {
+            clusterId: cluster.id,
+            count: n,
+            type: 'fallback-polygon'
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: p
           }
         })
       }

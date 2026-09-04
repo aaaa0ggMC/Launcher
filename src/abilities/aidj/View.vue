@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import { ref, inject, type Ref, computed, watch, nextTick, onMounted, onDeactivated } from 'vue'
+import {
+  ref,
+  inject,
+  type Ref,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onActivated,
+  onDeactivated
+} from 'vue'
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
 import FreqList from './components/FreqList.vue'
@@ -16,6 +26,8 @@ const menuOpen = ref(false)
 const menuStep = ref<'main' | 'sessions' | 'freq'>('main')
 const statsOpen = ref(false)
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
+const mode = ref<'dbus' | 'web'>('dbus')
+let modeUnsub: (() => void) | null = null
 
 interface SessionItem {
   id: string
@@ -113,6 +125,16 @@ async function refreshSessions(): Promise<void> {
   }
 }
 
+async function refreshMode(): Promise<void> {
+  const res = (await window.cockpit.command('aidj.player-mode').catch(() => null)) as {
+    ok?: boolean
+    mode?: 'dbus' | 'web'
+  } | null
+  if (res?.ok && res.mode) {
+    mode.value = res.mode
+  }
+}
+
 function toggleMenu(): void {
   if (menuOpen.value) {
     menuOpen.value = false
@@ -121,6 +143,7 @@ function toggleMenu(): void {
     menuOpen.value = true
     menuStep.value = 'main'
     refreshSessions()
+    void refreshMode()
     void refreshLyricsOpen()
   }
 }
@@ -167,6 +190,67 @@ function newChat(): void {
   menuOpen.value = false
   menuStep.value = 'main'
   void chatRef.value?.newChat?.()
+}
+
+/**
+ * Page-menu 「从此刻开始」 (DBus 模式专用)
+ * 读取当前 DBus 播放器歌曲信息，套用配置的模板生成提示词并自动触发 /persist
+ */
+async function startFromNow(): Promise<void> {
+  menuOpen.value = false
+  menuStep.value = 'main'
+  try {
+    const trackRes = (await window.cockpit.command('aidj.current-dbus-track')) as {
+      ok?: boolean
+      info?: string
+      track?: string
+      artist?: string
+      album?: string
+      error?: string
+    }
+    if (!trackRes?.ok || !trackRes.info) {
+      showSnack(
+        trackRes?.error ||
+          t('aidj.start_now_failed', '未能获取当前播放信息，请确认播放器正在运行并播放歌曲'),
+        'error'
+      )
+      return
+    }
+
+    let template = '从 {info} 开始'
+    const cfgRes = (await window.cockpit.command('aidj.get-config').catch(() => null)) as {
+      ok?: boolean
+      config?: { preferences?: { start_from_now_template?: string } }
+    } | null
+    if (cfgRes?.ok && cfgRes.config?.preferences?.start_from_now_template) {
+      template = cfgRes.config.preferences.start_from_now_template
+    }
+
+    const info = trackRes.info
+    const track = trackRes.track || info
+    const artist = trackRes.artist || ''
+    const album = trackRes.album || ''
+
+    const prompt = template
+      .replace(/\{info\}/g, info)
+      .replace(/\{track\}/g, track)
+      .replace(/\{title\}/g, track)
+      .replace(/\{artist\}/g, artist)
+      .replace(/\{album\}/g, album)
+      .trim()
+
+    if (!prompt) {
+      showSnack(t('aidj.start_now_prompt_empty', '格式化后的提示词为空'), 'error')
+      return
+    }
+
+    await chatRef.value?.runPersistCommand?.(prompt)
+  } catch (e) {
+    showSnack(
+      `${t('aidj.start_now_failed', '从此刻开始启动失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
+  }
 }
 
 // -- 桌面歌词：绑定当前设置的 DBus，窗口单例（已存在则聚焦，不重复启动） -----
@@ -394,7 +478,14 @@ onDeactivated(() => {
 })
 
 onMounted(() => {
+  void refreshMode()
   if (window.cockpit?.on) {
+    modeUnsub = window.cockpit.on('cockpit:aidj-mode', (event: unknown) => {
+      const ev = event as Record<string, unknown>
+      if (ev?.mode === 'dbus' || ev?.mode === 'web') {
+        mode.value = ev.mode
+      }
+    })
     btUnsub = window.cockpit.on('cockpit:bt', (event: unknown) => {
       const ev = event as Record<string, unknown>
       if (ev?.type === 'output') {
@@ -427,10 +518,18 @@ onMounted(() => {
   }
 })
 
+onActivated(() => {
+  void refreshMode()
+})
+
 onDeactivated(() => {
   if (btUnsub) {
     btUnsub()
     btUnsub = null
+  }
+  if (modeUnsub) {
+    modeUnsub()
+    modeUnsub = null
   }
 })
 
@@ -454,6 +553,10 @@ defineExpose({ toMarkdown })
               <div class="menu-item" @click="newChat">
                 <v-icon size="18">mdi-message-plus-outline</v-icon>
                 <span>{{ t('aidj.subpage.newchat', '新建会话') }}</span>
+              </div>
+              <div v-if="mode === 'dbus'" class="menu-item" @click="startFromNow">
+                <v-icon size="18">mdi-play-circle-outline</v-icon>
+                <span>{{ t('aidj.subpage.start_from_now', '从此刻开始') }}</span>
               </div>
               <div class="menu-item" @click="enterSessions">
                 <v-icon size="18">mdi-history</v-icon>

@@ -26,7 +26,7 @@ Electron + Vue 3 + Vuetify 3 (Material 3)。以下为搭建、开发、迁移的
 - `systemctl` — systemd 服务
 - `plasma-apply-wallpaperimage` / `kscreen-doctor` — 壁纸 / 显示输出 (KDE)
 - `konsole` — 终端启动 (可在 `~/.config/LinuxCockpit/config.json` 改)
-- `ffprobe` (ffmpeg) — AIDJ 响度分析（动态音量平衡）
+- `ffprobe` (ffmpeg) — AIDJ 响度分析（动态音量平衡）/ YARJ 视频元数据与 GPS 解析
 - MPRIS 兼容播放器（`vlc` / `mpv` 等）+ 会话 DBus — AIDJ 播放控制
 - OpenAI 兼容 API 端点 + [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 服务 — AIDJ 元数据同步 / 歌单生成
 

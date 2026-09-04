@@ -1,8 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
+import http from 'http'
 import pidusage from 'pidusage'
 import { run } from './util'
 import { makeLogger } from './logger'
-import type { BtOutputMessage, BtTaskInfo } from '../../shared/types'
+import type { BtGpuInfo, BtNetworkPort, BtOutputMessage, BtTaskInfo } from '../../shared/types'
 
 /**
  * Background task framework — architectural, not tied to any ability.
@@ -111,6 +112,7 @@ export function registerJobHandler(name: string, handler: JobHandler, gate?: Job
 
 interface InternalTask {
   info: BtTaskInfo
+  options?: StartProcessOptions
   /** process tasks only */
   child?: ChildProcessWithoutNullStreams
   output: BtOutputMessage[]
@@ -268,41 +270,455 @@ function onExit(t: InternalTask, code: number | null, signal: string | null = nu
 }
 
 // ---------------------------------------------------------------------------
-// Resource stats
+// Resource & network port stats (Cross-platform)
 // ---------------------------------------------------------------------------
 
-/**
- * Poll stats for one process task via `pidusage` (cross-platform: /proc on
- * Linux, PowerShell on Windows, ps on macOS). CPU is an instantaneous percent
- * measured between calls; memory is resident bytes.
- */
-async function pollProcessTask(t: InternalTask): Promise<void> {
-  const pid = t.info.pid
-  if (!pid || !t.child) return
+/** Cache probed web ports (TTL: 15s) */
+const webProbeCache = new Map<
+  number,
+  { type: 'web' | 'tcp' | 'udp'; url?: string; title?: string; expires: number }
+>()
+
+/** Probe a TCP port to determine if it hosts a Web (HTTP) service */
+function probeWebPort(
+  port: number
+): Promise<{ type: 'web' | 'tcp' | 'udp'; url?: string; title?: string }> {
+  const now = Date.now()
+  const cached = webProbeCache.get(port)
+  if (cached && cached.expires > now) {
+    return Promise.resolve({ type: cached.type, url: cached.url, title: cached.title })
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false
+    const done = (res: { type: 'web' | 'tcp' | 'udp'; url?: string; title?: string }): void => {
+      if (resolved) return
+      resolved = true
+      webProbeCache.set(port, { ...res, expires: Date.now() + 15000 })
+      resolve(res)
+    }
+
+    const req = http.get(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/',
+        headers: { Accept: 'text/html,application/xhtml+xml,application/json,*/*' },
+        timeout: 500
+      },
+      (res) => {
+        let rawBody = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => {
+          rawBody = (rawBody + chunk).slice(0, 2048)
+        })
+        res.on('end', () => {
+          let title: string | undefined
+          const match = rawBody.match(/<title[^>]*>([^<]+)<\/title>/i)
+          if (match) title = match[1].trim()
+          done({
+            type: 'web',
+            url: `http://127.0.0.1:${port}`,
+            title
+          })
+        })
+      }
+    )
+
+    req.on('error', () => {
+      // If plain HTTP fails, maybe it's raw TCP
+      done({ type: 'tcp' })
+    })
+
+    req.on('timeout', () => {
+      req.destroy()
+      done({ type: 'tcp' })
+    })
+  })
+}
+
+/** Recursively collect child process PIDs for a root PID */
+async function getProcessTreePids(rootPid: number): Promise<number[]> {
+  const pids = new Set<number>([rootPid])
+  if (process.platform === 'linux' || process.platform === 'darwin') {
+    try {
+      const out = await run('pgrep', ['-P', String(rootPid)], { timeout: 1000 }).catch(() => '')
+      if (out) {
+        for (const line of out.split('\n')) {
+          const childPid = parseInt(line.trim(), 10)
+          if (!isNaN(childPid) && childPid > 0 && !pids.has(childPid)) {
+            pids.add(childPid)
+            const grandchildren = await getProcessTreePids(childPid).catch(() => [childPid])
+            for (const gc of grandchildren) pids.add(gc)
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  } else if (process.platform === 'win32') {
+    try {
+      const out = await run(
+        'wmic',
+        ['process', 'where', `(ParentProcessId=${rootPid})`, 'get', 'ProcessId'],
+        { timeout: 1000 }
+      ).catch(() => '')
+      if (out) {
+        for (const line of out.split('\n')) {
+          const childPid = parseInt(line.trim(), 10)
+          if (!isNaN(childPid) && childPid > 0 && !pids.has(childPid)) {
+            pids.add(childPid)
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return [...pids]
+}
+
+/** Kill an entire process tree (cross-platform). */
+async function killProcessTree(rootPid: number, signal: NodeJS.Signals = 'SIGKILL'): Promise<void> {
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/F', '/T', '/PID', String(rootPid)])
+    } catch {
+      // ignore
+    }
+    return
+  }
+
   try {
-    const stat = await pidusage(pid)
-    t.info.stats.cpu = Math.max(0, Math.round(stat.cpu))
-    t.info.stats.mem = Math.round(stat.memory / 1024 / 1024)
+    const pids = await getProcessTreePids(rootPid)
+    const pidList = [...pids].reverse()
+    for (const pid of pidList) {
+      try {
+        process.kill(pid, signal)
+      } catch {
+        // already exited
+      }
+    }
+    try {
+      process.kill(-rootPid, signal)
+    } catch {
+      // ignore
+    }
+  } catch {
+    try {
+      process.kill(rootPid, signal)
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/** Query listening and occupied network ports for given PIDs */
+async function getListeningPorts(pids: number[]): Promise<BtNetworkPort[]> {
+  if (!pids.length) return []
+  const pidSet = new Set(pids)
+  const results: BtNetworkPort[] = []
+  const seenKey = new Set<string>()
+
+  if (process.platform === 'linux') {
+    // 1. Try ss -H -tulpn
+    try {
+      const out = await run('ss', ['-H', '-tulpn'], { timeout: 1500 }).catch(() => '')
+      if (out) {
+        for (const line of out.split('\n')) {
+          if (!line.trim()) continue
+          let matched = false
+          for (const p of pidSet) {
+            if (line.includes(`pid=${p},`) || line.includes(`pid=${p})`)) {
+              matched = true
+              break
+            }
+          }
+          if (!matched) continue
+
+          const parts = line.trim().split(/\s+/)
+          if (parts.length < 5) continue
+          const proto = parts[0].toLowerCase().startsWith('udp')
+            ? ('udp' as const)
+            : ('tcp' as const)
+          const state = parts[1]
+          const local = parts[4]
+          const lastColon = local.lastIndexOf(':')
+          if (lastColon < 0) continue
+          const localAddress = local.slice(0, lastColon)
+          const port = parseInt(local.slice(lastColon + 1), 10)
+          if (isNaN(port) || port <= 0) continue
+
+          const key = `${proto}:${port}`
+          if (seenKey.has(key)) continue
+          seenKey.add(key)
+
+          let type: 'web' | 'tcp' | 'udp' = proto === 'udp' ? 'udp' : 'tcp'
+          let url: string | undefined
+          let title: string | undefined
+
+          if (proto === 'tcp') {
+            const probe = await probeWebPort(port)
+            type = probe.type
+            url = probe.url
+            title = probe.title
+          }
+
+          results.push({
+            proto,
+            localAddress,
+            port,
+            state,
+            type,
+            url,
+            title
+          })
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fallback to lsof
+    if (!results.length) {
+      try {
+        const out = await run('lsof', ['-iTCP', '-iUDP', '-P', '-n', '-a', '-p', pids.join(',')], {
+          timeout: 1500
+        }).catch(() => '')
+        if (out) {
+          for (const line of out.split('\n')) {
+            if (line.startsWith('COMMAND') || !line.trim()) continue
+            const parts = line.trim().split(/\s+/)
+            if (parts.length < 9) continue
+            const protoStr = parts[7]?.toLowerCase() ?? ''
+            const proto = protoStr.includes('udp') ? ('udp' as const) : ('tcp' as const)
+            const nameField = parts[8] ?? ''
+            const state = parts[9] ? parts[9].replace(/[()]/g, '') : undefined
+            const lastColon = nameField.lastIndexOf(':')
+            if (lastColon < 0) continue
+            const localAddress = nameField.slice(0, lastColon)
+            const port = parseInt(nameField.slice(lastColon + 1), 10)
+            if (isNaN(port) || port <= 0) continue
+
+            const key = `${proto}:${port}`
+            if (seenKey.has(key)) continue
+            seenKey.add(key)
+
+            let type: 'web' | 'tcp' | 'udp' = proto === 'udp' ? 'udp' : 'tcp'
+            let url: string | undefined
+            let title: string | undefined
+
+            if (proto === 'tcp') {
+              const probe = await probeWebPort(port)
+              type = probe.type
+              url = probe.url
+              title = probe.title
+            }
+
+            results.push({
+              proto,
+              localAddress,
+              port,
+              state,
+              type,
+              url,
+              title
+            })
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  } else if (process.platform === 'win32') {
+    try {
+      const out = await run('netstat', ['-ano'], { timeout: 2000 }).catch(() => '')
+      if (out) {
+        for (const line of out.split('\n')) {
+          const parts = line.trim().split(/\s+/)
+          if (parts.length < 4) continue
+          const lastPart = parts[parts.length - 1]
+          const pid = parseInt(lastPart, 10)
+          if (!pidSet.has(pid)) continue
+
+          const protoStr = parts[0].toLowerCase()
+          const proto = protoStr.startsWith('udp') ? ('udp' as const) : ('tcp' as const)
+          const local = parts[1]
+          const lastColon = local.lastIndexOf(':')
+          if (lastColon < 0) continue
+          const localAddress = local.slice(0, lastColon)
+          const port = parseInt(local.slice(lastColon + 1), 10)
+          if (isNaN(port) || port <= 0) continue
+          const state = proto === 'tcp' ? parts[3] : undefined
+
+          const key = `${proto}:${port}`
+          if (seenKey.has(key)) continue
+          seenKey.add(key)
+
+          let type: 'web' | 'tcp' | 'udp' = proto === 'udp' ? 'udp' : 'tcp'
+          let url: string | undefined
+          let title: string | undefined
+
+          if (proto === 'tcp') {
+            const probe = await probeWebPort(port)
+            type = probe.type
+            url = probe.url
+            title = probe.title
+          }
+
+          results.push({
+            proto,
+            localAddress,
+            port,
+            state,
+            type,
+            url,
+            title
+          })
+        }
+      }
+    } catch {
+      // ignore
+    }
+  } else if (process.platform === 'darwin') {
+    try {
+      const out = await run('lsof', ['-iTCP', '-iUDP', '-P', '-n', '-a', '-p', pids.join(',')], {
+        timeout: 1500
+      }).catch(() => '')
+      if (out) {
+        for (const line of out.split('\n')) {
+          if (line.startsWith('COMMAND') || !line.trim()) continue
+          const parts = line.trim().split(/\s+/)
+          if (parts.length < 9) continue
+          const protoStr = parts[7]?.toLowerCase() ?? ''
+          const proto = protoStr.includes('udp') ? ('udp' as const) : ('tcp' as const)
+          const nameField = parts[8] ?? ''
+          const state = parts[9] ? parts[9].replace(/[()]/g, '') : undefined
+          const lastColon = nameField.lastIndexOf(':')
+          if (lastColon < 0) continue
+          const localAddress = nameField.slice(0, lastColon)
+          const port = parseInt(nameField.slice(lastColon + 1), 10)
+          if (isNaN(port) || port <= 0) continue
+
+          const key = `${proto}:${port}`
+          if (seenKey.has(key)) continue
+          seenKey.add(key)
+
+          let type: 'web' | 'tcp' | 'udp' = proto === 'udp' ? 'udp' : 'tcp'
+          let url: string | undefined
+          let title: string | undefined
+
+          if (proto === 'tcp') {
+            const probe = await probeWebPort(port)
+            type = probe.type
+            url = probe.url
+            title = probe.title
+          }
+
+          results.push({
+            proto,
+            localAddress,
+            port,
+            state,
+            type,
+            url,
+            title
+          })
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return results
+}
+
+/**
+ * Poll CPU & memory stats for one process task and its child process tree via `pidusage`.
+ */
+async function pollProcessTask(t: InternalTask, pids: number[]): Promise<void> {
+  if (!pids.length || !t.child) return
+  try {
+    let totalCpu = 0
+    let totalMem = 0
+    let ppid: number | undefined
+    let elapsed: number | undefined
+
+    for (const p of pids) {
+      try {
+        const stat = await pidusage(p)
+        totalCpu += stat.cpu
+        totalMem += stat.memory
+        if (p === t.info.pid) {
+          ppid = stat.ppid
+          elapsed = stat.elapsed
+        }
+      } catch {
+        // child might have exited
+      }
+    }
+
+    t.info.stats.cpu = Math.max(0, Math.round(totalCpu))
+    const memMb = Math.round(totalMem / 1024 / 1024)
+    t.info.stats.mem = memMb
+    t.info.stats.memDetails = { rss: memMb }
+    if (ppid) t.info.stats.ppid = ppid
+    if (elapsed) t.info.stats.elapsed = elapsed
   } catch {
     // process gone / not inspectable → keep last known stats
   }
 }
 
-/** Query GPU memory (MB) for the given pids via nvidia-smi compute-apps. */
-async function pollGpu(pids: number[]): Promise<Map<number, number>> {
-  const map = new Map<number, number>()
-  if (!pids.length) return map
-  const out = await run(
-    'nvidia-smi',
-    ['--query-compute-apps=pid,used_gpu_memory', '--format=csv,noheader,nounits'],
-    { timeout: 3000 }
-  ).catch(() => '')
-  if (!out) return map
-  for (const line of out.split('\n')) {
-    const m = line.match(/(\d+)\s*,\s*(\d+)/)
-    if (m) map.set(Number(m[1]), Number(m[2]))
+/** Query GPU details and memory via nvidia-smi. */
+async function pollGpuInfo(pids: number[]): Promise<{
+  globalGpu?: BtGpuInfo
+  processVramMap: Map<number, number>
+}> {
+  const processVramMap = new Map<number, number>()
+  let globalGpu: BtGpuInfo | undefined
+
+  try {
+    const gpuOut = await run(
+      'nvidia-smi',
+      [
+        '--query-gpu=index,name,utilization.gpu,memory.total,memory.used,temperature.gpu',
+        '--format=csv,noheader,nounits'
+      ],
+      { timeout: 3000 }
+    ).catch(() => '')
+    if (gpuOut) {
+      const line = gpuOut.trim().split('\n')[0]
+      if (line) {
+        const [, name, util, total, used, temp] = line.split(',').map((s) => s.trim())
+        globalGpu = {
+          name,
+          utilization: util ? Number(util) : undefined,
+          totalMemory: total ? Number(total) : undefined,
+          usedMemory: used ? Number(used) : undefined,
+          temperature: temp ? Number(temp) : undefined
+        }
+      }
+    }
+
+    if (pids.length) {
+      const appOut = await run(
+        'nvidia-smi',
+        ['--query-compute-apps=pid,used_gpu_memory', '--format=csv,noheader,nounits'],
+        { timeout: 3000 }
+      ).catch(() => '')
+      if (appOut) {
+        for (const line of appOut.split('\n')) {
+          const m = line.match(/(\d+)\s*,\s*(\d+)/)
+          if (m) processVramMap.set(Number(m[1]), Number(m[2]))
+        }
+      }
+    }
+  } catch {
+    // ignore
   }
-  return map
+
+  return { globalGpu, processVramMap }
 }
 
 async function poll(): Promise<void> {
@@ -311,12 +727,49 @@ async function poll(): Promise<void> {
     maybeStopPolling()
     return
   }
-  const pids = running.map((t) => t.info.pid).filter((p): p is number => typeof p === 'number')
-  const [gpuMap] = await Promise.all([pollGpu(pids)])
+
+  const taskPidsMap = new Map<string, number[]>()
+  const allPids: number[] = []
+
+  for (const t of running) {
+    if (t.info.pid) {
+      const tree = await getProcessTreePids(t.info.pid)
+      taskPidsMap.set(t.info.id, tree)
+      allPids.push(...tree)
+    }
+  }
+
+  const { globalGpu, processVramMap } = await pollGpuInfo(allPids)
+
   for (const t of running) {
     if (t.info.status !== 'running') continue
-    await pollProcessTask(t)
-    if (t.info.pid && gpuMap.has(t.info.pid)) t.info.stats.gpu = gpuMap.get(t.info.pid)
+    const treePids = taskPidsMap.get(t.info.id) ?? (t.info.pid ? [t.info.pid] : [])
+    await pollProcessTask(t, treePids)
+
+    // GPU stats
+    let totalProcVram = 0
+    let hasProcVram = false
+    for (const p of treePids) {
+      if (processVramMap.has(p)) {
+        totalProcVram += processVramMap.get(p)!
+        hasProcVram = true
+      }
+    }
+    if (hasProcVram) {
+      t.info.stats.gpu = totalProcVram
+    }
+    if (globalGpu) {
+      t.info.stats.gpuInfo = {
+        ...globalGpu,
+        processMemory: hasProcVram ? totalProcVram : undefined
+      }
+    }
+
+    // Network ports
+    if (treePids.length) {
+      const ports = await getListeningPorts(treePids)
+      t.info.stats.ports = ports
+    }
   }
   broadcastChanged()
 }
@@ -351,7 +804,8 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
   const child = spawn(cmd, args, {
     cwd: opts.cwd,
     env: { ...process.env, ...(opts.env ?? {}) },
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32'
   })
 
   const t: InternalTask = {
@@ -364,6 +818,8 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
       status: 'running',
       pid: child.pid,
       command: opts.argv.join(' '),
+      argv: opts.argv,
+      cwd: opts.cwd,
       startedAt: Date.now(),
       stats: {},
       outputCount: 0,
@@ -371,6 +827,7 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
       canSignal: true,
       tags: opts.tags
     },
+    options: opts,
     output: [],
     child,
     write: (data) => {
@@ -390,15 +847,128 @@ export function startProcessTask(opts: StartProcessOptions): BtTaskInfo {
   child.stdout.on('data', (d: string) => streamLines(t, 'stdout', d, outBuf))
   child.stderr.on('data', (d: string) => streamLines(t, 'stderr', d, errBuf))
   child.on('error', (err) => {
-    log.error('process task error', { id, error: err.message })
-    appendOutput(t, { stream: 'stderr', line: `[spawn error] ${err.message}` })
-    onExit(t, null)
+    if (t.child === child) {
+      log.error('process task error', { id, error: err.message })
+      appendOutput(t, { stream: 'stderr', line: `[spawn error] ${err.message}` })
+      onExit(t, null)
+    }
   })
-  child.on('exit', (code, signal) => onExit(t, code, signal))
+  child.on('exit', (code, signal) => {
+    if (t.child === child) {
+      onExit(t, code, signal)
+    }
+  })
 
   broadcastChanged()
   ensurePolling()
   return snapshot(t)
+}
+
+/**
+ * Restart a background process task using its original launch options.
+ */
+export async function restartTask(id: string): Promise<boolean> {
+  const t = tasks.get(id)
+  if (!t) return false
+  if (t.info.kind !== 'process' || !t.options) {
+    log.warn('restartTask: task is not a restartable process', { id })
+    return false
+  }
+
+  log.info('restarting process task', { id, name: t.info.name })
+
+  // 1. Cleanly terminate and unbind existing child process if still running
+  const oldChild = t.child
+  if (oldChild) {
+    oldChild.removeAllListeners('exit')
+    oldChild.removeAllListeners('error')
+    oldChild.removeAllListeners('close')
+    if (oldChild.stdout) oldChild.stdout.removeAllListeners()
+    if (oldChild.stderr) oldChild.stderr.removeAllListeners()
+    if (oldChild.pid) {
+      await killProcessTree(oldChild.pid, 'SIGKILL')
+    }
+    t.child = undefined
+  }
+  if (t.forceTimer) {
+    clearTimeout(t.forceTimer)
+    t.forceTimer = undefined
+  }
+
+  // 2. Append visually striking restart banner to output (bright ANSI colors & divider)
+  const time = new Date().toLocaleTimeString()
+  appendOutput(t, {
+    line: `\x1b[1;36m\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`
+  })
+  appendOutput(t, {
+    line: `\x1b[1;97;44m 🚀 [${time}] 任务已触发重启 / Restarting Task... \x1b[0m`
+  })
+  appendOutput(t, {
+    line: `\x1b[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n`
+  })
+
+  // 3. Re-spawn process with saved options
+  const opts = t.options
+  const [cmd, ...args] = opts.argv
+  try {
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, ...(opts.env ?? {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32'
+    })
+
+    t.child = child
+    t.info.status = 'running'
+    t.info.pid = child.pid
+    t.info.startedAt = Date.now()
+    t.info.endedAt = undefined
+    t.info.exitCode = undefined
+    t.info.stats = {}
+
+    t.write = (data) => {
+      try {
+        child.stdin.write(data)
+      } catch (e) {
+        log.warn('stdin write failed', { id, error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+
+    const outBuf = { rest: '' }
+    const errBuf = { rest: '' }
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (d: string) => streamLines(t, 'stdout', d, outBuf))
+    child.stderr.on('data', (d: string) => streamLines(t, 'stderr', d, errBuf))
+    child.on('error', (err) => {
+      if (t.child === child) {
+        log.error('process task error', { id, error: err.message })
+        appendOutput(t, { stream: 'stderr', line: `[spawn error] ${err.message}` })
+        onExit(t, null)
+      }
+    })
+    child.on('exit', (code, signal) => {
+      if (t.child === child) {
+        onExit(t, code, signal)
+      }
+    })
+
+    broadcastChanged()
+    ensurePolling()
+    return true
+  } catch (err) {
+    log.error('process task restart spawn threw', {
+      id,
+      error: err instanceof Error ? err.message : String(err)
+    })
+    appendOutput(t, {
+      stream: 'stderr',
+      line: `[restart error] ${err instanceof Error ? err.message : String(err)}`
+    })
+    t.info.status = 'error'
+    broadcastChanged()
+    return false
+  }
 }
 
 /**
@@ -563,25 +1133,17 @@ export function signalTask(id: string, signal: NodeJS.Signals): boolean {
 export async function stopTask(id: string): Promise<boolean> {
   const t = tasks.get(id)
   if (!t || t.info.status !== 'running') return false
-  if (t.child) {
+  if (t.child && t.child.pid) {
+    const pid = t.child.pid
     log.info('stopping process task', { id, name: t.info.name })
     t.stopRequested = true
-    try {
-      t.child.kill('SIGTERM')
-    } catch {
-      // ignore
-    }
+    void killProcessTree(pid, 'SIGTERM')
     t.forceTimer = setTimeout(() => {
       const cur = tasks.get(id)
-      if (cur?.child) {
-        try {
-          cur.child.kill('SIGKILL')
-        } catch {
-          // ignore
-        }
+      if (cur?.child && cur.child.pid) {
+        void killProcessTree(cur.child.pid, 'SIGKILL')
       }
     }, 3000)
-    // status updates via the child's exit event
     return true
   }
   // job task
@@ -599,13 +1161,9 @@ export async function stopTask(id: string): Promise<boolean> {
 /** Force-kill a process task immediately (SIGKILL). */
 export function killTask(id: string): boolean {
   const t = tasks.get(id)
-  if (!t?.child) return false
-  try {
-    t.child.kill('SIGKILL')
-    return true
-  } catch {
-    return false
-  }
+  if (!t?.child || !t.child.pid) return false
+  void killProcessTree(t.child.pid, 'SIGKILL')
+  return true
 }
 
 /** Remove a finished/errored task from the registry. */
@@ -635,11 +1193,24 @@ export function clearFinishedTasks(): number {
 /** Kill every running child on app shutdown (tasks are attached to the app). */
 export function shutdownBackgroundTasks(): void {
   for (const t of tasks.values()) {
-    if (t.child && t.info.status === 'running') {
-      try {
-        t.child.kill('SIGKILL')
-      } catch {
-        // ignore
+    if (t.child && t.child.pid && t.info.status === 'running') {
+      if (process.platform === 'win32') {
+        try {
+          spawnSync('taskkill', ['/F', '/T', '/PID', String(t.child.pid)])
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          process.kill(-t.child.pid, 'SIGKILL')
+        } catch {
+          // ignore
+        }
+        try {
+          t.child.kill('SIGKILL')
+        } catch {
+          // ignore
+        }
       }
     }
   }

@@ -11,5 +11,6 @@
   "background.stop.desc": "停止后台任务 (--id, 进程: SIGTERM→SIGKILL; 任务: 取消)",
   "background.kill.desc": "强制结束后台进程任务 (--id, SIGKILL)",
   "background.remove.desc": "从列表移除已结束的后台任务 (--id)",
-  "background.clear-finished.desc": "一键移除所有已停止/已结束的后台任务"
+  "background.clear-finished.desc": "一键移除所有已停止/已结束的后台任务",
+  "background.restart.desc": "重启后台进程任务 (--id)"
 }

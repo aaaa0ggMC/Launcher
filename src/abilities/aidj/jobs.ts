@@ -25,7 +25,7 @@ import {
   getCurrentPlayerKey
 } from './service'
 import OpenAI from 'openai'
-import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo } from './types'
+import type { SongMeta, PlaylistEntry, ChatMessage, LoudnessInfo, PlayerStatus } from './types'
 import { SEPARATOR } from './types'
 import { PLAYBACK_TAG, getPlayerMode, getWebPlayerBackend } from './player-backend'
 import {
@@ -34,6 +34,7 @@ import {
   isWebRemoteRunning,
   getWebRemotePort
 } from './web-remote'
+import { recordSongTimeline } from './song-timeline'
 
 const log = makeLogger('aidj-persistent')
 
@@ -363,10 +364,10 @@ export function boundContinuousPlayer(playerKey: string): string | undefined {
   return playerBindings.get(playerKey)
 }
 
-export function switchContinuousPlayer(
+export async function switchContinuousPlayer(
   taskId: string,
   playerKey: string
-): { ok: boolean; error?: string } {
+): Promise<{ ok: boolean; error?: string }> {
   const st = continuousTasks.get(taskId)
   if (!st) return { ok: false, error: '任务不存在' }
   if (playerBindings.get(playerKey) && playerBindings.get(playerKey) !== taskId) {
@@ -382,6 +383,28 @@ export function switchContinuousPlayer(
   for (const ct of chatTasks.values()) {
     if (samePlayer(ct.player, oldKey)) ct.player = playerKey
   }
+
+  if (st.dbus) {
+    await st.dbus.switchToPlayer(playerKey)
+    // If the task has an active track or is pending first track, send to the new player
+    const trackToPlay = st.current || (st.index < st.total ? st.queue[st.index] : null)
+    if (trackToPlay) {
+      if (!st.current && st.index < st.total) {
+        st.current = trackToPlay
+        st.index++
+      }
+      try {
+        await st.dbus.sendFiles([trackToPlay.path])
+        st.control.push({
+          data: { type: 'now_playing', track: trackToPlay.name, path: trackToPlay.path }
+        })
+        st.control.pushLine(`▶ ${trackToPlay.name} (${st.index}/${st.total})`)
+      } catch (e) {
+        log.warn('switchContinuousPlayer sendFiles failed', { player: playerKey, error: String(e) })
+      }
+    }
+  }
+  pushContinuousState(st)
   return { ok: true }
 }
 
@@ -483,10 +506,14 @@ registerJobHandler(
     // that wasn't actually delivered.
     let attempts = 0
     while (!ac.signal.aborted) {
-      const mgr = new DBusManager(target)
+      const currentTarget = st.playerKey || target
+      const mgr = new DBusManager(currentTarget)
       const connected = await withTimeout(mgr.connect(), 4000, false)
       let player = ''
       if (connected) {
+        if (currentTarget && currentTarget !== '__auto__') {
+          await mgr.switchToPlayer(currentTarget)
+        }
         const status = await withTimeout<{ player?: string } | null>(mgr.getStatus(), 4000, null)
         player = status?.player ?? ''
       }
@@ -546,7 +573,11 @@ registerJobHandler(
 
       while (!ac.signal.aborted) {
         try {
-          const status = await dbus.getStatus()
+          const status = await withTimeout<PlayerStatus | null>(dbus.getStatus(), 4000, null)
+          if (!status) {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+            continue
+          }
 
           // Bound player disappeared → reconnect per config, or exit.
           if (!status.player) {
@@ -662,6 +693,7 @@ registerJobHandler(
               currentLoudness: loudness
             }
             await dbus.sendFiles([track.path])
+            void recordSongTimeline(track.name).catch(() => {})
             control.push({
               data: { type: 'now_playing', track: track.name, path: track.path }
             })

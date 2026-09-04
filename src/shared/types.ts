@@ -50,7 +50,40 @@ export interface BtOutputMessage {
   label?: string
 }
 
-/** Rough resource snapshot for a background task (best-effort, Linux /proc). */
+/** Network port information occupied or listened to by a task */
+export interface BtNetworkPort {
+  /** Protocol: 'tcp' | 'udp' */
+  proto: 'tcp' | 'udp'
+  /** Local IP / host, e.g. '127.0.0.1', '0.0.0.0', '::1', '*' */
+  localAddress: string
+  /** Port number */
+  port: number
+  /** State: 'LISTEN' | 'ESTABLISHED' | 'UNCONN' etc. */
+  state?: string
+  /** Detected service type: 'web' (HTTP/HTTPS) | 'tcp' | 'udp' | 'unknown' */
+  type: 'web' | 'tcp' | 'udp' | 'unknown'
+  /** Full URL if it's a web/http interface, e.g. 'http://127.0.0.1:3000' or 'http://localhost:5173' */
+  url?: string
+  /** Title or HTTP banner if probed, e.g. 'Vite App', 'API Server' */
+  title?: string
+}
+
+/** Detailed GPU snapshot */
+export interface BtGpuInfo {
+  name?: string
+  /** GPU utilization % */
+  utilization?: number
+  /** Process VRAM used in MB */
+  processMemory?: number
+  /** Total GPU VRAM in MB */
+  totalMemory?: number
+  /** Total GPU VRAM used across system in MB */
+  usedMemory?: number
+  /** Temperature in Celsius */
+  temperature?: number
+}
+
+/** Detailed resource snapshot for a background task */
 export interface BtStats {
   /** CPU usage percent (approx, single-core normalized). */
   cpu?: number
@@ -58,6 +91,19 @@ export interface BtStats {
   mem?: number
   /** GPU memory in MB used by the task's process (nvidia-smi compute-apps). */
   gpu?: number
+  /** Detailed GPU info if available */
+  gpuInfo?: BtGpuInfo
+  /** Memory breakdown */
+  memDetails?: {
+    rss?: number
+    vms?: number
+  }
+  /** Process creation timestamp / uptime in ms */
+  elapsed?: number
+  /** PPID */
+  ppid?: number
+  /** Network ports opened or listened to by the process */
+  ports?: BtNetworkPort[]
 }
 
 /** Public snapshot of one background task, safe to ship to the renderer. */
@@ -73,6 +119,10 @@ export interface BtTaskInfo {
   pid?: number
   /** argv join for process tasks. */
   command?: string
+  /** original argv array if process task */
+  argv?: string[]
+  /** working directory if specified */
+  cwd?: string
   startedAt: number
   /** set when the task stops/exits/errors — freezes the elapsed time display. */
   endedAt?: number

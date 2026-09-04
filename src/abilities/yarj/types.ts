@@ -6,6 +6,25 @@ export interface GalleryRoot {
   watch?: boolean
 }
 
+const VIDEO_EXT_SET = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.3gp'])
+
+/** 检查文件路径是否为视频格式。 */
+export function isVideoFile(pathOrExt: string): boolean {
+  if (!pathOrExt) return false
+  const dot = pathOrExt.lastIndexOf('.')
+  if (dot === -1) return false
+  return VIDEO_EXT_SET.has(pathOrExt.slice(dot).toLowerCase())
+}
+
+/** 获取图片/视频在 <img> 渲染时所用的缩略图 URL。 */
+export function photoThumbUrl(filePath: string): string {
+  if (!filePath) return ''
+  if (isVideoFile(filePath)) {
+    return `cockpit-icon://${encodeURIComponent(filePath)}?thumb=1`
+  }
+  return `cockpit-icon://${encodeURIComponent(filePath)}`
+}
+
 /** 一个 MBTiles 地图文件配置。 */
 export interface MapFile {
   /** 唯一 id（添加时自动生成：文件名 + 短哈希）。 */
@@ -22,7 +41,16 @@ export interface MapProviderConfig {
   id: string
   name: string
   category:
-    'google' | 'google-official' | 'carto' | 'arcgis' | 'osm' | 'tianditu' | 'custom' | 'mbtiles'
+    | 'google'
+    | 'google-official'
+    | 'amap'
+    | 'tencent'
+    | 'carto'
+    | 'arcgis'
+    | 'osm'
+    | 'tianditu'
+    | 'custom'
+    | 'mbtiles'
   type: 'raster' | 'vector'
   urlTemplate: string
   subdomains?: string[]
@@ -32,13 +60,24 @@ export interface MapProviderConfig {
   requireApiKey?: boolean
   attribution?: string
   ext?: string
+  /** 坐标系类型：'wgs84' (标准无偏，如谷歌/OSM/天地图) | 'gcj02' (高德/腾讯火星加密偏移) */
+  coordSystem?: 'wgs84' | 'gcj02' | 'bd09'
 }
 
 export interface ProviderItem {
   id: string
   name: string
   category:
-    'google' | 'google-official' | 'carto' | 'arcgis' | 'osm' | 'tianditu' | 'custom' | 'mbtiles'
+    | 'google'
+    | 'google-official'
+    | 'amap'
+    | 'tencent'
+    | 'carto'
+    | 'arcgis'
+    | 'osm'
+    | 'tianditu'
+    | 'custom'
+    | 'mbtiles'
   type: 'raster' | 'vector'
   maxZoom?: number
   minZoom?: number
@@ -46,6 +85,7 @@ export interface ProviderItem {
   isCustom?: boolean
   isLocal?: boolean
   attribution?: string
+  coordSystem?: 'wgs84' | 'gcj02' | 'bd09'
 }
 
 /** 瓦片缓存统计。 */
@@ -85,6 +125,36 @@ export interface YarjConfig {
   exploredRadiusM: number
   /** 探索区域时空聚合粒度 ('fine' | 'standard' | 'trip' | 'coarse' | 'massive') */
   exploredGranularity?: ExploredGranularity
+  /** 我的探索旅途漫游时空粒度记忆 ('fine' | 'standard' | 'trip' | 'coarse' | 'massive') */
+  explorationGranularity?: ExploredGranularity
+  /** 默认投影模式 ('globe' | 'mercator' | 'remember') */
+  defaultProjection?: 'globe' | 'mercator' | 'remember'
+  /** 初始视角规则 ('fit-all' | 'remember') */
+  initialViewMode?: 'fit-all' | 'remember'
+  /** 滚轮缩放速率 (0.5 - 2.0，默认 1.0) */
+  zoomSpeed?: number
+  /** 双击地图行为 ('zoom-in' | 'none') */
+  doubleClickAction?: 'zoom-in' | 'none'
+  /** 自动巡航单站驻留时间（秒，1.0 - 6.0，默认 2.2） */
+  cruiseStayDurationSec?: number
+  /** 相机飞行跃迁速度 ('smooth' | 'cinematic' | 'brisk' | 'instant') */
+  flightSpeed?: 'smooth' | 'cinematic' | 'brisk' | 'instant'
+  /** 漫游默认聚焦视距 ('focus3' | 'focus5' | 'focus8' | 'all') */
+  defaultFocusRange?: 'focus3' | 'focus5' | 'focus8' | 'all'
+  /** 进入漫游时是否自动开始播放 */
+  autoPlayOnExplore?: boolean
+  /** 巡航漫游时是否自动展开本站照片抽屉 */
+  autoOpenDrawerOnCruise?: boolean
+  /** 探索足迹填充不透明度 (0.2 - 0.9，默认 0.52) */
+  footprintOpacity?: number
+  /** 照片侧栏抽屉每次滑动加载数量 (20 / 30 / 50 / 100，默认 30) */
+  drawerPageSize?: number
+  /** 时空穿梭顶部 HUD 样式风格 ('prominent' | 'minimal' | 'compact') */
+  timeShuttleStyle?: 'prominent' | 'minimal' | 'compact'
+  /** 照片聚合密度 ('tight' | 'standard' | 'loose') */
+  clusterDensity?: 'tight' | 'standard' | 'loose'
+  /** 启动时自动增量扫描新照片 */
+  autoScanOnStartup?: boolean
   /** 细节图层（省/市级边界等）显示的最低缩放级别，默认 4。 */
   detailMinZoom?: number
   /** ADM1（省级边界）回退缩放阈值（无 LOD 数据时），默认 4。 */
@@ -102,6 +172,64 @@ export interface YarjConfig {
     center: [number, number]
     zoom: number
   } | null
+  /** 地图展示照片高级过滤规则。 */
+  photoFilterRules?: PhotoFilterRule[]
+}
+
+/** 过滤操作符 */
+export type PhotoFilterOperator =
+  | 'in'
+  | 'not_in'
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains'
+  | 'is_empty'
+  | 'is_not_empty'
+  | 'gt'
+  | 'lt'
+
+/** 地图照片高级筛选条件 */
+export interface PhotoFilterRule {
+  id: string
+  enabled: boolean
+  field: string
+  operator: PhotoFilterOperator
+  value: string
+}
+
+export const DEFAULT_YARJ_CONFIG: YarjConfig = {
+  galleryRoots: [],
+  maps: [],
+  activeProviderId: 'google-hybrid',
+  enableTileCache: true,
+  maxTileCacheMb: 1024,
+  mapLanguage: 'auto',
+  showPhotosLayer: true,
+  showExploredLayer: true,
+  exploredRadiusM: 60,
+  exploredGranularity: 'standard',
+  explorationGranularity: 'standard',
+  defaultProjection: 'remember',
+  initialViewMode: 'fit-all',
+  zoomSpeed: 1.0,
+  doubleClickAction: 'zoom-in',
+  cruiseStayDurationSec: 2.2,
+  flightSpeed: 'smooth',
+  defaultFocusRange: 'focus5',
+  autoPlayOnExplore: false,
+  autoOpenDrawerOnCruise: false,
+  footprintOpacity: 0.52,
+  drawerPageSize: 30,
+  timeShuttleStyle: 'prominent',
+  clusterDensity: 'standard',
+  autoScanOnStartup: false,
+  detailMinZoom: 4,
+  adm1MinZoom: 4,
+  adm2MinZoom: 6,
+  lodScreenFraction: 0.2,
+  lastView: null,
+  photoFilterRules: []
 }
 
 /** LOD 要素：行政区包围盒（用于「区域占屏比例 → 显示层级」计算）。 */
@@ -181,8 +309,45 @@ export interface Photo {
   f_number?: number | null
   exposure_time?: string | null
   iso?: number | null
-  /** appendix 解析后的对象（tags, comment 等动态数据）。 */
-  appendix: Record<string, unknown>
+  /** 文件 SHA-256 内容哈希。 */
+  hash?: string | null
+  /** appendix 解析后的对象（tags, comment, ai_generated 等动态数据）。 */
+  appendix: PhotoAppendix
+}
+
+/** 照片 AI 视觉分析元数据（存储在 appendix.ai_generated / appendix.aigenerated）。 */
+export interface PhotoAiGenerated {
+  type:
+    | 'Document'
+    | 'Blackboard'
+    | 'Screenshot'
+    | 'Portrait'
+    | 'GroupPhoto'
+    | 'Scenery'
+    | 'Architecture'
+    | 'Food'
+    | 'Pet'
+    | 'Object'
+    | 'Interior'
+    | 'Activity'
+    | string
+  brief: string
+  ocr?: string
+  model?: string
+  judged_at?: string
+}
+
+/** 照片扩展元数据对象（存储在 SQLite photos.appendix JSON 列中）。 */
+export interface PhotoAppendix {
+  tags?: string[]
+  comment?: string
+  formatted_address?: string
+  city?: string
+  country?: string
+  explored_radius_m?: number
+  ai_generated?: PhotoAiGenerated
+  aigenerated?: PhotoAiGenerated
+  [key: string]: unknown
 }
 
 /** 地理编码结果（文字 -> 坐标） */
@@ -226,6 +391,8 @@ export interface PhotoFilters {
   q?: string
   /** [minLon, minLat, maxLon, maxLat] 经纬度框。 */
   bbox?: [number, number, number, number]
+  /** 是否按有 GPS 优先排序。 */
+  orderGpsFirst?: boolean
 }
 
 /** yarj.scan-status 返回的统计。 */
@@ -257,6 +424,7 @@ export interface PhotoRow {
   gps_lat: number | null
   gps_lon: number | null
   gps_alt: number | null
+  hash: string | null
   appendix: string
   scanned_at: string | null
 }
@@ -317,4 +485,55 @@ export const GRANULARITY_PRESETS: Record<ExploredGranularity, GranularityConfig>
     maxLinkDistM: 40000,
     baseRadiusM: 200
   }
+}
+
+/** 智能推测的交通方式。 */
+export type TransportMode = 'plane' | 'train' | 'car' | 'walk' | 'ship' | 'stay'
+
+export interface TransportModeMeta {
+  mode: TransportMode
+  nameKey: string
+  defaultName: string
+  icon: string
+  color: string
+}
+
+/** 「我的探索」单个旅途阶段（站点）。 */
+export interface JourneyStage {
+  id: string
+  index: number
+  title: string
+  photos: Photo[]
+  center: [number, number]
+  bounds: [number, number, number, number]
+  startTime: number | null
+  endTime: number | null
+  formattedTimeRange: string
+  locationName: string
+}
+
+/** 「我的探索」相邻两个阶段之间的航段 / 跃迁。 */
+export interface JourneyLeg {
+  id: string
+  fromIndex: number
+  toIndex: number
+  fromStage: JourneyStage
+  toStage: JourneyStage
+  distanceM: number
+  durationMs: number | null
+  speedKmH: number | null
+  mode: TransportMode
+  modeMeta: TransportModeMeta
+  /** 大圆航线 / 平滑曲线采样点坐标集合 [[lon, lat], ...] */
+  arcCoordinates: [number, number][]
+}
+
+/** 「我的探索」完整旅途数据结构。 */
+export interface JourneyData {
+  stages: JourneyStage[]
+  legs: JourneyLeg[]
+  totalDistanceM: number
+  totalPhotos: number
+  startTime: number | null
+  endTime: number | null
 }

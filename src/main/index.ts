@@ -31,7 +31,7 @@ protocol.registerSchemesAsPrivileged([
     // absolute path (`cockpit-icon://%2Fhome%2F...`) puts `%2F` in the URL
     // authority, which Chromium rejects → no request ever reaches the handler.
     // As a non-standard (opaque) scheme the whole URL is passed through as-is.
-    privileges: { secure: true, supportFetchAPI: true, stream: true }
+    privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
   },
   {
     scheme: 'cockpit-audio',
