@@ -1,13 +1,15 @@
 name: Build & Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: 'Target GitHub Release tag (e.g. v0.2.0, or leave empty to infer from ref/tag)'
+        required: false
+        type: string
+        default: ''
       upload_release:
-        description: 'Upload assets to GitHub release'
+        description: 'Upload built binaries to GitHub Release'
         required: false
         type: boolean
         default: true
@@ -59,9 +61,10 @@ jobs:
           path: dist/*.AppImage
 
       - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.upload_release == 'true'
+        if: (github.event.inputs.upload_release == 'true' || github.event.inputs.upload_release == true) && (github.event.inputs.release_tag != '' || startsWith(github.ref_name, 'v'))
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref_name }}
           files: dist/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,9 +107,10 @@ jobs:
           path: dist/*-portable.exe
 
       - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.upload_release == 'true'
+        if: (github.event.inputs.upload_release == 'true' || github.event.inputs.upload_release == true) && (github.event.inputs.release_tag != '' || startsWith(github.ref_name, 'v'))
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref_name }}
           files: dist/*-portable.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
