@@ -4,7 +4,7 @@ defineOptions({ name: 'cockpit-yarj-route-playback-bar' })
 import { ref } from 'vue'
 import type { Route, RouteSplit } from '../types'
 
-defineProps<{
+const props = defineProps<{
   route: Route
   isPlaying: boolean
   progress: number
@@ -46,6 +46,15 @@ function onSliderChange(v: number): void {
 function onSelectSplit(s: RouteSplit): void {
   emit('jumpToSplit', s)
   splitsMenuOpen.value = false
+}
+
+function toggleFollowCamera(): void {
+  if (props.followCamera) {
+    emit('update:followCamera', false)
+  } else {
+    emit('update:followCamera', true)
+    emit('reCenter')
+  }
 }
 </script>
 
@@ -125,14 +134,18 @@ function onSelectSplit(s: RouteSplit): void {
             />
           </v-btn>
 
-          <!-- 视角锁定与跟随 -->
+          <!-- 视角锁定与跟随 (自动跟随 / 手动档自由视角) -->
           <v-btn
             :variant="followCamera ? 'flat' : 'tonal'"
             :color="followCamera ? 'primary' : undefined"
             size="small"
             icon
-            :title="followCamera ? '镜头跟随中（点击立即居中）' : '自由视角（点击恢复居中跟随）'"
-            @click="emit('reCenter')"
+            :title="
+              followCamera
+                ? '当前：自动跟随（点击切换手动自由视角）'
+                : '当前：手动档/自由视角（点击恢复自动跟随）'
+            "
+            @click="toggleFollowCamera"
           >
             <v-icon size="18">{{ followCamera ? 'mdi-crosshairs-gps' : 'mdi-pan' }}</v-icon>
           </v-btn>
