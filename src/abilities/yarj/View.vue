@@ -736,17 +736,8 @@ async function initMap(targetProviderId?: string): Promise<void> {
     }, 1500)
   })
 
-  map.on('zoomstart', () => {
-    isMapZooming = true
-  })
-
   map.on('zoomend', () => {
     if (!map) return
-    if (zoomEndTimeout) clearTimeout(zoomEndTimeout)
-    zoomEndTimeout = setTimeout(() => {
-      isMapZooming = false
-    }, 200)
-
     const curZ = map.getZoom()
     const bucket = getZoomLodBucket(curZ)
     if (bucket !== lastRenderedRouteLodBucket) {
@@ -759,19 +750,26 @@ async function initMap(targetProviderId?: string): Promise<void> {
 
   map.getCanvas().addEventListener(
     'wheel',
-    () => {
-      isMapZooming = true
-      if (zoomEndTimeout) clearTimeout(zoomEndTimeout)
-      zoomEndTimeout = setTimeout(() => {
-        isMapZooming = false
-      }, 300)
+    (e) => {
+      if (routePlaybackActive.value && routePlaybackFollowCamera.value) {
+        e.preventDefault()
+        const zoomDelta = -e.deltaY * 0.0015
+        requestPlaybackZoom(zoomDelta)
+      }
     },
-    { passive: true }
+    { passive: false }
   )
 
   map.on('dragstart', () => {
-    if (routePlaybackActive.value && routePlaybackFollowCamera.value) {
-      routePlaybackFollowCamera.value = false
+    if (routePlaybackActive.value) {
+      if (routePlaybackFollowCamera.value) {
+        routePlaybackFollowCamera.value = false
+      }
+      playbackTargetZoom = null
+      if (playbackZoomRafId != null) {
+        cancelAnimationFrame(playbackZoomRafId)
+        playbackZoomRafId = null
+      }
     }
   })
 
@@ -2150,8 +2148,8 @@ let playbackLastFrameTime = 0
 let playbackAllProjectedCoords: [number, number][] = []
 let lastTrailCutIdx = -1
 let lastTrailUpdateMs = 0
-let isMapZooming = false
-let zoomEndTimeout: ReturnType<typeof setTimeout> | null = null
+let playbackTargetZoom: number | null = null
+let playbackZoomRafId: number | null = null
 
 const routePlaybackCurrentTimeMs = computed<number | null>(() => {
   if (!routePlaybackPoints.value.length) return null
@@ -2409,6 +2407,15 @@ function setupRoutePlaybackLayers(): void {
   }
 }
 
+function getPlaybackPadding(): { top: number; bottom: number; left: number; right: number } {
+  return {
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: routePlaybackPhotosDrawerOpen.value ? 380 : 0
+  }
+}
+
 function updatePlaybackMapFrame(): void {
   if (!map || !routePlaybackActive.value) return
   const cur = routePlaybackCurrentPoint.value
@@ -2474,12 +2481,15 @@ function updatePlaybackMapFrame(): void {
     })
   }
 
-  if (routePlaybackFollowCamera.value && !isMapZooming) {
-    map.easeTo({
-      center: cur.renderCoord,
-      padding: { top: 0, bottom: 0, left: 0, right: 0 },
-      duration: 120
-    })
+  if (routePlaybackFollowCamera.value) {
+    if (playbackTargetZoom != null) {
+      stepZoomInterpolation()
+    } else {
+      map.jumpTo({
+        center: cur.renderCoord,
+        padding: getPlaybackPadding()
+      })
+    }
   }
 }
 
@@ -2487,12 +2497,68 @@ function reCenterPlaybackCamera(forceFollow = true): void {
   if (forceFollow) {
     routePlaybackFollowCamera.value = true
   }
+  playbackTargetZoom = null
   if (!map || !routePlaybackCurrentPoint.value) return
   map.easeTo({
     center: routePlaybackCurrentPoint.value.renderCoord,
-    padding: { top: 0, bottom: 0, left: 0, right: 0 },
-    duration: 300
+    padding: getPlaybackPadding(),
+    duration: 250
   })
+}
+
+function requestPlaybackZoom(deltaZoom: number): void {
+  if (!map) return
+  const curZ = playbackTargetZoom ?? map.getZoom()
+  const minZ = map.getMinZoom?.() ?? 2
+  const maxZ = map.getMaxZoom?.() ?? 20
+  playbackTargetZoom = Math.max(minZ, Math.min(maxZ, curZ + deltaZoom))
+
+  if (!routePlaybackIsPlaying.value) {
+    if (playbackZoomRafId == null) {
+      playbackZoomRafId = requestAnimationFrame(runPausedZoomLoop)
+    }
+  }
+}
+
+function runPausedZoomLoop(): void {
+  playbackZoomRafId = null
+  const active = stepZoomInterpolation()
+  if (active) {
+    playbackZoomRafId = requestAnimationFrame(runPausedZoomLoop)
+  }
+}
+
+function stepZoomInterpolation(): boolean {
+  if (playbackTargetZoom == null || !map) return false
+  const curZ = map.getZoom()
+  const diff = playbackTargetZoom - curZ
+  const pad = getPlaybackPadding()
+  if (Math.abs(diff) < 0.005) {
+    const finalZ = playbackTargetZoom
+    playbackTargetZoom = null
+    const centerCoord =
+      routePlaybackFollowCamera.value && routePlaybackCurrentPoint.value
+        ? routePlaybackCurrentPoint.value.renderCoord
+        : map.getCenter()
+    map.jumpTo({
+      center: centerCoord,
+      zoom: finalZ,
+      padding: pad
+    })
+    return false
+  }
+
+  const nextZ = curZ + diff * 0.28
+  const centerCoord =
+    routePlaybackFollowCamera.value && routePlaybackCurrentPoint.value
+      ? routePlaybackCurrentPoint.value.renderCoord
+      : map.getCenter()
+  map.jumpTo({
+    center: centerCoord,
+    zoom: nextZ,
+    padding: pad
+  })
+  return true
 }
 
 function playbackLoop(now: number): void {
@@ -2524,7 +2590,14 @@ function toggleRoutePlaybackPlay(): void {
       cancelAnimationFrame(playbackAnimId)
       playbackAnimId = null
     }
+    if (playbackTargetZoom != null && playbackZoomRafId == null) {
+      playbackZoomRafId = requestAnimationFrame(runPausedZoomLoop)
+    }
   } else {
+    if (playbackZoomRafId != null) {
+      cancelAnimationFrame(playbackZoomRafId)
+      playbackZoomRafId = null
+    }
     if (routePlaybackProgress.value >= 1) {
       routePlaybackProgress.value = 0
     }
@@ -2549,7 +2622,6 @@ async function startRoutePlayback(route: Route): Promise<void> {
 
   if (map) {
     map.scrollZoom.disable()
-    map.scrollZoom.enable({ around: 'center' })
   }
 
   try {
@@ -2626,6 +2698,11 @@ function stopRoutePlayback(): void {
     cancelAnimationFrame(playbackAnimId)
     playbackAnimId = null
   }
+  if (playbackZoomRafId != null) {
+    cancelAnimationFrame(playbackZoomRafId)
+    playbackZoomRafId = null
+  }
+  playbackTargetZoom = null
   routePlaybackActive.value = false
   routePlaybackRoute.value = null
   routePlaybackPoints.value = []
@@ -2647,6 +2724,18 @@ function stopRoutePlayback(): void {
     map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 300 })
   }
 }
+
+watch(routePlaybackFollowCamera, (following) => {
+  if (!map || !routePlaybackActive.value) return
+  if (following) {
+    map.scrollZoom.disable()
+    if (!routePlaybackIsPlaying.value && routePlaybackCurrentPoint.value) {
+      reCenterPlaybackCamera(false)
+    }
+  } else {
+    map.scrollZoom.enable()
+  }
+})
 
 watch(isGcj02Active, () => {
   if (routePlaybackActive.value && routePlaybackPoints.value.length > 0) {
@@ -3723,10 +3812,18 @@ onBeforeUnmount(() => {
 // ---------------------------------------------------------------------------
 
 function zoomIn(): void {
+  if (routePlaybackActive.value && routePlaybackFollowCamera.value) {
+    requestPlaybackZoom(1)
+    return
+  }
   map?.zoomIn()
 }
 
 function zoomOut(): void {
+  if (routePlaybackActive.value && routePlaybackFollowCamera.value) {
+    requestPlaybackZoom(-1)
+    return
+  }
   map?.zoomOut()
 }
 
