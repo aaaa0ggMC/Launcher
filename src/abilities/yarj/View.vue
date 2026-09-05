@@ -46,6 +46,7 @@ import type {
   GuessedGps
 } from './types'
 import { DEFAULT_YARJ_CONFIG, GRANULARITY_PRESETS, photoThumbUrl, resolvePhotoGps } from './types'
+import { smoothRoutePoints, smoothFollowCamera, smoothFollowMarker } from './route-smoothing'
 import {
   generateExploredGeoJSON,
   haversineDistM,
@@ -2151,6 +2152,52 @@ let playbackTargetZoom: number | null = null
 let playbackZoomRafId: number | null = null
 let playbackTimestampsMs: number[] = []
 let playbackHeadMarker: maplibregl.Marker | null = null
+let rawPlaybackPoints: RoutePoint[] = []
+let playbackMarkerPos: [number, number] | null = null
+let playbackCameraPos: [number, number] | null = null
+let playbackLastMapFrameMs = 0
+
+function applyRouteSmoothing(): void {
+  if (!rawPlaybackPoints.length) {
+    routePlaybackPoints.value = []
+    playbackAllProjectedCoords = []
+    playbackTimestampsMs = []
+    return
+  }
+
+  const isSmooth = yarjConfig.value.routeSmoothing !== false
+  const win = yarjConfig.value.routeSmoothingWindow ?? 5
+  const pts =
+    isSmooth && rawPlaybackPoints.length > 2
+      ? smoothRoutePoints(rawPlaybackPoints, win)
+      : rawPlaybackPoints
+
+  routePlaybackPoints.value = pts
+  playbackAllProjectedCoords = pts.map((p) =>
+    isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
+  )
+  let lastT = 0
+  playbackTimestampsMs = pts.map((p) => {
+    const t = p.time ? new Date(p.time).getTime() : lastT
+    lastT = Math.max(lastT, t)
+    return lastT
+  })
+  lastTrailUpdateMs = 0
+
+  if (map && routePlaybackActive.value) {
+    const fullSrc = map.getSource('yarj-playback-full') as GeoJSONSource | undefined
+    if (fullSrc) {
+      fullSrc.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: playbackAllProjectedCoords
+        }
+      })
+    }
+  }
+}
 
 const routePlaybackCurrentTimeMs = computed<number | null>(() => {
   if (!routePlaybackPoints.value.length || !playbackTimestampsMs.length) return null
@@ -2419,6 +2466,21 @@ function updatePlaybackMapFrame(): void {
   const cutIdx = cur.idx
 
   const nowMs = performance.now()
+  const dtSec =
+    playbackLastMapFrameMs > 0 ? Math.min(0.1, (nowMs - playbackLastMapFrameMs) / 1000) : 0.016
+  playbackLastMapFrameMs = nowMs
+
+  // 点本身平滑插值 (Marker Position Smoothing)，消除离散插值带来的锯齿横跳
+  let markerCoord = cur.renderCoord
+  if (
+    yarjConfig.value.routeSmoothing !== false &&
+    playbackMarkerPos &&
+    routePlaybackIsPlaying.value
+  ) {
+    markerCoord = smoothFollowMarker(playbackMarkerPos, cur.renderCoord, dtSec, 15)
+  }
+  playbackMarkerPos = markerCoord
+
   if (nowMs - lastTrailUpdateMs >= 50 || cur.idx === pts.length - 1) {
     lastTrailUpdateMs = nowMs
 
@@ -2429,7 +2491,7 @@ function updatePlaybackMapFrame(): void {
             .slice(0, cutIdx + 1)
             .map((p) => (isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]))
     ) as [number, number][]
-    trailCoords.push(cur.renderCoord)
+    trailCoords.push(markerCoord)
 
     const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
     if (trailSrc) {
@@ -2444,17 +2506,29 @@ function updatePlaybackMapFrame(): void {
     }
   }
 
-  updatePlaybackHeadMarker(cur.renderCoord)
+  updatePlaybackHeadMarker(markerCoord)
 
   if (routePlaybackFollowCamera.value) {
     if (playbackTargetZoom != null) {
       stepZoomInterpolation()
     } else {
+      let finalCenter = markerCoord
+      if (
+        yarjConfig.value.routeCameraSmoothing !== false &&
+        playbackCameraPos &&
+        routePlaybackIsPlaying.value
+      ) {
+        finalCenter = smoothFollowCamera(playbackCameraPos, markerCoord, dtSec, 15)
+      }
+      playbackCameraPos = finalCenter
+
       map.jumpTo({
-        center: cur.renderCoord,
+        center: finalCenter,
         padding: getPlaybackPadding()
       })
     }
+  } else {
+    playbackCameraPos = null
   }
 }
 
@@ -2463,6 +2537,8 @@ function reCenterPlaybackCamera(forceFollow = true): void {
     routePlaybackFollowCamera.value = true
   }
   playbackTargetZoom = null
+  playbackCameraPos = null
+  playbackMarkerPos = null
   if (!map || !routePlaybackCurrentPoint.value) return
   map.easeTo({
     center: routePlaybackCurrentPoint.value.renderCoord,
@@ -2566,6 +2642,10 @@ function toggleRoutePlaybackPlay(): void {
     if (routePlaybackProgress.value >= 1) {
       routePlaybackProgress.value = 0
     }
+    if (routePlaybackCurrentPoint.value) {
+      playbackMarkerPos = routePlaybackCurrentPoint.value.renderCoord
+      playbackCameraPos = routePlaybackCurrentPoint.value.renderCoord
+    }
     routePlaybackIsPlaying.value = true
     playbackLastFrameTime = performance.now()
     playbackAnimId = requestAnimationFrame(playbackLoop)
@@ -2595,23 +2675,19 @@ async function startRoutePlayback(route: Route): Promise<void> {
       points?: RoutePoint[]
     }
     if (res?.ok && res.points) {
-      routePlaybackPoints.value = res.points
-      playbackAllProjectedCoords = res.points.map((p) =>
-        isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
-      )
-      let lastT = 0
-      playbackTimestampsMs = res.points.map((p) => {
-        const t = p.time ? new Date(p.time).getTime() : lastT
-        lastT = Math.max(lastT, t)
-        return lastT
-      })
-      lastTrailUpdateMs = 0
+      rawPlaybackPoints = res.points
+      playbackCameraPos = null
+      applyRouteSmoothing()
     } else {
+      rawPlaybackPoints = []
+      playbackCameraPos = null
       routePlaybackPoints.value = []
       playbackAllProjectedCoords = []
       playbackTimestampsMs = []
     }
   } catch {
+    rawPlaybackPoints = []
+    playbackCameraPos = null
     routePlaybackPoints.value = []
     playbackAllProjectedCoords = []
     playbackTimestampsMs = []
@@ -2675,6 +2751,9 @@ function stopRoutePlayback(): void {
     playbackZoomRafId = null
   }
   playbackTargetZoom = null
+  playbackCameraPos = null
+  playbackMarkerPos = null
+  rawPlaybackPoints = []
   if (playbackHeadMarker) {
     playbackHeadMarker.remove()
     playbackHeadMarker = null
@@ -2711,6 +2790,15 @@ watch(routePlaybackFollowCamera, (following) => {
   }
 })
 
+watch([() => yarjConfig.value.routeSmoothing, () => yarjConfig.value.routeSmoothingWindow], () => {
+  if (routePlaybackActive.value && rawPlaybackPoints.length > 0) {
+    applyRouteSmoothing()
+    playbackCameraPos = null
+    playbackMarkerPos = null
+    updatePlaybackMapFrame()
+  }
+})
+
 watch(isGcj02Active, () => {
   if (routePlaybackActive.value && routePlaybackPoints.value.length > 0) {
     playbackAllProjectedCoords = routePlaybackPoints.value.map((p) =>
@@ -2723,6 +2811,8 @@ watch(isGcj02Active, () => {
 
 function onRoutePlaybackProgressChange(v: number): void {
   routePlaybackProgress.value = Math.max(0, Math.min(1, v))
+  playbackCameraPos = null
+  playbackMarkerPos = null
   updatePlaybackMapFrame()
   if (routePlaybackFollowCamera.value && !routePlaybackIsPlaying.value) {
     reCenterPlaybackCamera(false)

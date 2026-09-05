@@ -17,7 +17,7 @@ import type {
   TileCacheStats,
   YarjConfig
 } from './types'
-import { GRANULARITY_PRESETS } from './types'
+import { GRANULARITY_PRESETS, DEFAULT_YARJ_CONFIG } from './types'
 import {
   getMetadataDb,
   photoCount,
@@ -43,43 +43,8 @@ import {
 const log = makeLogger('yarj')
 
 const DEFAULT_CONFIG: YarjConfig = {
-  galleryRoots: [],
-  routeRoots: [],
-  maps: [],
-  activeProviderId: 'google-hybrid',
-  googleApiKey: DEFAULT_GOOGLE_API_KEY,
-  tiandituApiKey: '',
-  customUrlTemplate: '',
-  customSubdomains: ['0', '1', '2', '3'],
-  enableTileCache: true,
-  maxTileCacheMb: 1024,
-  mapLanguage: 'auto',
-  showPhotosLayer: true,
-  showExploredLayer: true,
-  showRoutesLayer: true,
-  gpsPriority: ['track', 'corrected', 'guess', 'db', 'exif'],
-  exploredRadiusM: 60,
-  exploredGranularity: 'standard',
-  explorationGranularity: 'standard',
-  defaultProjection: 'remember',
-  initialViewMode: 'fit-all',
-  zoomSpeed: 1.0,
-  doubleClickAction: 'zoom-in',
-  cruiseStayDurationSec: 2.2,
-  flightSpeed: 'smooth',
-  defaultFocusRange: 'focus5',
-  autoPlayOnExplore: false,
-  autoOpenDrawerOnCruise: false,
-  footprintOpacity: 0.52,
-  drawerPageSize: 30,
-  timeShuttleStyle: 'prominent',
-  clusterDensity: 'standard',
-  autoScanOnStartup: false,
-  detailMinZoom: 4,
-  adm1MinZoom: 4,
-  adm2MinZoom: 6,
-  lodScreenFraction: 0.2,
-  lastView: null
+  ...DEFAULT_YARJ_CONFIG,
+  googleApiKey: DEFAULT_GOOGLE_API_KEY
 }
 
 let cached: YarjConfig | null = null
@@ -101,15 +66,17 @@ export async function loadYarjConfig(): Promise<YarjConfig> {
   try {
     const parsed = JSON.parse(file) as Partial<YarjConfig>
     cached = {
+      ...DEFAULT_CONFIG,
+      ...parsed,
       galleryRoots: Array.isArray(parsed.galleryRoots) ? parsed.galleryRoots : [],
       routeRoots: Array.isArray(parsed.routeRoots) ? parsed.routeRoots : [],
       maps: Array.isArray(parsed.maps) ? parsed.maps : [],
       activeProviderId:
         typeof parsed.activeProviderId === 'string' && parsed.activeProviderId
           ? parsed.activeProviderId
-          : 'google-hybrid',
+          : DEFAULT_CONFIG.activeProviderId,
       googleApiKey:
-        typeof parsed.googleApiKey === 'string' ? parsed.googleApiKey : DEFAULT_GOOGLE_API_KEY,
+        typeof parsed.googleApiKey === 'string' ? parsed.googleApiKey : DEFAULT_CONFIG.googleApiKey,
       tiandituApiKey: typeof parsed.tiandituApiKey === 'string' ? parsed.tiandituApiKey : '',
       customUrlTemplate:
         typeof parsed.customUrlTemplate === 'string' ? parsed.customUrlTemplate : '',
@@ -120,7 +87,7 @@ export async function loadYarjConfig(): Promise<YarjConfig> {
       maxTileCacheMb:
         typeof parsed.maxTileCacheMb === 'number' && parsed.maxTileCacheMb >= 0
           ? parsed.maxTileCacheMb
-          : 1024,
+          : DEFAULT_CONFIG.maxTileCacheMb,
       mapLanguage: typeof parsed.mapLanguage === 'string' ? parsed.mapLanguage : 'auto',
       showPhotosLayer: parsed.showPhotosLayer !== false,
       showExploredLayer: parsed.showExploredLayer !== false,
@@ -141,7 +108,12 @@ export async function loadYarjConfig(): Promise<YarjConfig> {
       adm2MinZoom: typeof parsed.adm2MinZoom === 'number' ? parsed.adm2MinZoom : 6,
       lodScreenFraction:
         typeof parsed.lodScreenFraction === 'number' ? parsed.lodScreenFraction : 0.2,
-      lastView: parsed.lastView ?? null
+      lastView: parsed.lastView ?? null,
+      photoFilterRules: Array.isArray(parsed.photoFilterRules) ? parsed.photoFilterRules : [],
+      routeSmoothing: parsed.routeSmoothing !== false,
+      routeSmoothingWindow:
+        typeof parsed.routeSmoothingWindow === 'number' ? parsed.routeSmoothingWindow : 5,
+      routeCameraSmoothing: parsed.routeCameraSmoothing !== false
     }
   } catch (err) {
     log.warn('config.json 解析失败，回落默认', { error: String(err) })

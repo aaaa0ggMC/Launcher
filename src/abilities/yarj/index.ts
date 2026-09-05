@@ -75,7 +75,8 @@ export default {
           key: 'preferences',
           label: '偏好与行为设置',
           icon: 'mdi-tune-vertical',
-          description: '配置地图投影、巡航漫游速度、战争迷雾足迹半径、抽屉滑动加载与性能调优',
+          description:
+            '配置地图投影、巡航漫游速度、战争迷雾足迹半径、照片高级筛选规则 (Filter) 与轨迹平滑防抖',
           keywords: [
             '偏好',
             '设置',
@@ -88,7 +89,17 @@ export default {
             '半径',
             '迷雾',
             '性能',
-            '抽屉'
+            '抽屉',
+            'filter',
+            'filters',
+            '规则',
+            '筛选',
+            '过滤',
+            '平滑',
+            '防抖',
+            '抖动',
+            'smooth',
+            'smoothing'
           ],
           fullWidth: true,
           component: defineAsyncComponent(() => import('./components/MapPreferencesSection.vue'))

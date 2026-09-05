@@ -102,7 +102,10 @@ async function savePreferences(): Promise<void> {
           JSON.stringify(config.value.gpsPriority || ['track', 'corrected', 'guess', 'db', 'exif'])
         ),
         showRoutesLayer: config.value.showRoutesLayer,
-        photoFilterRules: JSON.parse(JSON.stringify(config.value.photoFilterRules || []))
+        photoFilterRules: JSON.parse(JSON.stringify(config.value.photoFilterRules || [])),
+        routeSmoothing: config.value.routeSmoothing ?? true,
+        routeSmoothingWindow: config.value.routeSmoothingWindow ?? 5,
+        routeCameraSmoothing: config.value.routeCameraSmoothing ?? true
       }
     })
     savedSnackbar.value = true
@@ -216,7 +219,10 @@ function resetToDefaults(): void {
     drawerPageSize: DEFAULT_YARJ_CONFIG.drawerPageSize,
     timeShuttleStyle: DEFAULT_YARJ_CONFIG.timeShuttleStyle,
     clusterDensity: DEFAULT_YARJ_CONFIG.clusterDensity,
-    autoScanOnStartup: DEFAULT_YARJ_CONFIG.autoScanOnStartup
+    autoScanOnStartup: DEFAULT_YARJ_CONFIG.autoScanOnStartup,
+    routeSmoothing: DEFAULT_YARJ_CONFIG.routeSmoothing,
+    routeSmoothingWindow: DEFAULT_YARJ_CONFIG.routeSmoothingWindow,
+    routeCameraSmoothing: DEFAULT_YARJ_CONFIG.routeCameraSmoothing
   }
   savePreferences()
 }
@@ -645,7 +651,73 @@ onMounted(() => {
         </v-card-text>
       </v-card>
 
-      <!-- 5. 地图照片高级筛选器 (Photo Filters) -->
+      <!-- 5. 航线回放与轨迹平滑 (Route Smoothing & Playback) -->
+      <v-card rounded="lg" variant="tonal" class="card-fill">
+        <v-card-title class="text-subtitle-2">
+          {{ t('yarj.prefs.routeSmoothingTitle', '航线回放与轨迹平滑') }}
+        </v-card-title>
+        <v-card-text>
+          <div class="text-caption on-surface-variant mb-3">
+            {{
+              t(
+                'yarj.prefs.routeSmoothingDesc',
+                '过滤 GPS 记录微观锯齿与邻点左右跳动，结合云台防抖阻尼，消除航线播放时的小范围画面抖动与卡顿感'
+              )
+            }}
+          </div>
+
+          <v-row dense class="ga-y-3">
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="config.routeSmoothing"
+                color="primary"
+                density="compact"
+                hide-details
+                :label="t('yarj.prefs.routeSmoothing', '启用航线轨迹平滑滤波 (去除 GPS 高频抖动)')"
+                @update:model-value="savePreferences"
+              />
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="config.routeCameraSmoothing"
+                color="primary"
+                density="compact"
+                hide-details
+                :label="
+                  t('yarj.prefs.routeCameraSmoothing', '启用镜头跟随平滑缓冲 (云台级防抖阻尼)')
+                "
+                @update:model-value="savePreferences"
+              />
+            </v-col>
+
+            <v-col v-if="config.routeSmoothing !== false" cols="12">
+              <div class="d-flex align-center justify-space-between mb-1">
+                <span class="text-caption font-weight-medium on-surface-variant">
+                  {{ t('yarj.prefs.smoothingWindow', '轨迹平滑窗口强度') }}
+                </span>
+                <span class="text-caption font-mono on-surface-variant">
+                  {{ config.routeSmoothingWindow ?? 5 }}
+                  {{ t('yarj.prefs.smoothingWindowUnit', '点 (高斯核邻近采样)') }}
+                </span>
+              </div>
+              <v-slider
+                v-model="config.routeSmoothingWindow"
+                :min="3"
+                :max="15"
+                :step="2"
+                color="primary"
+                hide-details
+                density="compact"
+                thumb-label
+                @end="savePreferences"
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+
+      <!-- 6. 地图照片高级筛选器 (Photo Filters) -->
       <v-card rounded="lg" variant="tonal" class="card-fill">
         <v-card-title
           class="text-subtitle-2 d-flex align-center justify-space-between flex-wrap ga-2"

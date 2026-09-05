@@ -181,6 +181,12 @@ export interface YarjConfig {
   gpsGuessMaxDistanceM?: number
   /** GPS 智能猜测相邻照片最大时间差（小时），默认 4 */
   gpsGuessMaxTimeHours?: number
+  /** 是否开启航线轨迹平滑（消除 GPS 高频抖动），默认 true */
+  routeSmoothing?: boolean
+  /** 轨迹平滑窗口大小（点数，推荐 5，范围 3-15），默认 5 */
+  routeSmoothingWindow?: number
+  /** 是否开启相机跟随平滑缓冲（云台防抖阻尼），默认 true */
+  routeCameraSmoothing?: boolean
 }
 
 /** 过滤操作符 */
@@ -241,7 +247,10 @@ export const DEFAULT_YARJ_CONFIG: YarjConfig = {
   lastView: null,
   photoFilterRules: [],
   gpsGuessMaxDistanceM: 10000,
-  gpsGuessMaxTimeHours: 4
+  gpsGuessMaxTimeHours: 4,
+  routeSmoothing: true,
+  routeSmoothingWindow: 5,
+  routeCameraSmoothing: true
 }
 
 /** LOD 要素：行政区包围盒（用于「区域占屏比例 → 显示层级」计算）。 */
