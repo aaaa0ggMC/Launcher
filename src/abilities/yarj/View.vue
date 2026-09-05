@@ -2146,17 +2146,17 @@ const routePlaybackTimeWindowSec = ref(180) // 默认 ±3 分钟
 let playbackAnimId: number | null = null
 let playbackLastFrameTime = 0
 let playbackAllProjectedCoords: [number, number][] = []
-let lastTrailCutIdx = -1
 let lastTrailUpdateMs = 0
 let playbackTargetZoom: number | null = null
 let playbackZoomRafId: number | null = null
+let playbackTimestampsMs: number[] = []
+let playbackHeadMarker: maplibregl.Marker | null = null
 
 const routePlaybackCurrentTimeMs = computed<number | null>(() => {
-  if (!routePlaybackPoints.value.length) return null
-  const pts = routePlaybackPoints.value
-  const tStart = pts[0].time ? new Date(pts[0].time).getTime() : 0
-  const lastTime = pts[pts.length - 1]?.time
-  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
+  if (!routePlaybackPoints.value.length || !playbackTimestampsMs.length) return null
+  const times = playbackTimestampsMs
+  const tStart = times[0] ?? 0
+  const tEnd = times[times.length - 1] ?? 0
   if (!tStart || !tEnd || tEnd <= tStart) {
     const durMs = (routePlaybackRoute.value?.durationSec || 3600) * 1000
     return (tStart || Date.now()) + routePlaybackProgress.value * durMs
@@ -2167,6 +2167,8 @@ const routePlaybackCurrentTimeMs = computed<number | null>(() => {
 const routePlaybackCurrentPoint = computed<{
   coord: [number, number]
   renderCoord: [number, number]
+  idx: number
+  ratio: number
   speedKmh: number | null
   ele: number | null
   hr: number | null
@@ -2182,6 +2184,8 @@ const routePlaybackCurrentPoint = computed<{
     return {
       coord: [p.lon, p.lat],
       renderCoord,
+      idx: 0,
+      ratio: 0,
       speedKmh: p.speedKmh ?? null,
       ele: p.ele ?? null,
       hr: p.hr ?? null,
@@ -2196,6 +2200,8 @@ const routePlaybackCurrentPoint = computed<{
     return {
       coord: [p.lon, p.lat],
       renderCoord,
+      idx: pts.length - 1,
+      ratio: 1,
       speedKmh: p.speedKmh ?? null,
       ele: p.ele ?? null,
       hr: p.hr ?? null,
@@ -2203,36 +2209,30 @@ const routePlaybackCurrentPoint = computed<{
     }
   }
 
+  const times = playbackTimestampsMs
   const targetTimeMs = routePlaybackCurrentTimeMs.value
-  const tStart = pts[0].time ? new Date(pts[0].time).getTime() : 0
-  const lastTime = pts[pts.length - 1]?.time
-  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
+  const tStart = times[0] ?? 0
+  const tEnd = times[times.length - 1] ?? 0
 
   let idx = 0
   let ratio = 0
 
-  if (targetTimeMs && tStart && tEnd && tEnd > tStart) {
+  if (times.length > 1 && tStart && tEnd && tEnd > tStart && targetTimeMs) {
     let low = 0
-    let high = pts.length - 2
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2)
-      const tMid = pts[mid].time ? new Date(pts[mid].time!).getTime() : 0
-      const tNext = pts[mid + 1].time ? new Date(pts[mid + 1].time!).getTime() : 0
-      if (targetTimeMs >= tMid && targetTimeMs <= tNext) {
-        idx = mid
-        const span = tNext - tMid
-        ratio = span > 0 ? (targetTimeMs - tMid) / span : 0
-        break
-      } else if (targetTimeMs < tMid) {
-        high = mid - 1
-      } else {
+    let high = times.length - 1
+    while (low < high) {
+      const mid = (low + high) >> 1
+      if (times[mid] <= targetTimeMs) {
         low = mid + 1
+      } else {
+        high = mid
       }
     }
-    if (low > high) {
-      idx = Math.max(0, Math.min(pts.length - 2, high))
-      ratio = 0
-    }
+    idx = Math.max(0, Math.min(times.length - 2, low - 1))
+    const tMid = times[idx]
+    const tNext = times[idx + 1]
+    const span = tNext - tMid
+    ratio = span > 0 ? Math.max(0, Math.min(1, (targetTimeMs - tMid) / span)) : 0
   } else {
     const exact = routePlaybackProgress.value * (pts.length - 1)
     idx = Math.floor(exact)
@@ -2257,6 +2257,8 @@ const routePlaybackCurrentPoint = computed<{
   return {
     coord: [lon, lat],
     renderCoord,
+    idx,
+    ratio,
     speedKmh,
     ele,
     hr,
@@ -2377,34 +2379,6 @@ function setupRoutePlaybackLayers(): void {
       }
     })
   }
-
-  if (!map.getSource('yarj-playback-head')) {
-    map.addSource('yarj-playback-head', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    })
-    map.addLayer({
-      id: 'yarj-playback-head-halo',
-      type: 'circle',
-      source: 'yarj-playback-head',
-      paint: {
-        'circle-color': themeRgba(0.35),
-        'circle-radius': 16,
-        'circle-blur': 0.4
-      }
-    })
-    map.addLayer({
-      id: 'yarj-playback-head-dot',
-      type: 'circle',
-      source: 'yarj-playback-head',
-      paint: {
-        'circle-color': '#ffffff',
-        'circle-radius': 7,
-        'circle-stroke-width': 3,
-        'circle-stroke-color': themeRgba(1)
-      }
-    })
-  }
 }
 
 function getPlaybackPadding(): { top: number; bottom: number; left: number; right: number } {
@@ -2416,35 +2390,36 @@ function getPlaybackPadding(): { top: number; bottom: number; left: number; righ
   }
 }
 
+function updatePlaybackHeadMarker(coord: [number, number]): void {
+  if (!map) return
+  if (!playbackHeadMarker) {
+    const el = document.createElement('div')
+    el.className = 'yarj-playback-head-marker'
+    el.innerHTML = `
+      <div class="head-marker-halo"></div>
+      <div class="head-marker-dot"></div>
+    `
+    playbackHeadMarker = new maplibregl.Marker({
+      element: el,
+      anchor: 'center'
+    })
+      .setLngLat(coord)
+      .addTo(map)
+    return
+  }
+  playbackHeadMarker.setLngLat(coord)
+}
+
 function updatePlaybackMapFrame(): void {
   if (!map || !routePlaybackActive.value) return
   const cur = routePlaybackCurrentPoint.value
   if (!cur) return
 
   const pts = routePlaybackPoints.value
-  const targetTimeMs = routePlaybackCurrentTimeMs.value
-  const firstTime = pts[0]?.time
-  const tStart = firstTime ? new Date(firstTime).getTime() : 0
-  const lastTime = pts[pts.length - 1]?.time
-  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
-
-  let cutIdx = 0
-  if (targetTimeMs && tStart && tEnd && tEnd > tStart) {
-    for (let i = 0; i < pts.length; i++) {
-      const ptTime = pts[i].time ? new Date(pts[i].time!).getTime() : 0
-      if (ptTime <= targetTimeMs) {
-        cutIdx = i
-      } else {
-        break
-      }
-    }
-  } else {
-    cutIdx = Math.floor(routePlaybackProgress.value * (pts.length - 1))
-  }
+  const cutIdx = cur.idx
 
   const nowMs = performance.now()
-  if (cutIdx !== lastTrailCutIdx || nowMs - lastTrailUpdateMs > 80) {
-    lastTrailCutIdx = cutIdx
+  if (nowMs - lastTrailUpdateMs >= 50 || cur.idx === pts.length - 1) {
     lastTrailUpdateMs = nowMs
 
     const trailCoords = (
@@ -2469,17 +2444,7 @@ function updatePlaybackMapFrame(): void {
     }
   }
 
-  const headSrc = map.getSource('yarj-playback-head') as GeoJSONSource | undefined
-  if (headSrc) {
-    headSrc.setData({
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'Point',
-        coordinates: cur.renderCoord
-      }
-    })
-  }
+  updatePlaybackHeadMarker(cur.renderCoord)
 
   if (routePlaybackFollowCamera.value) {
     if (playbackTargetZoom != null) {
@@ -2634,15 +2599,22 @@ async function startRoutePlayback(route: Route): Promise<void> {
       playbackAllProjectedCoords = res.points.map((p) =>
         isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
       )
-      lastTrailCutIdx = -1
+      let lastT = 0
+      playbackTimestampsMs = res.points.map((p) => {
+        const t = p.time ? new Date(p.time).getTime() : lastT
+        lastT = Math.max(lastT, t)
+        return lastT
+      })
       lastTrailUpdateMs = 0
     } else {
       routePlaybackPoints.value = []
       playbackAllProjectedCoords = []
+      playbackTimestampsMs = []
     }
   } catch {
     routePlaybackPoints.value = []
     playbackAllProjectedCoords = []
+    playbackTimestampsMs = []
   }
 
   try {
@@ -2703,13 +2675,17 @@ function stopRoutePlayback(): void {
     playbackZoomRafId = null
   }
   playbackTargetZoom = null
+  if (playbackHeadMarker) {
+    playbackHeadMarker.remove()
+    playbackHeadMarker = null
+  }
   routePlaybackActive.value = false
   routePlaybackRoute.value = null
   routePlaybackPoints.value = []
   routePlaybackPhotos.value = []
   routePlaybackPhotosDrawerOpen.value = false
   playbackAllProjectedCoords = []
-  lastTrailCutIdx = -1
+  playbackTimestampsMs = []
   lastTrailUpdateMs = 0
 
   if (map) {
@@ -2719,8 +2695,6 @@ function stopRoutePlayback(): void {
     fullSrc?.setData({ type: 'FeatureCollection', features: [] })
     const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
     trailSrc?.setData({ type: 'FeatureCollection', features: [] })
-    const headSrc = map.getSource('yarj-playback-head') as GeoJSONSource | undefined
-    headSrc?.setData({ type: 'FeatureCollection', features: [] })
     map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 300 })
   }
 }
@@ -2742,7 +2716,6 @@ watch(isGcj02Active, () => {
     playbackAllProjectedCoords = routePlaybackPoints.value.map((p) =>
       isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
     )
-    lastTrailCutIdx = -1
     lastTrailUpdateMs = 0
     updatePlaybackMapFrame()
   }
@@ -6259,6 +6232,52 @@ async function reloadPreferences(): Promise<void> {
   }
   100% {
     transform: rotate(24deg);
+  }
+}
+
+:deep(.yarj-playback-head-marker) {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+:deep(.yarj-playback-head-marker .head-marker-halo) {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(var(--v-theme-primary), 0.35);
+  filter: blur(2px);
+  animation: head-halo-pulse 2s infinite ease-out;
+}
+
+:deep(.yarj-playback-head-marker .head-marker-dot) {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid rgb(var(--v-theme-primary));
+  box-shadow: 0 0 10px rgba(var(--v-theme-primary), 0.85);
+}
+
+@keyframes head-halo-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(0.85);
+    opacity: 0.85;
   }
 }
 </style>
