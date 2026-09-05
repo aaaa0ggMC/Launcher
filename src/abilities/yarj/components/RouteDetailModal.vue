@@ -8,6 +8,7 @@ import { photoThumbUrl } from '../types'
 const props = defineProps<{
   modelValue: boolean
   route: Route | null
+  explorationActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -132,6 +133,7 @@ function close(): void {
 }
 
 function handlePlay(): void {
+  if (props.explorationActive) return
   if (props.route) {
     emit('playRoute', props.route)
     close()
@@ -197,7 +199,14 @@ function handleGeotag(): void {
         </div>
 
         <div class="d-flex align-center ga-2 flex-wrap">
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-motion-play" @click="handlePlay">
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-motion-play"
+            :disabled="explorationActive"
+            :title="explorationActive ? '我的探索漫游进行中，请先退出探索再播放' : '播放此次行程'"
+            @click="handlePlay"
+          >
             播放行程
           </v-btn>
           <v-btn

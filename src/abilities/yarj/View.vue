@@ -2060,6 +2060,9 @@ function nextStage(): void {
 }
 
 function startExploration(subsetPhotos?: Photo[]): void {
+  if (routePlaybackActive.value) {
+    stopRoutePlayback()
+  }
   const basePhotos = subsetPhotos && subsetPhotos.length ? subsetPhotos : displayPhotos.value
   const targetPhotos = basePhotos.map((p) => {
     const resolved = resolvePhotoGps(p)
@@ -2440,9 +2443,9 @@ function updatePlaybackMapFrame(): void {
     const trailCoords = (
       playbackAllProjectedCoords.length > 0
         ? playbackAllProjectedCoords.slice(0, cutIdx + 1)
-        : pts.slice(0, cutIdx + 1).map((p) =>
-            isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
-          )
+        : pts
+            .slice(0, cutIdx + 1)
+            .map((p) => (isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]))
     ) as [number, number][]
     trailCoords.push(cur.renderCoord)
 
@@ -2472,13 +2475,24 @@ function updatePlaybackMapFrame(): void {
   }
 
   if (routePlaybackFollowCamera.value && !isMapZooming) {
-    const rightPad = routePlaybackPhotosDrawerOpen.value ? 380 : 0
     map.easeTo({
       center: cur.renderCoord,
-      padding: { top: 0, bottom: 0, left: 0, right: rightPad },
+      padding: { top: 0, bottom: 0, left: 0, right: 0 },
       duration: 120
     })
   }
+}
+
+function reCenterPlaybackCamera(forceFollow = true): void {
+  if (forceFollow) {
+    routePlaybackFollowCamera.value = true
+  }
+  if (!map || !routePlaybackCurrentPoint.value) return
+  map.easeTo({
+    center: routePlaybackCurrentPoint.value.renderCoord,
+    padding: { top: 0, bottom: 0, left: 0, right: 0 },
+    duration: 300
+  })
 }
 
 function playbackLoop(now: number): void {
@@ -2532,6 +2546,11 @@ async function startRoutePlayback(route: Route): Promise<void> {
   routePlaybackPhotosDrawerOpen.value = false
 
   setupRoutePlaybackLayers()
+
+  if (map) {
+    map.scrollZoom.disable()
+    map.scrollZoom.enable({ around: 'center' })
+  }
 
   try {
     const res = (await window.cockpit.command('yarj.get-route-points', { id: route.id })) as {
@@ -2617,6 +2636,8 @@ function stopRoutePlayback(): void {
   lastTrailUpdateMs = 0
 
   if (map) {
+    map.scrollZoom.disable()
+    map.scrollZoom.enable()
     const fullSrc = map.getSource('yarj-playback-full') as GeoJSONSource | undefined
     fullSrc?.setData({ type: 'FeatureCollection', features: [] })
     const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
@@ -2641,6 +2662,9 @@ watch(isGcj02Active, () => {
 function onRoutePlaybackProgressChange(v: number): void {
   routePlaybackProgress.value = Math.max(0, Math.min(1, v))
   updatePlaybackMapFrame()
+  if (routePlaybackFollowCamera.value && !routePlaybackIsPlaying.value) {
+    reCenterPlaybackCamera(false)
+  }
 }
 
 function onRoutePlaybackJumpTime(deltaSec: number): void {
@@ -3490,7 +3514,31 @@ function formatRunStatus(s: string): string {
 }
 
 function onGlobalKeyDown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement | null
+  const isInput =
+    target &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+
+  if (e.code === 'Space' || e.key === ' ') {
+    if (!isInput) {
+      if (routePlaybackActive.value) {
+        e.preventDefault()
+        toggleRoutePlaybackPlay()
+        return
+      }
+      if (explorationActive.value) {
+        e.preventDefault()
+        togglePlay()
+        return
+      }
+    }
+  }
+
   if (e.key === 'Escape') {
+    if (routePlaybackActive.value && routePlaybackPhotosDrawerOpen.value) {
+      routePlaybackPhotosDrawerOpen.value = false
+      return
+    }
     if (confirmRelocateDialogOpen.value) {
       confirmRelocateDialogOpen.value = false
     } else if (relocatingPhotos.value) {
@@ -3979,7 +4027,14 @@ async function reloadPreferences(): Promise<void> {
         variant="flat"
         class="yarj-ctrl-btn"
         :class="{ active: explorationActive }"
-        :title="t('yarj.exploration.title', '我的探索')"
+        :disabled="routePlaybackActive"
+        :title="
+          routePlaybackActive
+            ? '行程播放中，无法开启探索'
+            : explorationActive
+              ? '退出探索'
+              : t('yarj.exploration.title', '我的探索')
+        "
         @click="explorationActive ? exitExploration() : startExploration()"
       >
         <v-icon :color="explorationActive ? 'primary' : undefined">mdi-compass</v-icon>
@@ -5408,6 +5463,7 @@ async function reloadPreferences(): Promise<void> {
     <RouteDetailModal
       v-model="routeDetailModalOpen"
       :route="selectedRouteForDetail"
+      :exploration-active="explorationActive"
       @play-route="startRoutePlayback"
       @start-geotag="onStartGeotagFromDetail"
       @view-photo="onViewPhotoFromRoute"
@@ -5446,6 +5502,7 @@ async function reloadPreferences(): Promise<void> {
       @update:progress="onRoutePlaybackProgressChange"
       @update:speed="routePlaybackSpeed = $event"
       @update:follow-camera="routePlaybackFollowCamera = $event"
+      @re-center="reCenterPlaybackCamera(true)"
       @toggle-photos-drawer="toggleRoutePlaybackPhotosDrawer"
       @jump-time="onRoutePlaybackJumpTime"
       @jump-to-split="onRoutePlaybackJumpToSplit"

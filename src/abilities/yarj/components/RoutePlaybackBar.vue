@@ -28,6 +28,7 @@ const emit = defineEmits<{
   (e: 'update:progress', val: number): void
   (e: 'update:speed', val: number): void
   (e: 'update:followCamera', val: boolean): void
+  (e: 'reCenter'): void
   (e: 'togglePhotosDrawer'): void
   (e: 'jumpTime', deltaSec: number): void
   (e: 'jumpToSplit', split: RouteSplit): void
@@ -130,8 +131,8 @@ function onSelectSplit(s: RouteSplit): void {
             :color="followCamera ? 'primary' : undefined"
             size="small"
             icon
-            :title="followCamera ? '相机跟随开启' : '自由视角（点击恢复跟随）'"
-            @click="emit('update:followCamera', !followCamera)"
+            :title="followCamera ? '镜头跟随中（点击立即居中）' : '自由视角（点击恢复居中跟随）'"
+            @click="emit('reCenter')"
           >
             <v-icon size="18">{{ followCamera ? 'mdi-crosshairs-gps' : 'mdi-pan' }}</v-icon>
           </v-btn>
