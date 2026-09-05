@@ -7,6 +7,7 @@
   "scripting.toolbar.modified": "Modified",
   "scripting.toolbar.newScript": "New",
   "scripting.toolbar.openFile": "Open",
+  "scripting.toolbar.reloadFromDisk": "Reload from disk",
   "scripting.toolbar.save": "Save",
   "scripting.toolbar.saveAs": "Save As",
   "scripting.toolbar.templates": "Templates",

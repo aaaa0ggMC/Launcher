@@ -7,7 +7,7 @@
  *
  * 100% 兼容 2D 墨卡托 与 3D 地球仪投影（球面真实地理多边形）。
  */
-import type { Photo, ExploredGranularity, GranularityConfig } from './types'
+import type { Photo, Route, ExploredGranularity, GranularityConfig } from './types'
 import { GRANULARITY_PRESETS } from './types'
 
 const R_EARTH = 6378137 // 地球平均半径（米）
@@ -247,6 +247,96 @@ export function clusterPhotosSpatiotemporal(
 }
 
 import polygonClipping from 'polygon-clipping'
+import { wgs84ToGcj02 } from './coord-transform'
+
+/**
+ * Ramer-Douglas-Peucker 线简化算法（LOD 路线点抽取与抽稀）
+ */
+export function simplifyCoordinates(
+  points: [number, number][],
+  tolerance: number
+): [number, number][] {
+  if (points.length <= 2 || tolerance <= 0) return points
+
+  const sqTolerance = tolerance * tolerance
+
+  function getSqSegmentDist(
+    p: [number, number],
+    p1: [number, number],
+    p2: [number, number]
+  ): number {
+    let x = p1[0]
+    let y = p1[1]
+    let dx = p2[0] - x
+    let dy = p2[1] - y
+
+    if (dx !== 0 || dy !== 0) {
+      const t = ((p[0] - x) * dx + (p[1] - y) * dy) / (dx * dx + dy * dy)
+      if (t > 1) {
+        x = p2[0]
+        y = p2[1]
+      } else if (t > 0) {
+        x += dx * t
+        y += dy * t
+      }
+    }
+
+    dx = p[0] - x
+    dy = p[1] - y
+    return dx * dx + dy * dy
+  }
+
+  function simplifyDPStep(
+    pts: [number, number][],
+    first: number,
+    last: number,
+    sqTol: number,
+    simplified: [number, number][]
+  ): void {
+    let maxSqDist = sqTol
+    let index = -1
+
+    for (let i = first + 1; i < last; i++) {
+      const sqDist = getSqSegmentDist(pts[i], pts[first], pts[last])
+      if (sqDist > maxSqDist) {
+        index = i
+        maxSqDist = sqDist
+      }
+    }
+
+    if (index !== -1) {
+      if (index - first > 1) simplifyDPStep(pts, first, index, sqTol, simplified)
+      simplified.push(pts[index])
+      if (last - index > 1) simplifyDPStep(pts, index, last, sqTol, simplified)
+    }
+  }
+
+  const simplified: [number, number][] = [points[0]]
+  simplifyDPStep(points, 0, points.length - 1, sqTolerance, simplified)
+  simplified.push(points[points.length - 1])
+  return simplified
+}
+
+/** 缩放层级与 LOD 分档映射（0: 宏观概览, 1: 区域中景, 2: 街区近景） */
+export function getZoomLodBucket(zoom: number): number {
+  if (zoom < 8) return 0
+  if (zoom < 13) return 1
+  return 2
+}
+
+/** 获取对应 LOD 分档的路线抽稀容差（经纬度度数） */
+export function getRouteToleranceForBucket(bucket: number): number {
+  if (bucket === 0) return 0.001 // ~100m，大省/跨市宏观级
+  if (bucket === 1) return 0.00015 // ~15m，城市/区县级
+  return 0 // 街区级：全精度原始坐标
+}
+
+// 内存缓存最近计算的探索区域 GeoJSON（按 LOD 分档与数据集特征）
+const exploredGeoJsonCache = new Map<string, GeoJSON.FeatureCollection>()
+
+export function clearExploredCache(): void {
+  exploredGeoJsonCache.clear()
+}
 
 /**
  * 为一组照片群（PhotoCluster）生成真实的地理空间足迹包络（True Organic Fog-of-War Footprint）：
@@ -254,17 +344,41 @@ import polygonClipping from 'polygon-clipping'
  * - 使用 Martinez 2D 几何布尔并集引擎（polygon-clipping union）将相交重叠的足迹圆盘精准溶解（Dissolve）为一体；
  * - 密集沿街拍摄时自然融合成蜿蜒起伏的多叶/条状有机足迹走廊；
  * - 稀疏跳跃点保持各自真实的探索圆盘，绝不在未曾拍摄的远距离区域强行拉出虚假走廊；
- * - 彻底消除内部重叠接缝、同心杂线与半透明叠加暗斑。
+ * - 彻底消除内部重叠接缝、同心杂线与半透明叠加暗斑；
+ * - 完整支持 LOD 动态层级缩减与结果级缓存。
  */
 export function generateExploredGeoJSON(
   photos: Photo[],
   granularity: ExploredGranularity = 'standard',
-  userRadiusM?: number
+  userRadiusM?: number,
+  routes?: Route[],
+  isGcj02 = false,
+  lodBucket = 2
 ): GeoJSON.FeatureCollection {
+  // 生成缓存特征键
+  const cacheKey = `${lodBucket}:${granularity}:${userRadiusM ?? ''}:${isGcj02}:${photos.length}:${routes?.length ?? 0}:${
+    routes && routes.length > 0 ? routes.map((r) => r.id).join(',') : ''
+  }`
+
+  const cached = exploredGeoJsonCache.get(cacheKey)
+  if (cached) return cached
+
   const cfg = GRANULARITY_PRESETS[granularity] || GRANULARITY_PRESETS.standard
   const baseRadius =
     userRadiusM != null && userRadiusM > 0 && userRadiusM < 400 ? userRadiusM : cfg.baseRadiusM
   const clusters = clusterPhotosSpatiotemporal(photos, granularity, userRadiusM)
+
+  // LOD 参数控制：缩放较小（LOD bucket 0/1）时减少正多边形边数与采样密度，大幅减轻布尔并集与 GPU 面片负担
+  const singleDiscSteps = lodBucket === 0 ? 10 : lodBucket === 1 ? 16 : 32
+  const multiDiscSteps = lodBucket === 0 ? 8 : lodBucket === 1 ? 14 : 24
+  const routeCircleSteps = lodBucket === 0 ? 8 : lodBucket === 1 ? 12 : 16
+  const routeSampleStepM =
+    lodBucket === 0
+      ? Math.max(150, baseRadius * 2.0)
+      : lodBucket === 1
+        ? Math.max(50, baseRadius * 1.0)
+        : Math.max(25, baseRadius * 0.8)
+  const routeTol = getRouteToleranceForBucket(lodBucket)
 
   const features: GeoJSON.Feature[] = []
 
@@ -274,19 +388,19 @@ export function generateExploredGeoJSON(
     if (!n) continue
 
     if (n === 1) {
-      // 1 个点：正圆（32段测地线圆环）
+      // 1 个点：正圆
       const p = list[0]
       const r =
         Number(p.appendix?.explored_radius_m) && Number(p.appendix?.explored_radius_m) < 400
           ? Number(p.appendix.explored_radius_m)
           : baseRadius
-      const ring = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, 32)
+      const ring = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, singleDiscSteps)
       features.push({
         type: 'Feature',
         properties: {
           clusterId: cluster.id,
           count: 1,
-          type: 'circle'
+          type: 'single-disc'
         },
         geometry: {
           type: 'Polygon',
@@ -304,7 +418,7 @@ export function generateExploredGeoJSON(
         Number(p.appendix?.explored_radius_m) && Number(p.appendix?.explored_radius_m) < 400
           ? Number(p.appendix.explored_radius_m)
           : baseRadius
-      const cRing = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, 24)
+      const cRing = makeCircleRing(p.gps_lon as number, p.gps_lat as number, r, multiDiscSteps)
       rawPolygons.push([cRing])
     }
 
@@ -351,8 +465,92 @@ export function generateExploredGeoJSON(
     }
   }
 
-  return {
+  // 航线轨迹探索走廊精确计算
+  if (routes && routes.length > 0) {
+    for (const r of routes) {
+      try {
+        const geo = JSON.parse(r.geojson) as GeoJSON.Feature<GeoJSON.LineString>
+        let coords = geo.geometry?.coordinates as [number, number][] | undefined
+        if (!coords || coords.length < 2) continue
+
+        // LOD 路线点预先简化抽稀
+        if (routeTol > 0 && coords.length > 4) {
+          coords = simplifyCoordinates(coords, routeTol)
+        }
+
+        // 沿线采样测地线圆盘
+        const sampled: [number, number][] = [coords[0]]
+        let prev = coords[0]
+
+        for (let i = 1; i < coords.length; i++) {
+          const c = coords[i]
+          const d = haversineDistM(prev[0], prev[1], c[0], c[1])
+          if (d >= routeSampleStepM || i === coords.length - 1) {
+            sampled.push(c)
+            prev = c
+          }
+        }
+
+        const routePolys = sampled.map(([lon, lat]) => {
+          const [cLon, cLat] = isGcj02 ? wgs84ToGcj02(lon, lat) : [lon, lat]
+          return [makeCircleRing(cLon, cLat, baseRadius, routeCircleSteps)]
+        })
+        if (!routePolys.length) continue
+
+        // 分批执行布尔并集融合成蜿蜒有机走廊（每 50 个圆盘分批融合）
+        for (let i = 0; i < routePolys.length; i += 50) {
+          const chunk = routePolys.slice(i, i + 50)
+          try {
+            const chunkUnion =
+              chunk.length === 1
+                ? [chunk[0]]
+                : polygonClipping.union(
+                    chunk[0],
+                    ...(chunk.slice(1) as [polygonClipping.Polygon, ...polygonClipping.Polygon[]])
+                  )
+
+            for (const poly of chunkUnion) {
+              features.push({
+                type: 'Feature',
+                properties: {
+                  routeId: r.id,
+                  name: r.name,
+                  type: 'route-corridor'
+                },
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: poly as [number, number][][]
+                }
+              })
+            }
+          } catch {
+            // 降级原样放入
+            for (const p of chunk) {
+              features.push({
+                type: 'Feature',
+                properties: { routeId: r.id, type: 'route-corridor-fallback' },
+                geometry: { type: 'Polygon', coordinates: p }
+              })
+            }
+          }
+        }
+      } catch {
+        /* ignore single route parse error */
+      }
+    }
+  }
+
+  const result: GeoJSON.FeatureCollection = {
     type: 'FeatureCollection',
     features
   }
+
+  // 限制缓存最多保留 10 份
+  if (exploredGeoJsonCache.size > 10) {
+    const firstKey = exploredGeoJsonCache.keys().next().value
+    if (firstKey) exploredGeoJsonCache.delete(firstKey)
+  }
+  exploredGeoJsonCache.set(cacheKey, result)
+
+  return result
 }

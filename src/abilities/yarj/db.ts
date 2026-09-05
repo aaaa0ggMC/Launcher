@@ -10,7 +10,17 @@ import { mkdirSync } from 'fs'
 import { dirname, join } from 'path'
 import { USER_CONFIG_DIR } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
-import type { Photo, PhotoRow, ScanRun } from './types'
+import type {
+  CorrectedGps,
+  GuessedGps,
+  Photo,
+  PhotoAppendix,
+  PhotoRow,
+  Route,
+  RouteSplit,
+  ScanRun,
+  TrackMatchedGps
+} from './types'
 
 const log = makeLogger('yarj-db')
 
@@ -43,6 +53,9 @@ CREATE TABLE IF NOT EXISTS photos (
   gps_alt     REAL,
   hash        TEXT,
   appendix    TEXT NOT NULL DEFAULT '{}',
+  gps_guess   TEXT,
+  gps_corrected TEXT,
+  gps_track   TEXT,
   scanned_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_photos_gps  ON photos (gps_lat, gps_lon);
@@ -60,6 +73,36 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   failed INTEGER DEFAULT 0,
   error TEXT
 );
+
+CREATE TABLE IF NOT EXISTS routes (
+  id                  TEXT PRIMARY KEY,
+  path                TEXT UNIQUE NOT NULL,
+  name                TEXT NOT NULL,
+  desc                TEXT,
+  activity_type       TEXT,
+  start_time          TEXT,
+  end_time            TEXT,
+  duration_sec        INTEGER,
+  moving_duration_sec INTEGER,
+  total_distance_m    REAL,
+  avg_speed_kmh       REAL,
+  max_speed_kmh       REAL,
+  calories            REAL,
+  elevation_gain_m    REAL,
+  elevation_loss_m    REAL,
+  min_ele             REAL,
+  max_ele             REAL,
+  avg_hr              REAL,
+  max_hr              REAL,
+  bounds              TEXT,
+  point_count         INTEGER,
+  geojson             TEXT NOT NULL,
+  splits              TEXT,
+  created_at          TEXT,
+  updated_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_routes_start_time ON routes (start_time);
+CREATE INDEX IF NOT EXISTS idx_routes_activity ON routes (activity_type);
 `
 
 /** 惰性打开元数据库（WAL 模式 + 建表迁移）。主进程内单例。 */
@@ -67,23 +110,76 @@ export function getMetadataDb(): DatabaseSync {
   if (db) return db
   const path = metadataDbPath()
   mkdirSync(dirname(path), { recursive: true })
-  db = new DatabaseSync(path)
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec(SCHEMA)
+  const d = new DatabaseSync(path)
+  d.exec('PRAGMA journal_mode = WAL')
+  d.exec(SCHEMA)
 
-  // 迁移：检查 photos 表是否有 hash 字段
+  // 迁移：检查 photos 表新列并动态自动迁移、建索引
   try {
-    const cols = db.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
-    if (cols.length && !cols.some((c) => c.name === 'hash')) {
-      db.exec('ALTER TABLE photos ADD COLUMN hash TEXT')
-      log.info('migrated photos table: added hash column')
+    const cols = d.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
+    const colNames = new Set(cols.map((c) => c.name))
+
+    if (!colNames.has('hash')) {
+      try {
+        d.exec('ALTER TABLE photos ADD COLUMN hash TEXT')
+        log.info('migrated photos table: added hash column')
+      } catch (e) {
+        log.warn('add hash col failed', { error: String(e) })
+      }
     }
-    db.exec('CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash)')
+    try {
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash)')
+    } catch {
+      /* ignore */
+    }
+
+    if (!colNames.has('gps_guess')) {
+      try {
+        d.exec('ALTER TABLE photos ADD COLUMN gps_guess TEXT')
+        log.info('migrated photos table: added gps_guess column')
+      } catch (e) {
+        log.warn('add gps_guess col failed', { error: String(e) })
+      }
+    }
+    try {
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_guess ON photos (gps_guess)')
+    } catch {
+      /* ignore */
+    }
+
+    if (!colNames.has('gps_corrected')) {
+      try {
+        d.exec('ALTER TABLE photos ADD COLUMN gps_corrected TEXT')
+        log.info('migrated photos table: added gps_corrected column')
+      } catch (e) {
+        log.warn('add gps_corrected col failed', { error: String(e) })
+      }
+    }
+    try {
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_corrected ON photos (gps_corrected)')
+    } catch {
+      /* ignore */
+    }
+
+    if (!colNames.has('gps_track')) {
+      try {
+        d.exec('ALTER TABLE photos ADD COLUMN gps_track TEXT')
+        log.info('migrated photos table: added gps_track column')
+      } catch (e) {
+        log.warn('add gps_track col failed', { error: String(e) })
+      }
+    }
+    try {
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_track ON photos (gps_track)')
+    } catch {
+      /* ignore */
+    }
   } catch (err) {
     log.warn('migrate photos table check failed', { error: String(err) })
   }
 
   log.info('metadata db ready', { path })
+  db = d
   return db
 }
 
@@ -223,15 +319,17 @@ export interface PhotoUpdateOptions {
   lat?: number | null
   lon?: number | null
   alt?: number | null
+  gps_guess?: GuessedGps | null
+  gps_track?: TrackMatchedGps | null
 }
 
-/** 更新照片（支持更新 appendix 与 GPS 经纬度/高度）。 */
+/** 更新照片（支持更新 appendix 与 GPS 经纬度/高度/猜测/航线匹配）。 */
 export function updatePhoto(path: string, opts: PhotoUpdateOptions): Photo | null {
   const row = getPhotoRow(path)
   if (!row) return null
-  let appendix: Record<string, unknown>
+  let appendix: PhotoAppendix
   try {
-    appendix = JSON.parse(row.appendix || '{}') as Record<string, unknown>
+    appendix = JSON.parse(row.appendix || '{}') as PhotoAppendix
   } catch {
     appendix = {}
   }
@@ -245,16 +343,44 @@ export function updatePhoto(path: string, opts: PhotoUpdateOptions): Photo | nul
   const newLon = opts.lon !== undefined ? opts.lon : row.gps_lon
   const newAlt = opts.alt !== undefined ? opts.alt : row.gps_alt
 
+  // 如果用户正式固化或设定了真实 GPS，默认自动清除 gps_guess 猜测标记与 gps_corrected 纠正标记
+  let newGpsGuessStr: string | null = row.gps_guess ?? null
+  let newGpsCorrectedStr: string | null = row.gps_corrected ?? null
+  let newGpsTrackStr: string | null = row.gps_track ?? null
+  if (opts.lat !== undefined && opts.lat !== null && opts.gps_guess === undefined) {
+    newGpsGuessStr = null
+    newGpsCorrectedStr = null
+  } else if (opts.gps_guess !== undefined) {
+    newGpsGuessStr = opts.gps_guess ? JSON.stringify(opts.gps_guess) : null
+  }
+  if (opts.gps_track !== undefined) {
+    newGpsTrackStr = opts.gps_track ? JSON.stringify(opts.gps_track) : null
+  }
+
   getMetadataDb()
-    .prepare('UPDATE photos SET appendix = ?, gps_lat = ?, gps_lon = ?, gps_alt = ? WHERE path = ?')
-    .run(JSON.stringify(appendix), newLat, newLon, newAlt, path)
+    .prepare(
+      'UPDATE photos SET appendix = ?, gps_lat = ?, gps_lon = ?, gps_alt = ?, gps_guess = ?, gps_corrected = ?, gps_track = ? WHERE path = ?'
+    )
+    .run(
+      JSON.stringify(appendix),
+      newLat,
+      newLon,
+      newAlt,
+      newGpsGuessStr,
+      newGpsCorrectedStr,
+      newGpsTrackStr,
+      path
+    )
 
   return photoFromRow({
     ...row,
     appendix: JSON.stringify(appendix),
     gps_lat: newLat,
     gps_lon: newLon,
-    gps_alt: newAlt
+    gps_alt: newAlt,
+    gps_guess: newGpsGuessStr,
+    gps_corrected: newGpsCorrectedStr,
+    gps_track: newGpsTrackStr
   })
 }
 
@@ -275,7 +401,7 @@ export function batchUpdatePhotoGps(updates: BatchGpsUpdateItem[]): number {
   if (!updates.length) return 0
   const d = getMetadataDb()
   const stmt = d.prepare(
-    'UPDATE photos SET gps_lat = ?, gps_lon = ?, gps_alt = COALESCE(?, gps_alt) WHERE path = ?'
+    'UPDATE photos SET gps_lat = ?, gps_lon = ?, gps_alt = COALESCE(?, gps_alt), gps_guess = NULL, gps_corrected = NULL WHERE path = ?'
   )
   d.exec('BEGIN IMMEDIATE')
   try {
@@ -294,14 +420,397 @@ export function batchUpdatePhotoGps(updates: BatchGpsUpdateItem[]): number {
   }
 }
 
+export interface BatchGpsGuessItem {
+  path: string
+  guess: GuessedGps | null
+}
+
+/** 批量更新照片的 gps_guess 静态猜测字段（扫描完成后在单个事务中极速执行）。 */
+export function batchUpdatePhotoGpsGuesses(items: BatchGpsGuessItem[]): number {
+  if (!items.length) return 0
+  const d = getMetadataDb()
+  try {
+    const cols = d.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'gps_guess')) {
+      d.exec('ALTER TABLE photos ADD COLUMN gps_guess TEXT')
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_guess ON photos (gps_guess)')
+    }
+  } catch (err) {
+    log.warn('ensure gps_guess column failed', { error: String(err) })
+  }
+
+  const stmt = d.prepare('UPDATE photos SET gps_guess = ? WHERE path = ?')
+  d.exec('BEGIN IMMEDIATE')
+  try {
+    for (const item of items) {
+      stmt.run(item.guess ? JSON.stringify(item.guess) : null, item.path)
+    }
+    d.exec('COMMIT')
+    return items.length
+  } catch (err) {
+    try {
+      d.exec('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
+}
+
+export interface BatchGpsCorrectionItem {
+  path: string
+  correction: CorrectedGps | null
+}
+
+/** 批量更新照片的 gps_corrected 字段（在单个事务中极速执行）。 */
+export function batchUpdatePhotoGpsCorrections(items: BatchGpsCorrectionItem[]): number {
+  if (!items.length) return 0
+  const d = getMetadataDb()
+  try {
+    const cols = d.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'gps_corrected')) {
+      d.exec('ALTER TABLE photos ADD COLUMN gps_corrected TEXT')
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_corrected ON photos (gps_corrected)')
+    }
+  } catch (err) {
+    log.warn('ensure gps_corrected column failed', { error: String(err) })
+  }
+
+  const stmt = d.prepare('UPDATE photos SET gps_corrected = ? WHERE path = ?')
+  d.exec('BEGIN IMMEDIATE')
+  try {
+    for (const item of items) {
+      stmt.run(item.correction ? JSON.stringify(item.correction) : null, item.path)
+    }
+    d.exec('COMMIT')
+    return items.length
+  } catch (err) {
+    try {
+      d.exec('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
+}
+
+/** 清空指定根目录或全部照片的 gps_corrected 字段（取消纠正）。 */
+export function clearAllGpsCorrections(root?: string): number {
+  const d = getMetadataDb()
+  if (root) {
+    const res = d.prepare('UPDATE photos SET gps_corrected = NULL WHERE root = ?').run(root)
+    return Number(res.changes ?? 0)
+  } else {
+    const res = d.prepare('UPDATE photos SET gps_corrected = NULL').run()
+    return Number(res.changes ?? 0)
+  }
+}
+
+/** 统计当前已被纠正的照片数量。 */
+export function countCorrectedPhotos(root?: string): number {
+  const d = getMetadataDb()
+  if (root) {
+    const row = d
+      .prepare('SELECT COUNT(*) as cnt FROM photos WHERE gps_corrected IS NOT NULL AND root = ?')
+      .get(root) as { cnt: number } | undefined
+    return row?.cnt ?? 0
+  }
+  const row = d
+    .prepare('SELECT COUNT(*) as cnt FROM photos WHERE gps_corrected IS NOT NULL')
+    .get() as { cnt: number } | undefined
+  return row?.cnt ?? 0
+}
+
+export interface BatchPhotoRouteGpsItem {
+  path: string
+  trackGps: TrackMatchedGps | null
+}
+
+/** 批量更新照片的 gps_track 字段（在单个事务中极速执行）。 */
+export function batchUpdatePhotoRouteGps(items: BatchPhotoRouteGpsItem[]): number {
+  if (!items.length) return 0
+  const d = getMetadataDb()
+  try {
+    const cols = d.prepare('PRAGMA table_info(photos)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'gps_track')) {
+      d.exec('ALTER TABLE photos ADD COLUMN gps_track TEXT')
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_gps_track ON photos (gps_track)')
+    }
+  } catch (err) {
+    log.warn('ensure gps_track column failed', { error: String(err) })
+  }
+
+  const stmt = d.prepare('UPDATE photos SET gps_track = ? WHERE path = ?')
+  d.exec('BEGIN IMMEDIATE')
+  try {
+    for (const item of items) {
+      stmt.run(item.trackGps ? JSON.stringify(item.trackGps) : null, item.path)
+    }
+    d.exec('COMMIT')
+    return items.length
+  } catch (err) {
+    try {
+      d.exec('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
+}
+
+/** 清空指定根目录或全部照片的 gps_track 航线匹配数据。 */
+export function clearAllRouteGps(root?: string): number {
+  const d = getMetadataDb()
+  if (root) {
+    const res = d.prepare('UPDATE photos SET gps_track = NULL WHERE root = ?').run(root)
+    return Number(res.changes ?? 0)
+  } else {
+    const res = d.prepare('UPDATE photos SET gps_track = NULL').run()
+    return Number(res.changes ?? 0)
+  }
+}
+
+/** 统计当前已被航线轨迹匹配的照片数量。 */
+export function countRouteGeotaggedPhotos(root?: string): number {
+  const d = getMetadataDb()
+  if (root) {
+    const row = d
+      .prepare('SELECT COUNT(*) as cnt FROM photos WHERE gps_track IS NOT NULL AND root = ?')
+      .get(root) as { cnt: number } | undefined
+    return row?.cnt ?? 0
+  }
+  const row = d.prepare('SELECT COUNT(*) as cnt FROM photos WHERE gps_track IS NOT NULL').get() as
+    { cnt: number } | undefined
+  return row?.cnt ?? 0
+}
+
+// ---------------------------------------------------------------------------
+// routes 读写
+// ---------------------------------------------------------------------------
+
+export interface RouteRow {
+  id: string
+  path: string
+  name: string
+  desc: string | null
+  activity_type: string | null
+  start_time: string | null
+  end_time: string | null
+  duration_sec: number
+  moving_duration_sec: number
+  total_distance_m: number
+  avg_speed_kmh: number
+  max_speed_kmh: number
+  calories: number | null
+  elevation_gain_m: number | null
+  elevation_loss_m: number | null
+  min_ele: number | null
+  max_ele: number | null
+  avg_hr: number | null
+  max_hr: number | null
+  bounds: string | null
+  point_count: number
+  geojson: string
+  splits: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export function routeFromRow(row: RouteRow): Route {
+  let bounds: [number, number, number, number] = [0, 0, 0, 0]
+  if (row.bounds) {
+    try {
+      bounds = JSON.parse(row.bounds)
+    } catch {
+      bounds = [0, 0, 0, 0]
+    }
+  }
+  let splits: RouteSplit[] | undefined = undefined
+  if (row.splits) {
+    try {
+      splits = JSON.parse(row.splits)
+    } catch {
+      splits = undefined
+    }
+  }
+  return {
+    id: row.id,
+    path: row.path,
+    name: row.name,
+    desc: row.desc,
+    activityType: row.activity_type ?? undefined,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    durationSec: row.duration_sec,
+    movingDurationSec: row.moving_duration_sec,
+    totalDistanceM: row.total_distance_m,
+    avgSpeedKmh: row.avg_speed_kmh,
+    maxSpeedKmh: row.max_speed_kmh,
+    calories: row.calories,
+    elevationGainM: row.elevation_gain_m,
+    elevationLossM: row.elevation_loss_m,
+    minEle: row.min_ele,
+    maxEle: row.max_ele,
+    avgHr: row.avg_hr,
+    maxHr: row.max_hr,
+    bounds,
+    pointCount: row.point_count,
+    geojson: row.geojson,
+    splits,
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined
+  }
+}
+
+export function upsertRoute(route: Route): void {
+  const d = getMetadataDb()
+  const now = new Date().toISOString()
+  const stmt = d.prepare(`
+    INSERT INTO routes (
+      id, path, name, desc, activity_type, start_time, end_time,
+      duration_sec, moving_duration_sec, total_distance_m, avg_speed_kmh, max_speed_kmh,
+      calories, elevation_gain_m, elevation_loss_m, min_ele, max_ele, avg_hr, max_hr,
+      bounds, point_count, geojson, splits, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(path) DO UPDATE SET
+      id = excluded.id,
+      name = excluded.name,
+      desc = excluded.desc,
+      activity_type = excluded.activity_type,
+      start_time = excluded.start_time,
+      end_time = excluded.end_time,
+      duration_sec = excluded.duration_sec,
+      moving_duration_sec = excluded.moving_duration_sec,
+      total_distance_m = excluded.total_distance_m,
+      avg_speed_kmh = excluded.avg_speed_kmh,
+      max_speed_kmh = excluded.max_speed_kmh,
+      calories = excluded.calories,
+      elevation_gain_m = excluded.elevation_gain_m,
+      elevation_loss_m = excluded.elevation_loss_m,
+      min_ele = excluded.min_ele,
+      max_ele = excluded.max_ele,
+      avg_hr = excluded.avg_hr,
+      max_hr = excluded.max_hr,
+      bounds = excluded.bounds,
+      point_count = excluded.point_count,
+      geojson = excluded.geojson,
+      splits = excluded.splits,
+      updated_at = excluded.updated_at
+  `)
+  stmt.run(
+    route.id,
+    route.path,
+    route.name,
+    route.desc ?? null,
+    route.activityType ?? null,
+    route.startTime,
+    route.endTime,
+    route.durationSec,
+    route.movingDurationSec,
+    route.totalDistanceM,
+    route.avgSpeedKmh,
+    route.maxSpeedKmh,
+    route.calories ?? null,
+    route.elevationGainM ?? null,
+    route.elevationLossM ?? null,
+    route.minEle ?? null,
+    route.maxEle ?? null,
+    route.avgHr ?? null,
+    route.maxHr ?? null,
+    JSON.stringify(route.bounds),
+    route.pointCount,
+    route.geojson,
+    route.splits ? JSON.stringify(route.splits) : null,
+    route.createdAt ?? now,
+    now
+  )
+}
+
+export function getRoute(id: string): Route | null {
+  const row = getMetadataDb().prepare('SELECT * FROM routes WHERE id = ?').get(id)
+  return row ? routeFromRow(row as unknown as RouteRow) : null
+}
+
+export function getRouteByPath(path: string): Route | null {
+  const row = getMetadataDb().prepare('SELECT * FROM routes WHERE path = ?').get(path)
+  return row ? routeFromRow(row as unknown as RouteRow) : null
+}
+
+export function deleteRoute(id: string): boolean {
+  const res = getMetadataDb().prepare('DELETE FROM routes WHERE id = ?').run(id)
+  return Number(res.changes ?? 0) > 0
+}
+
+export function queryRoutes(filters?: {
+  activityType?: string
+  q?: string
+  since?: string
+}): Route[] {
+  const conds: string[] = []
+  const params: (string | number)[] = []
+  if (filters?.activityType) {
+    conds.push('activity_type = ?')
+    params.push(filters.activityType)
+  }
+  if (filters?.since) {
+    conds.push('start_time >= ?')
+    params.push(filters.since)
+  }
+  if (filters?.q) {
+    conds.push('(name LIKE ? OR desc LIKE ? OR path LIKE ?)')
+    params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`)
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+  const rows = getMetadataDb()
+    .prepare(`SELECT * FROM routes ${where} ORDER BY start_time DESC, id DESC`)
+    .all(...params) as unknown as RouteRow[]
+  return rows.map(routeFromRow)
+}
+
+export function routeCount(): number {
+  return Number(getMetadataDb().prepare('SELECT COUNT(*) c FROM routes').get()?.c ?? 0)
+}
+
 /** 照片行 → 渲染端 Photo 视图（appendix 解析为对象）。 */
 export function photoFromRow(row: PhotoRow): Photo {
-  let appendix: Record<string, unknown> = {}
+  let appendix: PhotoAppendix = {}
   try {
-    appendix = JSON.parse(row.appendix || '{}') as Record<string, unknown>
+    appendix = JSON.parse(row.appendix || '{}') as PhotoAppendix
   } catch {
     appendix = {}
   }
+
+  let gpsGuess: GuessedGps | null = null
+  if (row.gps_guess) {
+    try {
+      gpsGuess = JSON.parse(row.gps_guess) as GuessedGps
+    } catch {
+      gpsGuess = null
+    }
+  } else if (appendix.gps_guess) {
+    gpsGuess = appendix.gps_guess
+  }
+
+  let gpsCorrected: CorrectedGps | null = null
+  if (row.gps_corrected) {
+    try {
+      gpsCorrected = JSON.parse(row.gps_corrected) as CorrectedGps
+    } catch {
+      gpsCorrected = null
+    }
+  }
+
+  let gpsTrack: TrackMatchedGps | null = null
+  if (row.gps_track) {
+    try {
+      gpsTrack = JSON.parse(row.gps_track) as TrackMatchedGps
+    } catch {
+      gpsTrack = null
+    }
+  } else if (appendix.gps_track) {
+    gpsTrack = appendix.gps_track
+  }
+
   return {
     id: row.id,
     path: row.path,
@@ -322,7 +831,10 @@ export function photoFromRow(row: PhotoRow): Photo {
     exposure_time: row.exposure_time,
     iso: row.iso,
     hash: row.hash,
-    appendix
+    appendix,
+    gps_guess: gpsGuess,
+    gps_corrected: gpsCorrected,
+    gps_track: gpsTrack
   }
 }
 
@@ -331,6 +843,7 @@ export function queryPhotos(filters: {
   root?: string
   hasGps?: boolean
   since?: string
+  until?: string
   q?: string
   bbox?: [number, number, number, number]
   orderGpsFirst?: boolean
@@ -347,6 +860,10 @@ export function queryPhotos(filters: {
   if (filters.since) {
     conds.push('taken_at >= ?')
     params.push(filters.since)
+  }
+  if (filters.until) {
+    conds.push('taken_at <= ?')
+    params.push(filters.until)
   }
   if (filters.q) {
     // 路径模糊匹配 + appendix 内 tags 文本匹配（JSON 字符串 LIKE）
@@ -464,4 +981,59 @@ export function recentScanRuns(limit = 10): ScanRun[] {
     .prepare('SELECT * FROM scan_runs ORDER BY id DESC LIMIT ?')
     .all(limit) as unknown as ScanRun[]
   return rows
+}
+
+export interface MatchingPhotosResult {
+  photos: Photo[]
+  detectedOffsetSec: number
+  isLocalTime: boolean
+}
+
+/** 高效查询与指定航线时空相符的相册照片（自动检测小米/Keep等当地时间 GPX 时区偏移） */
+export function findMatchingPhotosForRoute(routeId: string): MatchingPhotosResult {
+  const route = getRoute(routeId)
+  if (!route || !route.startTime || !route.endTime) {
+    return { photos: [], detectedOffsetSec: 0, isLocalTime: false }
+  }
+
+  const startMs = new Date(route.startTime).getTime()
+  const endMs = new Date(route.endTime).getTime()
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    return { photos: [], detectedOffsetSec: 0, isLocalTime: false }
+  }
+
+  // 候选时区补偿值（秒）：
+  // 0: 标准 UTC
+  // 28800 (+8h): 适用于小米手环/Keep等国内运动软件导出时把本地时间伪装为 Z 的情况
+  // systemOffsetSec: 本地时区差值
+  const systemOffsetSec = -new Date().getTimezoneOffset() * 60
+  const candidateOffsets = Array.from(
+    new Set([0, 28800, systemOffsetSec, -28800, -systemOffsetSec])
+  )
+
+  let bestOffset = 0
+  let bestRows: PhotoRow[] = []
+
+  const stmt = getMetadataDb().prepare(
+    'SELECT * FROM photos WHERE taken_at >= ? AND taken_at <= ? ORDER BY taken_at ASC'
+  )
+
+  for (const off of candidateOffsets) {
+    // 照片真实 UTC + off * 1000 = GPX 记录的时间
+    // 也就是说照片的 UTC taken_at 应该在 [startMs - off * 1000, endMs - off * 1000]
+    const qStart = new Date(startMs - off * 1000 - 120000).toISOString()
+    const qEnd = new Date(endMs - off * 1000 + 120000).toISOString()
+    const rows = stmt.all(qStart, qEnd) as unknown as PhotoRow[]
+    if (rows.length > bestRows.length) {
+      bestRows = rows
+      bestOffset = off
+    }
+  }
+
+  const photos = bestRows.map((r) => photoFromRow(r))
+  return {
+    photos,
+    detectedOffsetSec: bestOffset,
+    isLocalTime: bestOffset !== 0
+  }
 }

@@ -19,10 +19,7 @@ export function isVideoFile(pathOrExt: string): boolean {
 /** 获取图片/视频在 <img> 渲染时所用的缩略图 URL。 */
 export function photoThumbUrl(filePath: string): string {
   if (!filePath) return ''
-  if (isVideoFile(filePath)) {
-    return `cockpit-icon://${encodeURIComponent(filePath)}?thumb=1`
-  }
-  return `cockpit-icon://${encodeURIComponent(filePath)}`
+  return `cockpit-icon://${encodeURIComponent(filePath)}?thumb=1`
 }
 
 /** 一个 MBTiles 地图文件配置。 */
@@ -174,6 +171,16 @@ export interface YarjConfig {
   } | null
   /** 地图展示照片高级过滤规则。 */
   photoFilterRules?: PhotoFilterRule[]
+  /** 运动航线目录列表（支持扫描 .gpx / .kml 等）。 */
+  routeRoots?: GalleryRoot[]
+  /** 运动航线图层是否显示，默认 true */
+  showRoutesLayer?: boolean
+  /** GPS 有效坐标解析优先级，默认 ['track', 'corrected', 'guess', 'db', 'exif'] */
+  gpsPriority?: GpsPrioritySource[]
+  /** GPS 智能猜测相邻照片最大距离（米），默认 10000（10公里） */
+  gpsGuessMaxDistanceM?: number
+  /** GPS 智能猜测相邻照片最大时间差（小时），默认 4 */
+  gpsGuessMaxTimeHours?: number
 }
 
 /** 过滤操作符 */
@@ -200,6 +207,7 @@ export interface PhotoFilterRule {
 
 export const DEFAULT_YARJ_CONFIG: YarjConfig = {
   galleryRoots: [],
+  routeRoots: [],
   maps: [],
   activeProviderId: 'google-hybrid',
   enableTileCache: true,
@@ -207,6 +215,8 @@ export const DEFAULT_YARJ_CONFIG: YarjConfig = {
   mapLanguage: 'auto',
   showPhotosLayer: true,
   showExploredLayer: true,
+  showRoutesLayer: true,
+  gpsPriority: ['track', 'corrected', 'guess', 'db', 'exif'],
   exploredRadiusM: 60,
   exploredGranularity: 'standard',
   explorationGranularity: 'standard',
@@ -229,7 +239,9 @@ export const DEFAULT_YARJ_CONFIG: YarjConfig = {
   adm2MinZoom: 6,
   lodScreenFraction: 0.2,
   lastView: null,
-  photoFilterRules: []
+  photoFilterRules: [],
+  gpsGuessMaxDistanceM: 10000,
+  gpsGuessMaxTimeHours: 4
 }
 
 /** LOD 要素：行政区包围盒（用于「区域占屏比例 → 显示层级」计算）。 */
@@ -313,6 +325,12 @@ export interface Photo {
   hash?: string | null
   /** appendix 解析后的对象（tags, comment, ai_generated 等动态数据）。 */
   appendix: PhotoAppendix
+  /** 静态推算的 GPS 猜测（仅在没有真实 GPS 时推算并持久化）。 */
+  gps_guess?: GuessedGps | null
+  /** 时空速度合理性分析纠正的 GPS。 */
+  gps_corrected?: CorrectedGps | null
+  /** 基于运动航线 (GPX) 时序插值匹配的 GPS。 */
+  gps_track?: TrackMatchedGps | null
 }
 
 /** 照片 AI 视觉分析元数据（存储在 appendix.ai_generated / appendix.aigenerated）。 */
@@ -347,7 +365,212 @@ export interface PhotoAppendix {
   explored_radius_m?: number
   ai_generated?: PhotoAiGenerated
   aigenerated?: PhotoAiGenerated
+  gps_guess?: GuessedGps
+  gps_track?: TrackMatchedGps
+  gps_source?: 'exif' | 'manual' | 'solidified_guess' | 'track' | string
   [key: string]: unknown
+}
+
+/** 照片 GPS 智能猜测元数据。 */
+export interface GuessedGps {
+  lat: number
+  lon: number
+  distanceM: number
+  timeDiffSeconds: number
+  prevPath: string
+  nextPath: string
+  prevTakenAt: string
+  nextTakenAt: string
+}
+
+/** 照片 GPS 时空速度异常纠正元数据。 */
+export interface CorrectedGps {
+  lat: number
+  lon: number
+  /** 纠正原因（例如：速度异常漂移、跨区跳点） */
+  reason: string
+  /** 纠正前原始经度 */
+  original_lon?: number | null
+  /** 纠正前原始纬度 */
+  original_lat?: number | null
+  /** 漂移距离 (km) */
+  drift_distance_km?: number
+  /** 计算得出时速 (km/h) */
+  speed_kmh?: number
+  /** 参考前序锚点路径 */
+  prevPath?: string
+  /** 参考后序锚点路径 */
+  nextPath?: string
+  /** 纠正时间戳 */
+  corrected_at: string
+}
+
+/** 基于运动轨迹 (GPX) 匹配的时空插值 GPS 元数据。 */
+export interface TrackMatchedGps {
+  lat: number
+  lon: number
+  alt?: number | null
+  routeId: string
+  routeName: string
+  trackPointTime: string
+  timeOffsetSeconds: number
+  matchedAt: string
+}
+
+/** 运动轨迹单个采样点。 */
+export interface RoutePoint {
+  lat: number
+  lon: number
+  ele?: number | null
+  time?: string | null
+  distFromStartM: number
+  speedKmh?: number | null
+  hr?: number | null
+  cadence?: number | null
+}
+
+/** 运动轨迹按公里划分的分段数据（splits）。 */
+export interface RouteSplit {
+  km: number
+  durationSec: number
+  avgSpeedKmh: number
+  elevationGainM?: number
+}
+
+/** 运动航线 / 轨迹完整对象。 */
+export interface Route {
+  id: string
+  path: string
+  name: string
+  desc?: string | null
+  activityType?: string
+  startTime: string | null
+  endTime: string | null
+  durationSec: number
+  movingDurationSec: number
+  totalDistanceM: number
+  avgSpeedKmh: number
+  maxSpeedKmh: number
+  calories?: number | null
+  elevationGainM?: number | null
+  elevationLossM?: number | null
+  minEle?: number | null
+  maxEle?: number | null
+  avgHr?: number | null
+  maxHr?: number | null
+  bounds: [number, number, number, number]
+  pointCount: number
+  geojson: string
+  splits?: RouteSplit[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** GPS 优先级来源类型 */
+export type GpsPrioritySource = 'track' | 'corrected' | 'guess' | 'db' | 'exif'
+
+export const DEFAULT_GPS_PRIORITY: GpsPrioritySource[] = [
+  'track',
+  'corrected',
+  'guess',
+  'db',
+  'exif'
+]
+
+export type GpsSourceType = 'track' | 'corrected' | 'guess' | 'db' | 'exif'
+
+export interface ResolvedPhotoGps {
+  lat: number
+  lon: number
+  source: GpsSourceType
+}
+
+/**
+ * 按照指定优先级解析照片最终使用的有效坐标：
+ * 默认顺序：track > corrected > guess > db > exif
+ */
+export function resolvePhotoGps(
+  photo: Photo | null | undefined,
+  priorityOrder?: GpsPrioritySource[]
+): ResolvedPhotoGps | null {
+  if (!photo) return null
+  const order = priorityOrder && priorityOrder.length ? priorityOrder : DEFAULT_GPS_PRIORITY
+
+  for (const src of order) {
+    if (src === 'track') {
+      if (
+        photo.gps_track &&
+        photo.gps_track.lat != null &&
+        photo.gps_track.lon != null &&
+        Number.isFinite(photo.gps_track.lat) &&
+        Number.isFinite(photo.gps_track.lon)
+      ) {
+        return {
+          lat: photo.gps_track.lat,
+          lon: photo.gps_track.lon,
+          source: 'track'
+        }
+      }
+    } else if (src === 'corrected') {
+      if (
+        photo.gps_corrected &&
+        photo.gps_corrected.lat != null &&
+        photo.gps_corrected.lon != null &&
+        Number.isFinite(photo.gps_corrected.lat) &&
+        Number.isFinite(photo.gps_corrected.lon)
+      ) {
+        return {
+          lat: photo.gps_corrected.lat,
+          lon: photo.gps_corrected.lon,
+          source: 'corrected'
+        }
+      }
+    } else if (src === 'guess') {
+      if (
+        photo.gps_guess &&
+        photo.gps_guess.lat != null &&
+        photo.gps_guess.lon != null &&
+        Number.isFinite(photo.gps_guess.lat) &&
+        Number.isFinite(photo.gps_guess.lon)
+      ) {
+        return {
+          lat: photo.gps_guess.lat,
+          lon: photo.gps_guess.lon,
+          source: 'guess'
+        }
+      }
+    } else if (src === 'db') {
+      if (
+        photo.gps_lat != null &&
+        photo.gps_lon != null &&
+        Number.isFinite(photo.gps_lat) &&
+        Number.isFinite(photo.gps_lon)
+      ) {
+        return {
+          lat: photo.gps_lat,
+          lon: photo.gps_lon,
+          source: 'db'
+        }
+      }
+    } else if (src === 'exif') {
+      const exifGps = photo.appendix?.exif_gps as { lat?: number; lon?: number } | undefined
+      if (
+        exifGps &&
+        exifGps.lat != null &&
+        exifGps.lon != null &&
+        Number.isFinite(exifGps.lat) &&
+        Number.isFinite(exifGps.lon)
+      ) {
+        return {
+          lat: exifGps.lat,
+          lon: exifGps.lon,
+          source: 'exif'
+        }
+      }
+    }
+  }
+
+  return null
 }
 
 /** 地理编码结果（文字 -> 坐标） */
@@ -426,6 +649,9 @@ export interface PhotoRow {
   gps_alt: number | null
   hash: string | null
   appendix: string
+  gps_guess?: string | null
+  gps_corrected?: string | null
+  gps_track?: string | null
   scanned_at: string | null
 }
 
@@ -537,3 +763,5 @@ export interface JourneyData {
   startTime: number | null
   endTime: number | null
 }
+
+export type { GeotagPreviewResult, GeotagPreviewItem } from './route-geotag'

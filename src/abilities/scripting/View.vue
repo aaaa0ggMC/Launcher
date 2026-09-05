@@ -439,17 +439,38 @@ const statusLabel = computed(() => {
 // Console Logging Helpers
 // ---------------------------------------------------------------------------
 let logSeq = 0
-function appendLog(type: ConsoleLineType, text: string): void {
-  logSeq++
-  consoleLines.value.push({
-    id: `log-${Date.now()}-${logSeq}`,
-    time: Date.now(),
-    type,
-    text
+let scriptOutputUnsub: (() => void) | null = null
+let scriptOutputSingleUnsub: (() => void) | null = null
+let scriptProgressUnsub: (() => void) | null = null
+let scrollRaf: number | null = null
+
+function triggerScroll(): void {
+  if (!autoScroll.value) return
+  if (scrollRaf !== null) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = null
+    scrollConsoleToBottom()
   })
-  if (autoScroll.value) {
-    nextTick(scrollConsoleToBottom)
+}
+
+function appendLogBatch(items: ConsoleLine[]): void {
+  if (!items.length) return
+  consoleLines.value.push(...items)
+  if (consoleLines.value.length > 2000) {
+    consoleLines.value.splice(0, consoleLines.value.length - 2000)
   }
+  triggerScroll()
+}
+
+function appendLog(type: ConsoleLineType, text: string, time = Date.now()): void {
+  appendLogBatch([
+    {
+      id: `log-${Date.now()}-${++logSeq}`,
+      time,
+      type,
+      text
+    }
+  ])
 }
 
 function scrollConsoleToBottom(): void {
@@ -549,6 +570,23 @@ async function openLocalFile(): Promise<void> {
   }
 }
 
+async function reloadFromDisk(): Promise<void> {
+  if (!scriptPath.value) return
+  try {
+    const loaded = (await window.cockpit.command('scripting.load', {
+      path: scriptPath.value
+    })) as ScriptItem
+    if (loaded && loaded.code !== undefined) {
+      scriptCode.value = loaded.code
+      isDirty.value = false
+      updateConfigSchema()
+      showToast(`${translate(uiLang.value, 'scripting.toolbar.reloadFromDisk')}: ${loaded.name}`)
+    }
+  } catch (err) {
+    appendLog('error', `重新加载失败: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 async function saveCurrentScript(saveAs = false): Promise<void> {
   let targetPath = scriptPath.value
   if (saveAs || !targetPath) {
@@ -642,6 +680,19 @@ function insertSnippet(snippet: string): void {
 async function runScript(): Promise<void> {
   if (status.value === 'running') return
 
+  if (scriptPath.value && !isDirty.value) {
+    try {
+      const loaded = (await window.cockpit.command('scripting.load', {
+        path: scriptPath.value
+      })) as ScriptItem
+      if (loaded && typeof loaded.code === 'string') {
+        scriptCode.value = loaded.code
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   status.value = 'running'
   startedAt.value = Date.now()
   endedAt.value = null
@@ -689,7 +740,10 @@ async function runScript(): Promise<void> {
       appendLog('system', `=== 脚本执行成功 (耗时 ${durationText.value}) ===`)
     } else {
       status.value = 'error'
-      appendLog('error', res?.error || '执行出错')
+      const errMsg = res?.error || '执行出错'
+      if (!consoleLines.value.some((l) => l.type === 'error' && l.text.includes(errMsg))) {
+        appendLog('error', errMsg)
+      }
       appendLog('system', `=== 脚本执行终止 ===`)
     }
   } catch (err: unknown) {
@@ -707,7 +761,7 @@ async function runScript(): Promise<void> {
   }
 }
 
-function stopScript(): void {
+async function stopScript(): Promise<void> {
   if (activeAbortController) {
     activeAbortController.abort()
     activeAbortController = null
@@ -719,6 +773,11 @@ function stopScript(): void {
     durationTimer = null
   }
   appendLog('warn', '用户中止了脚本执行')
+  try {
+    await window.cockpit.command('scripting.stop')
+  } catch {
+    // ignore
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +921,28 @@ onMounted(async () => {
   }
   await updateConfigSchema()
   window.addEventListener('keydown', handleGlobalKeyDown)
+
+  scriptOutputUnsub = window.cockpit.on('cockpit:script-output-batch', (payload: unknown) => {
+    const lines = payload as ConsoleLine[]
+    if (Array.isArray(lines) && lines.length > 0) {
+      appendLogBatch(lines)
+    }
+  })
+
+  scriptOutputSingleUnsub = window.cockpit.on('cockpit:script-output', (payload: unknown) => {
+    const line = payload as ConsoleLine
+    if (line && typeof line.text === 'string') {
+      appendLog(line.type, line.text, line.time)
+    }
+  })
+
+  scriptProgressUnsub = window.cockpit.on('cockpit:script-progress', (payload: unknown) => {
+    const data = payload as { pct: number; message?: string }
+    if (data && typeof data.pct === 'number') {
+      progressValue.value = data.pct
+      if (data.message) progressMessage.value = data.message
+    }
+  })
 })
 
 onActivated(() => {
@@ -873,6 +954,16 @@ onDeactivated(() => {
 })
 
 onUnmounted(() => {
+  if (scrollRaf !== null) {
+    cancelAnimationFrame(scrollRaf)
+    scrollRaf = null
+  }
+  scriptOutputUnsub?.()
+  scriptOutputUnsub = null
+  scriptOutputSingleUnsub?.()
+  scriptOutputSingleUnsub = null
+  scriptProgressUnsub?.()
+  scriptProgressUnsub = null
   window.removeEventListener('keydown', handleGlobalKeyDown)
   if (durationTimer) clearInterval(durationTimer)
   if (parseConfigTimer) clearTimeout(parseConfigTimer)
@@ -930,6 +1021,23 @@ onUnmounted(() => {
               size="small"
               variant="text"
               @click="openLocalFile"
+            />
+          </template>
+        </v-tooltip>
+
+        <!-- Reload from disk -->
+        <v-tooltip
+          v-if="scriptPath"
+          :text="translate(uiLang, 'scripting.toolbar.reloadFromDisk')"
+          location="bottom"
+        >
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              icon="mdi-reload"
+              size="small"
+              variant="text"
+              @click="reloadFromDisk"
             />
           </template>
         </v-tooltip>

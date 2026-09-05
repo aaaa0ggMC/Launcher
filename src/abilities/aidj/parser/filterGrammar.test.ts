@@ -64,6 +64,15 @@ describe('parseFilterCommand — flag parsing', () => {
     assert.equal(q.count, 5)
     assert.equal(evaluateFilter(q.expr, { haystack: norm('b'), meta: {} }, true), true)
   })
+  it('parses flags without leading -- for common options (e.g. compare=all, count=50)', () => {
+    const q1 = parseFilterCommand('compare=all 辽阔的森林')
+    assert.equal(q1.compare, 'all')
+    assert.deepEqual(q1.expr, { type: 'match', text: '辽阔的森林' })
+
+    const q2 = parseFilterCommand('count=50 "森林"')
+    assert.equal(q2.count, 50)
+    assert.deepEqual(q2.expr, { type: 'match', text: '森林' })
+  })
 })
 
 describe('parseFilterCommand — error handling', () => {

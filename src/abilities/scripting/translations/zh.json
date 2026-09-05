@@ -7,6 +7,7 @@
   "scripting.toolbar.modified": "已修改",
   "scripting.toolbar.newScript": "新建",
   "scripting.toolbar.openFile": "打开",
+  "scripting.toolbar.reloadFromDisk": "从磁盘重新加载",
   "scripting.toolbar.save": "保存",
   "scripting.toolbar.saveAs": "另存为",
   "scripting.toolbar.templates": "模板",

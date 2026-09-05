@@ -1,6 +1,6 @@
-import { protocol, net } from 'electron'
+import { protocol, net, nativeImage } from 'electron'
 import { createReadStream, existsSync, statSync } from 'node:fs'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'path'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -27,6 +27,47 @@ const inFlightThumbs = new Map<string, Promise<string>>()
 
 function toWebStream(node: import('stream').Readable): ReadableStream<Uint8Array> {
   return Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>
+}
+
+async function ensureImageThumbnail(imagePath: string, width = 360): Promise<string> {
+  const hash = createHash('md5').update(`${imagePath}:${width}`).digest('hex')
+  const thumbPath = join(THUMBNAIL_CACHE_DIR, `${hash}.jpg`)
+
+  if (existsSync(thumbPath)) {
+    try {
+      const st = statSync(thumbPath)
+      if (st.size > 0) return thumbPath
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const inFlight = inFlightThumbs.get(thumbPath)
+  if (inFlight) return inFlight
+
+  const genPromise = (async (): Promise<string> => {
+    try {
+      await mkdir(THUMBNAIL_CACHE_DIR, { recursive: true })
+      const img = nativeImage.createFromPath(imagePath)
+      if (img.isEmpty()) {
+        throw new Error('Image could not be decoded')
+      }
+      const resized = img.resize({ width })
+      const buf = resized.toJPEG(82)
+      await writeFile(thumbPath, buf)
+      return thumbPath
+    } catch (err) {
+      log.warn(`Failed to generate image thumbnail for ${imagePath}`, err)
+      throw err
+    }
+  })()
+
+  inFlightThumbs.set(thumbPath, genPromise)
+  try {
+    return await genPromise
+  } finally {
+    inFlightThumbs.delete(thumbPath)
+  }
 }
 
 async function ensureVideoThumbnail(videoPath: string): Promise<string> {
@@ -125,6 +166,15 @@ export function registerIconProtocol(): void {
           return await net.fetch('file://' + thumbPath)
         } catch {
           // If ffmpeg fails, fallback to direct fetch
+          return await net.fetch('file://' + filePath)
+        }
+      }
+
+      if (isThumbParam && !isVideo) {
+        try {
+          const thumbPath = await ensureImageThumbnail(filePath, 360)
+          return await net.fetch('file://' + thumbPath)
+        } catch {
           return await net.fetch('file://' + filePath)
         }
       }

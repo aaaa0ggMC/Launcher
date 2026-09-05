@@ -5,6 +5,7 @@ import {
   saveScriptFile,
   deleteScriptFile,
   executeScript,
+  stopCurrentScript,
   extractScriptConfigSchema
 } from './service'
 import { SCRIPT_TEMPLATES } from './templates'
@@ -24,6 +25,15 @@ export default [
         return { ok: false, error: '代码不能为空' }
       }
       return await executeScript(code, language, {}, userConfig)
+    }
+  },
+  {
+    name: 'scripting.stop',
+    description: '停止正在运行的脚本',
+    usage: 'scripting.stop',
+    run: async () => {
+      const stopped = stopCurrentScript()
+      return { ok: stopped }
     }
   },
   {

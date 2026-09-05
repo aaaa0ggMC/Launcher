@@ -51,6 +51,8 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
+
 let mainWindow: BrowserWindow | null = null
 // Once the user has confirmed quitting (or confirmed via the renderer), the
 // next close request is allowed to proceed without re-prompting.

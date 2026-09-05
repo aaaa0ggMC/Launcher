@@ -4,7 +4,7 @@ defineOptions({ name: 'cockpit-yarj-photo-lightbox' })
 import { ref, computed, watch, onBeforeUnmount, inject } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
-import type { Photo, ReverseGeocodeResult } from '../types'
+import type { Photo, ReverseGeocodeResult, GuessedGps } from '../types'
 import { isVideoFile, photoThumbUrl } from '../types'
 import JsonTreeView from './JsonTreeView.vue'
 
@@ -12,6 +12,7 @@ const props = defineProps<{
   open: boolean
   photos: Photo[]
   initialIndex: number
+  guessedGpsMap?: Map<string, GuessedGps>
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +20,7 @@ const emit = defineEmits<{
   (e: 'updated'): void
   (e: 'locate', coords: [number, number]): void
   (e: 'pick-gps', photo: Photo): void
+  (e: 'solidify-gps', payload: { photo: Photo; guess: GuessedGps }): void
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -54,6 +56,43 @@ const currentPhoto = computed<Photo | null>(() => {
   const idx = Math.max(0, Math.min(currentIndex.value, props.photos.length - 1))
   return props.photos[idx] ?? null
 })
+
+const currentGuessedGps = computed<GuessedGps | null>(() => {
+  if (!currentPhoto.value) return null
+  if (currentPhoto.value.gps_lat != null && currentPhoto.value.gps_lon != null) return null
+  return props.guessedGpsMap?.get(currentPhoto.value.path) ?? null
+})
+
+const solidifying = ref(false)
+
+async function solidifyCurrentGps(): Promise<void> {
+  const p = currentPhoto.value
+  const guess = currentGuessedGps.value
+  if (!p || !guess || solidifying.value) return
+  solidifying.value = true
+  try {
+    const res = (await window.cockpit.command('yarj.update-photo', {
+      path: p.path,
+      lat: guess.lat,
+      lon: guess.lon,
+      patch: { gps_source: 'solidified_guess' }
+    })) as { ok: boolean; photo?: Photo }
+    if (res?.ok) {
+      p.gps_lat = guess.lat
+      p.gps_lon = guess.lon
+      p.appendix = {
+        ...p.appendix,
+        gps_source: 'solidified_guess'
+      }
+      emit('solidify-gps', { photo: p, guess })
+      emit('updated')
+    }
+  } catch (err) {
+    console.error('Failed to solidify GPS:', err)
+  } finally {
+    solidifying.value = false
+  }
+}
 
 watch(
   () => props.initialIndex,
@@ -770,7 +809,127 @@ onBeforeUnmount(() => {
                   </v-btn>
                 </div>
 
-                <div class="text-body-1 font-weight-medium mb-1">
+                <!-- 智能时空速度纠正展示 -->
+                <div v-if="currentPhoto.gps_corrected" class="corrected-box pa-3 rounded-lg mb-2">
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center ga-1">
+                      <v-icon size="18" color="secondary">mdi-auto-fix</v-icon>
+                      <span class="text-body-2 font-weight-bold text-secondary">
+                        {{ t('yarj.correct.badge', 'GPS 已纠正') }}
+                      </span>
+                    </div>
+                    <v-chip
+                      v-if="currentPhoto.gps_corrected.drift_distance_km"
+                      size="x-small"
+                      color="secondary"
+                      variant="tonal"
+                    >
+                      偏移 {{ currentPhoto.gps_corrected.drift_distance_km }} km ·
+                      {{ currentPhoto.gps_corrected.speed_kmh }} km/h
+                    </v-chip>
+                  </div>
+
+                  <div class="text-caption on-surface-variant mb-2">
+                    {{ currentPhoto.gps_corrected.reason }}
+                  </div>
+
+                  <div class="text-body-1 font-weight-medium mb-3">
+                    {{
+                      formatCoords(currentPhoto.gps_corrected.lat, currentPhoto.gps_corrected.lon)
+                    }}
+                  </div>
+
+                  <div class="d-flex ga-2 flex-wrap">
+                    <v-btn
+                      color="secondary"
+                      variant="flat"
+                      prepend-icon="mdi-crosshairs-gps"
+                      @click="
+                        emit('locate', [
+                          currentPhoto.gps_corrected!.lon,
+                          currentPhoto.gps_corrected!.lat
+                        ])
+                      "
+                    >
+                      {{ t('yarj.guess.locateGuess', '定位到此点') }}
+                    </v-btn>
+                  </div>
+                </div>
+
+                <div
+                  v-if="currentGuessedGps && !currentPhoto.gps_corrected"
+                  class="guess-box pa-3 rounded-lg mb-2"
+                >
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center ga-1">
+                      <v-icon size="18" color="warning">mdi-map-marker-question-outline</v-icon>
+                      <span class="text-body-2 font-weight-bold text-warning">
+                        {{ t('yarj.guess.badge', '大致 GPS 猜测') }}
+                      </span>
+                    </div>
+                    <v-chip size="x-small" color="warning" variant="tonal">
+                      {{ (currentGuessedGps.distanceM / 1000).toFixed(1) }} km ·
+                      {{
+                        currentGuessedGps.timeDiffSeconds >= 3600
+                          ? `${(currentGuessedGps.timeDiffSeconds / 3600).toFixed(1)} h`
+                          : `${Math.round(currentGuessedGps.timeDiffSeconds / 60)} min`
+                      }}
+                    </v-chip>
+                  </div>
+
+                  <div class="text-caption on-surface-variant mb-2">
+                    {{
+                      t(
+                        'yarj.guess.desc',
+                        '该照片未记录原生 GPS，根据拍摄时间处于两张照片之间，自动计算中点推算得出（间距约 {dist}，拍摄时差约 {time}）。'
+                      )
+                        .replace(
+                          '{dist}',
+                          currentGuessedGps.distanceM >= 1000
+                            ? `${(currentGuessedGps.distanceM / 1000).toFixed(1)}km`
+                            : `${currentGuessedGps.distanceM}m`
+                        )
+                        .replace(
+                          '{time}',
+                          currentGuessedGps.timeDiffSeconds >= 3600
+                            ? `${(currentGuessedGps.timeDiffSeconds / 3600).toFixed(1)}h`
+                            : `${Math.round(currentGuessedGps.timeDiffSeconds / 60)}min`
+                        )
+                    }}
+                  </div>
+
+                  <div class="text-body-1 font-weight-medium mb-3">
+                    {{ formatCoords(currentGuessedGps.lat, currentGuessedGps.lon) }}
+                  </div>
+
+                  <div class="d-flex ga-2 flex-wrap">
+                    <v-btn
+                      color="warning"
+                      variant="flat"
+                      prepend-icon="mdi-check-decagram"
+                      :loading="solidifying"
+                      @click="solidifyCurrentGps"
+                    >
+                      {{ t('yarj.guess.solidify', '固化此位置') }}
+                    </v-btn>
+                    <v-btn
+                      variant="outlined"
+                      prepend-icon="mdi-map-marker-plus-outline"
+                      @click="emit('pick-gps', currentPhoto)"
+                    >
+                      {{ t('yarj.guess.pickCorrect', '选择正确地址') }}
+                    </v-btn>
+                    <v-btn
+                      variant="text"
+                      prepend-icon="mdi-crosshairs-gps"
+                      @click="emit('locate', [currentGuessedGps.lon, currentGuessedGps.lat])"
+                    >
+                      {{ t('yarj.guess.locate', '定位猜测点') }}
+                    </v-btn>
+                  </div>
+                </div>
+
+                <div v-else class="text-body-1 font-weight-medium mb-1">
                   {{ formatCoords(currentPhoto.gps_lat, currentPhoto.gps_lon) }}
                   <span
                     v-if="currentPhoto.gps_alt != null"
@@ -826,6 +985,7 @@ onBeforeUnmount(() => {
                     {{ t('yarj.drawer.locate', '定位到地图中心') }}
                   </v-btn>
                   <v-btn
+                    v-if="!currentGuessedGps"
                     variant="outlined"
                     block
                     prepend-icon="mdi-map-marker-plus-outline"
@@ -1157,6 +1317,16 @@ onBeforeUnmount(() => {
 .address-box {
   background: rgba(var(--v-theme-primary), 0.08);
   border: 1px solid rgba(var(--v-theme-primary), 0.2);
+}
+
+.corrected-box {
+  background: rgba(var(--v-theme-secondary), 0.08);
+  border: 1px solid rgba(var(--v-theme-secondary), 0.35);
+}
+
+.guess-box {
+  background: rgba(var(--v-theme-warning), 0.08);
+  border: 1px solid rgba(var(--v-theme-warning), 0.35);
 }
 
 .photo-comment {

@@ -5,8 +5,10 @@ import { Notification } from 'electron'
 import { USER_CONFIG_DIR } from '../../main/process/paths'
 import { runCommand, listCommands } from '../../main/process/commands/registry'
 import { makeLogger } from '../../main/process/logger'
+import { getBroadcast } from '../../main/process/broadcast'
 import type {
   CockpitContext,
+  ConsoleLine,
   ConsoleLineType,
   ScriptConfigSchema,
   ScriptItem,
@@ -258,6 +260,64 @@ export async function compileScriptToFunction(
   return factory as (ctx: { cockpit: CockpitContext }) => Promise<unknown>
 }
 
+let currentScriptAbortController: AbortController | null = null
+
+export function stopCurrentScript(): boolean {
+  if (currentScriptAbortController) {
+    currentScriptAbortController.abort()
+    currentScriptAbortController = null
+    return true
+  }
+  return false
+}
+
+// ---------------------------------------------------------------------------
+// Output & Progress Batching (prevents IPC flood and UI freeze)
+// ---------------------------------------------------------------------------
+let pendingOutputBatch: ConsoleLine[] = []
+let isBatchScheduled = false
+
+function flushOutputBatch(): void {
+  isBatchScheduled = false
+  if (!pendingOutputBatch.length) return
+  const batch = pendingOutputBatch
+  pendingOutputBatch = []
+  try {
+    getBroadcast()('cockpit:script-output-batch', batch)
+  } catch {
+    // ignore
+  }
+}
+
+function scheduleOutputBatch(item: ConsoleLine): void {
+  pendingOutputBatch.push(item)
+  if (pendingOutputBatch.length >= 100) {
+    flushOutputBatch()
+  } else if (!isBatchScheduled) {
+    isBatchScheduled = true
+    queueMicrotask(flushOutputBatch)
+  }
+}
+
+let pendingProgress: { pct: number; message?: string } | null = null
+let progressTimer: NodeJS.Timeout | null = null
+
+function scheduleProgress(pct: number, message?: string): void {
+  pendingProgress = { pct, message }
+  if (progressTimer) return
+  progressTimer = setTimeout(() => {
+    progressTimer = null
+    if (pendingProgress) {
+      try {
+        getBroadcast()('cockpit:script-progress', pendingProgress)
+      } catch {
+        // ignore
+      }
+      pendingProgress = null
+    }
+  }, 60)
+}
+
 /**
  * Execute script code with fully populated CockpitContext and live hooks.
  */
@@ -268,12 +328,41 @@ export async function executeScript(
   userConfig: Record<string, unknown> = {}
 ): Promise<ScriptRunResult> {
   const start = Date.now()
-  const signal = hooks.signal ?? new AbortController().signal
+  const controller = new AbortController()
+  currentScriptAbortController = controller
+
+  const onExternalAbort = (): void => {
+    controller.abort()
+  }
+  if (hooks.signal) {
+    if (hooks.signal.aborted) {
+      controller.abort()
+    } else {
+      hooks.signal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+  }
+  const signal = controller.signal
+
+  const logs: ConsoleLine[] = []
+  let lineSeq = 0
 
   const emit = (type: ConsoleLineType, ...args: unknown[]): void => {
+    if (signal.aborted) {
+      throw new Error('Script execution cancelled')
+    }
     const text = formatArgs(...args)
     hooks.onLog?.(type, text)
-    log.debug(`[script:${type}] ${text}`)
+    const item: ConsoleLine = {
+      id: `script-log-${Date.now()}-${++lineSeq}`,
+      time: Date.now(),
+      type,
+      text
+    }
+    logs.push(item)
+    if (logs.length > 2000) {
+      logs.splice(0, logs.length - 2000)
+    }
+    scheduleOutputBatch(item)
   }
 
   // Build CockpitContext
@@ -373,17 +462,22 @@ export async function executeScript(
     warn: (...args: unknown[]) => emit('warn', ...args),
     error: (...args: unknown[]) => emit('error', ...args),
     progress: (pct: number, message?: string) => {
+      if (signal.aborted) throw new Error('Script execution cancelled')
       hooks.onProgress?.(pct, message)
       if (message) emit('system', `[Progress ${Math.round(pct)}%] ${message}`)
+      scheduleProgress(pct, message)
     },
     sleep: async (ms: number) => {
       return new Promise<void>((resolve, reject) => {
         if (signal.aborted) return reject(new Error('Script execution cancelled'))
-        const t = setTimeout(resolve, ms)
         const onAbort = (): void => {
           clearTimeout(t)
           reject(new Error('Script execution cancelled'))
         }
+        const t = setTimeout(() => {
+          signal.removeEventListener('abort', onAbort)
+          resolve()
+        }, ms)
         signal.addEventListener('abort', onAbort, { once: true })
       })
     },
@@ -462,12 +556,30 @@ export async function executeScript(
       emit('result', result)
     }
     emit('system', `[Script] 执行完成 (耗时: ${durationMs}ms)`)
-    return { ok: true, result, durationMs }
+    flushOutputBatch()
+    return { ok: true, result, durationMs, logs }
   } catch (err: unknown) {
     const durationMs = Date.now() - start
-    const msg = err instanceof Error ? err.stack || err.message : String(err)
-    emit('error', msg)
-    emit('system', `[Script] 执行失败: ${msg}`)
-    return { ok: false, error: msg, durationMs }
+    const isAborted =
+      signal.aborted || (err instanceof Error && err.message.includes('Script execution cancelled'))
+    const msg = isAborted
+      ? '脚本执行已被用户中止'
+      : err instanceof Error
+        ? err.stack || err.message
+        : String(err)
+    if (!isAborted) {
+      emit('error', msg)
+    }
+    emit('system', isAborted ? '[Script] 执行已中止' : `[Script] 执行失败: ${msg}`)
+    flushOutputBatch()
+    return { ok: false, error: msg, durationMs, logs }
+  } finally {
+    if (hooks.signal) {
+      hooks.signal.removeEventListener('abort', onExternalAbort)
+    }
+    if (currentScriptAbortController === controller) {
+      currentScriptAbortController = null
+    }
+    flushOutputBatch()
   }
 }

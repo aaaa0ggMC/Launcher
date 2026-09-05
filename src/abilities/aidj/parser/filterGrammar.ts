@@ -140,12 +140,12 @@ export function parseFilterCommand(src: string): FilterQuery {
   let count = 100
   let compare: FilterQuery['compare'] = 'title'
   let ignoreCase = true
-  const flagRe = /^--([\w-]+)(?:=([^\s]*))?/
+  const flagRe = /^(?:--([\w-]+)(?:=([^\s]*))?|(count|compare|ignorecase|ignore-case)=([^\s]*))/i
   while (true) {
     const m = rest.match(flagRe)
     if (!m) break
-    const key = m[1]
-    const val = m[2] ?? ''
+    const key = (m[1] || m[3]).toLowerCase()
+    const val = (m[1] ? m[2] : m[4]) ?? ''
     if (key === 'count') {
       const n = Number(val)
       if (!Number.isFinite(n) || n === 0)

@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 
 /** App root: project root in dev, install dir in prod. */
-export const APP_ROOT = app.getAppPath()
+export const APP_ROOT = typeof app?.getAppPath === 'function' ? app.getAppPath() : process.cwd()
 
 export const SCRIPTS_DIR = join(APP_ROOT, 'scripts')
 

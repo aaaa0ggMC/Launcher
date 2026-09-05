@@ -35,6 +35,7 @@ export interface ScriptRunResult {
   error?: string
   durationMs?: number
   taskId?: string
+  logs?: ConsoleLine[]
 }
 
 // ---------------------------------------------------------------------------

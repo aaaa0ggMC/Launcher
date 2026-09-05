@@ -18,7 +18,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'jpg',
-    coordSystem: 'wgs84',
+    coordSystem: 'gcj02',
     attribution: '© Google'
   },
   {
@@ -33,7 +33,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'jpg',
-    coordSystem: 'wgs84',
+    coordSystem: 'gcj02',
     attribution: '© Google'
   },
   {
@@ -48,7 +48,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
-    coordSystem: 'wgs84',
+    coordSystem: 'gcj02',
     attribution: '© Google'
   },
   {
@@ -63,7 +63,7 @@ export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
     maxZoom: 20,
     tileSize: 256,
     ext: 'png',
-    coordSystem: 'wgs84',
+    coordSystem: 'gcj02',
     attribution: '© Google'
   },
   {

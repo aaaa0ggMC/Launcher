@@ -28,9 +28,28 @@ import {
   clearTileCache,
   forwardGeocode,
   reverseGeocode,
-  pruneMissingPhotos
+  pruneMissingPhotos,
+  addRouteRoot,
+  removeRouteRoot,
+  moveRouteRoot,
+  importRouteFile
 } from './service'
-import { queryPhotos, updatePhoto, batchUpdatePhotoGps, type BatchGpsUpdateItem } from './db'
+import {
+  queryPhotos,
+  updatePhoto,
+  batchUpdatePhotoGps,
+  batchUpdatePhotoGpsGuesses,
+  countCorrectedPhotos,
+  getRoute,
+  queryRoutes,
+  deleteRoute,
+  countRouteGeotaggedPhotos,
+  findMatchingPhotosForRoute,
+  type BatchGpsUpdateItem
+} from './db'
+import { computeStaticGpsGuesses } from './photo-guess'
+import { previewRouteGeotag, getRoutePoints } from './route-geotag'
+import type { GpsPrioritySource, Photo } from './types'
 import { readLodData } from './lod'
 import { readHierarchy } from './hierarchy'
 import { registerStartupHook } from '../../main/process/startup'
@@ -403,6 +422,266 @@ export default [
       const path = String(ctx.named.path ?? '')
       if (path) await shell.openPath(path)
       return { ok: true }
+    }
+  },
+  {
+    name: 'yarj.recompute-guesses',
+    description: '重新静态推算所有未定位照片的时空邻近 GPS 坐标',
+    usage: 'yarj.recompute-guesses',
+    run: async () => {
+      const cfg = await loadYarjConfig()
+      let totalGuessed = 0
+      for (const r of cfg.galleryRoots) {
+        const photos = queryPhotos({ root: r.path })
+        const guesses = computeStaticGpsGuesses(photos, {
+          maxDistanceM: cfg.gpsGuessMaxDistanceM ?? 10000,
+          maxTimeHours: cfg.gpsGuessMaxTimeHours ?? 4
+        })
+        batchUpdatePhotoGpsGuesses(guesses)
+        totalGuessed += guesses.length
+      }
+      return { ok: true, count: totalGuessed }
+    }
+  },
+  {
+    name: 'yarj.correct-gps',
+    description: '分析照片时空与速度合理性，自动纠正异常漂移的 GPS 坐标',
+    usage:
+      'yarj.correct-gps [--maxSpeed <800>] [--minDrift <80>] [--maxTimeGap <24>] [--root <rootPath>]',
+    run: async (ctx) => {
+      const maxSpeedKmh = ctx.named.maxSpeed ? Number(ctx.named.maxSpeed) : 800
+      const minDriftKm = ctx.named.minDrift ? Number(ctx.named.minDrift) : 80
+      const maxTimeGapHours = ctx.named.maxTimeGap ? Number(ctx.named.maxTimeGap) : 24
+      const root = typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined
+
+      const taskId = await startJobByName('yarj.correct-gps', {
+        maxSpeedKmh,
+        minDriftKm,
+        maxTimeGapHours,
+        root
+      })
+      return { ok: true, taskId }
+    }
+  },
+  {
+    name: 'yarj.clear-gps-correction',
+    description: '清除所有（或指定目录）照片的 GPS 纠正数据并恢复原始坐标',
+    usage: 'yarj.clear-gps-correction [--root <rootPath>]',
+    run: async (ctx) => {
+      const root = typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined
+      const taskId = await startJobByName('yarj.clear-gps-correction', { root })
+      return { ok: true, taskId }
+    }
+  },
+  {
+    name: 'yarj.count-corrected',
+    description: '获取当前已纠正 GPS 坐标的照片数量',
+    usage: 'yarj.count-corrected [--root <rootPath>]',
+    run: async (ctx) => {
+      const root = typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined
+      const count = countCorrectedPhotos(root)
+      return { ok: true, count }
+    }
+  },
+  {
+    name: 'yarj.routes',
+    description:
+      '查询运动航线列表 ([--activity <cycling|running>] [--q <keyword>] [--since <iso>])',
+    usage: 'yarj.routes [--activity cycling] [--q 骑行]',
+    run: async (ctx) => {
+      const activityType = typeof ctx.named.activity === 'string' ? ctx.named.activity : undefined
+      const q = typeof ctx.named.q === 'string' ? ctx.named.q : undefined
+      const since = typeof ctx.named.since === 'string' ? ctx.named.since : undefined
+      return queryRoutes({ activityType, q, since })
+    }
+  },
+  {
+    name: 'yarj.route',
+    description: '获取单条航线详情 (--id <routeId>)',
+    usage: 'yarj.route --id <routeId>',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const route = getRoute(id)
+      if (!route) return { ok: false, error: '未找到该航线' }
+      return { ok: true, route }
+    }
+  },
+  {
+    name: 'yarj.get-route-points',
+    description: '获取航线的全部高精度轨迹点与时间序列 (--id <routeId>)',
+    usage: 'yarj.get-route-points --id <routeId>',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const route = getRoute(id)
+      if (!route) return { ok: false, error: '未找到该航线' }
+      const points = getRoutePoints(route)
+      return { ok: true, points }
+    }
+  },
+  {
+    name: 'yarj.add-route-root',
+    description: '添加运动航线目录 (--path)',
+    usage: 'yarj.add-route-root --path /home/user/Downloads',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      if (!path) return { ok: false, error: '需要 --path' }
+      return addRouteRoot(path)
+    }
+  },
+  {
+    name: 'yarj.remove-route-root',
+    description: '移除运动航线目录 (--path)',
+    usage: 'yarj.remove-route-root --path /home/user/Downloads',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      if (!path) return { ok: false, error: '需要 --path' }
+      return removeRouteRoot(path)
+    }
+  },
+  {
+    name: 'yarj.move-route-root',
+    description: '调整航线目录顺序 (--path <p> --dir <up|down>)',
+    usage: 'yarj.move-route-root --path /dir --dir up',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      const dir = ctx.named.dir === 'up' ? -1 : 1
+      if (!path) return { ok: false, error: '需要 --path' }
+      return moveRouteRoot(path, dir)
+    }
+  },
+  {
+    name: 'yarj.import-route-file',
+    description: '手动导入单个 GPX / KML 轨迹文件 (--path)',
+    usage: 'yarj.import-route-file --path /path/to/ride.gpx',
+    run: async (ctx) => {
+      const path = String(ctx.named.path ?? '')
+      if (!path) return { ok: false, error: '需要 --path' }
+      const route = await importRouteFile(path)
+      if (!route) return { ok: false, error: '解析或导入失败' }
+      return { ok: true, route }
+    }
+  },
+  {
+    name: 'yarj.delete-route',
+    description: '删除一条运动航线记录 (--id)',
+    usage: 'yarj.delete-route --id <routeId>',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const deleted = deleteRoute(id)
+      return { ok: deleted }
+    }
+  },
+  {
+    name: 'yarj.scan-routes',
+    description: '启动后台任务扫描航线目录中的 GPX 文件 ([--root <path>])',
+    usage: 'yarj.scan-routes',
+    run: async (ctx) => {
+      const root = typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined
+      const taskId = await startJobByName('yarj.scan-routes', { root })
+      return { ok: true, taskId }
+    }
+  },
+  {
+    name: 'yarj.geotag-routes',
+    description:
+      '基于运动轨迹插值匹配并对齐照片拍摄位置 ([--routeId <id>] [--offset <0>] [--root <p>])',
+    usage: 'yarj.geotag-routes [--routeId <id>] [--offset 10]',
+    run: async (ctx) => {
+      const routeId = typeof ctx.named.routeId === 'string' ? ctx.named.routeId : undefined
+      const timeOffsetSeconds = ctx.named.offset != null ? Number(ctx.named.offset) : 0
+      const root = typeof ctx.named.root === 'string' ? ctx.named.root : undefined
+
+      const taskId = await startJobByName('yarj.geotag-routes', {
+        routeId,
+        timeOffsetSeconds,
+        root
+      })
+      return { ok: true, taskId }
+    }
+  },
+  {
+    name: 'yarj.clear-route-geotag',
+    description: '清空照片的轨迹贴合坐标 gps_track ([--root <path>])',
+    usage: 'yarj.clear-route-geotag',
+    run: async (ctx) => {
+      const root = typeof ctx.named.root === 'string' ? ctx.named.root : undefined
+      const taskId = await startJobByName('yarj.clear-route-geotag', { root })
+      return { ok: true, taskId }
+    }
+  },
+  {
+    name: 'yarj.preview-geotag',
+    description: '预览单条航线与照片的时序匹配情况 (--routeId <id> [--offset <0>] [--root <p>])',
+    usage: 'yarj.preview-geotag --routeId <id> [--offset 0]',
+    run: async (ctx) => {
+      const routeId = String(ctx.named.routeId ?? '')
+      if (!routeId) return { ok: false, error: '需要 --routeId' }
+      const route = getRoute(routeId)
+      if (!route) return { ok: false, error: '未找到该航线' }
+
+      const timeOffsetSeconds = ctx.named.offset != null ? Number(ctx.named.offset) : 0
+      const root = typeof ctx.named.root === 'string' ? ctx.named.root : undefined
+
+      let photos: Photo[] = []
+      if (route.startTime && route.endTime) {
+        const startMs = new Date(route.startTime).getTime()
+        const endMs = new Date(route.endTime).getTime()
+        if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+          // 照片 UTC + offset * 1000 = GPX 采样时间
+          const qStart = new Date(startMs - timeOffsetSeconds * 1000 - 300000).toISOString()
+          const qEnd = new Date(endMs - timeOffsetSeconds * 1000 + 300000).toISOString()
+          photos = queryPhotos({ root, since: qStart, until: qEnd })
+        }
+      }
+      if (!photos.length && (!route.startTime || !route.endTime)) {
+        photos = queryPhotos(root ? { root } : {})
+      }
+      const preview = previewRouteGeotag(photos, route, timeOffsetSeconds)
+      return { ok: true, preview }
+    }
+  },
+  {
+    name: 'yarj.count-geotagged',
+    description: '获取当前已贴合运动航线轨迹的照片数量',
+    usage: 'yarj.count-geotagged [--root <rootPath>]',
+    run: async (ctx) => {
+      const root = typeof ctx.named.root === 'string' && ctx.named.root ? ctx.named.root : undefined
+      const count = countRouteGeotaggedPhotos(root)
+      return { ok: true, count }
+    }
+  },
+  {
+    name: 'yarj.get-route-photos',
+    description: '查询与指定航线时空范围匹配的相册照片 (--routeId <id>)',
+    usage: 'yarj.get-route-photos --routeId <id>',
+    run: async (ctx) => {
+      const routeId = String(ctx.named.routeId ?? '')
+      if (!routeId) return { ok: false, error: '需要 --routeId' }
+      const res = findMatchingPhotosForRoute(routeId)
+      return { ok: true, ...res }
+    }
+  },
+  {
+    name: 'yarj.set-gps-priority',
+    description: '设置 GPS 坐标优先级解析顺序 (--priority <json_array>)',
+    usage: 'yarj.set-gps-priority --priority ["track","corrected","guess","db","exif"]',
+    run: async (ctx) => {
+      let priority: GpsPrioritySource[] = []
+      if (typeof ctx.named.priority === 'string') {
+        try {
+          priority = JSON.parse(ctx.named.priority)
+        } catch {
+          return { ok: false, error: '无效的 JSON 数组' }
+        }
+      } else if (Array.isArray(ctx.named.priority)) {
+        priority = ctx.named.priority as GpsPrioritySource[]
+      }
+      if (!priority.length) return { ok: false, error: '优先级列表不可为空' }
+      await saveYarjConfig({ gpsPriority: priority })
+      return { ok: true, gpsPriority: priority }
     }
   }
 ] satisfies CommandSpec[]

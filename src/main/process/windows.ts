@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { writeFile, unlink } from 'fs/promises'
 import { is } from '@electron-toolkit/utils'
 import { makeLogger } from './logger'
+import type { MessageBus } from 'dbus-next'
 import type { ChildWindowInfo, WindowChangedEvent } from '../../shared/types'
 
 /**
@@ -333,45 +334,46 @@ function escapeJs(s: string): string {
  * write the script to a temp file first, hand KWin the path, run it, unload,
  * then delete the file.
  */
+let kwinBus: MessageBus | null = null
+async function getKwinBus(): Promise<MessageBus> {
+  if (!kwinBus) {
+    const { sessionBus } = await import('dbus-next')
+    kwinBus = sessionBus()
+    kwinBus.on('error', () => {
+      kwinBus = null
+    })
+  }
+  return kwinBus
+}
+
 async function kwinRunScript(script: string): Promise<void> {
   if (!isKdeWayland()) return
   const tmpFile = join(tmpdir(), `cockpit-kwin-${Date.now().toString(36)}.js`)
   try {
     await writeFile(tmpFile, script, 'utf-8')
-    const { sessionBus } = await import('dbus-next')
-    const bus = sessionBus()
+    const bus = await getKwinBus()
+    const scripting = (await bus.getProxyObject('org.kde.KWin', '/Scripting')).getInterface(
+      'org.kde.kwin.Scripting'
+    ) as unknown as {
+      loadScript: (filePath: string) => Promise<number>
+      unloadScript: (scriptPath: string) => Promise<void>
+    }
+    const id = await scripting.loadScript(tmpFile)
+    const scriptPath = typeof id === 'number' ? `/Scripting/Script${id}` : String(id)
+    if (windowDebug) {
+      log.info('[win-debug] kwin script loaded', { id: scriptPath, script })
+    }
+    const scriptIface = (await bus.getProxyObject('org.kde.KWin', scriptPath)).getInterface(
+      'org.kde.kwin.Script'
+    ) as unknown as { run: () => Promise<void> }
+    await scriptIface.run()
     try {
-      const scripting = (await bus.getProxyObject('org.kde.KWin', '/Scripting')).getInterface(
-        'org.kde.kwin.Scripting'
-      ) as unknown as {
-        loadScript: (filePath: string) => Promise<number>
-        unloadScript: (scriptPath: string) => Promise<void>
-      }
-      const id = await scripting.loadScript(tmpFile)
-      // KWin returns the script id (int) on Plasma 6 / an object path on older
-      // versions — handle both.
-      const scriptPath = typeof id === 'number' ? `/Scripting/Script${id}` : String(id)
-      if (windowDebug) {
-        log.info('[win-debug] kwin script loaded', { id: scriptPath, script })
-      }
-      const scriptIface = (await bus.getProxyObject('org.kde.KWin', scriptPath)).getInterface(
-        'org.kde.kwin.Script'
-      ) as unknown as { run: () => Promise<void> }
-      await scriptIface.run()
-      try {
-        // unloadScript takes the object PATH string — passing the numeric id
-        // (Plasma 6's loadScript return) fails to marshal and leaks the script.
-        await scripting.unloadScript(scriptPath)
-      } catch {
-        // a lingering one-liner is harmless
-      }
+      await scripting.unloadScript(scriptPath)
+    } catch {
+      // ignore
+    }
+    if (windowDebug) {
       log.info('kwin script ran', { id: scriptPath })
-    } finally {
-      try {
-        bus.disconnect()
-      } catch {
-        /* ignore */
-      }
     }
   } catch (e) {
     if (windowDebug) log.info('[win-debug] kwin scripting unavailable', { error: String(e) })

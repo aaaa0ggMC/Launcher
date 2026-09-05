@@ -14,25 +14,46 @@ import {
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import maplibregl from 'maplibre-gl'
-import type { Map as MlMap, Popup, GeoJSONSource, FilterSpecification } from 'maplibre-gl'
+import type {
+  Map as MlMap,
+  Popup,
+  GeoJSONSource,
+  FilterSpecification,
+  DataDrivenPropertyValueSpecification
+} from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import PhotoSideDrawer from './components/PhotoSideDrawer.vue'
 import PhotoLightboxModal from './components/PhotoLightboxModal.vue'
-import MapPreferencesSection from './components/MapPreferencesSection.vue'
+import RouteSideDrawer from './components/RouteSideDrawer.vue'
+import RouteDetailModal from './components/RouteDetailModal.vue'
+import RouteGeotagModal from './components/RouteGeotagModal.vue'
+import RoutePlaybackBar from './components/RoutePlaybackBar.vue'
+import RoutePlaybackPhotosDrawer from './components/RoutePlaybackPhotosDrawer.vue'
 import type {
   GeocodeResult,
   ReverseGeocodeResult,
   Photo,
+  Route,
+  RoutePoint,
+  RouteSplit,
   ExploredGranularity,
   TileCacheStats,
   ProviderItem,
   JourneyData,
   JourneyStage,
   JourneyLeg,
-  YarjConfig
+  YarjConfig,
+  GuessedGps
 } from './types'
-import { DEFAULT_YARJ_CONFIG, GRANULARITY_PRESETS, photoThumbUrl } from './types'
-import { generateExploredGeoJSON, haversineDistM } from './explored-area'
+import { DEFAULT_YARJ_CONFIG, GRANULARITY_PRESETS, photoThumbUrl, resolvePhotoGps } from './types'
+import {
+  generateExploredGeoJSON,
+  haversineDistM,
+  simplifyCoordinates,
+  getZoomLodBucket,
+  getRouteToleranceForBucket,
+  clearExploredCache
+} from './explored-area'
 import {
   buildJourneyData,
   generateJourneyLinesGeoJSON,
@@ -40,6 +61,9 @@ import {
 } from './journey'
 import { wgs84ToGcj02, gcj02ToWgs84 } from './coord-transform'
 import { filterPhotosByRules } from './photo-filter'
+import { filterPhotosWithQuery } from './search-parser'
+import SearchHelpDialog from './components/SearchHelpDialog.vue'
+import GpsCorrectionModal from './components/GpsCorrectionModal.vue'
 
 interface LodFeature {
   lvl: 'ADM1' | 'ADM2'
@@ -122,6 +146,22 @@ const providers = ref<ProviderItem[]>([])
 const activeProviderId = ref('google-hybrid')
 const maps = ref<MapFileInfo[]>([])
 const photos = ref<Photo[]>([])
+const initializing = ref(true)
+const initLoadingStatus = ref('')
+
+const searchHelpOpen = ref(false)
+
+const guessedGpsMap = computed<Map<string, GuessedGps>>(() => {
+  const map = new Map<string, GuessedGps>()
+  for (const p of photos.value) {
+    const guess = p.gps_guess || p.appendix?.gps_guess
+    if (guess && p.gps_lat == null && p.gps_lon == null) {
+      map.set(p.path, guess)
+    }
+  }
+  return map
+})
+
 const mapError = ref('')
 const exploredRadiusM = ref(1000)
 const adm1MinZoom = ref(4)
@@ -144,7 +184,7 @@ let labelFontFamily = 'sans-serif'
 // page-menu
 const menuOpen = ref(false)
 const menuStep = ref<
-  'main' | 'search' | 'stats' | 'layers' | 'providers' | 'photo-search' | 'explored'
+  'main' | 'search' | 'stats' | 'layers' | 'providers' | 'photo-search' | 'explored' | 'build'
 >('main')
 const scanRunning = ref(false)
 const stats = ref<ScanStats | null>(null)
@@ -152,18 +192,113 @@ const lodStatus = ref<LodStatusRow[]>([])
 const hierarchyStatus = ref<HierarchyStatusRow[]>([])
 const showPhotosLayer = ref(true)
 const showExploredLayer = ref(true)
+const showRoutesLayer = ref(true)
+const routes = ref<Route[]>([])
+const activeRouteId = ref<string>('')
+const routeDrawerOpen = ref(false)
+const routeDetailModalOpen = ref(false)
+const selectedRouteForDetail = ref<Route | null>(null)
+const routeGeotagModalOpen = ref(false)
+const selectedRouteForGeotag = ref<Route | null>(null)
+const selectedGeotagInitialOffset = ref<number | undefined>(undefined)
 const exploredGranularity = ref<ExploredGranularity>('standard')
 const yarjConfig = ref<YarjConfig>({ ...DEFAULT_YARJ_CONFIG })
-const preferencesDialogOpen = ref(false)
+const gpsCorrectionModalOpen = ref(false)
 
-function openPreferences(): void {
-  preferencesDialogOpen.value = true
+function openRoutesDrawer(): void {
+  routeDrawerOpen.value = true
   menuOpen.value = false
 }
 
-function closePreferencesModal(): void {
-  preferencesDialogOpen.value = false
-  void reloadPreferences()
+function openRouteGeotagModal(route?: Route, initialOffset?: number): void {
+  selectedRouteForGeotag.value = route ?? null
+  selectedGeotagInitialOffset.value = initialOffset
+  routeGeotagModalOpen.value = true
+  menuOpen.value = false
+}
+
+function onSelectRouteFromDrawer(route: Route): void {
+  onFocusRouteOnMap(route)
+}
+
+function onOpenRouteDetail(route: Route): void {
+  selectedRouteForDetail.value = route
+  routeDetailModalOpen.value = true
+}
+
+function onToggleActiveRoute(routeId: string): void {
+  activeRouteId.value = routeId
+  syncRouteHighlight()
+}
+
+function onFocusRouteOnMap(route: Route): void {
+  activeRouteId.value = route.id
+  syncRouteHighlight()
+  if (map && route.bounds) {
+    let [minLon, minLat, maxLon, maxLat] = route.bounds
+    if (isGcj02Active.value) {
+      const [g1Lon, g1Lat] = wgs84ToGcj02(minLon, minLat)
+      const [g2Lon, g2Lat] = wgs84ToGcj02(maxLon, maxLat)
+      minLon = g1Lon
+      minLat = g1Lat
+      maxLon = g2Lon
+      maxLat = g2Lat
+    }
+    if (minLon !== maxLon && minLat !== maxLat) {
+      map.fitBounds(
+        [
+          [minLon, minLat],
+          [maxLon, maxLat]
+        ],
+        { padding: 80, maxZoom: 16 }
+      )
+    }
+  }
+}
+
+function onStartGeotagFromDetail(route: Route, detectedOffsetSec?: number): void {
+  openRouteGeotagModal(route, detectedOffsetSec)
+}
+
+function onViewPhotoFromRoute(photo: Photo, allPhotos?: Photo[]): void {
+  routeDetailModalOpen.value = false
+  const resolved = resolvePhotoGps(photo, yarjConfig.value.gpsPriority)
+  const coords: [number, number] | null = resolved
+    ? isGcj02Active.value
+      ? wgs84ToGcj02(resolved.lon, resolved.lat)
+      : [resolved.lon, resolved.lat]
+    : null
+  openPhotoDrawer(allPhotos && allPhotos.length ? allPhotos : [photo], coords)
+}
+
+async function onDeleteRoute(route: Route): Promise<void> {
+  await window.cockpit.command('yarj.delete-route', { id: route.id })
+  await refreshRoutes()
+  showSnack('已删除航线记录', 'info')
+}
+
+function onGeotagStarted(): void {
+  showSnack('轨迹贴合后台作业已启动，进度见后台任务面板', 'info')
+}
+
+function openGpsCorrectionModal(): void {
+  gpsCorrectionModalOpen.value = true
+  menuOpen.value = false
+}
+
+async function triggerRecomputeGuesses(): Promise<void> {
+  try {
+    const res = (await window.cockpit.command('yarj.recompute-guesses')) as {
+      ok: boolean
+      count?: number
+    }
+    if (res?.ok) {
+      showSnack(`已成功静态推算 ${res.count ?? 0} 张照片的猜测位置`, 'success')
+      await refreshPhotos()
+    }
+  } catch (err) {
+    showSnack('推算失败: ' + String(err), 'error')
+  }
 }
 
 // 「我的探索」状态与数据
@@ -217,6 +352,11 @@ function showSnack(text: string, color = 'success'): void {
   snackOpen.value = true
 }
 
+async function handleSolidifyGps(): Promise<void> {
+  showSnack(t('yarj.guess.solidified', '已成功固化该照片的 GPS 位置！'), 'success')
+  await refreshPhotos()
+}
+
 const activeProvider = computed<ProviderItem | undefined>(() => {
   return providers.value.find((x) => x.id === activeProviderId.value)
 })
@@ -232,14 +372,27 @@ const isGcj02Active = computed<boolean>(() => {
 
 const displayPhotos = computed<Photo[]>(() => {
   const filtered = filterPhotosByRules(photos.value, yarjConfig.value.photoFilterRules)
-  if (!isGcj02Active.value) return filtered
   return filtered.map((p) => {
-    if (p.gps_lon == null || p.gps_lat == null) return p
-    const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
+    const resolved = resolvePhotoGps(p, yarjConfig.value.gpsPriority)
+    if (!resolved) {
+      return {
+        ...p,
+        gps_lat: null,
+        gps_lon: null
+      }
+    }
+    if (isGcj02Active.value) {
+      const [gLng, gLat] = wgs84ToGcj02(resolved.lon, resolved.lat)
+      return {
+        ...p,
+        gps_lon: gLng,
+        gps_lat: gLat
+      }
+    }
     return {
       ...p,
-      gps_lon: gLng,
-      gps_lat: gLat
+      gps_lon: resolved.lon,
+      gps_lat: resolved.lat
     }
   })
 })
@@ -449,6 +602,7 @@ async function initMap(targetProviderId?: string): Promise<void> {
   yarjConfig.value = { ...DEFAULT_YARJ_CONFIG, ...cfg }
   showPhotosLayer.value = yarjConfig.value.showPhotosLayer !== false
   showExploredLayer.value = yarjConfig.value.showExploredLayer !== false
+  showRoutesLayer.value = yarjConfig.value.showRoutesLayer !== false
   exploredRadiusM.value =
     yarjConfig.value.exploredRadiusM != null && yarjConfig.value.exploredRadiusM < 400
       ? yarjConfig.value.exploredRadiusM
@@ -505,10 +659,13 @@ async function initMap(targetProviderId?: string): Promise<void> {
   map.on('load', () => {
     setupPolarCapsLayer()
     setupExploredLayer()
-    updateExplored()
+    setupRoutesLayers()
+    updateRoutesSource(true)
+    updateExplored(true)
     setupPhotosLayer()
     setupJourneyLayers()
     updateJourneyLayers()
+    applyLayerVisibility()
     if (pId.startsWith('local:')) {
       renderLabels()
     }
@@ -579,6 +736,45 @@ async function initMap(targetProviderId?: string): Promise<void> {
     }, 1500)
   })
 
+  map.on('zoomstart', () => {
+    isMapZooming = true
+  })
+
+  map.on('zoomend', () => {
+    if (!map) return
+    if (zoomEndTimeout) clearTimeout(zoomEndTimeout)
+    zoomEndTimeout = setTimeout(() => {
+      isMapZooming = false
+    }, 200)
+
+    const curZ = map.getZoom()
+    const bucket = getZoomLodBucket(curZ)
+    if (bucket !== lastRenderedRouteLodBucket) {
+      updateRoutesSource()
+    }
+    if (showExploredLayer.value && bucket !== lastRenderedExploredLodBucket) {
+      updateExplored()
+    }
+  })
+
+  map.getCanvas().addEventListener(
+    'wheel',
+    () => {
+      isMapZooming = true
+      if (zoomEndTimeout) clearTimeout(zoomEndTimeout)
+      zoomEndTimeout = setTimeout(() => {
+        isMapZooming = false
+      }, 300)
+    },
+    { passive: true }
+  )
+
+  map.on('dragstart', () => {
+    if (routePlaybackActive.value && routePlaybackFollowCamera.value) {
+      routePlaybackFollowCamera.value = false
+    }
+  })
+
   map.on('move', () => {
     if (activeProviderId.value.startsWith('local:')) {
       if (labelMoveRaf != null) return
@@ -601,19 +797,17 @@ async function switchProvider(newId: string): Promise<void> {
   const style = buildStyleForProvider(newId, proj)
   map.setStyle(style)
   map.once('style.load', () => {
+    clearExploredCache()
     setupPolarCapsLayer()
     setupExploredLayer()
-    updateExplored()
+    setupRoutesLayers()
+    updateRoutesSource(true)
+    updateExplored(true)
     setupPhotosLayer()
     setupJourneyLayers()
+    applyLayerVisibility()
     if (explorationActive.value) {
-      explorationPhotos.value = isGcj02Active.value
-        ? photos.value.map((p) => {
-            if (p.gps_lon == null || p.gps_lat == null) return p
-            const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
-            return { ...p, gps_lon: gLng, gps_lat: gLat }
-          })
-        : photos.value
+      explorationPhotos.value = displayPhotos.value
       journeyData.value = buildJourneyData(
         explorationPhotos.value,
         explorationGranularity.value,
@@ -1191,16 +1385,264 @@ function setupExploredLayer(): void {
   })
 }
 
-function updateExplored(): void {
+let updateExploredRaf = 0
+let lastRenderedExploredLodBucket = -1
+
+function updateExplored(force = false): void {
   if (!map) return
   const src = map.getSource('yarj-explored') as GeoJSONSource | undefined
   if (!src) return
-  const geojson = generateExploredGeoJSON(
-    displayPhotos.value,
-    exploredGranularity.value,
-    exploredRadiusM.value
-  )
-  src.setData(geojson)
+
+  // 用户未开启探索图层，立即清空并直接退出，彻底避免卡顿与无谓计算
+  if (!showExploredLayer.value) {
+    src.setData({ type: 'FeatureCollection', features: [] })
+    return
+  }
+
+  const bucket = getZoomLodBucket(map.getZoom())
+  if (!force && bucket === lastRenderedExploredLodBucket) return
+
+  // 防抖 / 合并至下一帧微任务，避免启动时或连续事件中高频重复计算
+  if (updateExploredRaf) cancelAnimationFrame(updateExploredRaf)
+  updateExploredRaf = requestAnimationFrame(() => {
+    updateExploredRaf = 0
+    if (!map || !showExploredLayer.value) return
+    const s = map.getSource('yarj-explored') as GeoJSONSource | undefined
+    if (!s) return
+    const curBucket = getZoomLodBucket(map.getZoom())
+    lastRenderedExploredLodBucket = curBucket
+    const geojson = generateExploredGeoJSON(
+      displayPhotos.value,
+      exploredGranularity.value,
+      exploredRadiusM.value,
+      showRoutesLayer.value ? routes.value : undefined,
+      isGcj02Active.value,
+      curBucket
+    )
+    s.setData(geojson)
+  })
+}
+
+interface RouteLineFeature {
+  type: 'Feature'
+  id: string
+  properties: {
+    id: string
+    name: string
+    activity_type?: string
+    distance_km: string
+    start_time: string | null
+  }
+  geometry: {
+    type: 'LineString'
+    coordinates: [number, number][]
+  }
+}
+
+interface RoutesGeoJSON {
+  type: 'FeatureCollection'
+  features: RouteLineFeature[]
+}
+
+function buildRoutesGeoJSON(bucket?: number): RoutesGeoJSON {
+  const b = bucket ?? (map ? getZoomLodBucket(map.getZoom()) : 2)
+  const tol = getRouteToleranceForBucket(b)
+  const features: RouteLineFeature[] = []
+  for (const r of routes.value) {
+    try {
+      const parsed = JSON.parse(r.geojson) as {
+        geometry?: { type?: string; coordinates?: [number, number][] }
+      }
+      if (parsed?.geometry?.coordinates) {
+        let rawCoords = parsed.geometry.coordinates
+        if (tol > 0 && rawCoords.length > 4) {
+          rawCoords = simplifyCoordinates(rawCoords, tol)
+        }
+        const coordinates = isGcj02Active.value
+          ? rawCoords.map(([lon, lat]) => wgs84ToGcj02(lon, lat))
+          : rawCoords
+        features.push({
+          type: 'Feature',
+          id: r.id,
+          properties: {
+            id: r.id,
+            name: r.name,
+            activity_type: r.activityType,
+            distance_km: (r.totalDistanceM / 1000).toFixed(1),
+            start_time: r.startTime
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates
+          }
+        })
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    type: 'FeatureCollection',
+    features
+  }
+}
+
+function getRouteLineWidthExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    4,
+    ['case', ['==', ['get', 'id'], activeId], 3, 1.5],
+    12,
+    ['case', ['==', ['get', 'id'], activeId], 5, 2.5],
+    17,
+    ['case', ['==', ['get', 'id'], activeId], 7, 4]
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function getRouteGlowWidthExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    4,
+    ['case', ['==', ['get', 'id'], activeId], 5, 3],
+    12,
+    ['case', ['==', ['get', 'id'], activeId], 10, 6],
+    17,
+    ['case', ['==', ['get', 'id'], activeId], 16, 10]
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function getRouteGlowOpacityExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'case',
+    ['==', ['literal', activeId], ''],
+    0.6,
+    ['==', ['get', 'id'], activeId],
+    0.9,
+    0.05
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function getRouteLineOpacityExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'case',
+    ['==', ['literal', activeId], ''],
+    0.85,
+    ['==', ['get', 'id'], activeId],
+    1.0,
+    0.12
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function setupRoutesLayers(): void {
+  if (!map) return
+  if (map.getSource('yarj-routes')) return
+
+  map.addSource('yarj-routes', {
+    type: 'geojson',
+    data: buildRoutesGeoJSON()
+  })
+
+  // 1. 底层光晕
+  map.addLayer({
+    id: 'yarj-routes-glow',
+    type: 'line',
+    source: 'yarj-routes',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': '#00e5ff',
+      'line-width': getRouteGlowWidthExpression(activeRouteId.value || ''),
+      'line-blur': ['interpolate', ['linear'], ['zoom'], 4, 2, 12, 4, 17, 6],
+      'line-opacity': getRouteGlowOpacityExpression(activeRouteId.value || '')
+    }
+  })
+
+  // 2. 顶层实体主轨迹线
+  map.addLayer({
+    id: 'yarj-routes-line',
+    type: 'line',
+    source: 'yarj-routes',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': '#00e5ff',
+      'line-width': getRouteLineWidthExpression(activeRouteId.value || ''),
+      'line-opacity': getRouteLineOpacityExpression(activeRouteId.value || '')
+    }
+  })
+
+  const onRouteClick = (
+    e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }
+  ): void => {
+    const feat = e.features?.[0]
+    if (feat?.properties?.id) {
+      const r = routes.value.find((x) => x.id === feat.properties?.id)
+      if (r) {
+        onOpenRouteDetail(r)
+      }
+    }
+  }
+
+  map.on('click', 'yarj-routes-line', onRouteClick)
+  map.on('click', 'yarj-routes-glow', onRouteClick)
+
+  map.on('mouseenter', 'yarj-routes-line', () => {
+    if (map) map.getCanvas().style.cursor = 'pointer'
+  })
+  map.on('mouseleave', 'yarj-routes-line', () => {
+    if (map) map.getCanvas().style.cursor = ''
+  })
+}
+
+let lastRenderedRouteLodBucket = -1
+
+function updateRoutesSource(force = false): void {
+  if (!map) return
+  const src = map.getSource('yarj-routes') as GeoJSONSource | undefined
+  if (!src) return
+  const bucket = getZoomLodBucket(map.getZoom())
+  if (!force && bucket === lastRenderedRouteLodBucket) return
+  lastRenderedRouteLodBucket = bucket
+  src.setData(buildRoutesGeoJSON(bucket))
+}
+
+function syncRouteHighlight(): void {
+  if (!map) return
+  const activeId = activeRouteId.value || ''
+
+  if (map.getLayer('yarj-routes-glow')) {
+    map.setPaintProperty(
+      'yarj-routes-glow',
+      'line-opacity',
+      getRouteGlowOpacityExpression(activeId)
+    )
+    map.setPaintProperty('yarj-routes-glow', 'line-width', getRouteGlowWidthExpression(activeId))
+  }
+
+  if (map.getLayer('yarj-routes-line')) {
+    map.setPaintProperty(
+      'yarj-routes-line',
+      'line-opacity',
+      getRouteLineOpacityExpression(activeId)
+    )
+    map.setPaintProperty('yarj-routes-line', 'line-width', getRouteLineWidthExpression(activeId))
+  }
 }
 
 async function setExploredGranularity(g: ExploredGranularity): Promise<void> {
@@ -1618,14 +2060,23 @@ function nextStage(): void {
 }
 
 function startExploration(subsetPhotos?: Photo[]): void {
-  const basePhotos = subsetPhotos && subsetPhotos.length ? subsetPhotos : photos.value
-  const targetPhotos = isGcj02Active.value
-    ? basePhotos.map((p) => {
-        if (p.gps_lon == null || p.gps_lat == null) return p
-        const [gLng, gLat] = wgs84ToGcj02(p.gps_lon, p.gps_lat)
-        return { ...p, gps_lon: gLng, gps_lat: gLat }
-      })
-    : basePhotos
+  const basePhotos = subsetPhotos && subsetPhotos.length ? subsetPhotos : displayPhotos.value
+  const targetPhotos = basePhotos.map((p) => {
+    const resolved = resolvePhotoGps(p)
+    if (!resolved) {
+      return { ...p, gps_lat: null, gps_lon: null }
+    }
+    if (isGcj02Active.value) {
+      if (p.gps_lat != null && p.gps_lon != null) return p
+      const [gLng, gLat] = wgs84ToGcj02(resolved.lon, resolved.lat)
+      return { ...p, gps_lon: gLng, gps_lat: gLat }
+    }
+    return {
+      ...p,
+      gps_lon: p.gps_lon ?? resolved.lon,
+      gps_lat: p.gps_lat ?? resolved.lat
+    }
+  })
   const valid = targetPhotos.filter((p) => p.gps_lat != null && p.gps_lon != null)
   if (!valid.length) {
     showSnack(
@@ -1672,6 +2123,557 @@ function exitExploration(): void {
   explorationActive.value = false
   applyLayerVisibility()
   updateJourneyLayers()
+}
+
+// ---------------------------------------------------------------------------
+// 航线时间轴生长动画与行程播放 (Route Journey Playback)
+// ---------------------------------------------------------------------------
+
+const routePlaybackActive = ref(false)
+const routePlaybackRoute = ref<Route | null>(null)
+const routePlaybackPoints = ref<RoutePoint[]>([])
+const routePlaybackPhotos = ref<Photo[]>([])
+const routePlaybackOffsetSec = ref(0)
+const routePlaybackIsLocalTime = ref(false)
+const routePlaybackIsPlaying = ref(false)
+const routePlaybackProgress = ref(0) // 0 to 1
+const routePlaybackSpeed = ref(15) // 默认 15x 倍速
+const routePlaybackFollowCamera = ref(true)
+const routePlaybackPhotosDrawerOpen = ref(false)
+const routePlaybackTimeWindowSec = ref(180) // 默认 ±3 分钟
+
+let playbackAnimId: number | null = null
+let playbackLastFrameTime = 0
+let playbackAllProjectedCoords: [number, number][] = []
+let lastTrailCutIdx = -1
+let lastTrailUpdateMs = 0
+let isMapZooming = false
+let zoomEndTimeout: ReturnType<typeof setTimeout> | null = null
+
+const routePlaybackCurrentTimeMs = computed<number | null>(() => {
+  if (!routePlaybackPoints.value.length) return null
+  const pts = routePlaybackPoints.value
+  const tStart = pts[0].time ? new Date(pts[0].time).getTime() : 0
+  const lastTime = pts[pts.length - 1]?.time
+  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
+  if (!tStart || !tEnd || tEnd <= tStart) {
+    const durMs = (routePlaybackRoute.value?.durationSec || 3600) * 1000
+    return (tStart || Date.now()) + routePlaybackProgress.value * durMs
+  }
+  return tStart + routePlaybackProgress.value * (tEnd - tStart)
+})
+
+const routePlaybackCurrentPoint = computed<{
+  coord: [number, number]
+  renderCoord: [number, number]
+  speedKmh: number | null
+  ele: number | null
+  hr: number | null
+  distM: number
+} | null>(() => {
+  const pts = routePlaybackPoints.value
+  if (!pts.length) return null
+  if (pts.length === 1 || routePlaybackProgress.value <= 0) {
+    const p = pts[0]
+    const renderCoord: [number, number] = isGcj02Active.value
+      ? wgs84ToGcj02(p.lon, p.lat)
+      : [p.lon, p.lat]
+    return {
+      coord: [p.lon, p.lat],
+      renderCoord,
+      speedKmh: p.speedKmh ?? null,
+      ele: p.ele ?? null,
+      hr: p.hr ?? null,
+      distM: 0
+    }
+  }
+  if (routePlaybackProgress.value >= 1) {
+    const p = pts[pts.length - 1]
+    const renderCoord: [number, number] = isGcj02Active.value
+      ? wgs84ToGcj02(p.lon, p.lat)
+      : [p.lon, p.lat]
+    return {
+      coord: [p.lon, p.lat],
+      renderCoord,
+      speedKmh: p.speedKmh ?? null,
+      ele: p.ele ?? null,
+      hr: p.hr ?? null,
+      distM: p.distFromStartM
+    }
+  }
+
+  const targetTimeMs = routePlaybackCurrentTimeMs.value
+  const tStart = pts[0].time ? new Date(pts[0].time).getTime() : 0
+  const lastTime = pts[pts.length - 1]?.time
+  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
+
+  let idx = 0
+  let ratio = 0
+
+  if (targetTimeMs && tStart && tEnd && tEnd > tStart) {
+    let low = 0
+    let high = pts.length - 2
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2)
+      const tMid = pts[mid].time ? new Date(pts[mid].time!).getTime() : 0
+      const tNext = pts[mid + 1].time ? new Date(pts[mid + 1].time!).getTime() : 0
+      if (targetTimeMs >= tMid && targetTimeMs <= tNext) {
+        idx = mid
+        const span = tNext - tMid
+        ratio = span > 0 ? (targetTimeMs - tMid) / span : 0
+        break
+      } else if (targetTimeMs < tMid) {
+        high = mid - 1
+      } else {
+        low = mid + 1
+      }
+    }
+    if (low > high) {
+      idx = Math.max(0, Math.min(pts.length - 2, high))
+      ratio = 0
+    }
+  } else {
+    const exact = routePlaybackProgress.value * (pts.length - 1)
+    idx = Math.floor(exact)
+    ratio = exact - idx
+  }
+
+  const p1 = pts[idx]
+  const p2 = pts[idx + 1] || p1
+  const lon = p1.lon + (p2.lon - p1.lon) * ratio
+  const lat = p1.lat + (p2.lat - p1.lat) * ratio
+  const ele =
+    p1.ele != null && p2.ele != null ? p1.ele + (p2.ele - p1.ele) * ratio : (p1.ele ?? null)
+  const speedKmh =
+    p1.speedKmh != null && p2.speedKmh != null
+      ? p1.speedKmh + (p2.speedKmh - p1.speedKmh) * ratio
+      : (p1.speedKmh ?? null)
+  const hr = p1.hr ?? p2.hr ?? null
+  const distM = p1.distFromStartM + (p2.distFromStartM - p1.distFromStartM) * ratio
+
+  const renderCoord: [number, number] = isGcj02Active.value ? wgs84ToGcj02(lon, lat) : [lon, lat]
+
+  return {
+    coord: [lon, lat],
+    renderCoord,
+    speedKmh,
+    ele,
+    hr,
+    distM
+  }
+})
+
+const currentWindowPhotos = computed(() => {
+  if (!routePlaybackPhotos.value.length) return []
+  const curTimeMs = routePlaybackCurrentTimeMs.value
+  if (!curTimeMs) return routePlaybackPhotos.value
+
+  const winSec = routePlaybackTimeWindowSec.value
+  if (winSec === -1) {
+    return routePlaybackPhotos.value
+  }
+
+  const offsetMs = routePlaybackOffsetSec.value * 1000
+
+  return routePlaybackPhotos.value.filter((p) => {
+    if (!p.taken_at) return false
+    const pTimeMs = new Date(p.taken_at).getTime() + offsetMs
+    const diffSec = Math.abs(pTimeMs - curTimeMs) / 1000
+    return diffSec <= winSec
+  })
+})
+
+const playbackCurrentTimeStr = computed(() => {
+  if (!routePlaybackCurrentTimeMs.value) return ''
+  try {
+    const d = new Date(routePlaybackCurrentTimeMs.value)
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch {
+    return ''
+  }
+})
+
+const playbackElapsedDurationStr = computed(() => {
+  if (!routePlaybackRoute.value) return '+00:00'
+  const totalSec = routePlaybackRoute.value.durationSec || 3600
+  const curSec = Math.round(routePlaybackProgress.value * totalSec)
+  const h = Math.floor(curSec / 3600)
+  const m = Math.floor((curSec % 3600) / 60)
+  const s = curSec % 60
+  if (h > 0) {
+    return `+${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+  return `+${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+})
+
+const playbackTotalDurationStr = computed(() => {
+  if (!routePlaybackRoute.value) return '00:00'
+  const totalSec = routePlaybackRoute.value.durationSec || 3600
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) {
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+})
+
+const playbackCurrentDistStr = computed(() => {
+  const distM = routePlaybackCurrentPoint.value?.distM ?? 0
+  return `${(distM / 1000).toFixed(2)} km`
+})
+
+const playbackTotalDistStr = computed(() => {
+  const totalM = routePlaybackRoute.value?.totalDistanceM ?? 0
+  return `${(totalM / 1000).toFixed(2)} km`
+})
+
+function setupRoutePlaybackLayers(): void {
+  if (!map) return
+
+  if (!map.getSource('yarj-playback-full')) {
+    map.addSource('yarj-playback-full', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    })
+    map.addLayer({
+      id: 'yarj-playback-full-line',
+      type: 'line',
+      source: 'yarj-playback-full',
+      paint: {
+        'line-color': themeRgba(0.35),
+        'line-width': 4,
+        'line-opacity': 0.35,
+        'line-dasharray': [2, 2]
+      }
+    })
+  }
+
+  if (!map.getSource('yarj-playback-trail')) {
+    map.addSource('yarj-playback-trail', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    })
+    map.addLayer({
+      id: 'yarj-playback-trail-glow',
+      type: 'line',
+      source: 'yarj-playback-trail',
+      paint: {
+        'line-color': themeRgba(0.85),
+        'line-width': 10,
+        'line-blur': 4,
+        'line-opacity': 0.65
+      }
+    })
+    map.addLayer({
+      id: 'yarj-playback-trail-line',
+      type: 'line',
+      source: 'yarj-playback-trail',
+      paint: {
+        'line-color': themeRgba(1),
+        'line-width': 5,
+        'line-opacity': 0.95
+      }
+    })
+  }
+
+  if (!map.getSource('yarj-playback-head')) {
+    map.addSource('yarj-playback-head', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    })
+    map.addLayer({
+      id: 'yarj-playback-head-halo',
+      type: 'circle',
+      source: 'yarj-playback-head',
+      paint: {
+        'circle-color': themeRgba(0.35),
+        'circle-radius': 16,
+        'circle-blur': 0.4
+      }
+    })
+    map.addLayer({
+      id: 'yarj-playback-head-dot',
+      type: 'circle',
+      source: 'yarj-playback-head',
+      paint: {
+        'circle-color': '#ffffff',
+        'circle-radius': 7,
+        'circle-stroke-width': 3,
+        'circle-stroke-color': themeRgba(1)
+      }
+    })
+  }
+}
+
+function updatePlaybackMapFrame(): void {
+  if (!map || !routePlaybackActive.value) return
+  const cur = routePlaybackCurrentPoint.value
+  if (!cur) return
+
+  const pts = routePlaybackPoints.value
+  const targetTimeMs = routePlaybackCurrentTimeMs.value
+  const firstTime = pts[0]?.time
+  const tStart = firstTime ? new Date(firstTime).getTime() : 0
+  const lastTime = pts[pts.length - 1]?.time
+  const tEnd = lastTime ? new Date(lastTime).getTime() : 0
+
+  let cutIdx = 0
+  if (targetTimeMs && tStart && tEnd && tEnd > tStart) {
+    for (let i = 0; i < pts.length; i++) {
+      const ptTime = pts[i].time ? new Date(pts[i].time!).getTime() : 0
+      if (ptTime <= targetTimeMs) {
+        cutIdx = i
+      } else {
+        break
+      }
+    }
+  } else {
+    cutIdx = Math.floor(routePlaybackProgress.value * (pts.length - 1))
+  }
+
+  const nowMs = performance.now()
+  if (cutIdx !== lastTrailCutIdx || nowMs - lastTrailUpdateMs > 80) {
+    lastTrailCutIdx = cutIdx
+    lastTrailUpdateMs = nowMs
+
+    const trailCoords = (
+      playbackAllProjectedCoords.length > 0
+        ? playbackAllProjectedCoords.slice(0, cutIdx + 1)
+        : pts.slice(0, cutIdx + 1).map((p) =>
+            isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
+          )
+    ) as [number, number][]
+    trailCoords.push(cur.renderCoord)
+
+    const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
+    if (trailSrc) {
+      trailSrc.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: trailCoords
+        }
+      })
+    }
+  }
+
+  const headSrc = map.getSource('yarj-playback-head') as GeoJSONSource | undefined
+  if (headSrc) {
+    headSrc.setData({
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'Point',
+        coordinates: cur.renderCoord
+      }
+    })
+  }
+
+  if (routePlaybackFollowCamera.value && !isMapZooming) {
+    const rightPad = routePlaybackPhotosDrawerOpen.value ? 380 : 0
+    map.easeTo({
+      center: cur.renderCoord,
+      padding: { top: 0, bottom: 0, left: 0, right: rightPad },
+      duration: 120
+    })
+  }
+}
+
+function playbackLoop(now: number): void {
+  if (!routePlaybackIsPlaying.value || !routePlaybackActive.value) return
+  const dtSec = (now - playbackLastFrameTime) / 1000
+  playbackLastFrameTime = now
+
+  const totalDurationSec = routePlaybackRoute.value?.durationSec || 3600
+  const progressDelta = (dtSec * routePlaybackSpeed.value) / Math.max(1, totalDurationSec)
+  let nextProgress = routePlaybackProgress.value + progressDelta
+
+  if (nextProgress >= 1) {
+    nextProgress = 1
+    routePlaybackProgress.value = 1
+    routePlaybackIsPlaying.value = false
+    updatePlaybackMapFrame()
+    return
+  }
+
+  routePlaybackProgress.value = nextProgress
+  updatePlaybackMapFrame()
+  playbackAnimId = requestAnimationFrame(playbackLoop)
+}
+
+function toggleRoutePlaybackPlay(): void {
+  if (routePlaybackIsPlaying.value) {
+    routePlaybackIsPlaying.value = false
+    if (playbackAnimId != null) {
+      cancelAnimationFrame(playbackAnimId)
+      playbackAnimId = null
+    }
+  } else {
+    if (routePlaybackProgress.value >= 1) {
+      routePlaybackProgress.value = 0
+    }
+    routePlaybackIsPlaying.value = true
+    playbackLastFrameTime = performance.now()
+    playbackAnimId = requestAnimationFrame(playbackLoop)
+  }
+}
+
+async function startRoutePlayback(route: Route): Promise<void> {
+  exitExploration()
+  closePhotoDrawer()
+  routeDetailModalOpen.value = false
+
+  routePlaybackRoute.value = route
+  routePlaybackProgress.value = 0
+  routePlaybackActive.value = true
+  routePlaybackIsPlaying.value = false
+  routePlaybackPhotosDrawerOpen.value = false
+
+  setupRoutePlaybackLayers()
+
+  try {
+    const res = (await window.cockpit.command('yarj.get-route-points', { id: route.id })) as {
+      ok: boolean
+      points?: RoutePoint[]
+    }
+    if (res?.ok && res.points) {
+      routePlaybackPoints.value = res.points
+      playbackAllProjectedCoords = res.points.map((p) =>
+        isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
+      )
+      lastTrailCutIdx = -1
+      lastTrailUpdateMs = 0
+    } else {
+      routePlaybackPoints.value = []
+      playbackAllProjectedCoords = []
+    }
+  } catch {
+    routePlaybackPoints.value = []
+    playbackAllProjectedCoords = []
+  }
+
+  try {
+    const res = (await window.cockpit.command('yarj.get-route-photos', { routeId: route.id })) as {
+      ok: boolean
+      photos?: Photo[]
+      detectedOffsetSec?: number
+      isLocalTime?: boolean
+    }
+    if (res?.ok && res.photos) {
+      routePlaybackPhotos.value = res.photos
+      routePlaybackOffsetSec.value = res.detectedOffsetSec ?? 0
+      routePlaybackIsLocalTime.value = res.isLocalTime ?? false
+    } else {
+      routePlaybackPhotos.value = []
+    }
+  } catch {
+    routePlaybackPhotos.value = []
+  }
+
+  if (map) {
+    const fullCoords = playbackAllProjectedCoords
+    const fullSrc = map.getSource('yarj-playback-full') as GeoJSONSource | undefined
+    if (fullSrc) {
+      fullSrc.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: fullCoords
+        }
+      })
+    }
+
+    if (route.bounds) {
+      map.fitBounds(
+        [
+          [route.bounds[0], route.bounds[1]],
+          [route.bounds[2], route.bounds[3]]
+        ],
+        { padding: 100, maxZoom: 15 }
+      )
+    }
+  }
+
+  updatePlaybackMapFrame()
+  toggleRoutePlaybackPlay()
+}
+
+function stopRoutePlayback(): void {
+  routePlaybackIsPlaying.value = false
+  if (playbackAnimId != null) {
+    cancelAnimationFrame(playbackAnimId)
+    playbackAnimId = null
+  }
+  routePlaybackActive.value = false
+  routePlaybackRoute.value = null
+  routePlaybackPoints.value = []
+  routePlaybackPhotos.value = []
+  routePlaybackPhotosDrawerOpen.value = false
+  playbackAllProjectedCoords = []
+  lastTrailCutIdx = -1
+  lastTrailUpdateMs = 0
+
+  if (map) {
+    const fullSrc = map.getSource('yarj-playback-full') as GeoJSONSource | undefined
+    fullSrc?.setData({ type: 'FeatureCollection', features: [] })
+    const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
+    trailSrc?.setData({ type: 'FeatureCollection', features: [] })
+    const headSrc = map.getSource('yarj-playback-head') as GeoJSONSource | undefined
+    headSrc?.setData({ type: 'FeatureCollection', features: [] })
+    map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 300 })
+  }
+}
+
+watch(isGcj02Active, () => {
+  if (routePlaybackActive.value && routePlaybackPoints.value.length > 0) {
+    playbackAllProjectedCoords = routePlaybackPoints.value.map((p) =>
+      isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]
+    )
+    lastTrailCutIdx = -1
+    lastTrailUpdateMs = 0
+    updatePlaybackMapFrame()
+  }
+})
+
+function onRoutePlaybackProgressChange(v: number): void {
+  routePlaybackProgress.value = Math.max(0, Math.min(1, v))
+  updatePlaybackMapFrame()
+}
+
+function onRoutePlaybackJumpTime(deltaSec: number): void {
+  const totalSec = routePlaybackRoute.value?.durationSec || 3600
+  const deltaProgress = deltaSec / Math.max(1, totalSec)
+  onRoutePlaybackProgressChange(routePlaybackProgress.value + deltaProgress)
+}
+
+function onRoutePlaybackJumpToSplit(split: RouteSplit): void {
+  const targetDistM = split.km * 1000
+  const totalM = routePlaybackRoute.value?.totalDistanceM || 1
+  onRoutePlaybackProgressChange(targetDistM / totalM)
+}
+
+function toggleRoutePlaybackPhotosDrawer(): void {
+  routePlaybackPhotosDrawerOpen.value = !routePlaybackPhotosDrawerOpen.value
+  if (map) {
+    const rightPad = routePlaybackPhotosDrawerOpen.value ? 380 : 0
+    map.easeTo({
+      padding: { top: 0, bottom: 0, left: 0, right: rightPad },
+      duration: 300
+    })
+  }
+}
+
+function onSelectPhotoFromPlayback(payload: {
+  photo: Photo
+  index: number
+  allPhotos: Photo[]
+}): void {
+  lightboxPhotos.value = payload.allPhotos
+  lightboxIndex.value = payload.index
+  lightboxOpen.value = true
 }
 
 function cycleExplorationGranularity(delta: -1 | 1): void {
@@ -2072,55 +3074,10 @@ function flyToGeocode(r: GeocodeResult): void {
 
 const photoSearchQuery = ref('')
 
-function matchPhotoItem(p: Photo, query: string): boolean {
-  if (!query) return true
-  const q = query.toLowerCase().trim()
-  const qTerms = q.split(/\s+/).filter(Boolean)
-  if (!qTerms.length) return true
-
-  const filename = (p.path.split('/').pop() || '').toLowerCase()
-  const path = p.path.toLowerCase()
-  const camera =
-    `${p.camera_make || ''} ${p.camera_model || ''} ${p.lens_model || ''}`.toLowerCase()
-  const comment = (typeof p.appendix?.comment === 'string' ? p.appendix.comment : '').toLowerCase()
-  const address = (
-    typeof p.appendix?.formatted_address === 'string' ? p.appendix.formatted_address : ''
-  ).toLowerCase()
-  const tags = Array.isArray(p.appendix?.tags)
-    ? p.appendix.tags.map(String).join(' ').toLowerCase()
-    : ''
-  const city = (typeof p.appendix?.city === 'string' ? p.appendix.city : '').toLowerCase()
-  const country = (typeof p.appendix?.country === 'string' ? p.appendix.country : '').toLowerCase()
-  const aiType = (
-    typeof p.appendix?.ai_generated?.type === 'string'
-      ? p.appendix.ai_generated.type
-      : typeof p.appendix?.aigenerated?.type === 'string'
-        ? p.appendix.aigenerated.type
-        : ''
-  ).toLowerCase()
-  const aiBrief = (
-    typeof p.appendix?.ai_generated?.brief === 'string'
-      ? p.appendix.ai_generated.brief
-      : typeof p.appendix?.aigenerated?.brief === 'string'
-        ? p.appendix.aigenerated.brief
-        : ''
-  ).toLowerCase()
-  const aiOcr = (
-    typeof p.appendix?.ai_generated?.ocr === 'string'
-      ? p.appendix.ai_generated.ocr
-      : typeof p.appendix?.aigenerated?.ocr === 'string'
-        ? p.appendix.aigenerated.ocr
-        : ''
-  ).toLowerCase()
-
-  const combined = `${filename} ${path} ${camera} ${comment} ${address} ${tags} ${city} ${country} ${aiType} ${aiBrief} ${aiOcr}`
-  return qTerms.every((term) => combined.includes(term))
-}
-
 const photoSearchResults = computed(() => {
   const q = photoSearchQuery.value.trim()
   if (!q) return photos.value
-  return photos.value.filter((p) => matchPhotoItem(p, q))
+  return filterPhotosWithQuery(photos.value, q)
 })
 
 function showAllSearchResultsInDrawer(): void {
@@ -2134,12 +3091,17 @@ function showAllSearchResultsInDrawer(): void {
 }
 
 function selectSearchResultPhoto(p: Photo): void {
-  openPhotoDrawer(
-    photoSearchResults.value,
-    p.gps_lat != null && p.gps_lon != null ? [p.gps_lon, p.gps_lat] : null
-  )
-  if (p.gps_lat != null && p.gps_lon != null) {
-    locateCoords([p.gps_lon, p.gps_lat])
+  const guess = guessedGpsMap.value.get(p.path)
+  const coords: [number, number] | null =
+    p.gps_lat != null && p.gps_lon != null
+      ? [p.gps_lon, p.gps_lat]
+      : guess
+        ? [guess.lon, guess.lat]
+        : null
+
+  openPhotoDrawer(photoSearchResults.value, coords)
+  if (coords) {
+    locateCoords(coords)
   }
   menuOpen.value = false
 }
@@ -2330,12 +3292,19 @@ function applyLayerVisibility(): void {
   // 旅途漫游模式激活时，暂时隐藏探索区域图层与照片点聚合图层，专注于展示各站点与航段轨迹
   const exploredVisible = explorationActive.value ? false : showExploredLayer.value
   const photosVisible = explorationActive.value ? false : showPhotosLayer.value
+  const routesVisible = showRoutesLayer.value
 
   if (map.getLayer('yarj-explored-fill')) {
     map.setLayoutProperty('yarj-explored-fill', 'visibility', vis(exploredVisible))
   }
   if (map.getLayer('yarj-explored-line')) {
     map.setLayoutProperty('yarj-explored-line', 'visibility', vis(exploredVisible))
+  }
+  if (map.getLayer('yarj-routes-glow')) {
+    map.setLayoutProperty('yarj-routes-glow', 'visibility', vis(routesVisible))
+  }
+  if (map.getLayer('yarj-routes-line')) {
+    map.setLayoutProperty('yarj-routes-line', 'visibility', vis(routesVisible))
   }
   if (map.getLayer('yarj-clusters')) {
     map.setLayoutProperty('yarj-clusters', 'visibility', vis(photosVisible))
@@ -2361,9 +3330,26 @@ async function setPhotosLayerVisible(v: boolean): Promise<void> {
 async function setExploredLayerVisible(v: boolean): Promise<void> {
   showExploredLayer.value = v
   applyLayerVisibility()
+  if (v) {
+    updateExplored(true)
+  } else {
+    updateExplored()
+  }
   await window.cockpit
     .command('yarj.save-config', {
       patch: { showExploredLayer: v }
+    })
+    .catch(() => undefined)
+}
+
+async function setRoutesLayerVisible(v: boolean): Promise<void> {
+  showRoutesLayer.value = v
+  applyLayerVisibility()
+  clearExploredCache()
+  updateExplored(true)
+  await window.cockpit
+    .command('yarj.save-config', {
+      patch: { showRoutesLayer: v }
     })
     .catch(() => undefined)
 }
@@ -2374,8 +3360,16 @@ async function setExploredLayerVisible(v: boolean): Promise<void> {
 
 async function refreshPhotos(): Promise<void> {
   photos.value = ((await window.cockpit.command('yarj.photos')) as Photo[]) ?? []
+  clearExploredCache()
   setupPhotosLayer()
-  updateExplored()
+  updateExplored(true)
+}
+
+async function refreshRoutes(): Promise<void> {
+  routes.value = ((await window.cockpit.command('yarj.routes')) as Route[]) ?? []
+  clearExploredCache()
+  updateRoutesSource(true)
+  updateExplored(true)
 }
 
 const cacheStats = ref<TileCacheStats | null>(null)
@@ -2542,7 +3536,11 @@ async function executePrune(): Promise<void> {
 // 生命周期
 // ---------------------------------------------------------------------------
 
+let btUnlisten: (() => void) | null = null
+
 onMounted(async () => {
+  initializing.value = true
+  initLoadingStatus.value = t('yarj.loading.hint', '正在载入旅行足迹与地图资源…')
   window.addEventListener('keydown', onGlobalKeyDown)
   labelFontFamily = getComputedStyle(document.body).fontFamily || 'sans-serif'
   try {
@@ -2570,16 +3568,36 @@ onMounted(async () => {
     console.warn('Failed to refresh stats', e)
   }
 
+  initLoadingStatus.value = t('yarj.loading.map', '正在初始化地图视口与图层…')
   try {
     await initMap(activeProviderId.value)
   } catch (e) {
     console.warn('Failed to init map', e)
   }
 
+  initLoadingStatus.value = t('yarj.loading.photos', '正在检索照片与地理足迹…')
   try {
     await refreshPhotos()
   } catch (e) {
     console.warn('Failed to refresh photos', e)
+  }
+
+  try {
+    await refreshRoutes()
+  } catch (e) {
+    console.warn('Failed to refresh routes', e)
+  }
+
+  if (map && !map.loaded()) {
+    const onMapDone = (): void => {
+      initializing.value = false
+    }
+    map.once('load', onMapDone)
+    window.setTimeout(() => {
+      initializing.value = false
+    }, 2500)
+  } else {
+    initializing.value = false
   }
 
   if (mapEl.value) {
@@ -2591,10 +3609,31 @@ onMounted(async () => {
     })
     resizeObserver.observe(mapEl.value)
   }
+
+  btUnlisten = window.cockpit.on('cockpit:bt', (payload) => {
+    const p = payload as { type?: string; task?: { name?: string } }
+    if (p && p.type === 'exit') {
+      const name = p.task?.name || ''
+      if (
+        name.includes('yarj.correct-gps') ||
+        name.includes('yarj.clear-gps-correction') ||
+        name.includes('yarj.scan') ||
+        name.includes('yarj.recompute-guesses') ||
+        name.includes('yarj.scan-routes') ||
+        name.includes('yarj.geotag-routes') ||
+        name.includes('yarj.clear-route-geotag')
+      ) {
+        void refreshPhotos()
+        void refreshRoutes()
+        void refreshStats()
+      }
+    }
+  })
 })
 
 onActivated(() => {
   map?.resize()
+  void reloadPreferences()
 })
 
 onDeactivated(() => {
@@ -2608,8 +3647,13 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(() => {
+  if (btUnlisten) {
+    btUnlisten()
+    btUnlisten = null
+  }
   window.removeEventListener('keydown', onGlobalKeyDown)
   stopPlay()
+  stopRoutePlayback()
   menuCleanup?.()
   menuCleanup = null
   resizeObserver?.disconnect()
@@ -2678,7 +3722,7 @@ function resetView(): void {
       return
     }
   }
-  const validPhotos = photos.value.filter((p) => p.gps_lat != null && p.gps_lon != null)
+  const validPhotos = displayPhotos.value.filter((p) => p.gps_lat != null && p.gps_lon != null)
   if (validPhotos.length > 0) {
     let minLon = 180
     let minLat = 90
@@ -2708,6 +3752,9 @@ async function reloadPreferences(): Promise<void> {
   try {
     const cfg = (await window.cockpit.command('yarj.config')) as YarjConfig
     yarjConfig.value = { ...DEFAULT_YARJ_CONFIG, ...cfg }
+    if (cfg.showRoutesLayer !== undefined) {
+      showRoutesLayer.value = cfg.showRoutesLayer
+    }
     if (map) {
       if (map.getLayer('yarj-explored-fill')) {
         map.setPaintProperty(
@@ -2723,6 +3770,8 @@ async function reloadPreferences(): Promise<void> {
       }
       setupPhotosLayer()
       setupExploredLayer()
+      setupRoutesLayers()
+      applyLayerVisibility()
     }
   } catch {
     /* ignore */
@@ -2732,6 +3781,35 @@ async function reloadPreferences(): Promise<void> {
 
 <template>
   <div class="yarj-shell">
+    <!-- 页面进入初始化加载动画（避免黑屏/卡住） -->
+    <Transition name="fade">
+      <div v-if="initializing" class="yarj-loading-overlay">
+        <div class="yarj-loading-card">
+          <div class="yarj-radar-wrapper mb-5">
+            <div class="radar-ping" />
+            <div class="radar-circle">
+              <v-icon size="44" color="primary" class="radar-icon">mdi-compass-outline</v-icon>
+            </div>
+          </div>
+
+          <div class="text-h6 font-weight-bold mb-1 tracking-wide">
+            {{ t('ability.yarj.name', '旅行记录') }}
+          </div>
+          <div class="text-body-2 on-surface-variant mb-5">
+            {{ initLoadingStatus || t('yarj.loading.hint', '正在载入旅行足迹与地图资源…') }}
+          </div>
+
+          <v-progress-linear
+            indeterminate
+            color="primary"
+            rounded
+            height="4"
+            style="width: 220px; max-width: 80%"
+          />
+        </div>
+      </div>
+    </Transition>
+
     <div ref="mapEl" class="yarj-map">
       <!-- 区域名称标签（仅本地 MBTiles 模式下生效） -->
       <div ref="labelsEl" class="yarj-labels" />
@@ -2977,6 +4055,20 @@ async function reloadPreferences(): Promise<void> {
               </v-chip>
               <v-icon size="16" class="ml-1">mdi-chevron-right</v-icon>
             </div>
+            <div class="menu-item" @click="openRoutesDrawer">
+              <v-icon size="18" color="cyan">mdi-map-marker-path</v-icon>
+              <span>{{ t('yarj.menu.routes', '运动航线') }}</span>
+              <v-chip
+                v-if="routes.length"
+                size="x-small"
+                variant="tonal"
+                color="cyan"
+                class="ml-auto"
+              >
+                {{ routes.length }}
+              </v-chip>
+              <v-icon size="16" class="ml-1">mdi-chevron-right</v-icon>
+            </div>
             <div class="menu-item" @click="menuStep = 'search'">
               <v-icon size="18">mdi-map-search-outline</v-icon>
               <span>{{ t('yarj.menu.search', '地名搜索与跳转') }}</span>
@@ -3018,14 +4110,83 @@ async function reloadPreferences(): Promise<void> {
               <span>{{ t('yarj.menu.layers', '图层') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
-            <div class="menu-item" @click="openPreferences">
-              <v-icon size="18">mdi-tune-vertical</v-icon>
-              <span>{{ t('yarj.menu.preferences', '偏好设置') }}</span>
+            <div class="menu-item" @click="menuStep = 'build'">
+              <v-icon size="18">mdi-map-marker-path</v-icon>
+              <span>{{ t('yarj.menu.footprintBuild', '足迹构建') }}</span>
               <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
             </div>
             <div class="menu-item text-error" @click="pruneConfirmDialogOpen = true">
               <v-icon size="18" color="error">mdi-broom</v-icon>
               <span>{{ t('yarj.menu.prune', '清理失效记录') }}</span>
+            </div>
+          </template>
+
+          <!-- 足迹构建菜单 -->
+          <template v-else-if="menuStep === 'build'">
+            <div class="sessions-head d-flex align-center ga-2">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                :title="t('yarj.menu.back', '返回')"
+                @click="menuStep = 'main'"
+              >
+                <v-icon size="18">mdi-arrow-left</v-icon>
+              </v-btn>
+              <span class="text-body-2 font-weight-medium">{{
+                t('yarj.menu.footprintBuild', '足迹构建')
+              }}</span>
+            </div>
+
+            <div class="px-2 pt-1 pb-2 d-flex flex-column ga-1">
+              <div class="menu-item" @click="openRouteGeotagModal()">
+                <v-icon size="18" color="cyan">mdi-crosshairs-gps</v-icon>
+                <div class="d-flex flex-column flex-grow-1 mr-2 text-left">
+                  <span>{{ t('yarj.build.geotagFromRoute', '基于运动轨迹贴合照片') }}</span>
+                  <span
+                    class="text-caption on-surface-variant text-truncate"
+                    style="max-width: 200px"
+                  >
+                    {{
+                      t('yarj.build.geotagFromRouteDesc', '通过 GPX 时间戳对齐与插值纠正拍摄位置')
+                    }}
+                  </span>
+                </div>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+
+              <div class="menu-item" @click="openGpsCorrectionModal">
+                <v-icon size="18" color="primary">mdi-auto-fix</v-icon>
+                <div class="d-flex flex-column flex-grow-1 mr-2 text-left">
+                  <span>{{ t('yarj.build.gpsCorrection', 'GPS 漂移时空纠正') }}</span>
+                  <span
+                    class="text-caption on-surface-variant text-truncate"
+                    style="max-width: 200px"
+                  >
+                    {{
+                      t(
+                        'yarj.build.gpsCorrectionMenuDesc',
+                        '按时序与速度合理性修复跨国/跨区离群漂移'
+                      )
+                    }}
+                  </span>
+                </div>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+
+              <div class="menu-item" @click="triggerRecomputeGuesses">
+                <v-icon size="18" color="warning">mdi-map-marker-question-outline</v-icon>
+                <div class="d-flex flex-column flex-grow-1 mr-2 text-left">
+                  <span>{{ t('yarj.build.recomputeGuesses', '重算未定位照片中点猜测') }}</span>
+                  <span
+                    class="text-caption on-surface-variant text-truncate"
+                    style="max-width: 200px"
+                  >
+                    {{ t('yarj.build.recomputeGuessesDesc', '在相邻有坐标照片之间静态推算定位') }}
+                  </span>
+                </div>
+                <v-icon size="16" class="ml-auto">mdi-refresh</v-icon>
+              </div>
             </div>
           </template>
 
@@ -3181,6 +4342,15 @@ async function reloadPreferences(): Promise<void> {
               <span class="text-body-2 font-weight-medium">{{
                 t('yarj.menu.photoSearch', '照片搜索')
               }}</span>
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                :title="t('yarj.search.helpBtn', '高级搜索语法指南 (SEARCH.md)')"
+                @click="searchHelpOpen = true"
+              >
+                <v-icon size="16">mdi-help-circle-outline</v-icon>
+              </v-btn>
               <v-chip size="x-small" variant="tonal" color="primary" class="ml-auto">
                 {{ photoSearchResults.length }}
               </v-chip>
@@ -3259,7 +4429,9 @@ async function reloadPreferences(): Promise<void> {
                       p.camera_model ||
                       (p.gps_lat != null
                         ? `${p.gps_lat.toFixed(4)}°, ${p.gps_lon?.toFixed(4)}°`
-                        : '无 GPS')
+                        : guessedGpsMap.get(p.path)
+                          ? `[${t('yarj.guess.badge', '大致 GPS 猜测')}] ${guessedGpsMap.get(p.path)!.lat.toFixed(4)}°, ${guessedGpsMap.get(p.path)!.lon.toFixed(4)}°`
+                          : '无 GPS')
                     }}
                   </div>
                 </div>
@@ -3476,6 +4648,14 @@ async function reloadPreferences(): Promise<void> {
                 density="compact"
                 :label="t('yarj.layers.explored', '探索区域')"
                 @update:model-value="(v: boolean | null) => setExploredLayerVisible(v ?? true)"
+              />
+              <v-switch
+                :model-value="showRoutesLayer"
+                color="cyan"
+                hide-details
+                density="compact"
+                :label="t('yarj.layers.routes', '运动航线')"
+                @update:model-value="(v: boolean | null) => setRoutesLayerVisible(v ?? true)"
               />
             </div>
           </template>
@@ -3922,12 +5102,14 @@ async function reloadPreferences(): Promise<void> {
       :photos="drawerPhotos"
       :coords="drawerCoords"
       :page-size="yarjConfig.drawerPageSize || 30"
+      :guessed-gps-map="guessedGpsMap"
       @close="closePhotoDrawer"
       @locate="locateCoords"
       @preview="openLightbox"
       @pick-gps="startPickGps"
       @explore="startExploration"
       @relocate-group="startRelocateGroup"
+      @solidify-gps="handleSolidifyGps"
       @updated="refreshPhotos"
     />
 
@@ -3936,10 +5118,12 @@ async function reloadPreferences(): Promise<void> {
       :open="lightboxOpen"
       :photos="lightboxPhotos"
       :initial-index="lightboxIndex"
+      :guessed-gps-map="guessedGpsMap"
       @close="closeLightbox"
       @updated="refreshPhotos"
       @locate="locateCoords"
       @pick-gps="startPickGps"
+      @solidify-gps="handleSolidifyGps"
     />
 
     <!-- 确认更新照片定位对话框 -->
@@ -4194,41 +5378,94 @@ async function reloadPreferences(): Promise<void> {
       </v-card>
     </v-dialog>
 
-    <!-- 偏好与行为设置对话框 -->
-    <v-dialog v-model="preferencesDialogOpen" max-width="880" scrollable>
-      <v-card
-        class="pa-6 rounded-2xl"
-        style="
-          background: rgba(var(--v-theme-surface), 0.95);
-          backdrop-filter: blur(28px);
-          max-height: 85vh;
-        "
-      >
-        <div class="d-flex align-center justify-space-between pb-4 border-b mb-4">
-          <div class="d-flex align-center ga-3">
-            <v-icon color="primary" size="26">mdi-tune-vertical</v-icon>
-            <div>
-              <div class="text-h6 font-weight-bold">
-                {{ t('yarj.menu.preferences', '偏好设置') }}
-              </div>
-              <div class="text-caption on-surface-variant">
-                {{ t('yarj.prefs.viewDesc', '设置默认投影模式、初始缩放聚焦规则与地图操作手感') }}
-              </div>
-            </div>
-          </div>
-          <v-btn icon size="small" variant="text" @click="closePreferencesModal">
-            <v-icon size="20">mdi-close</v-icon>
-          </v-btn>
-        </div>
-        <v-card-text class="px-1 py-0">
-          <MapPreferencesSection />
-        </v-card-text>
-      </v-card>
-    </v-dialog>
-
     <v-snackbar v-model="snackOpen" :color="snackColor" location="top" timeout="3000">
       {{ snackText }}
     </v-snackbar>
+
+    <!-- 高级搜索语法帮助对话框 -->
+    <SearchHelpDialog v-model="searchHelpOpen" />
+
+    <!-- GPS 漂移时空速度纠正配置对话框 -->
+    <GpsCorrectionModal
+      v-model="gpsCorrectionModalOpen"
+      :config="yarjConfig"
+      @started="refreshPhotos"
+      @cleared="refreshPhotos"
+    />
+
+    <!-- 运动航线侧边检视抽屉 -->
+    <RouteSideDrawer
+      v-model="routeDrawerOpen"
+      :routes="routes"
+      :active-route-id="activeRouteId"
+      @select-route="onSelectRouteFromDrawer"
+      @open-detail="onOpenRouteDetail"
+      @toggle-active="onToggleActiveRoute"
+      @delete-route="onDeleteRoute"
+    />
+
+    <!-- 运动航线详情看板模态框（对标 Mi Fitness） -->
+    <RouteDetailModal
+      v-model="routeDetailModalOpen"
+      :route="selectedRouteForDetail"
+      @play-route="startRoutePlayback"
+      @start-geotag="onStartGeotagFromDetail"
+      @view-photo="onViewPhotoFromRoute"
+      @focus-route="onFocusRouteOnMap"
+    />
+
+    <!-- 基于运动航线匹配照片贴合 GPS 模态框 -->
+    <RouteGeotagModal
+      v-model="routeGeotagModalOpen"
+      :routes="routes"
+      :initial-route="selectedRouteForGeotag"
+      :initial-offset="selectedGeotagInitialOffset"
+      @started="onGeotagStarted"
+    />
+
+    <!-- 航线行程播放浮动控制栏 -->
+    <RoutePlaybackBar
+      v-if="routePlaybackActive && routePlaybackRoute"
+      :route="routePlaybackRoute"
+      :is-playing="routePlaybackIsPlaying"
+      :progress="routePlaybackProgress"
+      :current-time-str="playbackCurrentTimeStr"
+      :elapsed-duration-str="playbackElapsedDurationStr"
+      :total-duration-str="playbackTotalDurationStr"
+      :current-dist-km-str="playbackCurrentDistStr"
+      :total-dist-km-str="playbackTotalDistStr"
+      :current-speed-kmh="routePlaybackCurrentPoint?.speedKmh ?? null"
+      :current-ele-m="routePlaybackCurrentPoint?.ele ?? null"
+      :current-hr="routePlaybackCurrentPoint?.hr ?? null"
+      :speed="routePlaybackSpeed"
+      :follow-camera="routePlaybackFollowCamera"
+      :photos-drawer-open="routePlaybackPhotosDrawerOpen"
+      :current-photos-count="currentWindowPhotos.length"
+      :splits="routePlaybackRoute.splits"
+      @toggle-play="toggleRoutePlaybackPlay"
+      @update:progress="onRoutePlaybackProgressChange"
+      @update:speed="routePlaybackSpeed = $event"
+      @update:follow-camera="routePlaybackFollowCamera = $event"
+      @toggle-photos-drawer="toggleRoutePlaybackPhotosDrawer"
+      @jump-time="onRoutePlaybackJumpTime"
+      @jump-to-split="onRoutePlaybackJumpToSplit"
+      @close="stopRoutePlayback"
+    />
+
+    <!-- 周围时刻照片侧边抽屉 -->
+    <RoutePlaybackPhotosDrawer
+      :open="routePlaybackActive && routePlaybackPhotosDrawerOpen"
+      :photos="currentWindowPhotos"
+      :total-photos-count="routePlaybackPhotos.length"
+      :current-time-ms="routePlaybackCurrentTimeMs"
+      :current-head-coord="routePlaybackCurrentPoint?.coord ?? null"
+      :time-window-sec="routePlaybackTimeWindowSec"
+      :detected-offset-sec="routePlaybackOffsetSec"
+      :is-local-time="routePlaybackIsLocalTime"
+      @close="routePlaybackPhotosDrawerOpen = false"
+      @update:time-window-sec="routePlaybackTimeWindowSec = $event"
+      @select-photo="onSelectPhotoFromPlayback"
+    />
   </div>
 </template>
 
@@ -4245,7 +5482,7 @@ async function reloadPreferences(): Promise<void> {
   flex-grow: 1;
   min-height: 0;
   position: relative;
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   contain: strict;
   transform: translateZ(0);
@@ -4791,5 +6028,83 @@ async function reloadPreferences(): Promise<void> {
 
 .time-shuttle-icon.is-shuttling {
   animation: yarj-spin 1.2s linear infinite;
+}
+
+/* 页面初始化全屏加载蒙层 */
+.yarj-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--v-theme-surface), 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 999;
+  user-select: none;
+}
+
+.yarj-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 40px;
+  border-radius: 20px;
+  background: rgba(var(--v-theme-surface-bright), 0.35);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+}
+
+.yarj-radar-wrapper {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-circle {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--v-theme-primary), 0.12);
+  border: 1.5px solid rgba(var(--v-theme-primary), 0.35);
+  box-shadow: 0 0 20px rgba(var(--v-theme-primary), 0.2);
+}
+
+.radar-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(var(--v-theme-primary), 0.6);
+  animation: radar-pulse 2s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+}
+
+.radar-icon {
+  animation: compass-sway 3s ease-in-out infinite alternate;
+}
+
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+@keyframes compass-sway {
+  0% {
+    transform: rotate(-18deg);
+  }
+  100% {
+    transform: rotate(24deg);
+  }
 }
 </style>

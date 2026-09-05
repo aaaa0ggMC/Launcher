@@ -12,6 +12,7 @@ import type {
   MapFileInfo,
   ProviderItem,
   ReverseGeocodeResult,
+  Route,
   ScanStats,
   TileCacheStats,
   YarjConfig
@@ -24,8 +25,10 @@ import {
   photoGpsCount,
   pruneDeletedPhotos,
   pruneOrphanedRoots,
-  recentScanRuns
+  recentScanRuns,
+  upsertRoute
 } from './db'
+import { parseGpxToRoute } from './route-parser'
 import { readMbtilesMeta } from './mbtiles'
 import { isLodRunning, readLodData } from './lod'
 import { isHierarchyRunning, readHierarchy } from './hierarchy'
@@ -41,6 +44,7 @@ const log = makeLogger('yarj')
 
 const DEFAULT_CONFIG: YarjConfig = {
   galleryRoots: [],
+  routeRoots: [],
   maps: [],
   activeProviderId: 'google-hybrid',
   googleApiKey: DEFAULT_GOOGLE_API_KEY,
@@ -52,6 +56,8 @@ const DEFAULT_CONFIG: YarjConfig = {
   mapLanguage: 'auto',
   showPhotosLayer: true,
   showExploredLayer: true,
+  showRoutesLayer: true,
+  gpsPriority: ['track', 'corrected', 'guess', 'db', 'exif'],
   exploredRadiusM: 60,
   exploredGranularity: 'standard',
   explorationGranularity: 'standard',
@@ -96,6 +102,7 @@ export async function loadYarjConfig(): Promise<YarjConfig> {
     const parsed = JSON.parse(file) as Partial<YarjConfig>
     cached = {
       galleryRoots: Array.isArray(parsed.galleryRoots) ? parsed.galleryRoots : [],
+      routeRoots: Array.isArray(parsed.routeRoots) ? parsed.routeRoots : [],
       maps: Array.isArray(parsed.maps) ? parsed.maps : [],
       activeProviderId:
         typeof parsed.activeProviderId === 'string' && parsed.activeProviderId
@@ -117,6 +124,10 @@ export async function loadYarjConfig(): Promise<YarjConfig> {
       mapLanguage: typeof parsed.mapLanguage === 'string' ? parsed.mapLanguage : 'auto',
       showPhotosLayer: parsed.showPhotosLayer !== false,
       showExploredLayer: parsed.showExploredLayer !== false,
+      showRoutesLayer: parsed.showRoutesLayer !== false,
+      gpsPriority: Array.isArray(parsed.gpsPriority)
+        ? parsed.gpsPriority
+        : ['track', 'corrected', 'guess', 'db', 'exif'],
       exploredRadiusM:
         typeof parsed.exploredRadiusM === 'number' && parsed.exploredRadiusM < 400
           ? parsed.exploredRadiusM
@@ -182,6 +193,49 @@ export async function moveGalleryRoot(path: string, dir: -1 | 1): Promise<YarjCo
   const roots = [...cfg.galleryRoots]
   ;[roots[idx], roots[target]] = [roots[target], roots[idx]]
   return saveYarjConfig({ galleryRoots: roots })
+}
+
+// ---------------------------------------------------------------------------
+// 运动航线目录与文件
+// ---------------------------------------------------------------------------
+
+export async function addRouteRoot(path: string): Promise<YarjConfig> {
+  const cfg = await loadYarjConfig()
+  const roots = cfg.routeRoots ?? []
+  if (roots.some((r) => r.path === path)) return cfg
+  return saveYarjConfig({ routeRoots: [...roots, { path, watch: false }] })
+}
+
+export async function removeRouteRoot(path: string): Promise<YarjConfig> {
+  const cfg = await loadYarjConfig()
+  const roots = cfg.routeRoots ?? []
+  return saveYarjConfig({ routeRoots: roots.filter((r) => r.path !== path) })
+}
+
+export async function moveRouteRoot(path: string, dir: -1 | 1): Promise<YarjConfig> {
+  const cfg = await loadYarjConfig()
+  const roots = [...(cfg.routeRoots ?? [])]
+  const idx = roots.findIndex((r) => r.path === path)
+  if (idx < 0) return cfg
+  const target = idx + dir
+  if (target < 0 || target >= roots.length) return cfg
+  ;[roots[idx], roots[target]] = [roots[target], roots[idx]]
+  return saveYarjConfig({ routeRoots: roots })
+}
+
+export async function importRouteFile(filePath: string): Promise<Route | null> {
+  try {
+    const xml = await readFile(filePath, 'utf-8')
+    const route = parseGpxToRoute(xml, filePath)
+    if (route) {
+      upsertRoute(route)
+      return route
+    }
+    return null
+  } catch (err) {
+    log.error('import route file failed', { path: filePath, error: String(err) })
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +463,8 @@ export async function listProviders(): Promise<{
     minZoom: p.minZoom,
     tileSize: p.tileSize,
     isCustom: p.id === 'custom',
-    attribution: p.attribution
+    attribution: p.attribution,
+    coordSystem: p.coordSystem
   }))
 
   // 合并本地已添加且启用的 MBTiles 地图

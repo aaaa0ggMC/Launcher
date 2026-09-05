@@ -1,5 +1,17 @@
 import { defineAsyncComponent } from 'vue'
 import type { Ability } from '../../main/ui/ability'
+import YarjContainer from './YarjContainer.vue'
+
+// 在应用启动空闲时预热加载 View.vue 及其依赖（如 maplibre-gl），
+// 进一步减少用户点击打开旅行记录时的实际载入时间。
+if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+  window.requestIdleCallback(
+    () => {
+      import('./View.vue')
+    },
+    { timeout: 4000 }
+  )
+}
 
 /**
  * Yet Another Recorded Journey — 照片足迹地图。
@@ -11,7 +23,7 @@ export default {
   icon: 'default/map',
   category: '旅行',
   keepAlive: true,
-  component: defineAsyncComponent(() => import('./View.vue')),
+  component: YarjContainer,
   settings: [
     {
       key: 'yarj',
@@ -28,6 +40,15 @@ export default {
           keywords: ['目录', '图库', '照片', '扫描', '根目录'],
           fullWidth: true,
           component: defineAsyncComponent(() => import('./components/GalleryFoldersSection.vue'))
+        },
+        {
+          key: 'routes',
+          label: '运动航线目录',
+          icon: 'mdi-routes',
+          description: '配置运动轨迹目录（GPX/KML）或手动导入文件，构建航线与足迹走廊',
+          keywords: ['运动', '航线', '轨迹', 'GPX', 'kml', '跑步', '骑行', '健身'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./components/RouteFoldersSection.vue'))
         },
         {
           key: 'maps',

@@ -4,15 +4,18 @@ defineOptions({ name: 'cockpit-yarj-photo-drawer' })
 import { ref, computed, inject, watch, nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
-import type { Photo, ReverseGeocodeResult } from '../types'
+import type { Photo, ReverseGeocodeResult, GuessedGps } from '../types'
 import { isVideoFile, photoThumbUrl } from '../types'
 import JsonTreeView from './JsonTreeView.vue'
+import { filterPhotosWithQuery } from '../search-parser'
+import SearchHelpDialog from './SearchHelpDialog.vue'
 
 const props = defineProps<{
   open: boolean
   photos: Photo[]
   coords: [number, number] | null
   pageSize?: number
+  guessedGpsMap?: Map<string, GuessedGps>
 }>()
 
 const emit = defineEmits<{
@@ -23,12 +26,14 @@ const emit = defineEmits<{
   (e: 'pick-gps', photo: Photo): void
   (e: 'explore', photos: Photo[]): void
   (e: 'relocate-group', photos: Photo[]): void
+  (e: 'solidify-gps', payload: { photo: Photo; guess: GuessedGps }): void
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const filterQuery = ref('')
+const searchHelpOpen = ref(false)
 const expandedJsonPaths = ref<Set<string>>(new Set())
 
 function toggleJsonTree(path: string): void {
@@ -62,32 +67,8 @@ async function onSaveDrawerJsonTree(p: Photo, updatedObj: unknown): Promise<void
   }
 }
 
-function matchPhoto(p: Photo, query: string): boolean {
-  if (!query) return true
-  const q = query.toLowerCase().trim()
-  const qTerms = q.split(/\s+/).filter(Boolean)
-  if (!qTerms.length) return true
-
-  const filename = (p.path.split('/').pop() || '').toLowerCase()
-  const path = p.path.toLowerCase()
-  const camera =
-    `${p.camera_make || ''} ${p.camera_model || ''} ${p.lens_model || ''}`.toLowerCase()
-  const comment = (typeof p.appendix?.comment === 'string' ? p.appendix.comment : '').toLowerCase()
-  const address = (
-    typeof p.appendix?.formatted_address === 'string' ? p.appendix.formatted_address : ''
-  ).toLowerCase()
-  const tags = Array.isArray(p.appendix?.tags)
-    ? p.appendix.tags.map(String).join(' ').toLowerCase()
-    : ''
-  const city = (typeof p.appendix?.city === 'string' ? p.appendix.city : '').toLowerCase()
-  const country = (typeof p.appendix?.country === 'string' ? p.appendix.country : '').toLowerCase()
-
-  const combined = `${filename} ${path} ${camera} ${comment} ${address} ${tags} ${city} ${country}`
-  return qTerms.every((term) => combined.includes(term))
-}
-
 const filteredPhotos = computed(() => {
-  return props.photos.filter((p) => matchPhoto(p, filterQuery.value))
+  return filterPhotosWithQuery(props.photos, filterQuery.value)
 })
 
 // ---------------------------------------------------------------------------
@@ -281,6 +262,41 @@ async function triggerReverseGeocode(p: Photo): Promise<void> {
   }
 }
 
+function getGuessedGps(p: Photo): GuessedGps | null {
+  if (p.gps_lat != null && p.gps_lon != null) return null
+  return props.guessedGpsMap?.get(p.path) ?? null
+}
+
+const solidifyingPath = ref<string | null>(null)
+
+async function solidifyDrawerGps(p: Photo): Promise<void> {
+  const guess = getGuessedGps(p)
+  if (!guess || solidifyingPath.value) return
+  solidifyingPath.value = p.path
+  try {
+    const res = (await window.cockpit.command('yarj.update-photo', {
+      path: p.path,
+      lat: guess.lat,
+      lon: guess.lon,
+      patch: { gps_source: 'solidified_guess' }
+    })) as { ok: boolean; photo?: Photo }
+    if (res?.ok) {
+      p.gps_lat = guess.lat
+      p.gps_lon = guess.lon
+      p.appendix = {
+        ...p.appendix,
+        gps_source: 'solidified_guess'
+      }
+      emit('solidify-gps', { photo: p, guess })
+      emit('updated')
+    }
+  } catch (err) {
+    console.error('Failed to solidify drawer photo GPS:', err)
+  } finally {
+    solidifyingPath.value = null
+  }
+}
+
 function handlePhotoCardClick(p: Photo, idx: number): void {
   if (isMultiSelectMode.value) {
     toggleSelect(p.path)
@@ -432,11 +448,11 @@ async function copyPath(filePath: string): Promise<void> {
 
       <!-- 照片列表卡片流（过滤搜索框嵌入此文档流最顶部，随内容滚动，不占固定视口高度） -->
       <div ref="drawerBodyRef" class="drawer-body px-4 py-4" @scroll.passive="handleScroll">
-        <div v-if="photos.length > 0" class="mb-4">
+        <div v-if="photos.length > 0" class="mb-4 d-flex align-center ga-2">
           <v-text-field
             v-model="filterQuery"
             :placeholder="
-              t('yarj.drawer.filterPlaceholder', '过滤当前列表照片（文件名、标签、备注…）')
+              t('yarj.drawer.filterPlaceholder', '过滤当前列表照片（文件名、标签、:guess_gps…）')
             "
             density="compact"
             variant="outlined"
@@ -444,6 +460,15 @@ async function copyPath(filePath: string): Promise<void> {
             clearable
             prepend-inner-icon="mdi-filter-variant"
           />
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            :title="t('yarj.search.helpBtn', '高级搜索语法指南 (SEARCH.md)')"
+            @click="searchHelpOpen = true"
+          >
+            <v-icon size="18">mdi-help-circle-outline</v-icon>
+          </v-btn>
         </div>
 
         <div v-if="!photos.length" class="text-caption on-surface-variant text-center py-10">
@@ -559,6 +584,87 @@ async function copyPath(filePath: string): Promise<void> {
               >
                 <v-icon size="14" color="primary" class="mr-1">mdi-map-marker</v-icon>
                 <span>{{ getPhotoAddress(p) }}</span>
+              </div>
+
+              <!-- 智能时空速度纠正结果展示 -->
+              <div
+                v-if="p.gps_corrected && editingPhotoPath !== p.path"
+                class="photo-corrected-box text-caption mb-3 pa-2 rounded-lg"
+              >
+                <div class="d-flex align-center justify-space-between mb-1">
+                  <div class="d-flex align-center ga-1 text-secondary font-weight-bold">
+                    <v-icon size="16" color="secondary">mdi-auto-fix</v-icon>
+                    <span>{{ t('yarj.correct.badge', 'GPS 已纠正') }}</span>
+                  </div>
+                  <v-chip
+                    v-if="p.gps_corrected.drift_distance_km"
+                    size="x-small"
+                    color="secondary"
+                    variant="tonal"
+                  >
+                    偏移 {{ p.gps_corrected.drift_distance_km }} km
+                  </v-chip>
+                </div>
+                <div class="text-caption on-surface-variant mb-1 line-height-tight">
+                  {{ p.gps_corrected.reason }}
+                </div>
+                <div class="d-flex align-center justify-space-between ga-2 mt-1">
+                  <div class="font-mono text-caption text-truncate on-surface-variant">
+                    {{ p.gps_corrected.lat.toFixed(4) }}°, {{ p.gps_corrected.lon.toFixed(4) }}°
+                  </div>
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="text"
+                    color="secondary"
+                    :title="t('yarj.drawer.locate', '定位到地图中心')"
+                    @click.stop="emit('locate', [p.gps_corrected.lon, p.gps_corrected.lat])"
+                  >
+                    <v-icon size="18">mdi-crosshairs-gps</v-icon>
+                  </v-btn>
+                </div>
+              </div>
+
+              <!-- 大致 GPS 猜测提示 -->
+              <div
+                v-if="getGuessedGps(p) && !p.gps_corrected && editingPhotoPath !== p.path"
+                class="photo-guess-box text-caption mb-3 pa-2 rounded-lg"
+              >
+                <div class="d-flex align-center justify-space-between mb-1">
+                  <div class="d-flex align-center ga-1 text-warning font-weight-bold">
+                    <v-icon size="16" color="warning">mdi-map-marker-question-outline</v-icon>
+                    <span>{{ t('yarj.guess.badge', '大致 GPS 猜测') }}</span>
+                  </div>
+                  <v-chip size="x-small" color="warning" variant="tonal">
+                    {{ (getGuessedGps(p)!.distanceM / 1000).toFixed(1) }} km
+                  </v-chip>
+                </div>
+                <div class="d-flex align-center justify-space-between ga-2 mt-2">
+                  <div class="font-mono text-caption text-truncate on-surface-variant">
+                    {{ getGuessedGps(p)!.lat.toFixed(4) }}, {{ getGuessedGps(p)!.lon.toFixed(4) }}
+                  </div>
+                  <div class="d-flex align-center ga-1 flex-shrink-0">
+                    <v-btn
+                      variant="tonal"
+                      color="warning"
+                      density="compact"
+                      prepend-icon="mdi-check-decagram"
+                      :loading="solidifyingPath === p.path"
+                      @click.stop="solidifyDrawerGps(p)"
+                    >
+                      {{ t('yarj.guess.solidify', '固化此位置') }}
+                    </v-btn>
+                    <v-btn
+                      icon
+                      size="small"
+                      variant="text"
+                      :title="t('yarj.drawer.locate', '定位到地图中心')"
+                      @click.stop="emit('locate', [getGuessedGps(p)!.lon, getGuessedGps(p)!.lat])"
+                    >
+                      <v-icon size="18">mdi-crosshairs-gps</v-icon>
+                    </v-btn>
+                  </div>
+                </div>
               </div>
 
               <!-- 备注展示 -->
@@ -710,12 +816,19 @@ async function copyPath(filePath: string): Promise<void> {
                   <v-icon size="18">mdi-map-marker-plus-outline</v-icon>
                 </v-btn>
                 <v-btn
-                  v-if="p.gps_lon != null && p.gps_lat != null"
+                  v-if="(p.gps_lon != null && p.gps_lat != null) || getGuessedGps(p)"
                   icon
                   size="small"
                   variant="text"
                   :title="t('yarj.drawer.locate', '定位到地图中心')"
-                  @click="emit('locate', [p.gps_lon as number, p.gps_lat as number])"
+                  @click="
+                    emit(
+                      'locate',
+                      p.gps_lon != null && p.gps_lat != null
+                        ? [p.gps_lon as number, p.gps_lat as number]
+                        : [getGuessedGps(p)!.lon, getGuessedGps(p)!.lat]
+                    )
+                  "
                 >
                   <v-icon size="18">mdi-crosshairs-gps</v-icon>
                 </v-btn>
@@ -805,6 +918,9 @@ async function copyPath(filePath: string): Promise<void> {
       </div>
     </div>
   </Transition>
+
+  <!-- 高级搜索语法帮助对话框 -->
+  <SearchHelpDialog v-model="searchHelpOpen" />
 </template>
 
 <style scoped>
@@ -959,6 +1075,20 @@ async function copyPath(filePath: string): Promise<void> {
   background: rgba(var(--v-theme-primary), 0.08);
   border: 1px solid rgba(var(--v-theme-primary), 0.18);
   color: rgb(var(--v-theme-on-surface));
+}
+
+.photo-corrected-box {
+  background: rgba(var(--v-theme-secondary), 0.08);
+  border: 1px solid rgba(var(--v-theme-secondary), 0.3);
+}
+
+.line-height-tight {
+  line-height: 1.4;
+}
+
+.photo-guess-box {
+  background: rgba(var(--v-theme-warning), 0.08);
+  border: 1px solid rgba(var(--v-theme-warning), 0.3);
 }
 
 .photo-comment {
