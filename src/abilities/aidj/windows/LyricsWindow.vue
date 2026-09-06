@@ -1,36 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { translate } from '@ui/i18n'
-import { DEFAULT_LYRICS_CFG } from '../types'
-import type { LyricsDisplayConfig } from '../types'
+import { DEFAULT_LYRICS_CFG, type LyricsDisplayConfig, type LyricPlaybackState } from '../types'
+import { parseLrc, extractPlainLyrics, type LyricLine } from '../parser/lrcParser'
 
-interface LyricChunk {
-  /** text fragment of a karaoke word */
-  text: string
-  /** ms at which this chunk becomes active (line-relative, raw LRC time) */
-  time: number
-}
-
-interface LyricLine {
-  time: number
-  text: string
-  /** per-word sub-timestamps from inline LRC tags; length > 1 = real karaoke */
-  chunks: LyricChunk[]
-}
-
-interface PlaybackState {
-  ok?: boolean
-  status?: string
-  track?: string
-  artist?: string
-  album?: string
-  player?: string
-  positionMs?: number | null
-  lengthMs?: number | null
-  lyric?: string | null
-  /** inline-timestamp karaoke LRC (Netease YRC) — preferred over `lyric` when set */
-  karaokeLyric?: string | null
-}
+type PlaybackState = Partial<LyricPlaybackState>
 
 // -- language: standalone window root has no App.vue to provide it, read config --
 const uiLang = ref<string>('zh')
@@ -115,76 +89,6 @@ const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const FAIL_LIMIT = 3
 let failCount = 0
 
-/** Parse an LRC document into time-sorted lines with per-word chunks.
- *  A line like `[00:12.00]一[00:12.30]二` becomes ONE line with two chunks so
- *  the current line can fill word-by-word (karaoke). Single-timestamp lines get
- *  one chunk (plain highlight). Empty-timestamp lines are kept as timing
- *  boundaries (instrumental-gap detection). */
-function parseLrc(lrc: string): LyricLine[] {
-  const lines: LyricLine[] = []
-  let offset = 0
-  for (const raw of lrc.split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
-    const off = line.match(/\[offset:([+-]?\d+)\]/)
-    if (off) {
-      offset = Number(off[1])
-      continue
-    }
-    if (!line.match(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/)) continue
-    const parts = line.split(/(\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\])/g)
-    const chunks: LyricChunk[] = []
-    // Leading timestamps that appear BEFORE any text — a repeated lyric such as
-    // `[02:53][02:28][01:08][00:42]敕勒川…` is sung multiple times, so each tag
-    // must produce its own line (LRC spec). Interleaved tags (karaoke) don't
-    // reach here because a text segment is flushed before them.
-    const leadingTimes: number[] = []
-    let pendingTime = 0
-    let pendingText = ''
-    const flush = (): void => {
-      if (pendingText) chunks.push({ text: pendingText, time: pendingTime + offset })
-      pendingText = ''
-    }
-    const parseTag = (m: RegExpMatchArray): number => {
-      const frac = Number(m[3] ?? '0')
-      return Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac)
-    }
-    for (const part of parts) {
-      const m = part.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]$/)
-      if (m) {
-        flush()
-        const t = parseTag(m)
-        if (!chunks.length) leadingTimes.push(t + offset)
-        pendingTime = t
-      } else {
-        pendingText += part
-      }
-    }
-    flush()
-    if (chunks.length === 1 && leadingTimes.length > 1) {
-      // `[02:53][02:28][01:08][00:42]句` — the same text repeats at each leading
-      // tag; expand to one line per tag so the lyric re-lights on each chorus.
-      for (const t of leadingTimes) {
-        lines.push({ time: t, text: chunks[0].text, chunks: [{ text: chunks[0].text, time: t }] })
-      }
-      continue
-    }
-    if (!chunks.length) {
-      lines.push({ time: pendingTime + offset, text: '', chunks: [] })
-    } else {
-      lines.push({
-        time: chunks[0].time,
-        text: chunks
-          .map((c) => c.text)
-          .join('')
-          .trim(),
-        chunks
-      })
-    }
-  }
-  return lines.sort((a, b) => a.time - b.time)
-}
-
 const lrcLines = computed<LyricLine[]>(() => {
   // Same preference as the in-app lyrics page: the inline-timestamp karaoke
   // LRC (from Netease YRC) when a song has one — each word carries its own
@@ -196,7 +100,7 @@ const lrcLines = computed<LyricLine[]>(() => {
 
 const plainLyric = computed<string>(() => {
   const lyric = state.value.karaokeLyric ?? state.value.lyric ?? ''
-  return lrcLines.value.length ? '' : lyric.replace(/\[[^\]]*\]/g, '').trim()
+  return lrcLines.value.length ? '' : extractPlainLyrics(lyric)
 })
 
 // Smooth playback position — `aidj.lyrics` polls every 600ms, so between polls

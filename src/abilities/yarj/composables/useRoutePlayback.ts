@@ -1,6 +1,6 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import type maplibregl from 'maplibre-gl'
+import maplibregl from 'maplibre-gl'
 import type { GeoJSONSource } from 'maplibre-gl'
 import type { Route, RoutePoint, RouteSplit, Photo, YarjConfig } from '../types'
 import { smoothRoutePoints, smoothFollowCamera, smoothFollowMarker } from '../route-smoothing'
@@ -11,7 +11,7 @@ export interface UseRoutePlaybackOptions {
   themeRgba: (alpha: number) => string
   isGcj02Active: Ref<boolean>
   yarjConfig: Ref<YarjConfig>
-  onBeforeStart?: () => void
+  onBeforeStart?: (route: Route) => void
 }
 
 export interface UseRoutePlaybackReturn {
@@ -58,6 +58,8 @@ export interface UseRoutePlaybackReturn {
   onRoutePlaybackProgressChange: (ratio: number) => void
   onRoutePlaybackJumpTime: (targetTimeMs: number) => void
   onRoutePlaybackJumpToSplit: (split: RouteSplit) => void
+  routePlaybackShowFullRoute: Ref<boolean>
+  toggleRoutePlaybackShowFullRoute: () => void
   handleMapDragStart: () => void
   toggleRoutePlaybackPhotosDrawer: () => void
 }
@@ -77,6 +79,32 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
   const routePlaybackFollowCamera = ref(true)
   const routePlaybackPhotosDrawerOpen = ref(false)
   const routePlaybackTimeWindowSec = ref(180) // 默认 ±3 分钟
+  const routePlaybackShowFullRoute = ref(yarjConfig.value.routePlaybackShowFullRoute !== false)
+
+  function toggleRoutePlaybackShowFullRoute(): void {
+    routePlaybackShowFullRoute.value = !routePlaybackShowFullRoute.value
+  }
+
+  function applyFullRouteVisibility(): void {
+    const map = getMap()
+    if (!map) return
+    const vis = routePlaybackShowFullRoute.value ? 'visible' : 'none'
+    if (map.getLayer('yarj-playback-full-line')) {
+      map.setLayoutProperty('yarj-playback-full-line', 'visibility', vis)
+    }
+    if (map.getLayer('yarj-playback-full-glow')) {
+      map.setLayoutProperty('yarj-playback-full-glow', 'visibility', vis)
+    }
+  }
+
+  watch(routePlaybackShowFullRoute, (val) => {
+    applyFullRouteVisibility()
+    void window.cockpit
+      .command('yarj.save-config', {
+        patch: { routePlaybackShowFullRoute: val }
+      })
+      .catch(() => undefined)
+  })
 
   let playbackAnimId: number | null = null
   let playbackLastFrameTime = 0
@@ -327,14 +355,32 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
         data: { type: 'FeatureCollection', features: [] }
       })
       map.addLayer({
+        id: 'yarj-playback-full-glow',
+        type: 'line',
+        source: 'yarj-playback-full',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': themeRgba(0.4),
+          'line-width': 8,
+          'line-blur': 3,
+          'line-opacity': 0.35
+        }
+      })
+      map.addLayer({
         id: 'yarj-playback-full-line',
         type: 'line',
         source: 'yarj-playback-full',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
         paint: {
-          'line-color': themeRgba(0.35),
-          'line-width': 4,
-          'line-opacity': 0.35,
-          'line-dasharray': [2, 2]
+          'line-color': themeRgba(0.85),
+          'line-width': 4.5,
+          'line-opacity': 0.65
         }
       })
     }
@@ -348,6 +394,10 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
         id: 'yarj-playback-trail-glow',
         type: 'line',
         source: 'yarj-playback-trail',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
         paint: {
           'line-color': themeRgba(0.85),
           'line-width': 10,
@@ -359,13 +409,18 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
         id: 'yarj-playback-trail-line',
         type: 'line',
         source: 'yarj-playback-trail',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
         paint: {
           'line-color': themeRgba(1),
-          'line-width': 5,
+          'line-width': 5.5,
           'line-opacity': 0.95
         }
       })
     }
+    applyFullRouteVisibility()
   }
 
   function getPlaybackPadding(): { top: number; bottom: number; left: number; right: number } {
@@ -387,8 +442,7 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
         <div class="head-marker-halo"></div>
         <div class="head-marker-dot"></div>
       `
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      playbackHeadMarker = new (window as any).maplibregl.Marker({
+      playbackHeadMarker = new maplibregl.Marker({
         element: el,
         anchor: 'center'
       })
@@ -435,6 +489,9 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
               .map((p) => (isGcj02Active.value ? wgs84ToGcj02(p.lon, p.lat) : [p.lon, p.lat]))
       ) as [number, number][]
       trailCoords.push(markerCoord)
+      if (trailCoords.length < 2) {
+        trailCoords.push(markerCoord)
+      }
 
       const trailSrc = map.getSource('yarj-playback-trail') as GeoJSONSource | undefined
       if (trailSrc) {
@@ -452,24 +509,33 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
     updatePlaybackHeadMarker(markerCoord)
 
     if (routePlaybackFollowCamera.value) {
-      if (playbackTargetZoom != null) {
-        stepZoomInterpolation()
-      } else {
-        let finalCenter = markerCoord
-        if (
-          yarjConfig.value.routeCameraSmoothing !== false &&
-          playbackCameraPos &&
-          routePlaybackIsPlaying.value
-        ) {
-          finalCenter = smoothFollowCamera(playbackCameraPos, markerCoord, dtSec, 15)
-        }
-        playbackCameraPos = finalCenter
-
-        map.jumpTo({
-          center: finalCenter,
-          padding: getPlaybackPadding()
-        })
+      let finalCenter = markerCoord
+      if (
+        yarjConfig.value.routeCameraSmoothing !== false &&
+        playbackCameraPos &&
+        routePlaybackIsPlaying.value
+      ) {
+        finalCenter = smoothFollowCamera(playbackCameraPos, markerCoord, dtSec, 15)
       }
+      playbackCameraPos = finalCenter
+
+      let nextZ: number | undefined
+      if (playbackTargetZoom != null) {
+        const curZ = map.getZoom()
+        const diff = playbackTargetZoom - curZ
+        if (Math.abs(diff) < 0.005) {
+          nextZ = playbackTargetZoom
+          playbackTargetZoom = null
+        } else {
+          nextZ = curZ + diff * 0.28
+        }
+      }
+
+      map.jumpTo({
+        center: finalCenter,
+        ...(nextZ !== undefined ? { zoom: nextZ } : {}),
+        padding: getPlaybackPadding()
+      })
     } else {
       playbackCameraPos = null
     }
@@ -508,52 +574,55 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
 
   function runPausedZoomLoop(): void {
     playbackZoomRafId = null
-    const active = stepZoomInterpolation()
+    const map = getMap()
+    if (!map || playbackTargetZoom == null) return
+
+    const curZ = map.getZoom()
+    const diff = playbackTargetZoom - curZ
+    let nextZ: number | undefined
+    let active = true
+
+    if (Math.abs(diff) < 0.005) {
+      nextZ = playbackTargetZoom
+      playbackTargetZoom = null
+      active = false
+    } else {
+      nextZ = curZ + diff * 0.28
+    }
+
+    const mapCenter = map.getCenter()
+    const centerCoord: [number, number] = routePlaybackFollowCamera.value
+      ? (playbackMarkerPos ??
+        routePlaybackCurrentPoint.value?.renderCoord ?? [mapCenter.lng, mapCenter.lat])
+      : [mapCenter.lng, mapCenter.lat]
+    playbackCameraPos = centerCoord
+
+    map.jumpTo({
+      center: centerCoord,
+      zoom: nextZ,
+      padding: getPlaybackPadding()
+    })
+
     if (active) {
       playbackZoomRafId = requestAnimationFrame(runPausedZoomLoop)
     }
   }
 
-  function stepZoomInterpolation(): boolean {
-    const map = getMap()
-    if (playbackTargetZoom == null || !map) return false
-    const curZ = map.getZoom()
-    const diff = playbackTargetZoom - curZ
-    const pad = getPlaybackPadding()
-    if (Math.abs(diff) < 0.005) {
-      const finalZ = playbackTargetZoom
-      playbackTargetZoom = null
-      const centerCoord =
-        routePlaybackFollowCamera.value && routePlaybackCurrentPoint.value
-          ? routePlaybackCurrentPoint.value.renderCoord
-          : map.getCenter()
-      map.jumpTo({
-        center: centerCoord,
-        zoom: finalZ,
-        padding: pad
-      })
-      return false
-    }
-
-    const nextZ = curZ + diff * 0.28
-    const centerCoord =
-      routePlaybackFollowCamera.value && routePlaybackCurrentPoint.value
-        ? routePlaybackCurrentPoint.value.renderCoord
-        : map.getCenter()
-    map.jumpTo({
-      center: centerCoord,
-      zoom: nextZ,
-      padding: pad
-    })
-    return true
-  }
-
   function playbackLoop(now: number): void {
     if (!routePlaybackIsPlaying.value || !routePlaybackActive.value) return
-    const dtSec = (now - playbackLastFrameTime) / 1000
+    const rawDtSec = (now - playbackLastFrameTime) / 1000
+    // 限制单帧最大时间增量（最多 80ms），防止缩放或切后台瞬时卡顿/掉帧造成进度突进与画面跳跃
+    const dtSec = Math.min(0.08, Math.max(0, rawDtSec))
     playbackLastFrameTime = now
 
-    const totalDurationSec = routePlaybackRoute.value?.durationSec || 3600
+    const totalDurationSec =
+      routePlaybackRoute.value?.durationSec && routePlaybackRoute.value.durationSec > 0
+        ? routePlaybackRoute.value.durationSec
+        : playbackTimestampsMs.length > 1 &&
+            playbackTimestampsMs[playbackTimestampsMs.length - 1] > playbackTimestampsMs[0]
+          ? (playbackTimestampsMs[playbackTimestampsMs.length - 1] - playbackTimestampsMs[0]) / 1000
+          : (routePlaybackRoute.value?.totalDistanceM ?? 1000) / 4 || 600
+
     const progressDelta = (dtSec * routePlaybackSpeed.value) / Math.max(1, totalDurationSec)
     let nextProgress = routePlaybackProgress.value + progressDelta
 
@@ -599,7 +668,7 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
   }
 
   async function startRoutePlayback(route: Route): Promise<void> {
-    onBeforeStart?.()
+    onBeforeStart?.(route)
 
     routePlaybackRoute.value = route
     routePlaybackProgress.value = 0
@@ -612,6 +681,29 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
     const map = getMap()
     if (map) {
       map.scrollZoom.disable()
+      // 立即从 route.geojson 注入全貌坐标，确保首帧路线全貌立即可见，避免任何黑屏/路线消失现象
+      try {
+        const geo = JSON.parse(route.geojson)
+        const coords = geo.geometry?.coordinates
+        if (Array.isArray(coords) && coords.length >= 2) {
+          const initCoords = coords.map((c: [number, number]) =>
+            isGcj02Active.value ? wgs84ToGcj02(c[0], c[1]) : c
+          )
+          const fullSrc = map.getSource('yarj-playback-full') as GeoJSONSource | undefined
+          if (fullSrc) {
+            fullSrc.setData({
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: initCoords
+              }
+            })
+          }
+        }
+      } catch {
+        // 容错：若预存的 geojson 解析异常则等待后续 get-route-points 补充
+      }
     }
 
     try {
@@ -678,8 +770,21 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
             [route.bounds[0], route.bounds[1]],
             [route.bounds[2], route.bounds[3]]
           ],
-          { padding: 100, maxZoom: 15 }
+          { padding: 100, maxZoom: 15, animate: false }
         )
+      }
+
+      if (map.getLayer('yarj-playback-full-glow')) {
+        map.setPaintProperty('yarj-playback-full-glow', 'line-color', themeRgba(0.4))
+      }
+      if (map.getLayer('yarj-playback-full-line')) {
+        map.setPaintProperty('yarj-playback-full-line', 'line-color', themeRgba(0.85))
+      }
+      if (map.getLayer('yarj-playback-trail-glow')) {
+        map.setPaintProperty('yarj-playback-trail-glow', 'line-color', themeRgba(0.85))
+      }
+      if (map.getLayer('yarj-playback-trail-line')) {
+        map.setPaintProperty('yarj-playback-trail-line', 'line-color', themeRgba(1))
       }
     }
 
@@ -847,6 +952,8 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
     onRoutePlaybackProgressChange,
     onRoutePlaybackJumpTime,
     onRoutePlaybackJumpToSplit,
+    routePlaybackShowFullRoute,
+    toggleRoutePlaybackShowFullRoute,
     handleMapDragStart,
     toggleRoutePlaybackPhotosDrawer
   }

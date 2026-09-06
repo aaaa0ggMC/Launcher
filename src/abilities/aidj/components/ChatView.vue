@@ -15,6 +15,9 @@ import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
 import ContextMenu from './ContextMenu.vue'
 import ModelSelect from './ModelSelect.vue'
+import ChatSlashPopup from './ChatSlashPopup.vue'
+import ChatStatusBar from './ChatStatusBar.vue'
+import { filterChatCommands, applyChatCommand } from './chat-commands'
 import { ensureWebPlayerEngine } from '../web-player/engine'
 
 defineOptions({ name: 'cockpit-aidj-chat' })
@@ -69,9 +72,6 @@ function setupOverlayH(): void {
   })
   overlayHRO.observe(overlayEl.value)
 }
-const cmdPopupStyle = computed(() => ({
-  bottom: `${overlayH.value + 8}px`
-}))
 
 function setupOverlayMeasure(): void {
   if (overlayRO || !contentRef.value) return
@@ -94,79 +94,9 @@ function makeUid(): number {
 // Chat slash-commands — typing a leading `/` shows a hint popup; Tab completes,
 // Up/Down navigate. Commands run without the AI (e.g. `/random N`).
 // ---------------------------------------------------------------------------
-interface ChatCommandDef {
-  name: string
-  args: string
-  descKey: string
-  descFallback: string
-}
-const CHAT_COMMANDS: ChatCommandDef[] = [
-  {
-    name: 'random',
-    args: '<number>',
-    descKey: 'aidj.cmd.random.desc',
-    descFallback: '随机选取 N 首歌曲'
-  },
-  {
-    name: 'pr',
-    args: '<number>',
-    descKey: 'aidj.cmd.pr.desc',
-    descFallback: 'AI 从随机候选中精选歌单'
-  },
-  {
-    name: 'explore',
-    args: '<number>',
-    descKey: 'aidj.cmd.explore.desc',
-    descFallback: '发现未听过/最少播放的歌曲'
-  },
-  {
-    name: 'ftop',
-    args: '<N | -N | A B>',
-    descKey: 'aidj.cmd.ftop.desc',
-    descFallback: '推送播放次数 Top/倒数/区间'
-  },
-  {
-    name: 'analyse',
-    args: '<language|emotion|genre|loudness>',
-    descKey: 'aidj.cmd.analyse.desc',
-    descFallback: '元数据分布统计（system 消息）'
-  },
-  {
-    name: 'filter',
-    args: '[--count] [--compare] [--ignorecase] <表达式>  [字段:值]',
-    descKey: 'aidj.cmd.filter.desc',
-    descFallback: '按表达式过滤曲库（title/lyrics/all + [字段:值] 元数据筛选）'
-  },
-  {
-    name: 'persist',
-    args: '<消息>',
-    descKey: 'aidj.cmd.persist.desc',
-    descFallback: '分支当前会话为持久会话并后台自动播放'
-  },
-  {
-    name: 'persist-stop',
-    args: '',
-    descKey: 'aidj.cmd.persistStop.desc',
-    descFallback: '停止运行中的持久会话'
-  }
-]
-
 const cmdActive = ref(0)
 const cmdDismissed = ref(false)
-const cmdFiltered = computed(() => {
-  const raw = inputText.value
-  if (!raw.startsWith('/')) return []
-  // The first token is the command name (may be a partial prefix).
-  const first = raw.slice(1).split(/\s+/)[0].toLowerCase()
-  const matched = CHAT_COMMANDS.filter((c) => c.name.startsWith(first))
-  if (matched.length === 0) return []
-  // Once a command is exactly identified (a space follows it — user is typing
-  // its arguments), keep the popup pinned on that command so it can be
-  // referenced while filling in the args.
-  const exact = CHAT_COMMANDS.find((c) => c.name === first)
-  if (exact && /\s/.test(raw.slice(1))) return [exact]
-  return matched
-})
+const cmdFiltered = computed(() => filterChatCommands(inputText.value))
 const cmdVisible = computed(() => !cmdDismissed.value && cmdFiltered.value.length > 0)
 watch(inputText, () => {
   cmdActive.value = 0
@@ -176,10 +106,7 @@ watch(inputText, () => {
 function cmdApply(): void {
   const c = cmdFiltered.value[cmdActive.value]
   if (!c) return
-  // Replace only the leading `/token` — keep whatever was typed after it
-  // (args / a pasted prompt) instead of wiping the whole input.
-  const rest = inputText.value.replace(/^\/\S*/, '')
-  inputText.value = `/${c.name}${rest || ' '}`
+  inputText.value = applyChatCommand(inputText.value, c)
 }
 
 /** Run a "push playlist" command and render the assistant result (like /random). */
@@ -504,7 +431,6 @@ const sbVolbal = ref<{ enabled: boolean; method: string }>({ enabled: false, met
 const sbRecordFreq = ref(false)
 const sbListening = ref(true)
 const sbBackgrounds = ref(0)
-const memoryConfirm = ref(false)
 const playAllConfirm = ref(false)
 const pendingPlayAll = ref<{ name: string; path: string }[] | null>(null)
 const snackOpen = ref(false)
@@ -529,13 +455,6 @@ const netState = ref<'ok' | 'bad' | 'checking'>('checking')
 const mode = ref<'dbus' | 'web'>('dbus')
 
 let modeUnsub: (() => void) | null = null
-
-function formatTokens(n: number): string {
-  if (n >= 1000) {
-    return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
-  }
-  return n.toLocaleString()
-}
 
 const visibleStatus = computed(() => {
   return (
@@ -596,7 +515,6 @@ async function toggleListening(): Promise<void> {
 }
 
 async function clearMemory(): Promise<void> {
-  memoryConfirm.value = false
   try {
     await window.cockpit.command('aidj.refresh')
     sbMemory.value = 0
@@ -1573,131 +1491,21 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
       :style="overlayStyle"
     >
       <div ref="contentRef" class="overlay-content">
-        <div class="aidj-status-bar">
-          <template v-for="key in visibleStatus" :key="key">
-            <template v-if="key === 'tokens'">
-              <v-chip
-                variant="flat"
-                size="small"
-                class="status-chip is-on"
-                :title="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
-              >
-                <span class="status-label">Tokens</span
-                ><span class="status-value">{{
-                  formatTokens(lastTokens.prompt + lastTokens.completion)
-                }}</span>
-              </v-chip>
-            </template>
-
-            <template v-else-if="key === 'context'">
-              <v-chip
-                variant="flat"
-                size="small"
-                class="status-chip is-on"
-                :title="t('aidj.chat.title_context', '单次请求的上下文输入 tokens')"
-              >
-                <span class="status-label">Context</span
-                ><span class="status-value">{{ formatTokens(lastContext.prompt) }}</span>
-              </v-chip>
-              <v-chip
-                variant="flat"
-                size="small"
-                class="status-chip is-on"
-                :title="t('aidj.chat.title_output_tokens', '单次请求的输出 tokens')"
-              >
-                <span class="status-label">Completion</span
-                ><span class="status-value">{{ formatTokens(lastContext.completion) }}</span>
-              </v-chip>
-            </template>
-
-            <v-chip
-              v-else-if="key === 'tracks'"
-              variant="flat"
-              size="small"
-              class="status-chip is-on"
-            >
-              <span class="status-label">Tracks</span
-              ><span class="status-value">{{
-                sbTracks === null ? '…' : sbTracks.toLocaleString()
-              }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'memory'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable is-on"
-              :title="t('aidj.chat.title_clear_memory', '点击清空已播记忆')"
-              @click="memoryConfirm = true"
-            >
-              <span class="status-label">Memory</span
-              ><span class="status-value">{{ sbMemory.toLocaleString() }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'volbal'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable"
-              :class="{ 'is-on': sbVolbal.enabled }"
-              :title="
-                sbVolbal.enabled
-                  ? t('aidj.chat.volbal_off', '点击关闭响度平衡')
-                  : t('aidj.chat.volbal_on', '点击开启响度平衡')
-              "
-              @click="toggleVolbal"
-            >
-              <span class="status-label">Volbal</span
-              ><span class="status-value">{{ sbVolbal.enabled ? sbVolbal.method : 'off' }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'record_freq'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable"
-              :class="{ 'is-on': sbRecordFreq }"
-              :title="
-                sbRecordFreq
-                  ? t('aidj.chat.freq_off', '点击关闭频率记录')
-                  : t('aidj.chat.freq_on', '点击开启频率记录')
-              "
-              @click="toggleRecordFreq"
-            >
-              <span class="status-label">RecordFreq</span
-              ><span class="status-value">{{ sbRecordFreq ? 'on' : 'off' }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'listening'"
-              variant="flat"
-              size="small"
-              class="status-chip clickable"
-              :class="{ 'is-on': sbListening }"
-              :title="
-                sbListening
-                  ? t('aidj.chat.listening_off', '点击关闭听歌时长统计')
-                  : t('aidj.chat.listening_on', '点击开启听歌时长统计')
-              "
-              @click="toggleListening"
-            >
-              <span class="status-label">Listen</span
-              ><span class="status-value">{{ sbListening ? 'on' : 'off' }}</span>
-            </v-chip>
-
-            <v-chip
-              v-else-if="key === 'backgrounds'"
-              variant="flat"
-              size="small"
-              class="status-chip"
-              :class="{ 'is-on': sbBackgrounds > 0 }"
-              :title="t('aidj.chat.title_bg_count', '运行中的后台任务数量')"
-            >
-              <span class="status-label">Backgrounds</span
-              ><span class="status-value">{{ sbBackgrounds }}</span>
-            </v-chip>
-          </template>
-        </div>
+        <ChatStatusBar
+          :visible-status="visibleStatus"
+          :last-tokens="lastTokens"
+          :last-context="lastContext"
+          :tracks="sbTracks"
+          :memory="sbMemory"
+          :volbal="sbVolbal"
+          :record-freq="sbRecordFreq"
+          :listening="sbListening"
+          :backgrounds="sbBackgrounds"
+          @toggle-volbal="toggleVolbal"
+          @toggle-record-freq="toggleRecordFreq"
+          @toggle-listening="toggleListening"
+          @clear-memory="clearMemory"
+        />
 
         <div v-if="!expanded" class="input-bar d-flex ga-2 align-center px-4 pb-3">
           <ModelSelect class="model-select-inline flex-shrink-0" />
@@ -1806,44 +1614,14 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
       </div>
     </div>
 
-    <Transition name="cmd-pop">
-      <div v-if="cmdVisible" class="cmd-popup" :style="cmdPopupStyle">
-        <div
-          v-for="(c, i) in cmdFiltered"
-          :key="c.name"
-          class="cmd-item"
-          :class="{ 'is-active': i === cmdActive }"
-          @mousedown.prevent="cmdApply"
-          @mouseenter="cmdActive = i"
-        >
-          <span class="cmd-name"
-            >/{{ c.name }} <span class="cmd-args">{{ c.args }}</span></span
-          >
-          <span class="cmd-desc">{{ t(c.descKey, c.descFallback) }}</span>
-        </div>
-      </div>
-    </Transition>
-
-    <v-dialog v-model="memoryConfirm" width="420">
-      <v-card rounded="lg">
-        <v-card-title class="text-subtitle-1">
-          <v-icon start>mdi-delete-sweep</v-icon>
-          {{ t('aidj.clear_memory_title', '清空已播记忆') }}
-        </v-card-title>
-        <v-card-text class="text-body-2">
-          {{ t('aidj.clear_memory_text', '确定要清空已播放歌曲的记忆吗？AI 将不再回避这些歌曲。') }}
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4 pt-2">
-          <v-spacer />
-          <v-btn variant="text" @click="memoryConfirm = false">
-            {{ t('aidj.cancel', '取消') }}
-          </v-btn>
-          <v-btn color="error" @click="clearMemory">
-            {{ t('aidj.clear', '清空') }}
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <ChatSlashPopup
+      v-if="cmdVisible"
+      :commands="cmdFiltered"
+      :active="cmdActive"
+      :bottom="overlayH + 8"
+      @select="cmdActive = $event"
+      @apply="cmdApply"
+    />
 
     <v-dialog v-model="playAllConfirm" width="440">
       <v-card rounded="lg">
@@ -1928,60 +1706,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
   transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
-.cmd-popup {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  z-index: 30;
-  max-height: 168px;
-  overflow-y: auto;
-  border-radius: 10px;
-  background: rgba(var(--v-theme-surface), 0.2);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
-  padding: 4px;
-}
-.cmd-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-.cmd-item.is-active {
-  background: rgba(var(--v-theme-primary), 0.15);
-}
-.cmd-name {
-  font-family: monospace;
-  font-weight: 600;
-  color: rgb(var(--v-theme-primary));
-  white-space: nowrap;
-}
-.cmd-args {
-  color: rgb(var(--v-theme-on-surface-variant));
-  font-weight: 400;
-}
-.cmd-desc {
-  opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cmd-pop-enter-active,
-.cmd-pop-leave-active {
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-.cmd-pop-enter-from,
-.cmd-pop-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
-}
 .input-overlay.input-expanded {
   position: absolute;
   left: 0;
@@ -1996,36 +1720,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
   flex: 1 0 auto;
   min-height: 0;
 }
-.aidj-status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 16px 10px;
-  flex-shrink: 0;
-}
-.status-chip {
-  padding-block: 4px;
-  min-height: 24px;
-}
-.status-chip.clickable {
-  cursor: pointer;
-}
-.status-chip.clickable:hover {
-  filter: brightness(1.15);
-}
-.status-chip.is-on {
-  background: rgba(var(--v-theme-success-container), 0.9);
-  color: rgb(var(--v-theme-on-success-container));
-}
-.status-chip .status-label {
-  opacity: 0.6;
-  margin-right: 5px;
-}
-.status-chip .status-value {
-  font-family: monospace;
-  font-weight: 600;
-}
 .expanded-textarea-wrap {
   min-height: 0;
 }
@@ -2035,10 +1729,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 .expanded-textarea-wrap :deep(.v-textarea) textarea {
   height: 100% !important;
   max-height: none !important;
-}
-.status-chip {
-  padding-block: 4px;
-  min-height: 24px;
 }
 .model-select-inline {
   width: 180px;

@@ -26,7 +26,7 @@ import {
 import { scanGalleryRoot, type RootScanSummary } from './scan'
 import { computeStaticGpsGuesses } from './photo-guess'
 import { analyzeAndCorrectGpsDrifts } from './gps-corrector'
-import { parseGpxToRoute } from './route-parser'
+import { parseGpxToRoute, parseActivityJsonToRoute } from './route-parser'
 import { matchPhotoToRoute, getRoutePoints } from './route-geotag'
 import { generateLod, markLodDone, markLodRunning, writeLodData } from './lod'
 import {
@@ -337,25 +337,55 @@ registerJobHandler(
   }
 )
 
-/** 递归扫描指定目录下的所有 GPX 文件 */
-async function findGpxFiles(dir: string, signal?: AbortSignal): Promise<string[]> {
-  const result: string[] = []
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const ent of entries) {
-      if (signal?.aborted) break
-      const full = join(dir, ent.name)
-      if (ent.isDirectory()) {
-        const sub = await findGpxFiles(full, signal)
-        result.push(...sub)
-      } else if (ent.isFile() && extname(ent.name).toLowerCase() === '.gpx') {
-        result.push(full)
+/** 递归扫描指定目录下的所有 GPX 与独立运动 JSON 文件 */
+async function findRouteFiles(
+  dir: string,
+  signal?: AbortSignal
+): Promise<{ gpxFiles: string[]; indoorJsonFiles: string[] }> {
+  const gpxFiles: string[] = []
+  const allJsonFiles: string[] = []
+  const gpxBaseSet = new Set<string>()
+
+  async function walk(curDir: string): Promise<void> {
+    try {
+      const entries = await readdir(curDir, { withFileTypes: true })
+      for (const ent of entries) {
+        if (signal?.aborted) break
+        const full = join(curDir, ent.name)
+        if (ent.isDirectory()) {
+          await walk(full)
+        } else if (ent.isFile()) {
+          const ext = extname(ent.name).toLowerCase()
+          if (ext === '.gpx') {
+            gpxFiles.push(full)
+            gpxBaseSet.add(full.slice(0, -4).toLowerCase())
+          } else if (ext === '.json') {
+            const lowerName = ent.name.toLowerCase()
+            if (
+              !lowerName.includes('summary') &&
+              !lowerName.includes('manifest') &&
+              !lowerName.includes('config') &&
+              !lowerName.includes('package')
+            ) {
+              allJsonFiles.push(full)
+            }
+          }
+        }
       }
+    } catch (err) {
+      log.warn('read dir for routes failed', { dir: curDir, error: String(err) })
     }
-  } catch (err) {
-    log.warn('read dir for gpx failed', { dir, error: String(err) })
   }
-  return result
+
+  await walk(dir)
+
+  // 独立的运动 JSON：没有对应的同名 .gpx 文件
+  const indoorJsonFiles = allJsonFiles.filter((jPath) => {
+    const stem = jPath.slice(0, -5).toLowerCase()
+    return !gpxBaseSet.has(stem)
+  })
+
+  return { gpxFiles, indoorJsonFiles }
 }
 
 registerJobHandler(
@@ -385,30 +415,57 @@ registerJobHandler(
     for (let i = 0; i < targetRoots.length; i++) {
       const rootPath = targetRoots[i]
       control.pushLine(`[${i + 1}/${targetRoots.length}] 扫描目录: ${rootPath}`)
-      const files = await findGpxFiles(rootPath, ac.signal)
-      totalFiles += files.length
-      control.pushLine(`发现 ${files.length} 个 GPX 轨迹文件`)
+      const { gpxFiles, indoorJsonFiles } = await findRouteFiles(rootPath, ac.signal)
+      const allFiles = [...gpxFiles, ...indoorJsonFiles]
+      totalFiles += allFiles.length
+      control.pushLine(
+        `发现 ${gpxFiles.length} 个 GPX 轨迹文件，${indoorJsonFiles.length} 个室内运动记录`
+      )
 
-      for (let fIdx = 0; fIdx < files.length; fIdx++) {
+      for (let fIdx = 0; fIdx < allFiles.length; fIdx++) {
         if (ac.signal.aborted) {
           control.pushLine('用户取消航线扫描', 'stderr')
           control.finish('cancelled')
           return
         }
 
-        const fPath = files[fIdx]
+        const fPath = allFiles[fIdx]
         try {
-          const xml = await readFile(fPath, 'utf-8')
-          const route = parseGpxToRoute(xml, fPath)
-          if (route) {
-            upsertRoute(route)
-            importedCount++
-            control.pushLine(
-              `解析成功: ${route.name} (${(route.totalDistanceM / 1000).toFixed(2)}km, 耗时 ${Math.round(route.durationSec / 60)}分)`
-            )
+          if (fPath.endsWith('.json')) {
+            const jsonContent = await readFile(fPath, 'utf-8')
+            const route = parseActivityJsonToRoute(jsonContent, fPath)
+            if (route) {
+              upsertRoute(route)
+              importedCount++
+              control.pushLine(
+                `解析成功 (室内/无轨迹): ${route.name} (${(route.totalDistanceM / 1000).toFixed(2)}km, 耗时 ${Math.round(route.durationSec / 60)}分)`
+              )
+            } else {
+              failedCount++
+            }
           } else {
-            failedCount++
-            control.pushLine(`跳过空轨迹或解析无效: ${fPath}`, 'stderr')
+            const xml = await readFile(fPath, 'utf-8')
+            let companionJson: Record<string, unknown> | null = null
+            try {
+              const jsonPath = fPath.replace(/\.gpx$/i, '.json')
+              const jsonContent = await readFile(jsonPath, 'utf-8')
+              companionJson = JSON.parse(jsonContent)
+            } catch {
+              // no companion json
+            }
+
+            const route = parseGpxToRoute(xml, fPath, undefined, companionJson)
+            if (route) {
+              upsertRoute(route)
+              importedCount++
+              const hasExtra = route.extraMetrics?.hrZones ? ' [含心率区间]' : ''
+              control.pushLine(
+                `解析成功: ${route.name} (${(route.totalDistanceM / 1000).toFixed(2)}km, 耗时 ${Math.round(route.durationSec / 60)}分)${hasExtra}`
+              )
+            } else {
+              failedCount++
+              control.pushLine(`跳过空轨迹或解析无效: ${fPath}`, 'stderr')
+            }
           }
         } catch (err) {
           failedCount++
@@ -416,7 +473,7 @@ registerJobHandler(
           control.pushLine(`解析失败 ${fPath}: ${msg}`, 'stderr')
         }
 
-        const frac = (fIdx + 1) / files.length
+        const frac = (fIdx + 1) / (allFiles.length || 1)
         control.setProgress(Math.round(10 + ((i + frac) / targetRoots.length) * 85))
       }
     }

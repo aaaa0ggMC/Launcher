@@ -54,11 +54,11 @@ let lastTs = 0
 let timer: ReturnType<typeof setInterval> | null = null
 let ticking = false
 
-function hourStartOf(ts: number): number {
+export function hourStartOf(ts: number): number {
   return Math.floor(ts / HOUR_MS) * HOUR_MS
 }
 
-function clampMinutes(m: number): number {
+export function clampMinutes(m: number): number {
   return Math.max(0, Math.min(60, Math.round(m)))
 }
 

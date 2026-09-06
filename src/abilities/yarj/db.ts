@@ -17,6 +17,7 @@ import type {
   PhotoAppendix,
   PhotoRow,
   Route,
+  RouteExtraMetrics,
   RouteSplit,
   ScanRun,
   TrackMatchedGps
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS routes (
   point_count         INTEGER,
   geojson             TEXT NOT NULL,
   splits              TEXT,
+  extra_metrics       TEXT,
   created_at          TEXT,
   updated_at          TEXT
 );
@@ -176,6 +178,22 @@ export function getMetadataDb(): DatabaseSync {
     }
   } catch (err) {
     log.warn('migrate photos table check failed', { error: String(err) })
+  }
+
+  // 迁移：检查 routes 表 extra_metrics 列
+  try {
+    const routeCols = d.prepare('PRAGMA table_info(routes)').all() as { name: string }[]
+    const routeColNames = new Set(routeCols.map((c) => c.name))
+    if (!routeColNames.has('extra_metrics')) {
+      try {
+        d.exec('ALTER TABLE routes ADD COLUMN extra_metrics TEXT')
+        log.info('migrated routes table: added extra_metrics column')
+      } catch (e) {
+        log.warn('add extra_metrics col failed', { error: String(e) })
+      }
+    }
+  } catch (err) {
+    log.warn('migrate routes table check failed', { error: String(err) })
   }
 
   log.info('metadata db ready', { path })
@@ -612,6 +630,7 @@ export interface RouteRow {
   point_count: number
   geojson: string
   splits: string | null
+  extra_metrics: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -631,6 +650,14 @@ export function routeFromRow(row: RouteRow): Route {
       splits = JSON.parse(row.splits)
     } catch {
       splits = undefined
+    }
+  }
+  let extraMetrics: RouteExtraMetrics | undefined = undefined
+  if (row.extra_metrics) {
+    try {
+      extraMetrics = JSON.parse(row.extra_metrics)
+    } catch {
+      extraMetrics = undefined
     }
   }
   return {
@@ -653,6 +680,22 @@ export function routeFromRow(row: RouteRow): Route {
     maxEle: row.max_ele,
     avgHr: row.avg_hr,
     maxHr: row.max_hr,
+    minHr: extraMetrics?.minHr ?? null,
+    avgCadence: extraMetrics?.avgCadence ?? null,
+    maxCadence: extraMetrics?.maxCadence ?? null,
+    steps: extraMetrics?.steps ?? null,
+    avgStrideCm: extraMetrics?.avgStrideCm ?? null,
+    avgPaceSec: extraMetrics?.avgPaceSec ?? null,
+    maxPaceSec: extraMetrics?.maxPaceSec ?? null,
+    minPaceSec: extraMetrics?.minPaceSec ?? null,
+    vo2Max: extraMetrics?.vo2Max ?? null,
+    trainLoad: extraMetrics?.trainLoad ?? null,
+    trainEffect: extraMetrics?.trainEffect ?? null,
+    recoverTimeHours: extraMetrics?.recoverTimeHours ?? null,
+    deviceType: extraMetrics?.deviceType ?? null,
+    deviceId: extraMetrics?.deviceId ?? null,
+    hrZones: extraMetrics?.hrZones ?? null,
+    extraMetrics,
     bounds,
     pointCount: row.point_count,
     geojson: row.geojson,
@@ -670,8 +713,8 @@ export function upsertRoute(route: Route): void {
       id, path, name, desc, activity_type, start_time, end_time,
       duration_sec, moving_duration_sec, total_distance_m, avg_speed_kmh, max_speed_kmh,
       calories, elevation_gain_m, elevation_loss_m, min_ele, max_ele, avg_hr, max_hr,
-      bounds, point_count, geojson, splits, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      bounds, point_count, geojson, splits, extra_metrics, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(path) DO UPDATE SET
       id = excluded.id,
       name = excluded.name,
@@ -695,6 +738,7 @@ export function upsertRoute(route: Route): void {
       point_count = excluded.point_count,
       geojson = excluded.geojson,
       splits = excluded.splits,
+      extra_metrics = excluded.extra_metrics,
       updated_at = excluded.updated_at
   `)
   stmt.run(
@@ -721,6 +765,7 @@ export function upsertRoute(route: Route): void {
     route.pointCount,
     route.geojson,
     route.splits ? JSON.stringify(route.splits) : null,
+    route.extraMetrics ? JSON.stringify(route.extraMetrics) : null,
     route.createdAt ?? now,
     now
   )

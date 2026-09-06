@@ -11,124 +11,23 @@ import {
 } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '../../main/ui/i18n'
-import { DEFAULT_LYRICS_PAGE_CFG } from './types'
-import type { AidjLyricsPageConfig } from './types'
-
-/**
- * In-app lyrics page — fully independent from the desktop LyricsWindow. Since
- * centering/scrolling all happen INSIDE this window, it can offer a scroll
- * mode (all lines, current one auto-centered) AND a karaoke mode (word-by-word
- * fill on the current line following inline LRC timestamps). Colors always
- * follow the app theme (`--v-theme-*`), never configurable.
- */
+import {
+  DEFAULT_LYRICS_PAGE_CFG,
+  type AidjLyricsPageConfig,
+  type LyricPlaybackState
+} from './types'
+import {
+  parseLrc as parseLyrics,
+  extractPlainLyrics as stripLrcTags,
+  type LyricLine
+} from './parser/lrcParser'
 
 defineOptions({ name: 'cockpit-aidj-lyrics' })
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
-interface PlaybackState {
-  ok?: boolean
-  status?: string
-  track?: string
-  artist?: string
-  album?: string
-  player?: string
-  positionMs?: number | null
-  lengthMs?: number | null
-  lyric?: string | null
-  karaokeLyric?: string | null
-  path?: string | null
-}
-
-// ---------------------------------------------------------------------------
-// Karaoke-aware LRC parsing (self-contained, not shared with LyricsWindow).
-// A line like `[00:12.00]一[00:12.30]二` splits into per-word chunks so the
-// current line can fill progressively. Lines with no inline sub-timestamps get
-// a single chunk (plain highlight).
-// ---------------------------------------------------------------------------
-interface LyricChunk {
-  text: string
-  /** ms at which this chunk becomes active (line-relative, raw LRC time). */
-  time: number
-}
-interface LyricLine {
-  time: number
-  text: string
-  chunks: LyricChunk[]
-}
-
-function parseTimeTag(m: RegExpMatchArray): number {
-  const frac = Number(m[3] ?? '0')
-  return Number(m[1]) * 60000 + Number(m[2]) * 1000 + (frac < 100 ? frac * 10 : frac)
-}
-
-function parseLyrics(lrc: string): LyricLine[] {
-  const lines: LyricLine[] = []
-  let offset = 0
-  for (const raw of lrc.split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
-    const off = line.match(/\[offset:([+-]?\d+)\]/)
-    if (off) {
-      offset = Number(off[1])
-      continue
-    }
-    if (!line.match(/\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]/)) continue
-    const parts = line.split(/(\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\])/g)
-    const chunks: LyricChunk[] = []
-    // Leading timestamps that appear BEFORE any text — a repeated lyric such as
-    // `[02:53][02:28][01:08][00:42]敕勒川…` is sung multiple times, so each tag
-    // must produce its own line (LRC spec). Interleaved tags (karaoke) don't
-    // reach here because a text segment is flushed before them.
-    const leadingTimes: number[] = []
-    let pendingTime = 0
-    let pendingText = ''
-    const flush = (): void => {
-      // Keep the raw segment text (WITH any leading space — Netease YRC
-      // attaches the inter-word space to the NEXT word, e.g. `[ts]Why[ts] you`;
-      // trimming here would jam the words together). Only the final joined
-      // line is trimmed.
-      if (pendingText) chunks.push({ text: pendingText, time: pendingTime + offset })
-      pendingText = ''
-    }
-    for (const part of parts) {
-      const m = part.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]$/)
-      if (m) {
-        flush()
-        const t = parseTimeTag(m)
-        if (!chunks.length) leadingTimes.push(t + offset)
-        pendingTime = t
-      } else {
-        pendingText += part
-      }
-    }
-    flush()
-    if (!chunks.length) continue
-    if (chunks.length === 1 && leadingTimes.length > 1) {
-      // `[02:53][02:28][01:08][00:42]句` — the same text repeats at each leading
-      // tag; expand to one line per tag so the lyric re-lights on each chorus.
-      for (const t of leadingTimes) {
-        lines.push({ time: t, text: chunks[0].text, chunks: [{ text: chunks[0].text, time: t }] })
-      }
-      continue
-    }
-    lines.push({
-      time: chunks[0].time,
-      text: chunks
-        .map((c) => c.text)
-        .join('')
-        .trim(),
-      chunks
-    })
-  }
-  return lines.sort((a, b) => a.time - b.time)
-}
-
-/** Strip bracket tags — for timestamp-less (plain) lyrics. */
-function stripLrcTags(lrc: string): string {
-  return lrc.replace(/\[[^\]]*\]/g, '').trim()
-}
+type PlaybackState = Partial<LyricPlaybackState>
 
 // ---------------------------------------------------------------------------
 // State + display config (colors are NOT part of it — theme only).

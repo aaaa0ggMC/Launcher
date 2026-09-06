@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# vivo 运动健康快捷提取命令
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec uv run --script "$SCRIPT_DIR/sync_vivo.py" "$@"

@@ -4,30 +4,40 @@ defineOptions({ name: 'cockpit-yarj-route-playback-bar' })
 import { ref } from 'vue'
 import type { Route, RouteSplit } from '../types'
 
-const props = defineProps<{
-  route: Route
-  isPlaying: boolean
-  progress: number
-  currentTimeStr: string
-  elapsedDurationStr: string
-  totalDurationStr: string
-  currentDistKmStr: string
-  totalDistKmStr: string
-  currentSpeedKmh: number | null
-  currentEleM: number | null
-  currentHr: number | null
-  speed: number
-  followCamera: boolean
-  photosDrawerOpen: boolean
-  currentPhotosCount: number
-  splits?: RouteSplit[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    route: Route
+    isPlaying: boolean
+    progress: number
+    currentTimeStr: string
+    elapsedDurationStr: string
+    totalDurationStr: string
+    currentDistKmStr: string
+    totalDistKmStr: string
+    currentSpeedKmh: number | null
+    currentEleM: number | null
+    currentHr: number | null
+    speed: number
+    followCamera: boolean
+    otherRoutesMode?: 'hide' | 'dim' | 'show'
+    showFullRoute?: boolean
+    photosDrawerOpen: boolean
+    currentPhotosCount: number
+    splits?: RouteSplit[]
+  }>(),
+  {
+    otherRoutesMode: 'hide',
+    showFullRoute: true
+  }
+)
 
 const emit = defineEmits<{
   (e: 'togglePlay'): void
   (e: 'update:progress', val: number): void
   (e: 'update:speed', val: number): void
   (e: 'update:followCamera', val: boolean): void
+  (e: 'update:otherRoutesMode', val: 'hide' | 'dim' | 'show'): void
+  (e: 'update:showFullRoute', val: boolean): void
   (e: 'reCenter'): void
   (e: 'togglePhotosDrawer'): void
   (e: 'jumpTime', deltaSec: number): void
@@ -56,6 +66,12 @@ function toggleFollowCamera(): void {
     emit('reCenter')
   }
 }
+
+function cycleOtherRoutesMode(): void {
+  const next =
+    props.otherRoutesMode === 'hide' ? 'dim' : props.otherRoutesMode === 'dim' ? 'show' : 'hide'
+  emit('update:otherRoutesMode', next)
+}
 </script>
 
 <template>
@@ -71,7 +87,11 @@ function toggleFollowCamera(): void {
                   ? 'mdi-bike'
                   : route.activityType === 'running'
                     ? 'mdi-run'
-                    : 'mdi-motion-play'
+                    : route.activityType === 'walking'
+                      ? 'mdi-walk'
+                      : route.activityType === 'hiking'
+                        ? 'mdi-hiking'
+                        : 'mdi-motion-play'
               }}
             </v-icon>
           </v-avatar>
@@ -148,6 +168,56 @@ function toggleFollowCamera(): void {
             @click="toggleFollowCamera"
           >
             <v-icon size="18">{{ followCamera ? 'mdi-crosshairs-gps' : 'mdi-pan' }}</v-icon>
+          </v-btn>
+
+          <!-- 当前完整路线全貌显隐切换 -->
+          <v-btn
+            :variant="showFullRoute ? 'flat' : 'tonal'"
+            :color="showFullRoute ? 'primary' : undefined"
+            size="small"
+            icon
+            :title="
+              showFullRoute
+                ? '当前完整路线：已显示（点击在播放时隐藏全貌，仅随行渐进）'
+                : '当前完整路线：已隐藏（点击在播放时显示路线全貌）'
+            "
+            @click="emit('update:showFullRoute', !showFullRoute)"
+          >
+            <v-icon size="18">
+              {{ showFullRoute ? 'mdi-routes' : 'mdi-map-marker-path' }}
+            </v-icon>
+          </v-btn>
+
+          <!-- 其他航线显隐/淡化切换 -->
+          <v-btn
+            :variant="otherRoutesMode !== 'show' ? 'flat' : 'tonal'"
+            :color="
+              otherRoutesMode === 'hide'
+                ? 'primary'
+                : otherRoutesMode === 'dim'
+                  ? 'secondary'
+                  : undefined
+            "
+            size="small"
+            icon
+            :title="
+              otherRoutesMode === 'hide'
+                ? '其他航线：已完全隐藏（点击切换为淡化显示）'
+                : otherRoutesMode === 'dim'
+                  ? '其他航线：已淡化显示（点击切换为正常显示）'
+                  : '其他航线：正常显示（点击切换为完全隐藏）'
+            "
+            @click="cycleOtherRoutesMode"
+          >
+            <v-icon size="18">
+              {{
+                otherRoutesMode === 'hide'
+                  ? 'mdi-eye-off-outline'
+                  : otherRoutesMode === 'dim'
+                    ? 'mdi-opacity'
+                    : 'mdi-eye-outline'
+              }}
+            </v-icon>
           </v-btn>
 
           <!-- 退出播放模式 -->

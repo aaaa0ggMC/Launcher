@@ -187,6 +187,10 @@ export interface YarjConfig {
   routeSmoothingWindow?: number
   /** 是否开启相机跟随平滑缓冲（云台防抖阻尼），默认 true */
   routeCameraSmoothing?: boolean
+  /** 航线播放期间其他航线显示模式 ('hide' 完全隐藏 | 'dim' 淡化 | 'show' 正常显示)，默认 'hide' */
+  routePlaybackOtherRoutesMode?: 'hide' | 'dim' | 'show'
+  /** 航线播放期间是否显示当前完整路线全貌，默认 true */
+  routePlaybackShowFullRoute?: boolean
 }
 
 /** 过滤操作符 */
@@ -222,6 +226,8 @@ export const DEFAULT_YARJ_CONFIG: YarjConfig = {
   showPhotosLayer: true,
   showExploredLayer: true,
   showRoutesLayer: true,
+  routePlaybackOtherRoutesMode: 'hide',
+  routePlaybackShowFullRoute: true,
   gpsPriority: ['track', 'corrected', 'guess', 'db', 'exif'],
   exploredRadiusM: 60,
   exploredGranularity: 'standard',
@@ -460,6 +466,35 @@ export interface RouteSplit {
   elevationGainM?: number
 }
 
+/** 心率五区间持续时间（秒） */
+export interface RouteHeartRateZones {
+  warmUpDurationSec?: number | null
+  fatBurningDurationSec?: number | null
+  aerobicDurationSec?: number | null
+  anaerobicDurationSec?: number | null
+  extremeDurationSec?: number | null
+}
+
+/** 深度扩展运动生理与设备指标 */
+export interface RouteExtraMetrics {
+  steps?: number | null
+  avgCadence?: number | null
+  maxCadence?: number | null
+  avgStrideCm?: number | null
+  avgPaceSec?: number | null
+  maxPaceSec?: number | null
+  minPaceSec?: number | null
+  minHr?: number | null
+  vo2Max?: number | null
+  trainLoad?: number | null
+  trainEffect?: number | null
+  recoverTimeHours?: number | null
+  deviceType?: string | null
+  deviceId?: string | null
+  hrZones?: RouteHeartRateZones | null
+  rawRecord?: Record<string, unknown> | null
+}
+
 /** 运动航线 / 轨迹完整对象。 */
 export interface Route {
   id: string
@@ -481,6 +516,22 @@ export interface Route {
   maxEle?: number | null
   avgHr?: number | null
   maxHr?: number | null
+  minHr?: number | null
+  avgCadence?: number | null
+  maxCadence?: number | null
+  steps?: number | null
+  avgStrideCm?: number | null
+  avgPaceSec?: number | null
+  maxPaceSec?: number | null
+  minPaceSec?: number | null
+  vo2Max?: number | null
+  trainLoad?: number | null
+  trainEffect?: number | null
+  recoverTimeHours?: number | null
+  deviceType?: string | null
+  deviceId?: string | null
+  hrZones?: RouteHeartRateZones | null
+  extraMetrics?: RouteExtraMetrics | null
   bounds: [number, number, number, number]
   pointCount: number
   geojson: string

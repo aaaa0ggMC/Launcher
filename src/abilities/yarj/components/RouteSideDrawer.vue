@@ -142,9 +142,11 @@ function onRouteClick(route: Route): void {
             variant="tonal"
             density="compact"
           >
-            <v-chip value="all" size="small">全部</v-chip>
-            <v-chip value="cycling" size="small">骑行</v-chip>
-            <v-chip value="running" size="small">跑步</v-chip>
+            <v-chip value="all">全部</v-chip>
+            <v-chip value="cycling">骑行</v-chip>
+            <v-chip value="running">跑步</v-chip>
+            <v-chip value="walking">健步</v-chip>
+            <v-chip value="hiking">徒步</v-chip>
           </v-chip-group>
 
           <!-- 若有当前聚焦航线，提示重置聚焦 -->
@@ -185,9 +187,29 @@ function onRouteClick(route: Route): void {
               <div class="d-flex align-center ga-2 min-width-0">
                 <v-icon
                   size="20"
-                  :color="route.activityType === 'cycling' ? 'primary' : 'secondary'"
+                  :color="
+                    route.activityType === 'cycling'
+                      ? 'primary'
+                      : route.activityType === 'running'
+                        ? 'secondary'
+                        : route.activityType === 'walking'
+                          ? 'success'
+                          : route.activityType === 'hiking'
+                            ? 'warning'
+                            : 'info'
+                  "
                 >
-                  {{ route.activityType === 'cycling' ? 'mdi-bike' : 'mdi-run' }}
+                  {{
+                    route.activityType === 'cycling'
+                      ? 'mdi-bike'
+                      : route.activityType === 'running'
+                        ? 'mdi-run'
+                        : route.activityType === 'walking'
+                          ? 'mdi-walk'
+                          : route.activityType === 'hiking'
+                            ? 'mdi-hiking'
+                            : 'mdi-routes'
+                  }}
                 </v-icon>
                 <span class="text-subtitle-2 font-weight-bold text-truncate">{{ route.name }}</span>
               </div>
@@ -239,6 +261,46 @@ function onRouteClick(route: Route): void {
               </div>
               <div>
                 {{ formatDate(route.startTime) }}
+              </div>
+            </div>
+
+            <!-- 次要指标徽章条（心率、卡路里、步数、设备） -->
+            <div
+              v-if="route.avgHr || route.calories || route.steps || route.deviceType"
+              class="d-flex align-center ga-3 mt-2 pt-2 border-t text-caption text-medium-emphasis flex-wrap"
+            >
+              <div v-if="route.avgHr" class="d-flex align-center ga-1 text-error">
+                <v-icon size="14">mdi-heart-pulse</v-icon>
+                <span>{{ route.avgHr }} bpm</span>
+              </div>
+              <div v-if="route.calories" class="d-flex align-center ga-1 text-warning">
+                <v-icon size="14">mdi-fire</v-icon>
+                <span>{{ route.calories }} kcal</span>
+              </div>
+              <div v-if="route.steps" class="d-flex align-center ga-1 text-info">
+                <v-icon size="14">mdi-shoe-sneaker</v-icon>
+                <span>{{ route.steps.toLocaleString() }} 步</span>
+              </div>
+              <div
+                v-if="route.deviceType"
+                class="d-flex align-center ga-1 ml-auto text-medium-emphasis"
+              >
+                <v-icon size="14">
+                  {{
+                    route.deviceType === 'smart_watch'
+                      ? 'mdi-watch'
+                      : route.deviceType === 'indoor'
+                        ? 'mdi-home-fitness'
+                        : 'mdi-cellphone'
+                  }}
+                </v-icon>
+                <span>{{
+                  route.deviceType === 'smart_watch'
+                    ? '手表'
+                    : route.deviceType === 'indoor'
+                      ? '室内'
+                      : '手机'
+                }}</span>
               </div>
             </div>
           </div>

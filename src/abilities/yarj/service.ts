@@ -3,7 +3,7 @@
  * 配置路径：~/.config/LinuxCockpit/yarj/config.json（abilityConfigPath 约定）。
  */
 import { mkdir, readFile, rename, stat, writeFile } from 'fs/promises'
-import { dirname } from 'path'
+import { dirname, extname } from 'path'
 import { abilityConfigPath } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import type {
@@ -28,7 +28,7 @@ import {
   recentScanRuns,
   upsertRoute
 } from './db'
-import { parseGpxToRoute } from './route-parser'
+import { parseGpxToRoute, parseActivityJsonToRoute } from './route-parser'
 import { readMbtilesMeta } from './mbtiles'
 import { isLodRunning, readLodData } from './lod'
 import { isHierarchyRunning, readHierarchy } from './hierarchy'
@@ -198,8 +198,28 @@ export async function moveRouteRoot(path: string, dir: -1 | 1): Promise<YarjConf
 
 export async function importRouteFile(filePath: string): Promise<Route | null> {
   try {
+    const ext = extname(filePath).toLowerCase()
+    if (ext === '.json') {
+      const jsonContent = await readFile(filePath, 'utf-8')
+      const route = parseActivityJsonToRoute(jsonContent, filePath)
+      if (route) {
+        upsertRoute(route)
+        return route
+      }
+      return null
+    }
+
     const xml = await readFile(filePath, 'utf-8')
-    const route = parseGpxToRoute(xml, filePath)
+    let companionJson: Record<string, unknown> | null = null
+    try {
+      const jsonPath = filePath.replace(/\.gpx$/i, '.json')
+      const jsonContent = await readFile(jsonPath, 'utf-8')
+      companionJson = JSON.parse(jsonContent)
+    } catch {
+      // no companion json
+    }
+
+    const route = parseGpxToRoute(xml, filePath, undefined, companionJson)
     if (route) {
       upsertRoute(route)
       return route

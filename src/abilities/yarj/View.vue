@@ -1,7 +1,16 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-yarj' })
 
-import { ref, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, inject } from 'vue'
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  onBeforeUnmount,
+  inject
+} from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import maplibregl from 'maplibre-gl'
@@ -173,6 +182,8 @@ function onFocusRouteOnMap(route: Route): void {
         ],
         { padding: 80, maxZoom: 16 }
       )
+    } else if (minLon !== 0 || minLat !== 0) {
+      map.flyTo({ center: [minLon, minLat], zoom: 15 })
     }
   }
 }
@@ -802,11 +813,17 @@ interface RouteLineFeature {
     activity_type?: string
     distance_km: string
     start_time: string | null
+    is_point?: boolean
   }
-  geometry: {
-    type: 'LineString'
-    coordinates: [number, number][]
-  }
+  geometry:
+    | {
+        type: 'LineString'
+        coordinates: [number, number][]
+      }
+    | {
+        type: 'Point'
+        coordinates: [number, number]
+      }
 }
 
 interface RoutesGeoJSON {
@@ -821,31 +838,61 @@ function buildRoutesGeoJSON(bucket?: number): RoutesGeoJSON {
   for (const r of routes.value) {
     try {
       const parsed = JSON.parse(r.geojson) as {
-        geometry?: { type?: string; coordinates?: [number, number][] }
+        geometry?: { type?: string; coordinates?: unknown }
       }
       if (parsed?.geometry?.coordinates) {
-        let rawCoords = parsed.geometry.coordinates
-        if (tol > 0 && rawCoords.length > 4) {
-          rawCoords = simplifyCoordinates(rawCoords, tol)
-        }
-        const coordinates = isGcj02Active.value
-          ? rawCoords.map(([lon, lat]) => wgs84ToGcj02(lon, lat))
-          : rawCoords
-        features.push({
-          type: 'Feature',
-          id: r.id,
-          properties: {
-            id: r.id,
-            name: r.name,
-            activity_type: r.activityType,
-            distance_km: (r.totalDistanceM / 1000).toFixed(1),
-            start_time: r.startTime
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates
+        if (
+          parsed.geometry.type === 'Point' ||
+          (Array.isArray(parsed.geometry.coordinates) &&
+            typeof parsed.geometry.coordinates[0] === 'number')
+        ) {
+          const [lon, lat] = parsed.geometry.coordinates as [number, number]
+          if (lon !== 0 || lat !== 0) {
+            const coordinates: [number, number] = isGcj02Active.value
+              ? wgs84ToGcj02(lon, lat)
+              : [lon, lat]
+            features.push({
+              type: 'Feature',
+              id: r.id,
+              properties: {
+                id: r.id,
+                name: r.name,
+                activity_type: r.activityType,
+                distance_km: (r.totalDistanceM / 1000).toFixed(1),
+                start_time: r.startTime,
+                is_point: true
+              },
+              geometry: {
+                type: 'Point',
+                coordinates
+              }
+            })
           }
-        })
+        } else if (Array.isArray(parsed.geometry.coordinates)) {
+          let rawCoords = parsed.geometry.coordinates as [number, number][]
+          if (tol > 0 && rawCoords.length > 4) {
+            rawCoords = simplifyCoordinates(rawCoords, tol)
+          }
+          const coordinates = isGcj02Active.value
+            ? rawCoords.map(([lon, lat]) => wgs84ToGcj02(lon, lat))
+            : rawCoords
+          features.push({
+            type: 'Feature',
+            id: r.id,
+            properties: {
+              id: r.id,
+              name: r.name,
+              activity_type: r.activityType,
+              distance_km: (r.totalDistanceM / 1000).toFixed(1),
+              start_time: r.startTime,
+              is_point: false
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates
+            }
+          })
+        }
       }
     } catch {
       // ignore
@@ -933,6 +980,66 @@ function getRouteLineOpacityExpression(
   ] as unknown as DataDrivenPropertyValueSpecification<number>
 }
 
+function getRouteDotOpacityExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    7,
+    0,
+    8.5,
+    ['case', ['==', ['literal', activeId], ''], 0.15, ['==', ['get', 'id'], activeId], 0.4, 0.03],
+    10,
+    ['case', ['==', ['literal', activeId], ''], 0.45, ['==', ['get', 'id'], activeId], 0.75, 0.06],
+    12,
+    ['case', ['==', ['literal', activeId], ''], 0.8, ['==', ['get', 'id'], activeId], 0.95, 0.12],
+    14,
+    ['case', ['==', ['literal', activeId], ''], 0.95, ['==', ['get', 'id'], activeId], 1.0, 0.2]
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function getRouteDotStrokeOpacityExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    7,
+    0,
+    8.5,
+    ['case', ['==', ['literal', activeId], ''], 0.15, ['==', ['get', 'id'], activeId], 0.4, 0.03],
+    10,
+    ['case', ['==', ['literal', activeId], ''], 0.45, ['==', ['get', 'id'], activeId], 0.75, 0.06],
+    12,
+    ['case', ['==', ['literal', activeId], ''], 0.8, ['==', ['get', 'id'], activeId], 0.95, 0.12],
+    14,
+    ['case', ['==', ['literal', activeId], ''], 0.95, ['==', ['get', 'id'], activeId], 1.0, 0.2]
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
+function getRouteDotRadiusExpression(
+  activeId: string
+): DataDrivenPropertyValueSpecification<number> {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    7,
+    0,
+    8.5,
+    ['case', ['==', ['get', 'id'], activeId], 5, 2.5],
+    11,
+    ['case', ['==', ['get', 'id'], activeId], 8, 4.5],
+    13,
+    ['case', ['==', ['get', 'id'], activeId], 10, 6.5],
+    16,
+    ['case', ['==', ['get', 'id'], activeId], 13, 8.5]
+  ] as unknown as DataDrivenPropertyValueSpecification<number>
+}
+
 function setupRoutesLayers(): void {
   if (!map) return
   if (map.getSource('yarj-routes')) return
@@ -977,10 +1084,37 @@ function setupRoutesLayers(): void {
     }
   })
 
+  // 3. 独立/单点运动标记圆点 (Point: 室内或只有起始坐标的运动记录，严格遵循 LOD 淡化消失与缩放)
+  map.addLayer({
+    id: 'yarj-routes-dots',
+    type: 'circle',
+    source: 'yarj-routes',
+    filter: ['==', '$type', 'Point'],
+    minzoom: 7,
+    paint: {
+      'circle-radius': getRouteDotRadiusExpression(activeRouteId.value || ''),
+      'circle-color': [
+        'case',
+        ['==', ['get', 'activity_type'], 'cycling'],
+        '#00e5ff',
+        ['==', ['get', 'activity_type'], 'running'],
+        '#ff4081',
+        ['==', ['get', 'activity_type'], 'walking'],
+        '#4caf50',
+        '#ffb300'
+      ],
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 7, 0, 9, 1, 13, 2],
+      'circle-stroke-color': '#ffffff',
+      'circle-opacity': getRouteDotOpacityExpression(activeRouteId.value || ''),
+      'circle-stroke-opacity': getRouteDotStrokeOpacityExpression(activeRouteId.value || '')
+    }
+  })
+
   const onRouteClick = (
     e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }
   ): void => {
     if (map && map.getZoom() < 8) return
+    if (routePlaybackActive.value) return
     const feat = e.features?.[0]
     if (feat?.properties?.id) {
       const r = routes.value.find((x) => x.id === feat.properties?.id)
@@ -992,11 +1126,18 @@ function setupRoutesLayers(): void {
 
   map.on('click', 'yarj-routes-line', onRouteClick)
   map.on('click', 'yarj-routes-glow', onRouteClick)
+  map.on('click', 'yarj-routes-dots', onRouteClick)
 
   map.on('mouseenter', 'yarj-routes-line', () => {
     if (map && map.getZoom() >= 8) map.getCanvas().style.cursor = 'pointer'
   })
   map.on('mouseleave', 'yarj-routes-line', () => {
+    if (map) map.getCanvas().style.cursor = ''
+  })
+  map.on('mouseenter', 'yarj-routes-dots', () => {
+    if (map) map.getCanvas().style.cursor = 'pointer'
+  })
+  map.on('mouseleave', 'yarj-routes-dots', () => {
     if (map) map.getCanvas().style.cursor = ''
   })
 }
@@ -1017,6 +1158,37 @@ function syncRouteHighlight(): void {
   if (!map) return
   const activeId = activeRouteId.value || ''
 
+  // 航线播放处于淡化模式时：正在播放的航线由专用 playback 图层绘制（静态线透明度设为 0 避免重叠），其他所有航线以 0.05 极淡呈现
+  if (routePlaybackActive.value && playbackOtherRoutesMode.value === 'dim') {
+    if (map.getLayer('yarj-routes-glow')) {
+      map.setPaintProperty('yarj-routes-glow', 'line-opacity', 0)
+    }
+    if (map.getLayer('yarj-routes-line')) {
+      map.setPaintProperty('yarj-routes-line', 'line-opacity', [
+        'case',
+        ['==', ['get', 'id'], activeId],
+        0,
+        0.05
+      ])
+      map.setPaintProperty('yarj-routes-line', 'line-width', 2.5)
+    }
+    if (map.getLayer('yarj-routes-dots')) {
+      map.setPaintProperty('yarj-routes-dots', 'circle-opacity', [
+        'case',
+        ['==', ['get', 'id'], activeId],
+        0,
+        0.08
+      ])
+      map.setPaintProperty('yarj-routes-dots', 'circle-stroke-opacity', [
+        'case',
+        ['==', ['get', 'id'], activeId],
+        0,
+        0.08
+      ])
+    }
+    return
+  }
+
   if (map.getLayer('yarj-routes-glow')) {
     map.setPaintProperty(
       'yarj-routes-glow',
@@ -1033,6 +1205,20 @@ function syncRouteHighlight(): void {
       getRouteLineOpacityExpression(activeId)
     )
     map.setPaintProperty('yarj-routes-line', 'line-width', getRouteLineWidthExpression(activeId))
+  }
+
+  if (map.getLayer('yarj-routes-dots')) {
+    map.setPaintProperty(
+      'yarj-routes-dots',
+      'circle-opacity',
+      getRouteDotOpacityExpression(activeId)
+    )
+    map.setPaintProperty(
+      'yarj-routes-dots',
+      'circle-stroke-opacity',
+      getRouteDotStrokeOpacityExpression(activeId)
+    )
+    map.setPaintProperty('yarj-routes-dots', 'circle-radius', getRouteDotRadiusExpression(activeId))
   }
 }
 
@@ -1492,6 +1678,19 @@ function exitExploration(): void {
 // 航线时间轴生长动画与行程播放 (Route Journey Playback - 委托给 useRoutePlayback)
 // ---------------------------------------------------------------------------
 
+const playbackOtherRoutesMode = ref<'hide' | 'dim' | 'show'>(
+  yarjConfig.value.routePlaybackOtherRoutesMode || 'hide'
+)
+
+watch(playbackOtherRoutesMode, (mode) => {
+  yarjConfig.value.routePlaybackOtherRoutesMode = mode
+  void window.cockpit
+    .command('yarj.save-config', {
+      patch: { routePlaybackOtherRoutesMode: mode }
+    })
+    .catch(() => undefined)
+})
+
 const {
   routePlaybackActive,
   routePlaybackRoute,
@@ -1520,6 +1719,7 @@ const {
   onRoutePlaybackProgressChange,
   onRoutePlaybackJumpTime,
   onRoutePlaybackJumpToSplit,
+  routePlaybackShowFullRoute,
   handleMapDragStart,
   toggleRoutePlaybackPhotosDrawer
 } = useRoutePlayback({
@@ -1527,11 +1727,17 @@ const {
   themeRgba,
   isGcj02Active,
   yarjConfig,
-  onBeforeStart: () => {
+  onBeforeStart: (route) => {
+    activeRouteId.value = route.id
     exitExploration()
     closePhotoDrawer()
     routeDetailModalOpen.value = false
   }
+})
+
+watch([routePlaybackActive, playbackOtherRoutesMode], () => {
+  applyLayerVisibility()
+  syncRouteHighlight()
 })
 
 function onSelectPhotoFromPlayback(payload: {
@@ -2120,7 +2326,16 @@ function applyLayerVisibility(): void {
   // 旅途漫游模式激活时，暂时隐藏探索区域图层与照片点聚合图层，专注于展示各站点与航段轨迹
   const exploredVisible = explorationActive.value ? false : showExploredLayer.value
   const photosVisible = explorationActive.value ? false : showPhotosLayer.value
-  const routesVisible = showRoutesLayer.value
+
+  // 播放轨迹时，根据 playbackOtherRoutesMode 控制底层静态航线
+  let routesVisible = showRoutesLayer.value
+  if (routePlaybackActive.value) {
+    if (playbackOtherRoutesMode.value === 'hide') {
+      routesVisible = false
+    } else {
+      routesVisible = true
+    }
+  }
 
   if (map.getLayer('yarj-explored-fill')) {
     map.setLayoutProperty('yarj-explored-fill', 'visibility', vis(exploredVisible))
@@ -2133,6 +2348,9 @@ function applyLayerVisibility(): void {
   }
   if (map.getLayer('yarj-routes-line')) {
     map.setLayoutProperty('yarj-routes-line', 'visibility', vis(routesVisible))
+  }
+  if (map.getLayer('yarj-routes-dots')) {
+    map.setLayoutProperty('yarj-routes-dots', 'visibility', vis(routesVisible))
   }
   if (map.getLayer('yarj-clusters')) {
     map.setLayoutProperty('yarj-clusters', 'visibility', vis(photosVisible))
@@ -2835,6 +3053,8 @@ async function reloadPreferences(): Promise<void> {
     <!-- 航线行程播放浮动控制栏 -->
     <RoutePlaybackBar
       v-if="routePlaybackActive && routePlaybackRoute"
+      v-model:other-routes-mode="playbackOtherRoutesMode"
+      v-model:show-full-route="routePlaybackShowFullRoute"
       :route="routePlaybackRoute"
       :is-playing="routePlaybackIsPlaying"
       :progress="routePlaybackProgress"

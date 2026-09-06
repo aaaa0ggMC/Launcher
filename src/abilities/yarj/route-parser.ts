@@ -9,7 +9,7 @@
  * 5. 生成标准 GeoJSON LineString 与包围盒 (bounds)；
  * 6. 航线折线与空间圆形区域（:gps lon lat km）相交判定。
  */
-import type { Route, RoutePoint, RouteSplit } from './types'
+import type { Route, RouteExtraMetrics, RouteHeartRateZones, RoutePoint, RouteSplit } from './types'
 import { haversineDistM } from './explored-area'
 
 /** MET 运动代谢当量参考值（按平均体重 68kg 估算卡路里） */
@@ -64,12 +64,30 @@ export function parseGpxContent(
   activityType: string
   points: RoutePoint[]
   totalDistanceExtensionM?: number
+  extensionsMetrics?: {
+    calories?: number
+    avgHrm?: number
+    maxHrm?: number
+    steps?: number
+    avgCadence?: number
+    maxCadence?: number
+    riseHeight?: number
+    fallHeight?: number
+  }
 } {
   // 提取名称与描述
   const nameMatch = /<name>([\s\S]*?)<\/name>/i.exec(xml)
   const descMatch = /<desc>([\s\S]*?)<\/desc>/i.exec(xml)
   const typeMatch = /<type>([\s\S]*?)<\/type>/i.exec(xml)
   const distExtMatch = /<totalDistance>([0-9.]+)<\/totalDistance>/i.exec(xml)
+  const calMatch = /<calories>([0-9.]+)<\/calories>/i.exec(xml)
+  const avgHrmMatch = /<avgHrm>([0-9.]+)<\/avgHrm>/i.exec(xml)
+  const maxHrmMatch = /<maxHrm>([0-9.]+)<\/maxHrm>/i.exec(xml)
+  const stepsMatch = /<steps>([0-9]+)<\/steps>/i.exec(xml)
+  const avgCadenceMatch = /<avgCadence>([0-9.]+)<\/avgCadence>/i.exec(xml)
+  const maxCadenceMatch = /<maxCadence>([0-9.]+)<\/maxCadence>/i.exec(xml)
+  const riseHeightMatch = /<riseHeight>([0-9.]+)<\/riseHeight>/i.exec(xml)
+  const fallHeightMatch = /<fallHeight>([0-9.]+)<\/fallHeight>/i.exec(xml)
 
   const name = nameMatch
     ? nameMatch[1].trim()
@@ -80,6 +98,16 @@ export function parseGpxContent(
   const desc = descMatch ? descMatch[1].trim() : null
   const activityType = detectActivityType(name, desc ?? '', typeMatch ? typeMatch[1] : undefined)
   const totalDistanceExtensionM = distExtMatch ? parseFloat(distExtMatch[1]) : undefined
+  const extensionsMetrics = {
+    calories: calMatch ? parseFloat(calMatch[1]) : undefined,
+    avgHrm: avgHrmMatch ? parseFloat(avgHrmMatch[1]) : undefined,
+    maxHrm: maxHrmMatch ? parseFloat(maxHrmMatch[1]) : undefined,
+    steps: stepsMatch ? parseInt(stepsMatch[1], 10) : undefined,
+    avgCadence: avgCadenceMatch ? parseFloat(avgCadenceMatch[1]) : undefined,
+    maxCadence: maxCadenceMatch ? parseFloat(maxCadenceMatch[1]) : undefined,
+    riseHeight: riseHeightMatch ? parseFloat(riseHeightMatch[1]) : undefined,
+    fallHeight: fallHeightMatch ? parseFloat(fallHeightMatch[1]) : undefined
+  }
 
   // 提取 trkpt 列表
   // 格式：<trkpt lat="30.534887" lon="114.428581">...</trkpt>
@@ -164,7 +192,8 @@ export function parseGpxContent(
     desc,
     activityType,
     points,
-    totalDistanceExtensionM
+    totalDistanceExtensionM,
+    extensionsMetrics
   }
 }
 
@@ -294,7 +323,12 @@ export function computeBounds(points: RoutePoint[]): [number, number, number, nu
 /**
  * 将 GPX 解析成完整的 Route 领域模型
  */
-export function parseGpxToRoute(xml: string, filePath: string, routeId?: string): Route | null {
+export function parseGpxToRoute(
+  xml: string,
+  filePath: string,
+  routeId?: string,
+  companionJson?: Record<string, unknown> | null
+): Route | null {
   const parsed = parseGpxContent(xml, filePath)
   const points = parsed.points
   if (!points.length) return null
@@ -347,7 +381,7 @@ export function parseGpxToRoute(xml: string, filePath: string, routeId?: string)
     points[i].speedKmh = speeds[i] ?? points[i].speedKmh
   }
 
-  // 计算海拔指标
+  // 计算海拔与心率指标
   let elevationGainM = 0
   let elevationLossM = 0
   let minEle: number | null = null
@@ -375,13 +409,77 @@ export function parseGpxToRoute(xml: string, filePath: string, routeId?: string)
     }
   }
 
-  const avgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : null
+  const calculatedAvgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : null
 
   // 卡路里估算（MET 模型）
   const met = MET_MAP[parsed.activityType] ?? 5.0
   const hours = movingDurationSec / 3600
   // 卡路里 = MET * 68kg * hours
-  const calories = Math.round(met * 68 * hours)
+  const calculatedCalories = Math.round(met * 68 * hours)
+
+  // 融合伴随 JSON 与 GPX Extensions
+  const ext = parsed.extensionsMetrics || {}
+  const compSummary = (companionJson?.summary as Record<string, unknown>) || null
+  const compZones = (companionJson?.heart_rate_zones as Record<string, unknown>) || null
+  const compDevice = (companionJson?.device as Record<string, unknown>) || null
+
+  let finalCalories = calculatedCalories
+  if (compSummary?.calories_kcal != null && typeof compSummary.calories_kcal === 'number') {
+    finalCalories = compSummary.calories_kcal
+  } else if (ext.calories != null) {
+    finalCalories = Math.round(ext.calories)
+  }
+
+  const finalAvgHr = (compSummary?.avg_hrm as number) ?? ext.avgHrm ?? calculatedAvgHr
+  const finalMaxHr = (compSummary?.max_hrm as number) ?? ext.maxHrm ?? maxHr
+  const finalMinHr = (compSummary?.min_hrm as number) ?? null
+
+  const finalSteps = (compSummary?.steps as number) ?? ext.steps ?? null
+  const finalAvgCadence = (compSummary?.avg_cadence as number) ?? ext.avgCadence ?? null
+  const finalMaxCadence = (compSummary?.max_cadence as number) ?? ext.maxCadence ?? null
+  const finalAvgStrideCm = (compSummary?.avg_stride_cm as number) ?? null
+
+  const finalAvgPaceSec = (compSummary?.avg_pace_sec as number) ?? null
+  const finalMaxPaceSec = (compSummary?.max_pace_sec as number) ?? null
+  const finalMinPaceSec = (compSummary?.min_pace_sec as number) ?? null
+
+  const finalVo2Max = (compSummary?.vo2_max as number) ?? null
+  const finalTrainLoad = (compSummary?.train_load as number) ?? null
+  const finalTrainEffect = (compSummary?.train_effect as number) ?? null
+  const finalRecoverTimeHours = (compSummary?.recover_time_hours as number) ?? null
+
+  const finalDeviceType = (compDevice?.type as string) ?? null
+  const finalDeviceId = (compDevice?.did as string) ?? null
+
+  let hrZones: RouteHeartRateZones | null = null
+  if (compZones) {
+    hrZones = {
+      warmUpDurationSec: (compZones.warm_up_duration_sec as number) ?? null,
+      fatBurningDurationSec: (compZones.fat_burning_duration_sec as number) ?? null,
+      aerobicDurationSec: (compZones.aerobic_duration_sec as number) ?? null,
+      anaerobicDurationSec: (compZones.anaerobic_duration_sec as number) ?? null,
+      extremeDurationSec: (compZones.extreme_duration_sec as number) ?? null
+    }
+  }
+
+  const extraMetrics: RouteExtraMetrics = {
+    steps: finalSteps,
+    avgCadence: finalAvgCadence,
+    maxCadence: finalMaxCadence,
+    avgStrideCm: finalAvgStrideCm,
+    avgPaceSec: finalAvgPaceSec,
+    maxPaceSec: finalMaxPaceSec,
+    minPaceSec: finalMinPaceSec,
+    minHr: finalMinHr,
+    vo2Max: finalVo2Max,
+    trainLoad: finalTrainLoad,
+    trainEffect: finalTrainEffect,
+    recoverTimeHours: finalRecoverTimeHours,
+    deviceType: finalDeviceType,
+    deviceId: finalDeviceId,
+    hrZones,
+    rawRecord: (companionJson?.raw_record as Record<string, unknown>) ?? null
+  }
 
   // 计算 splits
   const splits = computeSplits(points)
@@ -403,7 +501,7 @@ export function parseGpxToRoute(xml: string, filePath: string, routeId?: string)
       totalDistanceM,
       avgSpeedKmh,
       maxSpeedKmh,
-      calories,
+      calories: finalCalories,
       elevationGainM: Math.round(elevationGainM),
       elevationLossM: Math.round(elevationLossM),
       pointCount: points.length
@@ -427,19 +525,155 @@ export function parseGpxToRoute(xml: string, filePath: string, routeId?: string)
     totalDistanceM: Math.round(totalDistanceM),
     avgSpeedKmh,
     maxSpeedKmh,
-    calories,
+    calories: finalCalories,
     elevationGainM: elevationGainM > 0 ? Math.round(elevationGainM) : null,
     elevationLossM: elevationLossM > 0 ? Math.round(elevationLossM) : null,
     minEle: minEle != null ? Math.round(minEle) : null,
     maxEle: maxEle != null ? Math.round(maxEle) : null,
-    avgHr,
-    maxHr,
+    avgHr: finalAvgHr,
+    maxHr: finalMaxHr,
+    minHr: finalMinHr,
+    avgCadence: finalAvgCadence,
+    maxCadence: finalMaxCadence,
+    steps: finalSteps,
+    avgStrideCm: finalAvgStrideCm,
+    avgPaceSec: finalAvgPaceSec,
+    maxPaceSec: finalMaxPaceSec,
+    minPaceSec: finalMinPaceSec,
+    vo2Max: finalVo2Max,
+    trainLoad: finalTrainLoad,
+    trainEffect: finalTrainEffect,
+    recoverTimeHours: finalRecoverTimeHours,
+    deviceType: finalDeviceType,
+    deviceId: finalDeviceId,
+    hrZones,
+    extraMetrics,
     bounds,
     pointCount: points.length,
     geojson: JSON.stringify(geojsonObj),
     splits,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
+  }
+}
+
+/**
+ * 将无 GPS 轨迹的室内运动 JSON（如跑步机室内跑步）直接解析成 Route 记录
+ */
+export function parseActivityJsonToRoute(
+  jsonStr: string,
+  filePath: string,
+  routeId?: string
+): Route | null {
+  try {
+    const data = JSON.parse(jsonStr)
+    const id = routeId || data.id || `route_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const summary = data.summary || {}
+    const durationSec = summary.duration_seconds || 0
+    const distanceM = summary.distance_meters || 0
+    const avgSpeedKmh =
+      summary.avg_speed_kmh || (durationSec > 0 ? (distanceM / durationSec) * 3.6 : 0)
+
+    const extraMetrics: RouteExtraMetrics = {
+      steps: summary.steps ?? null,
+      avgCadence: summary.avg_cadence ?? null,
+      maxCadence: summary.max_cadence ?? null,
+      avgStrideCm: summary.avg_stride_cm ?? null,
+      avgPaceSec: summary.avg_pace_sec ?? null,
+      maxPaceSec: summary.max_pace_sec ?? null,
+      minPaceSec: summary.min_pace_sec ?? null,
+      minHr: summary.min_hrm ?? null,
+      vo2Max: summary.vo2_max ?? null,
+      trainLoad: summary.train_load ?? null,
+      trainEffect: summary.train_effect ?? null,
+      recoverTimeHours: summary.recover_time_hours ?? null,
+      deviceType: data.device?.type ?? 'indoor',
+      deviceId: data.device?.did ?? null,
+      hrZones: data.heart_rate_zones
+        ? {
+            warmUpDurationSec: data.heart_rate_zones.warm_up_duration_sec,
+            fatBurningDurationSec: data.heart_rate_zones.fat_burning_duration_sec,
+            aerobicDurationSec: data.heart_rate_zones.aerobic_duration_sec,
+            anaerobicDurationSec: data.heart_rate_zones.anaerobic_duration_sec,
+            extremeDurationSec: data.heart_rate_zones.extreme_duration_sec
+          }
+        : null,
+      rawRecord: data.raw_record ?? null
+    }
+
+    let bounds: [number, number, number, number] = [0, 0, 0, 0]
+    let pointCount = 0
+    let geojson = '{"type":"Feature","geometry":null,"properties":{}}'
+
+    const loc =
+      data.location ||
+      (Array.isArray(data.start_point) && data.start_point.length >= 2
+        ? { longitude: data.start_point[0], latitude: data.start_point[1] }
+        : null)
+    if (
+      loc &&
+      typeof loc.longitude === 'number' &&
+      typeof loc.latitude === 'number' &&
+      !Number.isNaN(loc.longitude) &&
+      !Number.isNaN(loc.latitude)
+    ) {
+      bounds = [loc.longitude, loc.latitude, loc.longitude, loc.latitude]
+      pointCount = 1
+      geojson = JSON.stringify({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [loc.longitude, loc.latitude]
+        },
+        properties: {
+          id,
+          name: data.name || '运动记录'
+        }
+      })
+    }
+
+    return {
+      id,
+      path: filePath,
+      name: data.name || '运动记录',
+      desc:
+        data.sport_display || (pointCount === 1 ? '运动记录 (单点定位)' : '室内/无轨迹运动记录'),
+      activityType: data.sport_type || 'running',
+      startTime: data.start_time || null,
+      endTime: data.end_time || null,
+      durationSec,
+      movingDurationSec: durationSec,
+      totalDistanceM: distanceM,
+      avgSpeedKmh: Math.round(avgSpeedKmh * 10) / 10,
+      maxSpeedKmh: summary.max_speed_kmh || Math.round(avgSpeedKmh * 10) / 10,
+      calories: summary.calories_kcal || null,
+      avgHr: summary.avg_hrm ?? null,
+      maxHr: summary.max_hrm ?? null,
+      minHr: summary.min_hrm ?? null,
+      avgCadence: summary.avg_cadence ?? null,
+      maxCadence: summary.max_cadence ?? null,
+      steps: summary.steps ?? null,
+      avgStrideCm: summary.avg_stride_cm ?? null,
+      avgPaceSec: summary.avg_pace_sec ?? null,
+      maxPaceSec: summary.max_pace_sec ?? null,
+      minPaceSec: summary.min_pace_sec ?? null,
+      vo2Max: summary.vo2_max ?? null,
+      trainLoad: summary.train_load ?? null,
+      trainEffect: summary.train_effect ?? null,
+      recoverTimeHours: summary.recover_time_hours ?? null,
+      deviceType: data.device?.type ?? 'indoor',
+      deviceId: data.device?.name ?? data.device?.did ?? null,
+      hrZones: extraMetrics.hrZones,
+      extraMetrics,
+      bounds,
+      pointCount,
+      geojson,
+      splits: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  } catch {
+    return null
   }
 }
 

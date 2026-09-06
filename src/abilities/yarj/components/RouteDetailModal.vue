@@ -74,6 +74,13 @@ function formatDuration(sec: number): string {
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 }
 
+function formatPace(sec?: number): string {
+  if (!sec || sec <= 0) return '-'
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}'${String(s).padStart(2, '0')}"`
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return '未知时间'
   try {
@@ -128,6 +135,85 @@ const maxSplitSpeed = computed(() => {
   return Math.ceil(max * 1.15)
 })
 
+const hasHrZones = computed(() => {
+  const z = props.route?.hrZones
+  if (!z) return false
+  return (
+    (z.warmUpDurationSec || 0) +
+      (z.fatBurningDurationSec || 0) +
+      (z.aerobicDurationSec || 0) +
+      (z.anaerobicDurationSec || 0) +
+      (z.extremeDurationSec || 0) >
+    0
+  )
+})
+
+const totalHrZoneSec = computed(() => {
+  const z = props.route?.hrZones
+  if (!z) return 0
+  return (
+    (z.warmUpDurationSec || 0) +
+    (z.fatBurningDurationSec || 0) +
+    (z.aerobicDurationSec || 0) +
+    (z.anaerobicDurationSec || 0) +
+    (z.extremeDurationSec || 0)
+  )
+})
+
+function getZonePercent(sec?: number | null): number {
+  if (!sec || totalHrZoneSec.value <= 0) return 0
+  return Math.round((sec / totalHrZoneSec.value) * 100)
+}
+
+function getTrainingEffectText(te?: number): string {
+  if (te == null || te <= 0) return ''
+  if (te < 1.0) return '轻微恢复'
+  if (te < 2.0) return '基础维持'
+  if (te < 3.0) return '提升心肺'
+  if (te < 4.0) return '显著提升'
+  return '极限突破'
+}
+
+const hasRunningMetrics = computed(() => {
+  const r = props.route
+  if (!r) return false
+  return !!(
+    (r.avgCadence && r.avgCadence > 0) ||
+    (r.steps && r.steps > 0) ||
+    (r.avgStrideCm && r.avgStrideCm > 0) ||
+    (r.avgPaceSec && r.avgPaceSec > 0)
+  )
+})
+
+const hasTrainingMetrics = computed(() => {
+  const r = props.route
+  if (!r) return false
+  return !!(
+    r.trainLoad != null ||
+    r.trainEffect != null ||
+    r.recoverTimeHours != null ||
+    r.vo2Max != null
+  )
+})
+
+const deviceDisplay = computed(() => {
+  const r = props.route
+  if (!r) return null
+  if (r.deviceType === 'smart_watch') {
+    return { icon: 'mdi-watch', label: '智能手环 / 手表' }
+  }
+  if (r.deviceType === 'phone') {
+    return { icon: 'mdi-cellphone', label: '智能手机' }
+  }
+  if (r.deviceType === 'indoor') {
+    return { icon: 'mdi-home-fitness', label: '室内健身记录' }
+  }
+  if (r.deviceId) {
+    return { icon: 'mdi-devices', label: `设备 ${r.deviceId}` }
+  }
+  return null
+})
+
 function close(): void {
   emit('update:modelValue', false)
 }
@@ -158,14 +244,14 @@ function handleGeotag(): void {
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="840"
+    max-width="920"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
     <v-card v-if="route" rounded="xl" class="route-modal-card">
       <!-- 头部：标题与活动状态 -->
       <v-card-title
-        class="pa-5 pb-3 d-flex align-center justify-space-between flex-wrap ga-2 border-b"
+        class="pa-5 pb-3 d-flex align-center justify-space-between flex-wrap ga-2 border-b flex-shrink-0 route-modal-title"
       >
         <div class="d-flex align-center ga-3">
           <v-avatar color="primary" size="44" variant="tonal">
@@ -175,25 +261,48 @@ function handleGeotag(): void {
                   ? 'mdi-bike'
                   : route.activityType === 'running'
                     ? 'mdi-run'
-                    : 'mdi-routes'
+                    : route.activityType === 'walking'
+                      ? 'mdi-walk'
+                      : route.activityType === 'hiking'
+                        ? 'mdi-hiking'
+                        : route.activityType === 'indoor'
+                          ? 'mdi-home-fitness'
+                          : 'mdi-routes'
               }}
             </v-icon>
           </v-avatar>
           <div>
-            <div class="text-h6 font-weight-bold d-flex align-center ga-2">
+            <div class="text-h6 font-weight-bold d-flex align-center flex-wrap ga-2">
               <span>{{ route.name }}</span>
-              <v-chip size="small" variant="flat" color="primary">
+              <v-chip variant="flat" color="primary" class="activity-chip">
                 {{
                   route.activityType === 'cycling'
                     ? '户外骑行'
                     : route.activityType === 'running'
                       ? '户外跑步'
-                      : '运动轨迹'
+                      : route.activityType === 'walking'
+                        ? '健步走'
+                        : route.activityType === 'hiking'
+                          ? '徒步登山'
+                          : route.activityType === 'indoor'
+                            ? '室内运动'
+                            : '运动轨迹'
                 }}
               </v-chip>
+              <v-chip
+                v-if="deviceDisplay"
+                variant="tonal"
+                color="info"
+                class="device-chip"
+                :prepend-icon="deviceDisplay.icon"
+              >
+                {{ deviceDisplay.label }}
+              </v-chip>
             </div>
-            <div class="text-caption text-medium-emphasis">
-              {{ formatDate(route.startTime) }} · {{ route.pointCount }} 个定位点
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{ formatDate(route.startTime) }}
+              <span v-if="route.endTime"> ~ {{ formatDate(route.endTime).split(' ')[1] }}</span>
+              <span v-if="route.pointCount > 0" class="ml-2">({{ route.pointCount }} 点)</span>
             </div>
           </div>
         </div>
@@ -203,8 +312,14 @@ function handleGeotag(): void {
             color="primary"
             variant="flat"
             prepend-icon="mdi-motion-play"
-            :disabled="explorationActive"
-            :title="explorationActive ? '我的探索漫游进行中，请先退出探索再播放' : '播放此次行程'"
+            :disabled="explorationActive || route.pointCount <= 1"
+            :title="
+              explorationActive
+                ? '我的探索漫游进行中，请先退出探索再播放'
+                : route.pointCount <= 1
+                  ? '该运动无连续航线轨迹，无法播放'
+                  : '播放此次行程'
+            "
             @click="handlePlay"
           >
             播放行程
@@ -213,6 +328,12 @@ function handleGeotag(): void {
             color="primary"
             variant="tonal"
             prepend-icon="mdi-crosshairs-gps"
+            :disabled="!route.bounds || (route.bounds[0] === 0 && route.bounds[1] === 0)"
+            :title="
+              !route.bounds || (route.bounds[0] === 0 && route.bounds[1] === 0)
+                ? '该运动无地理坐标'
+                : '在地图上查看位置'
+            "
             @click="handleFocus"
           >
             地图聚焦
@@ -221,6 +342,8 @@ function handleGeotag(): void {
             color="secondary"
             variant="tonal"
             prepend-icon="mdi-camera-timer"
+            :disabled="route.pointCount <= 1"
+            :title="route.pointCount <= 1 ? '无连续轨迹可贴合照片' : '轨迹贴合照片'"
             @click="handleGeotag"
           >
             轨迹贴合照片
@@ -230,14 +353,18 @@ function handleGeotag(): void {
       </v-card-title>
 
       <!-- 选项卡切换 -->
-      <v-tabs v-model="activeTab" density="compact" color="primary" class="px-5 border-b">
+      <v-tabs
+        v-model="activeTab"
+        color="primary"
+        class="px-5 border-b flex-shrink-0 route-modal-tabs"
+      >
         <v-tab value="overview">总览指标</v-tab>
         <v-tab value="splits">分公里配速 ({{ route.splits?.length || 0 }})</v-tab>
         <v-tab value="photos">随行实拍照片 ({{ routePhotos.length }})</v-tab>
       </v-tabs>
 
       <!-- 内容区 -->
-      <v-card-text class="pa-5">
+      <v-card-text class="pa-5 flex-grow-1 overflow-y-auto route-modal-body">
         <!-- 1. 总览指标卡片 -->
         <div v-if="activeTab === 'overview'" class="d-flex flex-column ga-4">
           <!-- 核心高光大卡片（对标 Mi Fitness 运动详情大看板） -->
@@ -313,8 +440,245 @@ function handleGeotag(): void {
             </v-row>
           </v-card>
 
-          <!-- 传感器状态卡片 (仅当有传感器数据时展示，无数据彻底隐藏) -->
-          <div v-if="route.avgHr || route.minEle != null" class="d-flex ga-3 flex-wrap">
+          <!-- 运动动力学表现（跑步/健步走步频、步幅、步数、配速） -->
+          <v-card v-if="hasRunningMetrics" rounded="lg" variant="tonal" class="pa-4 card-fill">
+            <div class="text-subtitle-2 font-weight-bold d-flex align-center ga-2 mb-3">
+              <v-icon size="20" color="primary">mdi-shoe-sneaker</v-icon>
+              <span>运动动力学表现 (Dynamics)</span>
+            </div>
+            <v-row dense>
+              <v-col v-if="route.avgPaceSec" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">平均配速</div>
+                  <div class="metric-val">
+                    {{ formatPace(route.avgPaceSec) }} <span class="unit">/km</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.minPaceSec" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">最佳配速</div>
+                  <div class="metric-val text-primary">
+                    {{ formatPace(route.minPaceSec) }} <span class="unit">/km</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.steps" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">总步数</div>
+                  <div class="metric-val">
+                    {{ route.steps.toLocaleString() }} <span class="unit">步</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.avgCadence" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">平均步频</div>
+                  <div class="metric-val">{{ route.avgCadence }} <span class="unit">spm</span></div>
+                </div>
+              </v-col>
+              <v-col v-if="route.maxCadence" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">最高步频</div>
+                  <div class="metric-val text-secondary">
+                    {{ route.maxCadence }} <span class="unit">spm</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.avgStrideCm" cols="6" sm="4">
+                <div class="metric-item">
+                  <div class="metric-label">平均步幅</div>
+                  <div class="metric-val">{{ route.avgStrideCm }} <span class="unit">cm</span></div>
+                </div>
+              </v-col>
+            </v-row>
+          </v-card>
+
+          <!-- 心率区间分布 (Heart Rate Zones) -->
+          <v-card
+            v-if="hasHrZones"
+            rounded="lg"
+            variant="tonal"
+            class="pa-4 card-fill hr-zones-card"
+          >
+            <div class="d-flex align-center justify-space-between mb-3 flex-wrap ga-2">
+              <div class="text-subtitle-2 font-weight-bold d-flex align-center ga-2">
+                <v-icon size="20" color="error">mdi-heart-pulse</v-icon>
+                <span>心率区间分布 (Heart Rate Zones)</span>
+              </div>
+              <div class="text-caption text-medium-emphasis">
+                总记录时长: {{ formatDuration(totalHrZoneSec) }}
+                <span v-if="route.minHr && route.maxHr" class="ml-2">
+                  ({{ route.minHr }} ~ {{ route.maxHr }} bpm)
+                </span>
+              </div>
+            </div>
+
+            <!-- 五段式心率堆叠比例条 -->
+            <div class="hr-zones-stacked-bar mb-4">
+              <div
+                v-if="route.hrZones?.warmUpDurationSec"
+                class="zone-bar-segment zone-warmup"
+                :style="{ width: `${getZonePercent(route.hrZones.warmUpDurationSec)}%` }"
+                :title="`热身放松: ${formatDuration(route.hrZones.warmUpDurationSec)} (${getZonePercent(route.hrZones.warmUpDurationSec)}%)`"
+              />
+              <div
+                v-if="route.hrZones?.fatBurningDurationSec"
+                class="zone-bar-segment zone-fatburn"
+                :style="{ width: `${getZonePercent(route.hrZones.fatBurningDurationSec)}%` }"
+                :title="`脂肪消耗: ${formatDuration(route.hrZones.fatBurningDurationSec)} (${getZonePercent(route.hrZones.fatBurningDurationSec)}%)`"
+              />
+              <div
+                v-if="route.hrZones?.aerobicDurationSec"
+                class="zone-bar-segment zone-aerobic"
+                :style="{ width: `${getZonePercent(route.hrZones.aerobicDurationSec)}%` }"
+                :title="`心肺耐力: ${formatDuration(route.hrZones.aerobicDurationSec)} (${getZonePercent(route.hrZones.aerobicDurationSec)}%)`"
+              />
+              <div
+                v-if="route.hrZones?.anaerobicDurationSec"
+                class="zone-bar-segment zone-anaerobic"
+                :style="{ width: `${getZonePercent(route.hrZones.anaerobicDurationSec)}%` }"
+                :title="`无氧耐力: ${formatDuration(route.hrZones.anaerobicDurationSec)} (${getZonePercent(route.hrZones.anaerobicDurationSec)}%)`"
+              />
+              <div
+                v-if="route.hrZones?.extremeDurationSec"
+                class="zone-bar-segment zone-extreme"
+                :style="{ width: `${getZonePercent(route.hrZones.extremeDurationSec)}%` }"
+                :title="`极限爆发: ${formatDuration(route.hrZones.extremeDurationSec)} (${getZonePercent(route.hrZones.extremeDurationSec)}%)`"
+              />
+            </div>
+
+            <!-- 五区间明细网格 -->
+            <div class="d-flex flex-column ga-2">
+              <div
+                v-for="zone in [
+                  {
+                    key: 'extreme',
+                    name: '极限爆发 (Anaerobic Capacity)',
+                    sec: route.hrZones?.extremeDurationSec,
+                    color: '#f44336'
+                  },
+                  {
+                    key: 'anaerobic',
+                    name: '无氧耐力 (Threshold)',
+                    sec: route.hrZones?.anaerobicDurationSec,
+                    color: '#ff9800'
+                  },
+                  {
+                    key: 'aerobic',
+                    name: '心肺耐力 (Aerobic)',
+                    sec: route.hrZones?.aerobicDurationSec,
+                    color: '#2196f3'
+                  },
+                  {
+                    key: 'fatburn',
+                    name: '脂肪消耗 (Fat Burn)',
+                    sec: route.hrZones?.fatBurningDurationSec,
+                    color: '#00bcd4'
+                  },
+                  {
+                    key: 'warmup',
+                    name: '热身放松 (Warm Up)',
+                    sec: route.hrZones?.warmUpDurationSec,
+                    color: '#4caf50'
+                  }
+                ]"
+                :key="zone.key"
+                class="zone-detail-row d-flex align-center justify-space-between pa-2 px-3 rounded-lg"
+              >
+                <div class="d-flex align-center ga-2">
+                  <span class="zone-dot" :style="{ backgroundColor: zone.color }" />
+                  <span class="text-caption font-weight-medium">{{ zone.name }}</span>
+                </div>
+                <div class="d-flex align-center ga-3">
+                  <span class="text-caption text-medium-emphasis">{{
+                    formatDuration(zone.sec || 0)
+                  }}</span>
+                  <span
+                    class="text-caption font-weight-bold"
+                    :style="{ color: zone.color, width: '45px', textAlign: 'right' }"
+                  >
+                    {{ getZonePercent(zone.sec) }}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </v-card>
+
+          <!-- 训练负荷与体能恢复 (Training Status) -->
+          <v-card v-if="hasTrainingMetrics" rounded="lg" variant="tonal" class="pa-4 card-fill">
+            <div class="text-subtitle-2 font-weight-bold d-flex align-center ga-2 mb-3">
+              <v-icon size="20" color="success">mdi-lightning-bolt</v-icon>
+              <span>训练负荷与体能恢复 (Training Status)</span>
+            </div>
+            <v-row dense>
+              <v-col v-if="route.trainEffect != null" cols="6" sm="3">
+                <div class="metric-item">
+                  <div class="metric-label">训练效果 (TE)</div>
+                  <div class="metric-val text-success">
+                    {{ route.trainEffect }}
+                    <span class="unit ml-1">{{ getTrainingEffectText(route.trainEffect) }}</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.recoverTimeHours != null" cols="6" sm="3">
+                <div class="metric-item">
+                  <div class="metric-label">建议恢复时间</div>
+                  <div class="metric-val text-info">
+                    {{ route.recoverTimeHours }} <span class="unit">小时</span>
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.trainLoad != null" cols="6" sm="3">
+                <div class="metric-item">
+                  <div class="metric-label">运动负荷 (Load)</div>
+                  <div class="metric-val text-warning">
+                    {{ route.trainLoad }}
+                  </div>
+                </div>
+              </v-col>
+              <v-col v-if="route.vo2Max != null" cols="6" sm="3">
+                <div class="metric-item">
+                  <div class="metric-label">最大摄氧量 (VO2Max)</div>
+                  <div class="metric-val text-primary">
+                    {{ route.vo2Max }} <span class="unit">ml/kg/min</span>
+                  </div>
+                </div>
+              </v-col>
+            </v-row>
+          </v-card>
+
+          <!-- 传感器状态与打卡地点卡片 (仅当有数据时展示，无数据彻底隐藏) -->
+          <div
+            v-if="
+              route.avgHr ||
+              route.minEle != null ||
+              (route.pointCount === 1 &&
+                route.bounds &&
+                (route.bounds[0] !== 0 || route.bounds[1] !== 0))
+            "
+            class="d-flex ga-3 flex-wrap"
+          >
+            <v-card
+              v-if="
+                route.pointCount === 1 &&
+                route.bounds &&
+                (route.bounds[0] !== 0 || route.bounds[1] !== 0)
+              "
+              rounded="lg"
+              variant="outlined"
+              class="flex-grow-1 pa-3 d-flex align-center ga-3"
+            >
+              <v-icon color="primary">mdi-map-marker-radius</v-icon>
+              <div class="text-caption">
+                <div class="font-weight-medium">运动打卡地点</div>
+                <div class="text-medium-emphasis">
+                  定位点: {{ route.bounds[1].toFixed(4) }}°N, {{ route.bounds[0].toFixed(4) }}°E
+                  (地图已标记为打卡圆点)
+                </div>
+              </div>
+            </v-card>
+
             <v-card
               v-if="route.avgHr"
               rounded="lg"
@@ -325,7 +689,8 @@ function handleGeotag(): void {
               <div class="text-caption">
                 <div class="font-weight-medium">心率传感器状态</div>
                 <div class="text-medium-emphasis">
-                  实时记录心率流 (峰值 {{ route.maxHr ?? route.avgHr }} bpm)
+                  实时记录心率流 (均值 {{ route.avgHr }} bpm, 峰值
+                  {{ route.maxHr ?? route.avgHr }} bpm)
                 </div>
               </div>
             </v-card>
@@ -442,9 +807,26 @@ function handleGeotag(): void {
 
 <style scoped>
 .route-modal-card {
-  max-height: 90vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
+}
+
+.route-modal-title {
+  flex-shrink: 0 !important;
+}
+
+.route-modal-tabs,
+.route-modal-card :deep(.v-tabs) {
+  flex-shrink: 0 !important;
+  min-height: 48px !important;
+  height: 48px !important;
+}
+
+.route-modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
 }
 
 .hero-distance {
@@ -560,5 +942,52 @@ function handleGeotag(): void {
   aspect-ratio: 1;
   object-fit: cover;
   display: block;
+}
+
+.activity-chip,
+.device-chip {
+  padding-block: 4px;
+  min-height: 26px;
+}
+
+.hr-zones-stacked-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.zone-bar-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.zone-warmup {
+  background-color: #4caf50;
+}
+.zone-fatburn {
+  background-color: #00bcd4;
+}
+.zone-aerobic {
+  background-color: #2196f3;
+}
+.zone-anaerobic {
+  background-color: #ff9800;
+}
+.zone-extreme {
+  background-color: #f44336;
+}
+
+.zone-detail-row {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.zone-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 </style>
