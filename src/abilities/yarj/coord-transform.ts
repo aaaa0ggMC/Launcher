@@ -57,10 +57,13 @@ export function wgs84ToGcj02(lng: number, lat: number): [number, number] {
  */
 export function gcj02ToWgs84(lng: number, lat: number): [number, number] {
   if (outOfChina(lng, lat)) return [lng, lat]
-  const [gLng, gLat] = wgs84ToGcj02(lng, lat)
-  const dLng = gLng - lng
-  const dLat = gLat - lat
-  return [lng - dLng, lat - dLat]
+  const [gLng1, gLat1] = wgs84ToGcj02(lng, lat)
+  let wLng = lng - (gLng1 - lng)
+  let wLat = lat - (gLat1 - lat)
+  const [gLng2, gLat2] = wgs84ToGcj02(wLng, wLat)
+  wLng -= gLng2 - lng
+  wLat -= gLat2 - lat
+  return [wLng, wLat]
 }
 
 /**

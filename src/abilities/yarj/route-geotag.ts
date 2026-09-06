@@ -123,10 +123,15 @@ export function matchPhotoToRoute(
     lon = p2.lon
     alt = p2.ele ?? null
   } else {
-    // 线性地理插值
+    // 线性地理插值（经度跨越 180° 日界线保护）
     const alpha = (targetTs - t1) / (t2 - t1)
     lat = p1.lat + alpha * (p2.lat - p1.lat)
-    lon = p1.lon + alpha * (p2.lon - p1.lon)
+    let dLon = p2.lon - p1.lon
+    if (dLon > 180) dLon -= 360
+    else if (dLon < -180) dLon += 360
+    lon = p1.lon + alpha * dLon
+    if (lon > 180) lon -= 360
+    else if (lon < -180) lon += 360
     if (p1.ele != null && p2.ele != null) {
       alt = p1.ele + alpha * (p2.ele - p1.ele)
     }

@@ -132,9 +132,14 @@ export function computeGuessedGpsMap(
         continue
       }
 
-      // 自动选择两张图片的中点
+      // 自动选择两张图片的中点（兼容跨越 180° 日界线的大圆中点经度）
       const midLat = (prevLat + nextLat) / 2
-      const midLon = (prevLon + nextLon) / 2
+      let dLon = nextLon - prevLon
+      if (dLon > 180) dLon -= 360
+      else if (dLon < -180) dLon += 360
+      let midLon = prevLon + dLon / 2
+      if (midLon > 180) midLon -= 360
+      else if (midLon < -180) midLon += 360
 
       result.set(current.photo.path, {
         lat: Number(midLat.toFixed(6)),

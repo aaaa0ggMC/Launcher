@@ -296,6 +296,20 @@ export interface LodStatus {
   running: boolean
 }
 
+export interface LodStatusRow {
+  mapId: string
+  ready: boolean
+  count: number
+  running: boolean
+}
+
+export interface HierarchyStatusRow {
+  mapId: string
+  ready: boolean
+  count: number
+  running: boolean
+}
+
 /** 地图文件 + 实时读出的 mbtiles 元数据（读失败时 error 非空）。 */
 export interface MapFileInfo extends MapFile {
   minzoom?: number

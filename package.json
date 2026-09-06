@@ -11,7 +11,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "test": "tsx --test src/abilities/aidj/parser/*.test.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "dev:lts": "node scripts/dev-lts.mjs",

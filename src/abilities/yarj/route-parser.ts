@@ -84,9 +84,9 @@ export function parseGpxContent(
   // 提取 trkpt 列表
   // 格式：<trkpt lat="30.534887" lon="114.428581">...</trkpt>
   const trkptRegex =
-    /<trkpt\s+[^>]*lat=["']([^"']+)["'][^>]*lon=["']([^"']+)["'][^>]*>([\s\S]*?)<\/trkpt>/gi
+    /<trkpt\s+[^>]*lat=["']([^"']+)["'][^>]*lon=["']([^"']+)["'][^>]*(?:>([\s\S]*?)<\/trkpt>|\s*\/>)/gi
   const trkptReverseRegex =
-    /<trkpt\s+[^>]*lon=["']([^"']+)["'][^>]*lat=["']([^"']+)["'][^>]*>([\s\S]*?)<\/trkpt>/gi
+    /<trkpt\s+[^>]*lon=["']([^"']+)["'][^>]*lat=["']([^"']+)["'][^>]*(?:>([\s\S]*?)<\/trkpt>|\s*\/>)/gi
 
   let match: RegExpExecArray | null
   const points: RoutePoint[] = []
@@ -107,7 +107,7 @@ export function parseGpxContent(
   while ((match = activeRegex.exec(xml)) !== null) {
     const lat = parseFloat(isReverse ? match[2] : match[1])
     const lon = parseFloat(isReverse ? match[1] : match[2])
-    const inner = match[3]
+    const inner = match[3] || ''
 
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue
 
