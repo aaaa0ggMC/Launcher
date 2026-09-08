@@ -1,6 +1,6 @@
 {
   "name": "linux-cockpit",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Linux System Cockpit — Electron + Vue3 + Vuetify3 launcher",
   "main": "./out/main/index.js",
   "author": "aaaa0ggmc (RockonDreaming)",
