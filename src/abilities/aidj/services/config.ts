@@ -1,11 +1,13 @@
-import { mkdir } from 'fs/promises'
+import { mkdir, readFile } from 'fs/promises'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { makeLogger } from '../../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../../main/process/paths'
 import {
   readOrCreateJson,
   writeJsonAtomic,
-  writeJsonAtomicSerialized
+  writeJsonAtomicSerialized,
+  writeTextAtomic
 } from '../../../main/process/util'
 import type { AidjConfig, AidjLyricsPageConfig, EqProfile, SessionMeta } from '../types'
 import {
@@ -72,6 +74,14 @@ export async function saveLyricsPageConfig(
 
 export function getAidjDir(): string {
   return AIDJ_DIR
+}
+
+export function getMetadataDir(): string {
+  return join(AIDJ_DIR, 'metadata')
+}
+
+export function getBiliMetadataPath(): string {
+  return join(getMetadataDir(), 'Bilibili-Current.metadata')
 }
 
 export function getMetadataPath(): string {
@@ -190,37 +200,98 @@ export async function findEqProfile(id: string): Promise<EqProfile | null> {
   return all.find((p) => p.id === id) ?? null
 }
 
+function csvEscape(s: string): string {
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
 export async function loadFrequency(): Promise<Map<string, number>> {
   const file = getFreqPath()
   const map = new Map<string, number>()
-  const data = await readOrCreateJson<Record<string, number>>(file, () => ({}))
-  for (const [k, v] of Object.entries(data)) {
-    const n = Number(v)
-    if (Number.isFinite(n) && n > 0) map.set(k, n)
+  if (!existsSync(file)) return map
+
+  try {
+    const raw = await readFile(file, 'utf-8')
+    const trimmed = raw.trim()
+    if (!trimmed) return map
+
+    // Handle legacy/temporary JSON format gracefully if encountered
+    if (trimmed.startsWith('{')) {
+      try {
+        const json = JSON.parse(trimmed) as Record<string, number>
+        for (const [k, v] of Object.entries(json)) {
+          const n = Number(v)
+          if (Number.isFinite(n) && n > 0) map.set(k, n)
+        }
+        return map
+      } catch {
+        /* fall through to CSV */
+      }
+    }
+
+    for (const line of trimmed.split('\n')) {
+      const l = line.trim()
+      if (!l || l === 'name,times') continue
+      let name: string
+      let rest: string
+      if (l.startsWith('"')) {
+        let i = 1
+        let quoted = ''
+        while (i < l.length) {
+          if (l[i] === '"' && i + 1 < l.length && l[i + 1] === '"') {
+            quoted += '"'
+            i += 2
+          } else if (l[i] === '"') {
+            i++
+            break
+          } else {
+            quoted += l[i]
+            i++
+          }
+        }
+        name = quoted
+        rest = l.slice(i + 1)
+      } else {
+        const idx = l.lastIndexOf(',')
+        if (idx <= 0) continue
+        name = l.slice(0, idx)
+        rest = l.slice(idx + 1)
+      }
+      const times = Number(rest)
+      if (name && Number.isFinite(times) && times > 0) {
+        map.set(name, times)
+      }
+    }
+  } catch (e) {
+    log.warn('loadFrequency failed', { error: String(e) })
   }
   return map
 }
 
 export async function saveFrequency(freq: Map<string, number>): Promise<void> {
   await ensureAidjDir()
-  const obj: Record<string, number> = {}
-  for (const [k, v] of freq.entries()) {
-    if (v > 0) obj[k] = v
-  }
-  await writeJsonAtomic(getFreqPath(), obj)
+  const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1])
+  const lines = ['name,times', ...sorted.map(([name, times]) => `${csvEscape(name)},${times}`)]
+  await writeTextAtomic(getFreqPath(), lines.join('\n') + '\n')
 }
 
 export async function bumpFrequency(names: string[]): Promise<void> {
   if (!names.length) return
   const freq = await loadFrequency()
+  let changed = false
   for (const name of names) {
+    if (!name) continue
     freq.set(name, (freq.get(name) ?? 0) + 1)
+    changed = true
   }
-  await saveFrequency(freq)
+  if (changed) await saveFrequency(freq)
 }
 
 export async function ensureAidjDir(): Promise<void> {
   await mkdir(AIDJ_DIR, { recursive: true })
+  await mkdir(getMetadataDir(), { recursive: true })
   await mkdir(SESSIONS_DIR, { recursive: true })
   await mkdir(getPlaylistsDir(), { recursive: true })
 }

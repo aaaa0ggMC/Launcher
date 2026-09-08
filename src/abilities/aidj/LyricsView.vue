@@ -49,6 +49,214 @@ let busy = false
 const hasTrack = computed(() => Boolean(state.value.track))
 const playing = computed(() => state.value.status === 'Playing')
 
+// MV Video playback & auto-hide controls
+const aidjAudioOnly = ref(false)
+const videoEl = ref<HTMLVideoElement | null>(null)
+const mvControlsVisible = ref(true)
+let mvHideTimer: ReturnType<typeof setTimeout> | null = null
+
+const isStopped = computed(() => state.value.status === 'Stopped')
+
+const isMp4 = computed(() => {
+  const p = (state.value.path || '').toLowerCase()
+  return p.endsWith('.mp4') || p.endsWith('.mkv') || p.endsWith('.webm')
+})
+const isMvActive = computed(() => {
+  return hasTrack.value && isMp4.value && !aidjAudioOnly.value && !isStopped.value
+})
+const videoSrc = computed(() => {
+  if (!state.value.path) return ''
+  return `cockpit-audio://${encodeURIComponent(state.value.path)}`
+})
+
+function resetMvControlsTimer(): void {
+  if (mvHideTimer) clearTimeout(mvHideTimer)
+  if (playing.value && isMvActive.value) {
+    mvHideTimer = setTimeout(() => {
+      if (playing.value && isMvActive.value) {
+        mvControlsVisible.value = false
+      }
+    }, 3000)
+  }
+}
+
+function onMvMouseMove(e: MouseEvent): void {
+  if (!isMvActive.value) return
+  const target = e.currentTarget as HTMLElement | null
+  const rect = target?.getBoundingClientRect()
+  const relY = rect ? e.clientY - rect.top : e.clientY
+  const height = rect?.height || window.innerHeight
+  const upperThreshold = Math.max(180, height * 0.3)
+
+  // Only wake up / show controls when moving into the upper portion
+  if (relY <= upperThreshold) {
+    mvControlsVisible.value = true
+    resetMvControlsTimer()
+  }
+  // When moving in the lower portion, maintain current status (保持现状, does not trigger UI)
+}
+
+function onMvMouseLeave(): void {
+  if (isMvActive.value && playing.value) {
+    mvControlsVisible.value = false
+  }
+}
+
+watch(
+  [isMvActive, playing],
+  ([active, isPlaying]) => {
+    if (active && isPlaying) {
+      resetMvControlsTimer()
+    } else {
+      if (mvHideTimer) clearTimeout(mvHideTimer)
+      mvControlsVisible.value = true
+    }
+  },
+  { immediate: true }
+)
+
+let lastSeekTime = 0
+let isPlayPending = false
+
+async function safePlayVideo(v: HTMLVideoElement): Promise<void> {
+  if (isPlayPending || !v.paused || !playing.value || v.readyState < 1 || v.seeking) return
+  isPlayPending = true
+  try {
+    await v.play()
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!msg.includes('AbortError')) {
+      console.warn('[LyricsView] video play error:', msg)
+    }
+  } finally {
+    isPlayPending = false
+  }
+}
+
+function onVideoLoadedMetadata(): void {
+  const v = videoEl.value
+  if (!v || v.readyState < 1) return
+  v.muted = true
+
+  const targetSec = Math.max(0, positionMs.value / 1000)
+  // If target position is beyond initial frames (> 0.3s), seek to it and let @seeked resume playback
+  if (Number.isFinite(targetSec) && targetSec > 0.3 && Math.abs(v.currentTime - targetSec) > 0.3) {
+    try {
+      v.currentTime = targetSec
+      lastSeekTime = performance.now()
+    } catch {
+      /* ignore seek bounds error */
+    }
+  } else if (playing.value && v.paused && !v.seeking) {
+    void safePlayVideo(v)
+  }
+}
+
+function onVideoCanPlay(): void {
+  const v = videoEl.value
+  if (!v || v.readyState < 1) return
+  v.muted = true
+
+  const targetSec = Math.max(0, positionMs.value / 1000)
+  if (
+    Number.isFinite(targetSec) &&
+    targetSec > 0.3 &&
+    Math.abs(v.currentTime - targetSec) > 0.5 &&
+    !v.seeking
+  ) {
+    try {
+      v.currentTime = targetSec
+      lastSeekTime = performance.now()
+    } catch {
+      /* ignore seek bounds error */
+    }
+    return
+  }
+
+  if (playing.value && v.paused && !v.seeking) {
+    void safePlayVideo(v)
+  }
+}
+
+function onVideoSeeked(): void {
+  const v = videoEl.value
+  if (!v || v.readyState < 1) return
+  if (playing.value && v.paused) {
+    void safePlayVideo(v)
+  }
+}
+
+function onVideoError(e: Event): void {
+  const v = e.target as HTMLVideoElement
+  if (v?.error) {
+    console.warn('[LyricsView] video element error:', v.error.code, v.error.message)
+    // PipelineStatus::PIPELINE_ERROR_READ or transient demuxer abort on rapid switch
+    if (isMvActive.value && videoSrc.value) {
+      setTimeout(() => {
+        if (videoEl.value === v && isMvActive.value && v.error) {
+          console.info('[LyricsView] reloading video source to recover from error')
+          v.load()
+        }
+      }, 300)
+    }
+  }
+}
+
+watch(
+  videoEl,
+  (v) => {
+    if (v && v.readyState >= 1) {
+      onVideoLoadedMetadata()
+    }
+  },
+  { flush: 'post' }
+)
+
+function syncVideoPlayback(): void {
+  const v = videoEl.value
+  if (!v || v.readyState < 1) return
+
+  if (!v.muted) v.muted = true
+
+  // Only handle pause if we have confirmed state from backend (never pause during initial mount)
+  if (state.value.status) {
+    if (playing.value) {
+      if (v.paused && !isPlayPending && !v.seeking) {
+        void safePlayVideo(v)
+      }
+    } else {
+      if (!v.paused) {
+        v.pause()
+      }
+    }
+  }
+
+  // Prevent endless seek storm: if actively seeking, let Chromium finish decoding
+  if (v.seeking) return
+
+  const targetSec = Math.max(0, positionMs.value / 1000)
+  const drift = targetSec - v.currentTime
+  const now = performance.now()
+
+  // Large drift (> 0.5s): snap video to audio track position
+  if (Math.abs(drift) > 0.5) {
+    if (now - lastSeekTime > 500) {
+      lastSeekTime = now
+      try {
+        v.currentTime = targetSec
+      } catch {
+        /* ignore seek bounds error */
+      }
+    }
+    v.playbackRate = 1.0
+  } else if (Math.abs(drift) > 0.05) {
+    // Minor drift: subtle rate adjustment (±5%) for continuous sync
+    v.playbackRate = drift > 0 ? 1.05 : 0.95
+  } else {
+    v.playbackRate = 1.0
+  }
+}
+
 // Smooth playback position: `aidj.lyrics` polls every 600ms, so between polls we
 // advance the last-known position by wall-clock time on a rAF loop. Without this
 // the karaoke fill (and progress bar) would jump in 600ms steps instead of
@@ -102,6 +310,9 @@ function smoothLoop(): void {
     if (p > smoothPos.value) smoothPos.value = p
   } else {
     smoothPos.value = lastRawPos
+  }
+  if (isMvActive.value) {
+    syncVideoPlayback()
   }
   rafId = requestAnimationFrame(smoothLoop)
 }
@@ -179,7 +390,10 @@ const lyricSourceLabel = computed(() =>
  * full-page background instead of the user-configured one. Without a cover the
  * page falls back to the normal (transparent) background.
  */
-const immerseActive = computed(() => Boolean(cfg.value.immerse_mode && coverUrl))
+const immerseActive = computed(() => {
+  if (!coverUrl.value || isMvActive.value) return false
+  return Boolean(cfg.value.immerse_mode || isStopped.value)
+})
 
 /** Index of the current line (last whose start time ≤ playback position). */
 const currentIdx = computed(() => {
@@ -191,6 +405,16 @@ const currentIdx = computed(() => {
     else break
   }
   return idx
+})
+
+const currentLineText = computed(() => {
+  if (currentIdx.value < 0 || currentIdx.value >= lrcLines.value.length) return ''
+  return lrcLines.value[currentIdx.value]?.text || ''
+})
+const nextLineText = computed(() => {
+  const nextIdx = currentIdx.value + 1
+  if (nextIdx < 0 || nextIdx >= lrcLines.value.length) return ''
+  return lrcLines.value[nextIdx]?.text || ''
 })
 
 /** End of the last lyric line (fallback for fill timing on the final line). */
@@ -422,11 +646,20 @@ async function refreshLyricsOpen(): Promise<void> {
 }
 
 async function loadConfig(): Promise<void> {
-  const res = (await window.cockpit.command('aidj.lyrics-page-config').catch(() => null)) as {
-    ok?: boolean
-    config?: Partial<AidjLyricsPageConfig>
-  } | null
+  const [res, aidjCfg] = await Promise.all([
+    window.cockpit.command('aidj.lyrics-page-config').catch(() => null) as Promise<{
+      ok?: boolean
+      config?: Partial<AidjLyricsPageConfig>
+    } | null>,
+    window.cockpit.command('aidj.get-config').catch(() => null) as Promise<{
+      ok?: boolean
+      config?: { preferences?: { audio_only?: boolean } }
+    } | null>
+  ])
   if (res?.ok && res.config) cfg.value = { ...DEFAULT_LYRICS_PAGE_CFG, ...res.config }
+  if (aidjCfg?.ok && aidjCfg.config?.preferences) {
+    aidjAudioOnly.value = aidjCfg.config.preferences.audio_only === true
+  }
 }
 
 // -- polling + cover ---------------------------------------------------------
@@ -479,7 +712,10 @@ async function refreshCover(): Promise<void> {
 
 watch(
   () => state.value.path,
-  () => void refreshCover()
+  () => {
+    lastSeekTime = 0
+    void refreshCover()
+  }
 )
 
 function toMarkdown(): string {
@@ -497,6 +733,13 @@ function onResize(): void {
 }
 
 onMounted(async () => {
+  // Start smooth loop immediately so interpolation and video sync are responsive
+  rafId = requestAnimationFrame(smoothLoop)
+  window.addEventListener('resize', onResize)
+  unsub = window.cockpit.on('cockpit:windows', () => {
+    void refreshLyricsOpen()
+  })
+
   // Opening the lyrics page always activates AIDJ's shared DBus binding (the
   // main AIDJ page is keep-alive, so once bound it stays), so the "当前激活"
   // auto mode and per-player binding work without first starting AIDJ.
@@ -510,11 +753,12 @@ onMounted(async () => {
   recenter()
   pollTimer = setInterval(() => void poll(), 600)
   playersTimer = setInterval(() => void pollPlayers(), 10000)
-  rafId = requestAnimationFrame(smoothLoop)
-  unsub = window.cockpit.on('cockpit:windows', () => {
-    void refreshLyricsOpen()
-  })
-  window.addEventListener('resize', onResize)
+
+  // Check if video is already ready in DOM
+  await nextTick()
+  if (isMvActive.value && videoEl.value && videoEl.value.readyState >= 1) {
+    onVideoLoadedMetadata()
+  }
 })
 
 // The page is keep-alive'd: a window resize that happened while it was
@@ -524,18 +768,54 @@ onActivated(() => recenter())
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (playersTimer) clearInterval(playersTimer)
+  if (mvHideTimer) clearTimeout(mvHideTimer)
   cancelAnimationFrame(rafId)
   padRO?.disconnect()
   padRO = null
   unsub?.()
   window.removeEventListener('resize', onResize)
+
+  // Cleanly teardown video element so Chromium aborts demuxer requests and frees pipeline
+  if (videoEl.value) {
+    const v = videoEl.value
+    v.pause()
+    v.removeAttribute('src')
+    v.load()
+  }
 })
 
 defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div class="aidj-lyrics-page" :class="{ 'is-immerse': immerseActive }" :style="lyricStyle">
+  <div
+    class="aidj-lyrics-page"
+    :class="{
+      'is-immerse': immerseActive,
+      'is-mv': isMvActive,
+      'controls-hidden': isMvActive && !mvControlsVisible
+    }"
+    :style="lyricStyle"
+    @mousemove="onMvMouseMove"
+    @mouseleave="onMvMouseLeave"
+  >
+    <!-- MV video element (muted for sync with MPRIS / Web player) -->
+    <video
+      v-if="isMvActive && videoSrc"
+      ref="videoEl"
+      :src="videoSrc"
+      :poster="coverUrl"
+      :muted="true"
+      crossorigin="anonymous"
+      class="lyrics-mv-video"
+      playsinline
+      preload="auto"
+      @loadedmetadata="onVideoLoadedMetadata"
+      @canplay="onVideoCanPlay"
+      @seeked="onVideoSeeked"
+      @error="onVideoError"
+    ></video>
+
     <!-- immersive background: blurred + dimmed cover behind everything -->
     <div v-if="immerseActive" class="lyrics-immerse-bg" aria-hidden="true">
       <div class="lyrics-immerse-bg-img" :style="{ backgroundImage: `url(${coverUrl})` }"></div>
@@ -665,8 +945,8 @@ defineExpose({ toMarkdown })
       </div>
     </template>
 
-    <!-- lyrics body -->
-    <div class="lyrics-body">
+    <!-- lyrics body (regular view) -->
+    <div v-if="!isMvActive" class="lyrics-body">
       <template v-if="hasTrack">
         <!-- scroll mode: all lines, current one auto-centered -->
         <div
@@ -709,6 +989,21 @@ defineExpose({ toMarkdown })
           </div>
         </div>
         <div v-else-if="plainLyric" class="lyric-plain">{{ plainLyric }}</div>
+        <div v-else-if="isMp4" class="lyrics-mv-stopped-preview">
+          <div class="lyrics-mv-stopped-card" @click="control('toggle')">
+            <img v-if="coverUrl" :src="coverUrl" class="lyrics-mv-stopped-img" alt="" />
+            <v-icon v-else size="64">mdi-video-outline</v-icon>
+            <div class="lyrics-mv-stopped-overlay">
+              <v-btn
+                variant="flat"
+                color="primary"
+                icon="mdi-play"
+                size="large"
+                class="lyrics-mv-play-fab"
+              />
+            </div>
+          </div>
+        </div>
         <v-empty-state
           v-else
           icon="mdi-music-note-off-outline"
@@ -728,6 +1023,19 @@ defineExpose({ toMarkdown })
         "
       />
     </div>
+
+    <!-- lyrics subtitles (MV view: bottom-centered overlay with clear text shadow) -->
+    <div v-else-if="hasTrack" class="lyrics-mv-subtitles">
+      <div v-if="currentLineText" class="lyrics-mv-line current">
+        <span v-if="cfg.karaoke" class="karaoke-mask" :style="maskStyle">{{
+          currentLineText
+        }}</span>
+        <span v-else>{{ currentLineText }}</span>
+      </div>
+      <div v-if="nextLineText" class="lyrics-mv-line next">
+        {{ nextLineText }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -743,6 +1051,82 @@ defineExpose({ toMarkdown })
   overflow: hidden;
   /* Contain the immersive cover's stacking so it stays behind the page content. */
   isolation: isolate;
+}
+
+/* -- MV mode ---------------------------------------------------------------- */
+.aidj-lyrics-page.is-mv {
+  background: #000;
+}
+.lyrics-mv-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  z-index: 0;
+}
+.lyrics-mv-subtitles {
+  position: absolute;
+  bottom: 56px;
+  left: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 5;
+  pointer-events: none;
+  text-align: center;
+}
+.lyrics-mv-line.current {
+  font-family: var(--lyr-font);
+  font-size: calc(var(--lyr-size) * 0.95);
+  font-weight: var(--lyr-current-weight);
+  color: #ffffff;
+  text-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.95),
+    0 0 4px rgba(0, 0, 0, 0.9);
+  line-height: var(--lyr-line-height);
+  letter-spacing: var(--lyr-letter-spacing);
+  white-space: pre-wrap;
+}
+.lyrics-mv-line.current .karaoke-mask {
+  background-image: linear-gradient(
+    90deg,
+    #ffffff var(--lyr-kfill),
+    rgba(255, 255, 255, 0.6) var(--lyr-kfill)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+}
+.lyrics-mv-line.next {
+  font-family: var(--lyr-font);
+  font-size: calc(var(--lyr-candidate-size) * 0.85);
+  font-weight: var(--lyr-candidate-weight);
+  color: rgba(255, 255, 255, 0.7);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+  line-height: var(--lyr-line-height);
+  letter-spacing: var(--lyr-letter-spacing);
+  white-space: pre-wrap;
+}
+
+.lyrics-header,
+.lyrics-progress {
+  position: relative;
+  z-index: 10;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease;
+}
+.is-mv.controls-hidden .lyrics-header,
+.is-mv.controls-hidden .lyrics-progress {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
 }
 
 /* -- immersive mode --------------------------------------------------------- */
@@ -991,5 +1375,56 @@ defineExpose({ toMarkdown })
 .lyric-plain::-webkit-scrollbar-thumb:hover {
   background: rgba(var(--v-theme-on-surface-variant), 0.55);
   background-clip: padding-box;
+}
+
+.lyrics-mv-stopped-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+}
+.lyrics-mv-stopped-card {
+  position: relative;
+  max-width: 480px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.lyrics-mv-stopped-card:hover {
+  transform: scale(1.02);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+}
+.lyrics-mv-stopped-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lyrics-mv-stopped-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  transition: background 0.2s ease;
+}
+.lyrics-mv-stopped-card:hover .lyrics-mv-stopped-overlay {
+  background: rgba(0, 0, 0, 0.1);
+}
+.lyrics-mv-play-fab {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 </style>

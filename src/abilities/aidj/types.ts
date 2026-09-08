@@ -19,6 +19,14 @@ export interface AidjConfig {
     player_mode?: 'dbus' | 'web'
     /** NCM source: 'auto' external-first w/ built-in fallback | 'external' only | 'builtin' only */
     ncm_mode?: 'auto' | 'external' | 'builtin'
+    /** Explicit approval flag for built-in NCM API. If false, ncm_mode is forced to 'external'. */
+    ncm_approved?: boolean
+    /** Explicit approval flag for Bilibili API & downloading. */
+    bilibili_approved?: boolean
+    /** Toggle to enable Bilibili import/integration features. */
+    bilibili_enabled?: boolean
+    /** Audio only mode: when playing .mp4, suppress video playback and keep standard lyrics view. */
+    audio_only?: boolean
     record_freq: boolean
     dynamic_balance_volume: boolean
     sound_adjust_method: 'lufs' | 'linear'
@@ -82,6 +90,8 @@ export interface AidjConfig {
     song_timeline?: boolean
     /** DBus 模式下“从此刻开始”的提示词模板（默认 "从 {info} 开始"）。 */
     start_from_now_template?: string
+    /** 自定义 Bilibili 凭据文件路径（可选，未指定时优先读取 Cockpit 配置目录，后回退 ~/Apps/bili_info.json）。 */
+    bili_credential_path?: string
   }
 }
 
@@ -107,6 +117,10 @@ export const DEFAULT_AIDJ_CONFIG: AidjConfig = {
     auto_play: true,
     dbus_target: 'vlc',
     ncm_mode: 'auto',
+    ncm_approved: false,
+    bilibili_approved: false,
+    bilibili_enabled: false,
+    audio_only: false,
     record_freq: true,
     dynamic_balance_volume: true,
     sound_adjust_method: 'lufs',

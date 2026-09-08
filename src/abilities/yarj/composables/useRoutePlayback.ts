@@ -509,6 +509,13 @@ export function useRoutePlayback(options: UseRoutePlaybackOptions): UseRoutePlay
     updatePlaybackHeadMarker(markerCoord)
 
     if (routePlaybackFollowCamera.value) {
+      // 若用户当前正在主动拖拽画面，立即解除镜头锁定，将控制权完全交还用户手势
+      if ((map as unknown as { dragPan?: { isActive?: () => boolean } })?.dragPan?.isActive?.()) {
+        routePlaybackFollowCamera.value = false
+        playbackCameraPos = null
+        return
+      }
+
       let finalCenter = markerCoord
       if (
         yarjConfig.value.routeCameraSmoothing !== false &&

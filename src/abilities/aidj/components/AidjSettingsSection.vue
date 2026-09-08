@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed, inject } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, computed, inject } from 'vue'
 import type { Ref } from 'vue'
 import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
 import { translate, translateTemplate } from '../../../main/ui/i18n'
@@ -49,11 +49,61 @@ const baseUrl = ref('')
 const apiKey = ref('')
 const ncmBaseUrl = ref('')
 const ncmMode = ref<'auto' | 'external' | 'builtin'>('auto')
-const ncmModeItems = [
-  { title: t('aidj.settings.ncm_mode_auto', 'Auto（外部优先，内置兜底）'), value: 'auto' },
-  { title: t('aidj.settings.ncm_mode_external', '外部服务（仅 NCM API 地址）'), value: 'external' },
-  { title: t('aidj.settings.ncm_mode_builtin', '内置（进程内直连网易）'), value: 'builtin' }
-]
+const ncmApproved = ref(false)
+const bilibiliApproved = ref(false)
+const bilibiliEnabled = ref(false)
+const audioOnly = ref(false)
+
+interface BiliProfileState {
+  isLogin: boolean
+  mid?: number
+  uname?: string
+  face?: string
+  money?: number
+  level?: number
+  vipType?: number
+  vipStatus?: number
+  vipDueDate?: number
+}
+const biliProfile = ref<BiliProfileState | null>(null)
+const biliProfileLoading = ref(false)
+const biliSourcePath = ref<string | null>(null)
+
+const ncmDialog = ref(false)
+const biliDialog = ref(false)
+
+const qrDialog = ref(false)
+const qrLoading = ref(false)
+const qrDataUrl = ref('')
+const qrcodeKey = ref('')
+const qrStatusText = ref('')
+let qrPollTimer: ReturnType<typeof setInterval> | null = null
+
+const importDialog = ref(false)
+const importTab = ref<'file' | 'text'>('file')
+const importFilePath = ref('')
+const importTextContent = ref('')
+const importSubmitting = ref(false)
+const importErrorMsg = ref('')
+
+const ncmModeItems = computed(() => {
+  if (!ncmApproved.value) {
+    return [
+      {
+        title: t('aidj.settings.ncm_mode_external', '外部服务（仅 NCM API 地址）'),
+        value: 'external'
+      }
+    ]
+  }
+  return [
+    { title: t('aidj.settings.ncm_mode_auto', 'Auto（外部优先，内置兜底）'), value: 'auto' },
+    {
+      title: t('aidj.settings.ncm_mode_external', '外部服务（仅 NCM API 地址）'),
+      value: 'external'
+    },
+    { title: t('aidj.settings.ncm_mode_builtin', '内置（进程内直连网易）'), value: 'builtin' }
+  ]
+})
 const dbusTarget = ref('vlc')
 const startFromNowTemplate = ref('从 {info} 开始')
 const playerMode = ref<'dbus' | 'web' | ''>('')
@@ -113,7 +163,14 @@ onMounted(async () => {
   baseUrl.value = (ai.base_url as string) || ''
   apiKey.value = (sec.api_key as string) || ''
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
+  ncmApproved.value = (prefs.ncm_approved as boolean) ?? false
+  bilibiliApproved.value = (prefs.bilibili_approved as boolean) ?? false
+  bilibiliEnabled.value = (prefs.bilibili_enabled as boolean) ?? false
+  audioOnly.value = (prefs.audio_only as boolean) ?? false
   ncmMode.value = (prefs.ncm_mode as 'auto' | 'external' | 'builtin') || 'auto'
+  if (!ncmApproved.value && ncmMode.value !== 'external') {
+    ncmMode.value = 'external'
+  }
   dbusTarget.value = (prefs.dbus_target as string) || 'vlc'
   startFromNowTemplate.value = (prefs.start_from_now_template as string) || '从 {info} 开始'
   playerMode.value = (prefs.player_mode as 'dbus' | 'web' | undefined) ?? ''
@@ -161,6 +218,9 @@ onMounted(async () => {
     playerMode.value = pm.mode
   }
   fetchModels()
+  if (bilibiliApproved.value) {
+    void fetchBiliProfile()
+  }
 })
 
 async function fetchModels(): Promise<void> {
@@ -308,6 +368,203 @@ watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(listeningStats, (v) => update('preferences.listening_stats', v))
 watch(songTimeline, (v) => update('preferences.song_timeline', v))
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
+watch(audioOnly, (v) => update('preferences.audio_only', v))
+
+async function confirmNcmApproval(): Promise<void> {
+  ncmDialog.value = false
+  ncmApproved.value = true
+  update('preferences.ncm_approved', true)
+  await window.cockpit.command('aidj.approve-ncm', { enable: true })
+}
+
+function revokeNcmApproval(): void {
+  ncmApproved.value = false
+  ncmMode.value = 'external'
+  update('preferences.ncm_approved', false)
+  update('preferences.ncm_mode', 'external')
+  void window.cockpit.command('aidj.approve-ncm', { enable: false })
+}
+
+async function confirmBiliApproval(): Promise<void> {
+  biliDialog.value = false
+  bilibiliApproved.value = true
+  bilibiliEnabled.value = true
+  update('preferences.bilibili_approved', true)
+  update('preferences.bilibili_enabled', true)
+  await window.cockpit.command('aidj.approve-bilibili', { enable: true })
+  void fetchBiliProfile()
+}
+
+function revokeBiliApproval(): void {
+  bilibiliApproved.value = false
+  bilibiliEnabled.value = false
+  biliProfile.value = null
+  biliSourcePath.value = null
+  update('preferences.bilibili_approved', false)
+  update('preferences.bilibili_enabled', false)
+  void window.cockpit.command('aidj.approve-bilibili', { enable: false })
+}
+
+function onBilibiliSwitchChange(val: boolean | null): void {
+  const enabled = !!val
+  if (enabled && !bilibiliApproved.value) {
+    biliDialog.value = true
+    bilibiliEnabled.value = false
+    return
+  }
+  bilibiliEnabled.value = enabled
+  update('preferences.bilibili_enabled', enabled)
+}
+
+async function openQrLogin(): Promise<void> {
+  qrDialog.value = true
+  await refreshQrCode()
+}
+
+async function refreshQrCode(): Promise<void> {
+  if (qrPollTimer) clearInterval(qrPollTimer)
+  qrLoading.value = true
+  qrDataUrl.value = ''
+  qrcodeKey.value = ''
+  qrStatusText.value = t('aidj.settings.bili_qr_scan_prompt', '请使用 哔哩哔哩 手机客户端 扫码登录')
+  try {
+    const res = (await window.cockpit.command('aidj.bili-qr-generate')) as {
+      ok?: boolean
+      qrcode_key?: string
+      qrDataUrl?: string
+      error?: string
+    } | null
+    if (res?.ok && res.qrcode_key && res.qrDataUrl) {
+      qrcodeKey.value = res.qrcode_key
+      qrDataUrl.value = res.qrDataUrl
+      startPollingQr(res.qrcode_key)
+    } else {
+      qrStatusText.value = res?.error || t('aidj.settings.bili_qr_failed', '生成二维码失败')
+    }
+  } catch (e) {
+    qrStatusText.value = String(e)
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+function startPollingQr(key: string): void {
+  qrPollTimer = setInterval(async () => {
+    if (!qrDialog.value) {
+      if (qrPollTimer) clearInterval(qrPollTimer)
+      return
+    }
+    try {
+      const res = (await window.cockpit.command('aidj.bili-qr-poll', { key })) as {
+        ok?: boolean
+        code?: number
+        message?: string
+        profile?: BiliProfileState
+      } | null
+
+      if (res?.code === 0) {
+        if (qrPollTimer) clearInterval(qrPollTimer)
+        qrStatusText.value = t('aidj.settings.bili_login_success', '登录成功！')
+        if (res.profile) biliProfile.value = res.profile
+        setTimeout(() => {
+          qrDialog.value = false
+          void fetchBiliProfile()
+        }, 1000)
+      } else if (res?.code === 86090) {
+        qrStatusText.value = t('aidj.settings.bili_qr_scanned', '已扫码，请在手机端点击确认登录')
+      } else if (res?.code === 86038) {
+        if (qrPollTimer) clearInterval(qrPollTimer)
+        qrStatusText.value = t('aidj.settings.bili_qr_expired', '二维码已失效，请点击刷新')
+      }
+    } catch {
+      /* ignore poll errors */
+    }
+  }, 2000)
+}
+
+watch(qrDialog, (val) => {
+  if (!val && qrPollTimer) {
+    clearInterval(qrPollTimer)
+    qrPollTimer = null
+  }
+})
+
+onBeforeUnmount(() => {
+  if (qrPollTimer) {
+    clearInterval(qrPollTimer)
+    qrPollTimer = null
+  }
+})
+
+async function pickCredentialFile(): Promise<void> {
+  const path = await window.cockpit.pickFile({
+    title: t('aidj.settings.pick_credential_file', '选择 Bilibili 凭据文件 (JSON)'),
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (path) importFilePath.value = path
+}
+
+async function submitImportCredential(): Promise<void> {
+  importSubmitting.value = true
+  importErrorMsg.value = ''
+  try {
+    const args =
+      importTab.value === 'file'
+        ? { file: importFilePath.value.trim() }
+        : { content: importTextContent.value.trim() }
+    const res = (await window.cockpit.command('aidj.bili-import-credential', args)) as {
+      ok?: boolean
+      error?: string
+      message?: string
+      profile?: BiliProfileState
+      savedPath?: string
+    } | null
+    if (res?.ok) {
+      importDialog.value = false
+      importFilePath.value = ''
+      importTextContent.value = ''
+      if (res.profile) biliProfile.value = res.profile
+      if (res.savedPath) biliSourcePath.value = res.savedPath
+    } else {
+      importErrorMsg.value = res?.error || '导入失败'
+    }
+  } catch (e) {
+    importErrorMsg.value = String(e)
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
+async function logoutBili(): Promise<void> {
+  try {
+    await window.cockpit.command('aidj.bili-logout')
+    biliProfile.value = { isLogin: false }
+    biliSourcePath.value = null
+  } catch {
+    /* noop */
+  }
+}
+
+async function fetchBiliProfile(): Promise<void> {
+  if (!bilibiliApproved.value) return
+  biliProfileLoading.value = true
+  try {
+    const res = (await window.cockpit.command('aidj.bili-profile')) as {
+      ok?: boolean
+      isLogin?: boolean
+      profile?: BiliProfileState
+      sourcePath?: string | null
+    } | null
+    if (res?.ok && res.profile) {
+      biliProfile.value = res.profile
+      biliSourcePath.value = res.sourcePath ?? null
+    }
+  } catch {
+    /* noop */
+  } finally {
+    biliProfileLoading.value = false
+  }
+}
 watch(metadataCommentCount, (v) => update('preferences.metadata_comment_count', v))
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
@@ -495,6 +752,64 @@ defineExpose({
               density="compact"
               variant="outlined"
             />
+          </v-col>
+        </v-row>
+        <v-row dense class="mt-2">
+          <v-col cols="12">
+            <div
+              class="d-flex align-center justify-space-between flex-wrap ga-2 pa-2 rounded border"
+            >
+              <div>
+                <div class="text-body-2 font-weight-medium">
+                  {{ t('aidj.settings.ncm_builtin_auth', '网易云内置直连授权') }}
+                  <v-chip
+                    size="small"
+                    :color="ncmApproved ? 'success' : 'warning'"
+                    variant="tonal"
+                    class="ml-2"
+                  >
+                    {{
+                      ncmApproved
+                        ? t('aidj.settings.approved', '已授权')
+                        : t('aidj.settings.unapproved_external_only', '未授权（仅外部服务）')
+                    }}
+                  </v-chip>
+                </div>
+                <div class="text-caption text-medium-emphasis mt-1">
+                  {{
+                    ncmApproved
+                      ? t(
+                          'aidj.settings.ncm_approved_hint',
+                          '已签署免责声明，已解锁内置直连网易云 API 选项'
+                        )
+                      : t(
+                          'aidj.settings.ncm_unapproved_hint',
+                          '未签署免责声明：禁止内置抓取，歌词来源仅限外部服务地址'
+                        )
+                  }}
+                </div>
+              </div>
+              <div>
+                <v-btn
+                  v-if="!ncmApproved"
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-shield-check-outline"
+                  @click="ncmDialog = true"
+                >
+                  {{ t('aidj.settings.agree_and_enable', '签署免责并启用') }}
+                </v-btn>
+                <v-btn
+                  v-else
+                  color="error"
+                  variant="text"
+                  prepend-icon="mdi-shield-off-outline"
+                  @click="revokeNcmApproval"
+                >
+                  {{ t('aidj.settings.revoke_approval', '撤销授权') }}
+                </v-btn>
+              </div>
+            </div>
           </v-col>
         </v-row>
         <v-row dense class="mt-2">
@@ -1076,7 +1391,210 @@ defineExpose({
               density="compact"
             />
           </v-col>
+          <v-col cols="6" md="3">
+            <v-switch
+              v-model="audioOnly"
+              color="primary"
+              :label="t('aidj.settings.audio_only', '仅音频模式 (Audio Only)')"
+              hide-details
+              density="compact"
+            />
+          </v-col>
         </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-2">
+          {{ t('aidj.settings.bilibili_section', 'Bilibili 视频导入与扩展') }}
+        </div>
+        <div class="d-flex align-center justify-space-between flex-wrap ga-2 pa-2 rounded border">
+          <div>
+            <div class="d-flex align-center ga-2 flex-wrap">
+              <span class="text-body-2 font-weight-medium">{{
+                t('aidj.settings.bili_feature', 'Bilibili 视频导入与 AI 乐评')
+              }}</span>
+              <v-chip
+                size="small"
+                :color="bilibiliApproved ? 'success' : 'warning'"
+                variant="tonal"
+              >
+                {{
+                  bilibiliApproved
+                    ? t('aidj.settings.approved', '已授权')
+                    : t('aidj.settings.unapproved', '未授权')
+                }}
+              </v-chip>
+            </div>
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{
+                bilibiliApproved
+                  ? t(
+                      'aidj.settings.bili_approved_hint',
+                      '已签署免责声明，支持下载视频、提取官方/AI字幕、抓取弹幕及评论并生成 AI 元数据'
+                    )
+                  : t(
+                      'aidj.settings.bili_unapproved_hint',
+                      '未签署免责声明：使用前必须阅读并同意免责声明以撇清责任'
+                    )
+              }}
+            </div>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <v-switch
+              :model-value="bilibiliEnabled"
+              color="primary"
+              :label="
+                bilibiliEnabled
+                  ? t('aidj.settings.enabled', '已启用')
+                  : t('aidj.settings.disabled', '已禁用')
+              "
+              hide-details
+              density="compact"
+              @update:model-value="onBilibiliSwitchChange"
+            />
+            <v-btn
+              v-if="bilibiliApproved"
+              color="error"
+              variant="text"
+              prepend-icon="mdi-shield-off-outline"
+              @click="revokeBiliApproval"
+            >
+              {{ t('aidj.settings.revoke_approval', '撤销授权') }}
+            </v-btn>
+          </div>
+        </div>
+
+        <!-- Bilibili Profile & Account Info (when approved) -->
+        <div v-if="bilibiliApproved" class="mt-3 pa-3 rounded border bg-surface">
+          <div class="d-flex align-center justify-space-between flex-wrap ga-3">
+            <!-- Left: Avatar & Info -->
+            <div class="d-flex align-center ga-3">
+              <v-avatar size="52" color="surface-variant" rounded="circle">
+                <img
+                  v-if="biliProfile?.isLogin && biliProfile.face"
+                  :src="biliProfile.face"
+                  alt="avatar"
+                  referrerpolicy="no-referrer"
+                  style="width: 100%; height: 100%; object-fit: cover"
+                />
+                <v-icon v-else size="32" color="medium-emphasis">mdi-account-circle-outline</v-icon>
+              </v-avatar>
+
+              <div class="d-flex flex-column">
+                <div class="d-flex align-center ga-2 flex-wrap">
+                  <span class="text-body-1 font-weight-bold">
+                    {{
+                      biliProfile?.isLogin
+                        ? biliProfile.uname || 'Bilibili 用户'
+                        : t('aidj.settings.bili_not_logged_in', '未登录 Bilibili 账号')
+                    }}
+                  </span>
+                  <v-chip
+                    v-if="biliProfile?.isLogin && biliProfile.level !== undefined"
+                    size="x-small"
+                    color="primary"
+                    variant="flat"
+                    class="font-weight-bold"
+                  >
+                    Lv.{{ biliProfile.level }}
+                  </v-chip>
+                  <v-chip
+                    v-if="biliProfile?.isLogin && biliProfile.vipStatus === 1"
+                    size="x-small"
+                    color="pink"
+                    variant="tonal"
+                  >
+                    {{
+                      biliProfile.vipType === 2
+                        ? t('aidj.settings.bili_vip_year', '年度大会员')
+                        : t('aidj.settings.bili_vip', '大会员')
+                    }}
+                  </v-chip>
+                  <v-chip
+                    size="small"
+                    :color="biliProfile?.isLogin ? 'success' : 'default'"
+                    variant="tonal"
+                  >
+                    {{
+                      biliProfile?.isLogin
+                        ? t('aidj.settings.bili_logged_in', '已登录')
+                        : t('aidj.settings.bili_guest', '游客模式')
+                    }}
+                  </v-chip>
+                </div>
+
+                <div class="text-caption text-medium-emphasis mt-1">
+                  <template v-if="biliProfile?.isLogin">
+                    <span>UID: {{ biliProfile.mid }}</span>
+                    <span class="mx-2">•</span>
+                    <span
+                      >{{ t('aidj.settings.bili_coins', '硬币') }}:
+                      {{ biliProfile.money ?? 0 }}</span
+                    >
+                    <span v-if="biliSourcePath" class="mx-2">•</span>
+                    <span v-if="biliSourcePath" :title="biliSourcePath">
+                      {{ t('aidj.settings.bili_source', '凭据来源') }}:
+                      {{ biliSourcePath.split('/').slice(-2).join('/') }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    {{
+                      t(
+                        'aidj.settings.bili_guest_hint',
+                        '未配置登录凭据。游客模式仅可解析下载 360P/480P 基础画质，登录后可解锁 1080P+ 高清音画与会员内容。'
+                      )
+                    }}
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Action Buttons -->
+            <div class="d-flex align-center flex-wrap ga-2">
+              <v-btn
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-qrcode-scan"
+                @click="openQrLogin"
+              >
+                {{
+                  biliProfile?.isLogin
+                    ? t('aidj.settings.bili_switch_account', '切换账号 (扫码)')
+                    : t('aidj.settings.bili_qr_login', '扫码登录')
+                }}
+              </v-btn>
+              <v-btn
+                variant="outlined"
+                prepend-icon="mdi-file-import-outline"
+                @click="importDialog = true"
+              >
+                {{ t('aidj.settings.bili_import_cred', '导入凭据') }}
+              </v-btn>
+              <v-btn
+                v-if="biliProfile?.isLogin"
+                icon
+                size="small"
+                variant="text"
+                :loading="biliProfileLoading"
+                :title="t('aidj.settings.bili_refresh', '刷新个人信息')"
+                @click="fetchBiliProfile"
+              >
+                <v-icon size="small">mdi-refresh</v-icon>
+              </v-btn>
+              <v-btn
+                v-if="biliProfile?.isLogin"
+                color="error"
+                variant="text"
+                prepend-icon="mdi-logout-variant"
+                @click="logoutBili"
+              >
+                {{ t('aidj.settings.bili_logout', '退出登录') }}
+              </v-btn>
+            </div>
+          </div>
+        </div>
       </div>
 
       <v-divider />
@@ -1369,6 +1887,312 @@ defineExpose({
           </v-col>
         </v-row>
       </div>
+
+      <!-- NCM Disclaimer Dialog -->
+      <v-dialog v-model="ncmDialog" max-width="560" persistent>
+        <v-card rounded="lg">
+          <v-card-title class="d-flex align-center ga-2 px-4 pt-4 pb-2">
+            <v-icon color="warning">mdi-alert-circle-outline</v-icon>
+            <span class="text-h6 font-weight-bold">{{
+              t('aidj.disclaimer.ncm_title', '免责声明：网易云音乐内置直连')
+            }}</span>
+          </v-card-title>
+          <v-card-text class="px-4 py-2 text-body-2 line-height-relaxed">
+            <p class="mb-3">
+              {{
+                t(
+                  'aidj.disclaimer.ncm_p1',
+                  '开启内置直连模式后，本程序将在本地进程中直接向第三方服务器（网易云音乐）发起检索与歌词获取请求。'
+                )
+              }}
+            </p>
+            <div class="pa-3 rounded bg-surface-variant text-caption mb-3">
+              <div class="font-weight-bold mb-1">
+                {{ t('aidj.disclaimer.terms_title', '特别声明与责任限制：') }}
+              </div>
+              <ol class="pl-4 d-flex flex-column ga-1">
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.ncm_term1',
+                      '本功能仅供个人学习、技术研究与离线本地音乐元数据整理之用。'
+                    )
+                  }}
+                </li>
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.ncm_term2',
+                      '开发者及本项目不托管、不传播、不存储任何受版权保护的音视频或商业数据。'
+                    )
+                  }}
+                </li>
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.ncm_term3',
+                      '使用者需自愿承担因调用第三方接口所产生的所有网络流量、法律及合规责任。'
+                    )
+                  }}
+                </li>
+              </ol>
+            </div>
+            <p class="text-caption text-medium-emphasis">
+              {{
+                t(
+                  'aidj.disclaimer.agree_hint',
+                  '点击「同意并启用」即表示您已充分阅读并理解上述声明，自愿承担所有使用风险与责任。'
+                )
+              }}
+            </p>
+          </v-card-text>
+          <v-card-actions class="px-4 pb-4 pt-0 ga-2">
+            <v-btn variant="text" @click="ncmDialog = false">
+              {{ t('aidj.disclaimer.cancel', '取消') }}
+            </v-btn>
+            <v-spacer />
+            <v-btn color="primary" variant="flat" @click="confirmNcmApproval">
+              {{ t('aidj.disclaimer.agree_and_enable', '同意并启用') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Bilibili Disclaimer Dialog -->
+      <v-dialog v-model="biliDialog" max-width="560" persistent>
+        <v-card rounded="lg">
+          <v-card-title class="d-flex align-center ga-2 px-4 pt-4 pb-2">
+            <v-icon color="warning">mdi-alert-circle-outline</v-icon>
+            <span class="text-h6 font-weight-bold">{{
+              t('aidj.disclaimer.bili_title', '免责声明：Bilibili API 视频与元数据导入')
+            }}</span>
+          </v-card-title>
+          <v-card-text class="px-4 py-2 text-body-2 line-height-relaxed">
+            <p class="mb-3">
+              {{
+                t(
+                  'aidj.disclaimer.bili_p1',
+                  '开启 Bilibili 扩展后，本程序可根据用户指定的 BV 号/链接下载视频流、提取字幕与弹幕，并通过 AI 生成音乐元数据。'
+                )
+              }}
+            </p>
+            <div class="pa-3 rounded bg-surface-variant text-caption mb-3">
+              <div class="font-weight-bold mb-1">
+                {{ t('aidj.disclaimer.terms_title', '特别声明与责任限制：') }}
+              </div>
+              <ol class="pl-4 d-flex flex-column ga-1">
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.bili_term1',
+                      '本功能仅供个人学习交流与多媒体技术研究之用，请勿用于商业传播。'
+                    )
+                  }}
+                </li>
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.bili_term2',
+                      '开发者及本项目不托管、不提供任何 Bilibili 网站内容，亦不提供破解保护措施。'
+                    )
+                  }}
+                </li>
+                <li>
+                  {{
+                    t(
+                      'aidj.disclaimer.bili_term3',
+                      '使用者须自觉遵守相关法律法规及平台规范，对所有下载与使用行为独立承担全部法律责任。'
+                    )
+                  }}
+                </li>
+              </ol>
+            </div>
+            <p class="text-caption text-medium-emphasis">
+              {{
+                t(
+                  'aidj.disclaimer.agree_hint',
+                  '点击「同意并启用」即表示您已充分阅读并理解上述声明，自愿承担所有使用风险与责任。'
+                )
+              }}
+            </p>
+          </v-card-text>
+          <v-card-actions class="px-4 pb-4 pt-0 ga-2">
+            <v-btn variant="text" @click="biliDialog = false">
+              {{ t('aidj.disclaimer.cancel', '取消') }}
+            </v-btn>
+            <v-spacer />
+            <v-btn color="primary" variant="flat" @click="confirmBiliApproval">
+              {{ t('aidj.disclaimer.agree_and_enable', '同意并启用') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Bilibili QR Login Dialog -->
+      <v-dialog v-model="qrDialog" max-width="440" persistent>
+        <v-card rounded="lg">
+          <v-card-title class="d-flex align-center justify-space-between px-4 pt-4 pb-2">
+            <div class="d-flex align-center ga-2">
+              <v-icon color="primary">mdi-qrcode-scan</v-icon>
+              <span class="text-h6 font-weight-bold">
+                {{ t('aidj.settings.bili_qr_dialog_title', 'Bilibili 扫码登录') }}
+              </span>
+            </div>
+            <v-btn icon size="small" variant="text" @click="qrDialog = false">
+              <v-icon size="small">mdi-close</v-icon>
+            </v-btn>
+          </v-card-title>
+          <v-card-text class="d-flex flex-column align-center px-4 py-4">
+            <div
+              class="pa-2 border rounded-lg bg-white d-flex align-center justify-center"
+              style="width: 236px; height: 236px"
+            >
+              <v-progress-circular v-if="qrLoading" indeterminate color="primary" size="48" />
+              <img
+                v-else-if="qrDataUrl"
+                :src="qrDataUrl"
+                alt="QR Code"
+                style="width: 220px; height: 220px; display: block"
+              />
+              <div v-else class="text-caption text-error text-center pa-4">
+                {{ qrStatusText }}
+              </div>
+            </div>
+            <div class="text-body-2 font-weight-medium mt-4 text-center">
+              {{ qrStatusText }}
+            </div>
+            <div class="text-caption text-medium-emphasis mt-1 text-center">
+              {{ t('aidj.settings.bili_qr_subhint', '请使用 哔哩哔哩 手机客户端 扫码并确认') }}
+            </div>
+          </v-card-text>
+          <v-card-actions class="px-4 pb-4 pt-0 ga-2">
+            <v-btn variant="text" @click="qrDialog = false">
+              {{ t('aidj.disclaimer.cancel', '取消') }}
+            </v-btn>
+            <v-spacer />
+            <v-btn
+              variant="tonal"
+              color="primary"
+              prepend-icon="mdi-refresh"
+              :loading="qrLoading"
+              @click="refreshQrCode"
+            >
+              {{ t('aidj.settings.bili_qr_refresh', '刷新二维码') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Bilibili Import Credential Dialog -->
+      <v-dialog v-model="importDialog" max-width="560">
+        <v-card rounded="lg">
+          <v-card-title class="d-flex align-center justify-space-between px-4 pt-4 pb-2">
+            <div class="d-flex align-center ga-2">
+              <v-icon color="primary">mdi-file-import-outline</v-icon>
+              <span class="text-h6 font-weight-bold">
+                {{ t('aidj.settings.bili_import_dialog_title', '导入 Bilibili 凭据') }}
+              </span>
+            </div>
+            <v-btn icon size="small" variant="text" @click="importDialog = false">
+              <v-icon size="small">mdi-close</v-icon>
+            </v-btn>
+          </v-card-title>
+          <v-card-text class="px-4 py-2">
+            <v-tabs v-model="importTab" density="compact" color="primary" class="mb-3">
+              <v-tab value="file">{{ t('aidj.settings.import_tab_file', '选择文件') }}</v-tab>
+              <v-tab value="text">
+                {{ t('aidj.settings.import_tab_text', '手动粘贴 Cookie / JSON') }}
+              </v-tab>
+            </v-tabs>
+
+            <v-window v-model="importTab">
+              <v-window-item value="file">
+                <div class="text-caption text-medium-emphasis mb-2">
+                  {{
+                    t(
+                      'aidj.settings.import_file_hint',
+                      '支持选择包含 bili_info.json 或带有 SESSDATA 的 JSON 文件'
+                    )
+                  }}
+                </div>
+                <div class="d-flex align-center ga-2">
+                  <v-text-field
+                    v-model="importFilePath"
+                    :placeholder="
+                      t('aidj.settings.import_file_placeholder', '/home/user/Apps/bili_info.json')
+                    "
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    class="flex-grow-1"
+                  >
+                    <template #append-inner>
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        :title="t('aidj.settings.pick_file', '浏览文件')"
+                        @click="pickCredentialFile"
+                      >
+                        <v-icon>mdi-folder-open</v-icon>
+                      </v-btn>
+                    </template>
+                  </v-text-field>
+                </div>
+              </v-window-item>
+
+              <v-window-item value="text">
+                <div class="text-caption text-medium-emphasis mb-2">
+                  {{
+                    t(
+                      'aidj.settings.import_text_hint',
+                      '支持直接粘贴浏览器 Cookie（如 SESSDATA=xxx; bili_jct=yyy;）或完整凭据 JSON'
+                    )
+                  }}
+                </div>
+                <v-textarea
+                  v-model="importTextContent"
+                  :placeholder="
+                    t(
+                      'aidj.settings.import_text_placeholder',
+                      'SESSDATA=xxx; bili_jct=yyy; buvid3=zzz; DedeUserID=123...'
+                    )
+                  "
+                  density="compact"
+                  variant="outlined"
+                  rows="4"
+                  no-resize
+                  hide-details
+                />
+              </v-window-item>
+            </v-window>
+
+            <v-alert
+              v-if="importErrorMsg"
+              type="error"
+              variant="tonal"
+              density="compact"
+              class="mt-3 text-caption"
+            >
+              {{ importErrorMsg }}
+            </v-alert>
+          </v-card-text>
+          <v-card-actions class="px-4 pb-4 pt-0 ga-2">
+            <v-btn variant="text" @click="importDialog = false">
+              {{ t('aidj.disclaimer.cancel', '取消') }}
+            </v-btn>
+            <v-spacer />
+            <v-btn
+              color="primary"
+              variant="flat"
+              :loading="importSubmitting"
+              @click="submitImportCredential"
+            >
+              {{ t('aidj.settings.bili_save_cred', '验证并保存') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-card-text>
   </v-card>
 </template>

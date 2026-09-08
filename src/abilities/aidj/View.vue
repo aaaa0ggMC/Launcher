@@ -14,6 +14,8 @@ import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
 import FreqList from './components/FreqList.vue'
 import ListeningStatsView from './components/ListeningStatsView.vue'
+import MetadataSlotsView from './components/MetadataSlotsView.vue'
+import BiliDownloadView from './components/BiliDownloadView.vue'
 
 defineOptions({ name: 'cockpit-aidj' })
 
@@ -23,7 +25,7 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 const openBt = inject('cockpit:open-bt', null) as (() => void) | null
 
 const menuOpen = ref(false)
-const menuStep = ref<'main' | 'sessions' | 'freq'>('main')
+const menuStep = ref<'main' | 'sessions' | 'freq' | 'slots' | 'bili'>('main')
 const statsOpen = ref(false)
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 const mode = ref<'dbus' | 'web'>('dbus')
@@ -548,7 +550,14 @@ defineExpose({ toMarkdown })
         </button>
 
         <Transition name="menu-pop">
-          <div v-if="menuOpen" class="page-menu-pop" :class="{ 'is-wide': menuStep === 'freq' }">
+          <div
+            v-if="menuOpen"
+            class="page-menu-pop"
+            :class="{
+              'is-wide': menuStep === 'freq',
+              'is-extra-wide': menuStep === 'slots' || menuStep === 'bili'
+            }"
+          >
             <template v-if="menuStep === 'main'">
               <div class="menu-item" @click="newChat">
                 <v-icon size="18">mdi-message-plus-outline</v-icon>
@@ -566,6 +575,16 @@ defineExpose({ toMarkdown })
               <div class="menu-item" @click="menuStep = 'freq'">
                 <v-icon size="18">mdi-poll</v-icon>
                 <span>{{ t('aidj.subpage.freq', '歌曲频率') }}</span>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+              <div class="menu-item" @click="menuStep = 'slots'">
+                <v-icon size="18">mdi-database-cog-outline</v-icon>
+                <span>{{ t('aidj.subpage.metadata_slots', '元数据槽位') }}</span>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+              <div class="menu-item" @click="menuStep = 'bili'">
+                <v-icon size="18">mdi-download-network-outline</v-icon>
+                <span>{{ t('aidj.subpage.bili_download', 'Bilibili 视频下载') }}</span>
                 <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
               </div>
               <div class="menu-item" @click="statsOpen = true">
@@ -687,6 +706,14 @@ defineExpose({ toMarkdown })
                 }}</span>
               </div>
               <FreqList />
+            </template>
+
+            <template v-else-if="menuStep === 'slots'">
+              <MetadataSlotsView @back="menuStep = 'main'" />
+            </template>
+
+            <template v-else-if="menuStep === 'bili'">
+              <BiliDownloadView @back="menuStep = 'main'" />
             </template>
           </div>
         </Transition>
@@ -823,6 +850,10 @@ defineExpose({ toMarkdown })
 }
 .page-menu-pop.is-wide {
   width: 460px;
+}
+.page-menu-pop.is-extra-wide {
+  width: 520px;
+  max-width: 90vw;
 }
 
 .menu-item {

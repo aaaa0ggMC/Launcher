@@ -100,21 +100,14 @@ function onRouteClick(route: Route): void {
 </script>
 
 <template>
-  <v-navigation-drawer
-    :model-value="modelValue"
-    location="right"
-    temporary
-    width="420"
-    class="route-drawer elevation-8"
-    @update:model-value="emit('update:modelValue', $event)"
-  >
-    <div class="d-flex flex-column h-100">
+  <Transition name="drawer-slide">
+    <div v-if="modelValue" class="yarj-route-drawer">
       <!-- 抽屉头部 -->
-      <div class="pa-4 pb-2 border-b d-flex align-center justify-space-between">
+      <div class="pa-4 pb-2 border-b d-flex align-center justify-space-between flex-shrink-0">
         <div class="d-flex align-center ga-2">
           <v-icon color="primary" size="24">mdi-routes</v-icon>
           <span class="text-subtitle-1 font-weight-bold">运动轨迹航线</span>
-          <v-chip size="x-small" variant="tonal" color="primary">
+          <v-chip size="small" variant="tonal" color="primary" class="font-weight-medium">
             {{ filteredRoutes.length }} / {{ routes.length }}
           </v-chip>
         </div>
@@ -122,7 +115,7 @@ function onRouteClick(route: Route): void {
       </div>
 
       <!-- 搜索与空间筛选 -->
-      <div class="px-4 py-3 border-b">
+      <div class="px-4 py-3 border-b flex-shrink-0">
         <v-text-field
           v-model="searchQuery"
           placeholder="搜索航线名称或 :gps(经度, 纬度, 距离km)"
@@ -152,7 +145,6 @@ function onRouteClick(route: Route): void {
           <!-- 若有当前聚焦航线，提示重置聚焦 -->
           <v-btn
             v-if="activeRouteId"
-            size="x-small"
             variant="text"
             color="warning"
             prepend-icon="mdi-eye-off-outline"
@@ -164,159 +156,206 @@ function onRouteClick(route: Route): void {
       </div>
 
       <!-- 航线卡片列表 -->
-      <div class="flex-grow-1 overflow-y-auto pa-4 d-flex flex-column ga-3">
+      <div class="route-list-body flex-grow-1 overflow-y-auto pa-4">
         <div v-if="filteredRoutes.length === 0" class="text-center py-12 text-disabled">
           <v-icon size="48" class="mb-2 opacity-50">mdi-map-marker-distance</v-icon>
           <div>暂无符合条件的运动航线</div>
           <div class="text-caption mt-1">支持输入 :gps(114.4, 30.5, 5km) 检索穿过该区域的轨迹</div>
         </div>
 
-        <v-card
-          v-for="route in filteredRoutes"
-          :key="route.id"
-          rounded="lg"
-          variant="tonal"
-          :class="[
-            'route-card cursor-pointer',
-            { 'route-card-active': activeRouteId === route.id }
-          ]"
-          @click="onRouteClick(route)"
-        >
-          <div class="pa-3">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <div class="d-flex align-center ga-2 min-width-0">
-                <v-icon
-                  size="20"
-                  :color="
-                    route.activityType === 'cycling'
-                      ? 'primary'
-                      : route.activityType === 'running'
-                        ? 'secondary'
-                        : route.activityType === 'walking'
-                          ? 'success'
-                          : route.activityType === 'hiking'
-                            ? 'warning'
-                            : 'info'
-                  "
-                >
-                  {{
-                    route.activityType === 'cycling'
-                      ? 'mdi-bike'
-                      : route.activityType === 'running'
-                        ? 'mdi-run'
-                        : route.activityType === 'walking'
-                          ? 'mdi-walk'
-                          : route.activityType === 'hiking'
-                            ? 'mdi-hiking'
-                            : 'mdi-routes'
-                  }}
-                </v-icon>
-                <span class="text-subtitle-2 font-weight-bold text-truncate">{{ route.name }}</span>
+        <div v-else class="d-flex flex-column ga-3">
+          <v-card
+            v-for="route in filteredRoutes"
+            :key="route.id"
+            rounded="lg"
+            variant="tonal"
+            :class="[
+              'route-card cursor-pointer flex-shrink-0',
+              { 'route-card-active': activeRouteId === route.id }
+            ]"
+            @click="onRouteClick(route)"
+          >
+            <div class="pa-3">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center ga-2 min-w-0">
+                  <v-icon
+                    size="20"
+                    :color="
+                      route.activityType === 'cycling'
+                        ? 'primary'
+                        : route.activityType === 'running'
+                          ? 'secondary'
+                          : route.activityType === 'walking'
+                            ? 'success'
+                            : route.activityType === 'hiking'
+                              ? 'warning'
+                              : 'info'
+                    "
+                  >
+                    {{
+                      route.activityType === 'cycling'
+                        ? 'mdi-bike'
+                        : route.activityType === 'running'
+                          ? 'mdi-run'
+                          : route.activityType === 'walking'
+                            ? 'mdi-walk'
+                            : route.activityType === 'hiking'
+                              ? 'mdi-hiking'
+                              : 'mdi-routes'
+                    }}
+                  </v-icon>
+                  <span class="text-subtitle-2 font-weight-bold text-truncate">{{
+                    route.name
+                  }}</span>
+                </div>
+
+                <div class="d-flex align-center ga-1 flex-shrink-0">
+                  <!-- 独立聚焦开关（降低其他路线存在感，防止光污染） -->
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="text"
+                    :color="activeRouteId === route.id ? 'primary' : 'default'"
+                    :title="
+                      activeRouteId === route.id ? '取消单独高亮' : '高亮此航线并暗化其余航线'
+                    "
+                    @click.stop="emit('toggleActive', activeRouteId === route.id ? '' : route.id)"
+                  >
+                    <v-icon size="18">{{
+                      activeRouteId === route.id ? 'mdi-lightbulb' : 'mdi-lightbulb-outline'
+                    }}</v-icon>
+                  </v-btn>
+
+                  <!-- 详情看板 -->
+                  <v-btn
+                    icon="mdi-chart-box-outline"
+                    size="small"
+                    variant="text"
+                    title="查看完整运动数据看板"
+                    @click.stop="emit('openDetail', route)"
+                  />
+
+                  <!-- 从库中移除此记录 -->
+                  <v-btn
+                    icon="mdi-delete-outline"
+                    size="small"
+                    variant="text"
+                    color="error"
+                    title="从数据库移除此航线记录"
+                    @click.stop="emit('deleteRoute', route)"
+                  />
+                </div>
               </div>
 
-              <div class="d-flex align-center ga-1 flex-shrink-0">
-                <!-- 独立聚焦开关（降低其他路线存在感，防止光污染） -->
-                <v-btn
-                  icon
-                  size="x-small"
-                  variant="text"
-                  :color="activeRouteId === route.id ? 'primary' : 'default'"
-                  :title="activeRouteId === route.id ? '取消单独高亮' : '高亮此航线并暗化其余航线'"
-                  @click.stop="emit('toggleActive', activeRouteId === route.id ? '' : route.id)"
-                >
-                  <v-icon>{{
-                    activeRouteId === route.id ? 'mdi-lightbulb' : 'mdi-lightbulb-outline'
-                  }}</v-icon>
-                </v-btn>
-
-                <!-- 详情看板 -->
-                <v-btn
-                  icon="mdi-chart-box-outline"
-                  size="x-small"
-                  variant="text"
-                  title="查看完整运动数据看板"
-                  @click.stop="emit('openDetail', route)"
-                />
-              </div>
-            </div>
-
-            <!-- 数据统计条 -->
-            <div
-              class="d-flex align-center justify-space-between text-caption text-medium-emphasis"
-            >
-              <div>
-                <span class="font-weight-bold text-high-emphasis text-body-2">
-                  {{ (route.totalDistanceM / 1000).toFixed(2) }}
-                </span>
-                km
-              </div>
-              <div>
-                <span class="font-weight-bold text-high-emphasis text-body-2">
-                  {{ route.avgSpeedKmh }}
-                </span>
-                km/h
-              </div>
-              <div>
-                {{ formatDuration(route.durationSec) }}
-              </div>
-              <div>
-                {{ formatDate(route.startTime) }}
-              </div>
-            </div>
-
-            <!-- 次要指标徽章条（心率、卡路里、步数、设备） -->
-            <div
-              v-if="route.avgHr || route.calories || route.steps || route.deviceType"
-              class="d-flex align-center ga-3 mt-2 pt-2 border-t text-caption text-medium-emphasis flex-wrap"
-            >
-              <div v-if="route.avgHr" class="d-flex align-center ga-1 text-error">
-                <v-icon size="14">mdi-heart-pulse</v-icon>
-                <span>{{ route.avgHr }} bpm</span>
-              </div>
-              <div v-if="route.calories" class="d-flex align-center ga-1 text-warning">
-                <v-icon size="14">mdi-fire</v-icon>
-                <span>{{ route.calories }} kcal</span>
-              </div>
-              <div v-if="route.steps" class="d-flex align-center ga-1 text-info">
-                <v-icon size="14">mdi-shoe-sneaker</v-icon>
-                <span>{{ route.steps.toLocaleString() }} 步</span>
-              </div>
+              <!-- 数据统计条 -->
               <div
-                v-if="route.deviceType"
-                class="d-flex align-center ga-1 ml-auto text-medium-emphasis"
+                class="d-flex align-center justify-space-between text-caption text-medium-emphasis"
               >
-                <v-icon size="14">
-                  {{
+                <div>
+                  <span class="font-weight-bold text-high-emphasis text-body-2">
+                    {{ (route.totalDistanceM / 1000).toFixed(2) }}
+                  </span>
+                  km
+                </div>
+                <div>
+                  <span class="font-weight-bold text-high-emphasis text-body-2">
+                    {{ route.avgSpeedKmh }}
+                  </span>
+                  km/h
+                </div>
+                <div>
+                  {{ formatDuration(route.durationSec) }}
+                </div>
+                <div>
+                  {{ formatDate(route.startTime) }}
+                </div>
+              </div>
+
+              <!-- 次要指标徽章条（心率、卡路里、步数、设备） -->
+              <div
+                v-if="route.avgHr || route.calories || route.steps || route.deviceType"
+                class="d-flex align-center ga-3 mt-2 pt-2 border-t text-caption text-medium-emphasis flex-wrap"
+              >
+                <div v-if="route.avgHr" class="d-flex align-center ga-1 text-error">
+                  <v-icon size="14">mdi-heart-pulse</v-icon>
+                  <span>{{ route.avgHr }} bpm</span>
+                </div>
+                <div v-if="route.calories" class="d-flex align-center ga-1 text-warning">
+                  <v-icon size="14">mdi-fire</v-icon>
+                  <span>{{ route.calories }} kcal</span>
+                </div>
+                <div v-if="route.steps" class="d-flex align-center ga-1 text-info">
+                  <v-icon size="14">mdi-shoe-sneaker</v-icon>
+                  <span>{{ route.steps.toLocaleString() }} 步</span>
+                </div>
+                <div
+                  v-if="route.deviceType"
+                  class="d-flex align-center ga-1 ml-auto text-medium-emphasis"
+                >
+                  <v-icon size="14">
+                    {{
+                      route.deviceType === 'smart_watch'
+                        ? 'mdi-watch'
+                        : route.deviceType === 'indoor'
+                          ? 'mdi-home-fitness'
+                          : 'mdi-cellphone'
+                    }}
+                  </v-icon>
+                  <span>{{
                     route.deviceType === 'smart_watch'
-                      ? 'mdi-watch'
+                      ? '手表'
                       : route.deviceType === 'indoor'
-                        ? 'mdi-home-fitness'
-                        : 'mdi-cellphone'
-                  }}
-                </v-icon>
-                <span>{{
-                  route.deviceType === 'smart_watch'
-                    ? '手表'
-                    : route.deviceType === 'indoor'
-                      ? '室内'
-                      : '手机'
-                }}</span>
+                        ? '室内'
+                        : '手机'
+                  }}</span>
+                </div>
               </div>
             </div>
-          </div>
-        </v-card>
+          </v-card>
+        </div>
       </div>
     </div>
-  </v-navigation-drawer>
+  </Transition>
 </template>
 
 <style scoped>
-.route-drawer {
-  background: rgba(var(--v-theme-surface), 0.96) !important;
-  backdrop-filter: blur(16px);
+.yarj-route-drawer {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  background: rgba(var(--v-theme-surface), 0.9);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  border-radius: 18px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  user-select: none;
+}
+
+.route-list-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.route-list-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.route-list-body::-webkit-scrollbar-thumb {
+  background: rgba(var(--v-theme-on-surface-variant), 0.4);
+  border-radius: 3px;
 }
 
 .route-card {
+  flex-shrink: 0;
   transition: all 0.2s ease;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
@@ -330,5 +369,19 @@ function onRouteClick(route: Route): void {
   border-color: rgb(var(--v-theme-primary)) !important;
   box-shadow: 0 0 12px rgba(var(--v-theme-primary), 0.3);
   background: rgba(var(--v-theme-primary), 0.08) !important;
+}
+
+/* 过渡动画 */
+.drawer-slide-enter-active,
+.drawer-slide-leave-active {
+  transition:
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.2s ease;
+}
+
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+  transform: translateX(440px);
+  opacity: 0;
 }
 </style>

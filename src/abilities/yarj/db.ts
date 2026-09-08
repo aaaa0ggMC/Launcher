@@ -968,6 +968,40 @@ export function pruneOrphanedRoots(validRoots: string[]): number {
   return Number(info.changes)
 }
 
+/** 同步清理指定航线目录下在磁盘已不存在的旧航线记录，返回删除条数。 */
+export function pruneDeletedRoutes(targetRoots: string[], existingPaths: Set<string>): number {
+  const db = getMetadataDb()
+  let rows: { id: string; path: string }[]
+  if (targetRoots.length > 0) {
+    const conds = targetRoots.map(() => 'path LIKE ?')
+    const params = targetRoots.map((r) => `${r}%`)
+    rows = db.prepare(`SELECT id, path FROM routes WHERE ${conds.join(' OR ')}`).all(...params) as {
+      id: string
+      path: string
+    }[]
+  } else {
+    rows = db.prepare('SELECT id, path FROM routes').all() as { id: string; path: string }[]
+  }
+
+  let deletedCount = 0
+  const deleteStmt = db.prepare('DELETE FROM routes WHERE id = ?')
+
+  db.exec('BEGIN TRANSACTION')
+  try {
+    for (const row of rows) {
+      if (!existingPaths.has(row.path)) {
+        deleteStmt.run(row.id)
+        deletedCount++
+      }
+    }
+    db.exec('COMMIT')
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
+  return deletedCount
+}
+
 // ---------------------------------------------------------------------------
 // 扫描统计
 // ---------------------------------------------------------------------------

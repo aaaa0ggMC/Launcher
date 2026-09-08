@@ -4,9 +4,14 @@ import { makeLogger } from '../../../main/process/logger'
 import type { SongMeta } from '../types'
 import { ensureAidjDir, getMetadataPath, getLyricsPath, loadAidjConfig } from './config'
 import { localYrcToInlineLrc, yrcToInlineLrc, localYrcToLrc } from './lyrics'
+import {
+  loadAllActiveMetadata,
+  getActiveWriteSlotPath,
+  invalidateSlotCache
+} from './metadata-slots'
 
 const log = makeLogger('aidj-library')
-const MUSIC_EXTS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus'])
+const MUSIC_EXTS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus', '.mp4'])
 const LRC_EXT = '.lrc'
 const YRC_EXT = '.yrc'
 
@@ -41,6 +46,13 @@ async function walkDir(dir: string, map: Map<string, string>): Promise<void> {
 }
 
 export async function loadMetadata(): Promise<Map<string, SongMeta>> {
+  try {
+    const active = await loadAllActiveMetadata()
+    if (active.size > 0) return active
+  } catch (e) {
+    log.warn('loadAllActiveMetadata failed, falling back to default', { error: String(e) })
+  }
+
   const map = new Map<string, SongMeta>()
   try {
     const raw = await readFile(getMetadataPath(), 'utf-8')
@@ -230,10 +242,32 @@ export function isLibraryLoading(): boolean {
   return !_libraryCache && _libraryLoading !== null
 }
 
-export async function appendMetadata(name: string, meta: SongMeta): Promise<void> {
+export function setLibraryCacheMetadata(metadata: Map<string, SongMeta>): void {
+  if (_libraryCache) {
+    _libraryCache.metadata = metadata
+  }
+}
+
+export async function recomputeActiveLibraryMetadata(): Promise<Map<string, SongMeta>> {
+  const metadata = await loadAllActiveMetadata()
+  if (_libraryCache) {
+    _libraryCache.metadata = metadata
+  }
+  return metadata
+}
+
+export async function appendMetadata(
+  name: string,
+  meta: SongMeta,
+  targetSlotOrPath?: string
+): Promise<void> {
   await ensureAidjDir()
+  const filePath = targetSlotOrPath?.includes('/')
+    ? targetSlotOrPath
+    : await getActiveWriteSlotPath(targetSlotOrPath)
   const line = JSON.stringify({ name, metadata: meta }) + '\n'
-  await appendFile(getMetadataPath(), line, 'utf-8')
+  await appendFile(filePath, line, 'utf-8')
+  invalidateSlotCache(filePath)
 }
 
 export async function findMissingSongs(

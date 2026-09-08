@@ -1,5 +1,5 @@
 import { appendFile } from 'fs/promises'
-import { basename } from 'path'
+import { basename, extname } from 'path'
 import { msToLrcTime } from '../parser/lrcParser'
 import { ensureAidjDir, getLyricsPath } from './config'
 
@@ -141,10 +141,21 @@ export function resolveLyricForTrackPath(
   opts?: { fuzzy?: boolean }
 ): string | null {
   if (path) {
+    const ext = extname(path).toLowerCase()
+    const isVideo = ext === '.mp4' || ext === '.mkv' || ext === '.webm' || ext === '.avi'
+    const isBili = path.includes('/Bilibili/') || path.includes('\\Bilibili\\')
+
     const name = basename(path)
       .replace(/\.[^.]+$/, '')
       .trim()
     if (name && lyrics.has(name)) return lyrics.get(name) ?? null
+
+    // For video files or Bilibili downloads, lyrics represent video subtitles.
+    // If no subtitles were saved for this specific file, do NOT match unrelated audio songs!
+    if (isVideo || isBili) {
+      return null
+    }
+
     const titleOnly = name.replace(/^.+?\s+-\s+/, '').trim()
     if (titleOnly && titleOnly !== name && lyrics.has(titleOnly)) {
       return lyrics.get(titleOnly) ?? null

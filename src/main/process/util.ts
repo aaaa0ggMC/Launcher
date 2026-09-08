@@ -54,6 +54,16 @@ export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
   await rename(tmp, p)
 }
 
+/** Atomic text write (write temp then rename). */
+export async function writeTextAtomic(p: string, content: string): Promise<void> {
+  await mkdir(dirname(p), { recursive: true })
+  const tmp = `${p}.tmp-${process.pid}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`
+  await writeFile(tmp, content, 'utf-8')
+  await rename(tmp, p)
+}
+
 /**
  * Serialized atomic JSON write — same as `writeJsonAtomic`, but writes to the
  * same target are queued. On Windows, concurrent renames to one destination

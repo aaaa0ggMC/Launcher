@@ -455,6 +455,7 @@ const netState = ref<'ok' | 'bad' | 'checking'>('checking')
 const mode = ref<'dbus' | 'web'>('dbus')
 
 let modeUnsub: (() => void) | null = null
+let slotsUnsub: (() => void) | null = null
 
 const visibleStatus = computed(() => {
   return (
@@ -538,6 +539,7 @@ onMounted(() => {
   netPollTimer = setInterval(pollNetwork, 15000)
   listenBt()
   listenMode()
+  listenSlots()
   setupOverlayMeasure()
   setupOverlayH()
 })
@@ -559,6 +561,7 @@ onActivated(() => {
   void pollNetwork()
   listenBt()
   listenMode()
+  listenSlots()
   scrollToBottom()
   setupOverlayMeasure()
   setupOverlayH()
@@ -592,6 +595,10 @@ onDeactivated(() => {
   if (modeUnsub) {
     modeUnsub()
     modeUnsub = null
+  }
+  if (slotsUnsub) {
+    slotsUnsub()
+    slotsUnsub = null
   }
 })
 
@@ -655,6 +662,20 @@ function listenMode(): void {
     if (ev?.mode === 'dbus' || ev?.mode === 'web') {
       mode.value = ev.mode
     }
+  })
+}
+
+/** Metadata slot selection changes broadcast as `cockpit:aidj-slots-changed` —
+ *  immediately update the status bar tracks counter. */
+function listenSlots(): void {
+  if (slotsUnsub) return
+  if (!window.cockpit?.on) return
+  slotsUnsub = window.cockpit.on('cockpit:aidj-slots-changed', (event: unknown) => {
+    const ev = event as Record<string, unknown>
+    if (typeof ev?.tracks === 'number') {
+      sbTracks.value = ev.tracks
+    }
+    void pollStatus()
   })
 }
 

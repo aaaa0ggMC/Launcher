@@ -18,6 +18,7 @@ import {
   upsertRoute,
   getRoute,
   queryRoutes,
+  pruneDeletedRoutes,
   batchUpdatePhotoRouteGps,
   clearAllRouteGps,
   findMatchingPhotosForRoute,
@@ -411,12 +412,16 @@ registerJobHandler(
     let totalFiles = 0
     let importedCount = 0
     let failedCount = 0
+    const allFoundPaths = new Set<string>()
 
     for (let i = 0; i < targetRoots.length; i++) {
       const rootPath = targetRoots[i]
       control.pushLine(`[${i + 1}/${targetRoots.length}] 扫描目录: ${rootPath}`)
       const { gpxFiles, indoorJsonFiles } = await findRouteFiles(rootPath, ac.signal)
       const allFiles = [...gpxFiles, ...indoorJsonFiles]
+      for (const f of allFiles) {
+        allFoundPaths.add(f)
+      }
       totalFiles += allFiles.length
       control.pushLine(
         `发现 ${gpxFiles.length} 个 GPX 轨迹文件，${indoorJsonFiles.length} 个室内运动记录`
@@ -478,9 +483,13 @@ registerJobHandler(
       }
     }
 
+    // 扫描结束后：自动清理在磁盘上已被删除的旧航线记录
+    const prunedCount = pruneDeletedRoutes(targetRoots, allFoundPaths)
+    const prunedPart = prunedCount > 0 ? `，清理失效航线 ${prunedCount} 条` : ''
+
     control.setProgress(100)
     control.pushLine(
-      `[航线扫描完成] 共发现 ${totalFiles} 个文件，成功入库 ${importedCount} 条航线记录，失败 ${failedCount} 个`
+      `[航线扫描完成] 共发现 ${totalFiles} 个文件，成功入库 ${importedCount} 条航线记录${prunedPart}，失败 ${failedCount} 个`
     )
     control.finish('exited')
   }

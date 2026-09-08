@@ -70,13 +70,21 @@ export const playbackCommands: CommandSpec[] = [
         })
         .catch(() => {})
       const session = state.session
-      const librarySize = session
-        ? [...session.metadata.keys()].filter((k) => session.musicPaths.has(k)).length
-        : state.metadata && state.musicPaths
-          ? [...state.metadata.keys()].filter((k) => state.musicPaths!.has(k)).length
-          : isLibraryLoading()
-            ? null
-            : 0
+      let librarySize: number | null = null
+      if (session) {
+        librarySize =
+          session.musicPaths && session.musicPaths.size > 0
+            ? [...session.metadata.keys()].filter((k) => session.musicPaths.has(k)).length
+            : session.metadata.size
+      } else if (state.metadata && state.musicPaths && state.musicPaths.size > 0) {
+        librarySize = [...state.metadata.keys()].filter((k) => state.musicPaths!.has(k)).length
+      } else if (state.metadata) {
+        librarySize = state.metadata.size
+      } else if (isLibraryLoading()) {
+        librarySize = null
+      } else {
+        librarySize = 0
+      }
       const base = {
         ok: true,
         // null = library still loading (first background scan/read in flight) —

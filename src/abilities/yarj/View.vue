@@ -188,6 +188,11 @@ function onFocusRouteOnMap(route: Route): void {
   }
 }
 
+function onFocusRouteFromDetail(route: Route): void {
+  routeDrawerOpen.value = false
+  onFocusRouteOnMap(route)
+}
+
 function onStartGeotagFromDetail(route: Route, detectedOffsetSec?: number): void {
   openRouteGeotagModal(route, detectedOffsetSec)
 }
@@ -3038,7 +3043,7 @@ async function reloadPreferences(): Promise<void> {
       @play-route="startRoutePlayback"
       @start-geotag="onStartGeotagFromDetail"
       @view-photo="onViewPhotoFromRoute"
-      @focus-route="onFocusRouteOnMap"
+      @focus-route="onFocusRouteFromDetail"
     />
 
     <!-- 基于运动航线匹配照片贴合 GPS 模态框 -->

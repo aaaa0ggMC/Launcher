@@ -1,5 +1,7 @@
+import { basename } from 'path'
 import { registerJobHandler } from '../../../main/process/background-tasks'
 import { makeLogger } from '../../../main/process/logger'
+import { getActiveWriteSlotPath } from '../services/metadata-slots'
 import {
   loadAidjConfig,
   SessionManager,
@@ -150,8 +152,10 @@ registerJobHandler('aidj.metadata-sync', async (control) => {
     return
   }
 
+  const targetSlotPath = await getActiveWriteSlotPath()
+  const targetSlotName = basename(targetSlotPath)
   control.pushLine(
-    `发现 ${missing.size} 首歌曲缺少元数据，并发: ${config.preferences.metadata_concurrency}，模型: ${config.ai_settings.metadata_model}`
+    `发现 ${missing.size} 首歌曲缺少元数据，并发: ${config.preferences.metadata_concurrency}，模型: ${config.ai_settings.metadata_model}，写入槽位: ${targetSlotName}`
   )
   control.push({ data: { type: 'metadata_sync_start', total: missing.size } })
 

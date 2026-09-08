@@ -14,9 +14,14 @@ export function setNcmBaseUrl(url: string): void {
 }
 
 let ncmMode: 'auto' | 'external' | 'builtin' = 'auto'
+let ncmApproved = false
 
 export function setNcmMode(mode: 'auto' | 'external' | 'builtin' | undefined): void {
   ncmMode = mode ?? 'auto'
+}
+
+export function setNcmApproved(approved: boolean | undefined): void {
+  ncmApproved = Boolean(approved)
 }
 
 let ncmCommentCount = 10
@@ -38,6 +43,18 @@ export type NcmSearchResultT = {
 }
 
 export async function searchNcmApi(keywords: string): Promise<NcmSearchResultT> {
+  // If user hasn't approved NCM built-in scraping, strictly disallow builtin requests
+  if (!ncmApproved) {
+    if (ncmMode === 'builtin') {
+      log.warn(
+        'NCM built-in API blocked: not approved by user. Please run aidj.approve-ncm or enable in settings.',
+        { keywords }
+      )
+      return { sid: null, lyric: '', karaoke: '', networkError: true, comments: [] }
+    }
+    return searchNcmApiExternal(keywords)
+  }
+
   if (ncmMode === 'builtin') return searchNcmApiBuiltin(keywords)
   const external = await searchNcmApiExternal(keywords)
   if (ncmMode === 'external' || !external.networkError) return external
@@ -112,6 +129,10 @@ async function fetchExternalComments(sid: number): Promise<string[]> {
 }
 
 async function searchNcmApiBuiltin(keywords: string): Promise<NcmSearchResultT> {
+  if (!ncmApproved) {
+    log.warn('NCM built-in API blocked: not approved by user', { keywords })
+    return { sid: null, lyric: '', karaoke: '', networkError: true, comments: [] }
+  }
   const started = Date.now()
   try {
     const sData = await ncmSearch(keywords, 1)

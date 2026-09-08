@@ -84,5 +84,23 @@ describe('AIDJ lyrics service', () => {
     // Disabled fuzzy returns null when path doesn't match
     const noFuzzy = resolveLyricForTrackPath('/music/unknown.mp3', '稻香', map, { fuzzy: false })
     assert.equal(noFuzzy, null)
+
+    // Video files and Bilibili downloads with no subtitle exact match return null
+    const videoNoLyric = resolveLyricForTrackPath(
+      '/music/Bilibili/BV123/UP主 - 稻香.mp4',
+      '稻香',
+      map
+    )
+    assert.equal(videoNoLyric, null)
+
+    const mapWithVideoLrc = new Map<string, string>([
+      ['UP主 - 稻香', '[00:01.00]专属于该视频的字幕']
+    ])
+    const videoWithLyric = resolveLyricForTrackPath(
+      '/music/Bilibili/BV123/UP主 - 稻香.mp4',
+      'UP主 - 稻香',
+      mapWithVideoLrc
+    )
+    assert.equal(videoWithLyric, '[00:01.00]专属于该视频的字幕')
   })
 })

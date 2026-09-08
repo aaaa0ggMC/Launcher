@@ -189,4 +189,67 @@ describe('Yarj Explored Area Fog-of-War Engine', () => {
     assert.ok(geo.features.length > 0)
     assert.strictEqual(geo.features[0].geometry.type, 'Polygon')
   })
+
+  test('generateExploredGeoJSON dissolves overlapping routes into a unified polygon', () => {
+    // Two overlapping routes sharing the same road segment
+    const r1: Route = {
+      id: 'r1',
+      path: '/r1.gpx',
+      name: 'Route 1',
+      desc: null,
+      activityType: 'cycling',
+      startTime: '2024-05-01 08:00:00',
+      endTime: '2024-05-01 09:00:00',
+      durationSec: 1000,
+      movingDurationSec: 1000,
+      totalDistanceM: 500,
+      avgSpeedKmh: 15,
+      maxSpeedKmh: 20,
+      calories: 100,
+      elevationGainM: 10,
+      elevationLossM: 10,
+      minEle: 10,
+      maxEle: 20,
+      avgHr: 120,
+      maxHr: 140,
+      bounds: [120.0, 30.0, 120.005, 30.005],
+      pointCount: 3,
+      geojson: JSON.stringify({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [120.0, 30.0],
+            [120.002, 30.002],
+            [120.005, 30.005]
+          ]
+        }
+      }),
+      createdAt: '2024-05-01',
+      updatedAt: '2024-05-01'
+    }
+
+    const r2: Route = {
+      ...r1,
+      id: 'r2',
+      path: '/r2.gpx',
+      name: 'Route 2',
+      geojson: JSON.stringify({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [120.001, 30.001],
+            [120.003, 30.003],
+            [120.006, 30.006]
+          ]
+        }
+      })
+    }
+
+    const geo = generateExploredGeoJSON([], 'standard', 100, [r1, r2])
+    // The two overlapping routes must be dissolved into a single polygon
+    assert.strictEqual(geo.features.length, 1)
+    assert.strictEqual(geo.features[0].geometry.type, 'Polygon')
+  })
 })

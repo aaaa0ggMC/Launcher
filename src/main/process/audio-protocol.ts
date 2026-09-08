@@ -3,6 +3,7 @@ import { createReadStream } from 'fs'
 import { stat } from 'fs/promises'
 import { extname } from 'path'
 import { Readable } from 'stream'
+import { log } from './logger'
 
 /**
  * `cockpit-audio://<abs-path>` — streams local audio files to the renderer's
@@ -22,7 +23,9 @@ const AUDIO_MIME: Record<string, string> = {
   '.aac': 'audio/aac',
   '.ogg': 'audio/ogg',
   '.opus': 'audio/ogg',
-  '.webm': 'audio/webm'
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.mkv': 'video/x-matroska'
 }
 
 export function registerAudioProtocol(): void {
@@ -66,7 +69,8 @@ export function registerAudioProtocol(): void {
           'Content-Length': String(total)
         }
       })
-    } catch {
+    } catch (err) {
+      log.warn('cockpit-audio stream error', { url: request.url, error: String(err) })
       return new Response(null, { status: 404 })
     }
   })
@@ -75,6 +79,7 @@ export function registerAudioProtocol(): void {
 /** Node Readable → web ReadableStream (Node ≥ 18); typed via a cast because the
  *  Node `stream/web` generic and the DOM `ReadableStream` lib types clash. */
 function toWebStream(node: import('stream').Readable): ReadableStream<Uint8Array> {
+  node.on('error', () => {})
   return Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>
 }
 

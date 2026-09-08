@@ -9,6 +9,8 @@ import { curateCommands } from './commands/curate'
 import { sessionsCommands } from './commands/sessions'
 import { chatContinuousCommands } from './commands/chat-continuous'
 import { configLyricsCommands } from './commands/config-lyrics'
+import { approveCommands } from './commands/approve'
+import { metadataSlotsCommands } from './commands/metadata-slots'
 
 export { getCurrentAbortSignal, abortCurrentRequest } from './commands/shared'
 
@@ -22,7 +24,9 @@ const commands: CommandSpec[] = [
   ...sessionsCommands,
   ...configLyricsCommands,
   ...webPlayerCommands,
-  ...chatContinuousCommands
+  ...chatContinuousCommands,
+  ...approveCommands,
+  ...metadataSlotsCommands
 ]
 
 export default commands

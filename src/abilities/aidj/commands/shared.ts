@@ -22,6 +22,7 @@ import {
   syncMetadata,
   setNcmBaseUrl,
   setNcmMode,
+  setNcmApproved,
   setNcmCommentCount,
   ensureAidjDir,
   DJSession,
@@ -121,6 +122,7 @@ export async function ensureInit(): Promise<{
   }
 
   setNcmBaseUrl(config.ncm_base_url)
+  setNcmApproved(config.preferences?.ncm_approved)
   setNcmMode(config.preferences?.ncm_mode)
   setNcmCommentCount(config.preferences?.metadata_comment_count)
 
