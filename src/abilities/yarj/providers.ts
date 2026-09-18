@@ -3,7 +3,7 @@
  */
 import type { MapProviderConfig } from './types'
 
-export const DEFAULT_GOOGLE_API_KEY = 'AIzaSyASJjzjKnyusU1FWFCB25F3NIIrp3S-1kE'
+export const DEFAULT_GOOGLE_API_KEY = 'AIzaSyDOg7tWZ8xiqO7Uz-j4bvbulIFGZz7P-XR'
 
 export const BUILTIN_PROVIDERS: MapProviderConfig[] = [
   {
