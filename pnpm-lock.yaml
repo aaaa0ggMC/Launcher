@@ -132,7 +132,7 @@ importers:
     dependencies:
       hustpass:
         specifier: github:aaaa0ggMC/husthelper#path:hustpass
-        version: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustpass(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+        version: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustpass(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
@@ -141,7 +141,7 @@ importers:
     dependencies:
       hustnet:
         specifier: github:aaaa0ggMC/husthelper#path:hustnet
-        version: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustnet(supports-color@7.2.0)
+        version: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustnet(supports-color@7.2.0)
 
   src/abilities/cli: {}
 
@@ -2016,17 +2016,17 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
-  hustcore@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustcore:
-    resolution: {gitHosted: true, integrity: sha512-uXn2J29xiM8vjWAvxHwDE0dQeZOLSf/U9aaO0LONVsGy9mArMPV5CS+ynXEyR89KfYIkNUdw+3Pmwey/Ur1WXQ==, path: hustcore, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8}
+  hustcore@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustcore:
+    resolution: {gitHosted: true, integrity: sha512-5JoS6pAchvheOUUsRU7N8zk+icWQeC1iKHl3Y8EX1JApnzggavSwoESHbDhnpjT1rm9uyznU5G6RysmZKeZ1sw==, path: hustcore, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b}
     version: 1.0.0
 
-  hustnet@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustnet:
-    resolution: {gitHosted: true, integrity: sha512-uXn2J29xiM8vjWAvxHwDE0dQeZOLSf/U9aaO0LONVsGy9mArMPV5CS+ynXEyR89KfYIkNUdw+3Pmwey/Ur1WXQ==, path: hustnet, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8}
+  hustnet@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustnet:
+    resolution: {gitHosted: true, integrity: sha512-5JoS6pAchvheOUUsRU7N8zk+icWQeC1iKHl3Y8EX1JApnzggavSwoESHbDhnpjT1rm9uyznU5G6RysmZKeZ1sw==, path: hustnet, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b}
     version: 1.0.0
     hasBin: true
 
-  hustpass@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustpass:
-    resolution: {gitHosted: true, integrity: sha512-uXn2J29xiM8vjWAvxHwDE0dQeZOLSf/U9aaO0LONVsGy9mArMPV5CS+ynXEyR89KfYIkNUdw+3Pmwey/Ur1WXQ==, path: hustpass, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8}
+  hustpass@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustpass:
+    resolution: {gitHosted: true, integrity: sha512-5JoS6pAchvheOUUsRU7N8zk+icWQeC1iKHl3Y8EX1JApnzggavSwoESHbDhnpjT1rm9uyznU5G6RysmZKeZ1sw==, path: hustpass, tarball: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b}
     version: 1.0.0
 
   ignore@5.3.2:
@@ -5111,26 +5111,26 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hustcore@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
+  hustcore@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
     dependencies:
       axios: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     transitivePeerDependencies:
       - debug
       - supports-color
 
-  hustnet@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustnet(supports-color@7.2.0):
+  hustnet@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustnet(supports-color@7.2.0):
     dependencies:
-      hustcore: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      hustcore: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     transitivePeerDependencies:
       - debug
       - supports-color
 
-  hustpass@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustpass(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
+  hustpass@https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustpass(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
     dependencies:
       axios: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       fast-xml-parser: 4.5.7
       gifuct-js: 2.1.2
-      hustcore: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/a69cf3d2d537e3f7d4319b4565b41d836e64f0b8#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      hustcore: https://codeload.github.com/aaaa0ggMC/husthelper/tar.gz/2010a5dab88fe0bf925777e141b9c06fe6aba66b#path:hustcore(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       jpeg-js: 0.4.4
       sm-crypto: 0.5.7
     transitivePeerDependencies:
