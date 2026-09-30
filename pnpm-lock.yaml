@@ -130,6 +130,9 @@ importers:
 
   src/abilities/biliviewer:
     dependencies:
+      bilibili-api-node:
+        specifier: file:../../../../bilibili-api-node
+        version: file:../bilibili-api-node
       mpegts.js:
         specifier: ^1.8.0
         version: 1.8.2
