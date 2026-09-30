@@ -60,11 +60,29 @@ const showQuickProfileDialog = ref(false)
 const quickProfileName = ref('')
 const creatingQuickProfile = ref(false)
 
+// Codex detection state
+const defaultCodex = ref<{ exists: boolean; path: string; planType?: string } | null>(null)
+
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
 const supportedTypes = SUPPORTED_PLATFORM_TYPES
 
 function showToast(text: string, color = 'success'): void {
   snackbar.value = { show: true, text, color }
+}
+
+async function checkCodexLocal(): Promise<void> {
+  try {
+    const res = (await window.cockpit.command('balance.codex.check_default')) as {
+      exists: boolean
+      path: string
+      planType?: string
+    }
+    if (res) {
+      defaultCodex.value = res
+    }
+  } catch {
+    defaultCodex.value = null
+  }
 }
 
 async function loadData(): Promise<void> {
@@ -78,6 +96,7 @@ async function loadData(): Promise<void> {
     if (Array.isArray(listRes)) {
       balances.value = listRes
     }
+    await checkCodexLocal()
   } catch (err) {
     console.error('Failed to load balance data:', err)
     showToast(String(err), 'error')
@@ -135,7 +154,8 @@ function openAddModal(): void {
     profileId: config.value?.profiles?.[0]?.id || 'default',
     enabled: true,
     baseUrl: '',
-    icon: 'gi:settings'
+    icon: 'gi:settings',
+    extra: {}
   }
   showEditModal.value = true
 }
@@ -158,6 +178,9 @@ async function openEditModal(platformId: string): Promise<void> {
       if (!editingPlatform.value.profileId) {
         editingPlatform.value.profileId = fullCfg.profiles?.[0]?.id || 'default'
       }
+      if (!editingPlatform.value.extra) {
+        editingPlatform.value.extra = {}
+      }
       showEditModal.value = true
     }
   } catch (err) {
@@ -175,6 +198,208 @@ function onTypeChange(type: string): void {
       editingPlatform.value.icon = found.defaultIcon || 'gi:settings'
     }
   }
+  if (type === 'codex') {
+    if (!editingPlatform.value.extra) editingPlatform.value.extra = {}
+    if (!editingPlatform.value.icon || editingPlatform.value.icon === 'gi:settings') {
+      editingPlatform.value.icon = 'default/lightning/padding'
+    }
+  }
+}
+
+function applyCodexCredentials(parsed: {
+  accessToken: string
+  accountId?: string
+  refreshToken?: string
+  idToken?: string
+  planType?: string
+}): void {
+  editingPlatform.value.apiKey = parsed.accessToken
+  if (!editingPlatform.value.extra) editingPlatform.value.extra = {}
+  if (parsed.accountId) editingPlatform.value.extra.accountId = parsed.accountId
+  if (parsed.refreshToken) editingPlatform.value.extra.refreshToken = parsed.refreshToken
+  if (parsed.idToken) editingPlatform.value.extra.idToken = parsed.idToken
+  if (parsed.planType) {
+    editingPlatform.value.extra.planType = parsed.planType
+    editingPlatform.value.name = `Codex (${parsed.planType.toUpperCase()})`
+  } else if (!editingPlatform.value.name) {
+    editingPlatform.value.name = 'Codex (ChatGPT 配额)'
+  }
+}
+
+function onCodexApiKeyInput(val: string): void {
+  const trimmed = (val || '').trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        tokens?: { access_token?: string; account_id?: string; refresh_token?: string }
+        access_token?: string
+        account_id?: string
+        refresh_token?: string
+      }
+      const tokens = parsed.tokens || {}
+      const accessToken = tokens.access_token || parsed.access_token || ''
+      const accountId = tokens.account_id || parsed.account_id || ''
+      const refreshToken = tokens.refresh_token || parsed.refresh_token || ''
+      if (accessToken) {
+        applyCodexCredentials({ accessToken, accountId, refreshToken })
+        showToast('已从粘贴的 JSON 中自动解析并填充凭据！')
+      }
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+async function importLocalCodexIntoEdit(): Promise<void> {
+  try {
+    const res = (await window.cockpit.command('balance.codex.import_auth', {})) as {
+      ok: boolean
+      platform?: PlatformConfig
+      error?: string
+    }
+    if (res && res.ok && res.platform) {
+      applyCodexCredentials({
+        accessToken: res.platform.apiKey,
+        accountId: res.platform.extra?.accountId as string,
+        refreshToken: res.platform.extra?.refreshToken as string,
+        planType: res.platform.extra?.planType as string
+      })
+      showToast('已成功载入 ~/.codex/auth.json 凭据！')
+    } else {
+      showToast(`载入失败: ${res?.error || '未找到凭据'}`, 'error')
+    }
+  } catch (err) {
+    showToast(`载入失败: ${String(err)}`, 'error')
+  }
+}
+
+async function pickCodexFileIntoEdit(): Promise<void> {
+  try {
+    const filePath = await window.cockpit.pickFile({
+      title: '选择 Codex auth.json 文件',
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+    })
+    if (!filePath) return
+
+    const res = (await window.cockpit.command('balance.codex.import_auth', { path: filePath })) as {
+      ok: boolean
+      platform?: PlatformConfig
+      error?: string
+    }
+    if (res && res.ok && res.platform) {
+      applyCodexCredentials({
+        accessToken: res.platform.apiKey,
+        accountId: res.platform.extra?.accountId as string,
+        refreshToken: res.platform.extra?.refreshToken as string,
+        planType: res.platform.extra?.planType as string
+      })
+      showToast('已成功载入指定的 auth.json 凭据！')
+    } else {
+      showToast(`载入失败: ${res?.error || '解析失败'}`, 'error')
+    }
+  } catch (err) {
+    showToast(`载入失败: ${String(err)}`, 'error')
+  }
+}
+
+interface CodexDisplaySummary {
+  planType: string
+  allowed: boolean
+  limitReached: boolean
+  email?: string | null
+  primaryWindow: {
+    usedPercent: number
+    remainingPercent: number
+    windowHours: number
+    resetAfterSeconds: number
+    resetAfterMinutes: number
+    resetAt?: number | null
+  } | null
+  secondaryWindow: {
+    usedPercent: number
+    remainingPercent: number
+    windowDays: number
+    resetAfterSeconds: number
+    resetAfterHours: number
+    resetAt?: number | null
+  } | null
+  credits: {
+    balance: string
+    hasCredits: boolean
+    unlimited?: boolean
+  } | null
+  resetCredits: {
+    availableCount: number
+    applicableCount: number
+  } | null
+}
+
+function getCodexSummary(b: BalanceResult): CodexDisplaySummary | null {
+  if (b.type !== 'codex' || !b.raw) return null
+  const raw = b.raw as Record<string, unknown>
+  const summary = raw.summary as Record<string, unknown> | undefined
+  return {
+    planType: (summary?.planType as string) || (raw.plan_type as string)?.toUpperCase() || '',
+    allowed: summary?.allowed !== false,
+    limitReached: !!summary?.limitReached,
+    email: (summary?.email as string) || (raw.email as string) || null,
+    primaryWindow: summary?.primaryWindow as CodexDisplaySummary['primaryWindow'],
+    secondaryWindow: summary?.secondaryWindow as CodexDisplaySummary['secondaryWindow'],
+    credits: summary?.credits as CodexDisplaySummary['credits'],
+    resetCredits: summary?.resetCredits as CodexDisplaySummary['resetCredits']
+  }
+}
+
+function formatCountdown(seconds?: number | null): string {
+  if (seconds == null || isNaN(seconds)) return ''
+  if (seconds <= 0) return '即将重置'
+  if (seconds < 60) return `${Math.floor(seconds)}秒后重置`
+  if (seconds < 3600) {
+    const mins = Math.ceil(seconds / 60)
+    return `${mins}分钟后重置`
+  }
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600)
+    const mins = Math.round((seconds % 3600) / 60)
+    return mins > 0 ? `${hours}小时${mins}分后重置` : `${hours}小时后重置`
+  }
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.round((seconds % 86400) / 3600)
+  return hours > 0 ? `${days}天${hours}小时后重置` : `${days}天后重置`
+}
+
+function formatTargetDate(timestampMs?: number | null): string {
+  if (!timestampMs || isNaN(timestampMs)) return ''
+  const target = new Date(timestampMs)
+  const now = new Date()
+
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const hours = pad(target.getHours())
+  const mins = pad(target.getMinutes())
+
+  const isToday =
+    target.getDate() === now.getDate() &&
+    target.getMonth() === now.getMonth() &&
+    target.getFullYear() === now.getFullYear()
+
+  if (isToday) {
+    return `预计今日 ${hours}:${mins}`
+  }
+
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow =
+    target.getDate() === tomorrow.getDate() &&
+    target.getMonth() === tomorrow.getMonth() &&
+    target.getFullYear() === tomorrow.getFullYear()
+
+  if (isTomorrow) {
+    return `预计明日 ${hours}:${mins}`
+  }
+
+  const month = target.getMonth() + 1
+  const day = target.getDate()
+  return `预计 ${month}月${day}日 ${hours}:${mins}`
 }
 
 async function handleCreateQuickProfile(): Promise<void> {
@@ -303,6 +528,7 @@ async function importLegacy(): Promise<void> {
 const loggingInCards = ref<Record<string, boolean>>({})
 
 function getPlatformUrl(b: BalanceResult): string {
+  if (b.type === 'codex') return 'https://chatgpt.com/codex/settings/usage'
   if (b.type === 'google_ai_studio') {
     const rawTarget = typeof b.raw?.targetUrl === 'string' ? b.raw.targetUrl : ''
     return rawTarget || 'https://aistudio.google.com/billing'
@@ -812,6 +1038,178 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <!-- Codex Comprehensive Quota Display -->
+              <div v-else-if="b.type === 'codex'" class="d-flex flex-column ga-3">
+                <!-- Status & Plan Header -->
+                <div class="d-flex align-center justify-space-between flex-wrap ga-2">
+                  <div class="d-flex align-center ga-2 flex-wrap">
+                    <v-chip
+                      v-if="getCodexSummary(b)?.planType"
+                      size="default"
+                      variant="tonal"
+                      color="primary"
+                      class="font-weight-bold"
+                      style="padding-block: 4px; min-height: 24px"
+                    >
+                      <v-icon start icon="mdi-shield-crown-outline" size="small" />
+                      {{ getCodexSummary(b)?.planType }}
+                    </v-chip>
+
+                    <v-chip
+                      v-if="getCodexSummary(b)?.limitReached"
+                      size="default"
+                      variant="tonal"
+                      color="error"
+                      class="font-weight-bold"
+                      style="padding-block: 4px; min-height: 24px"
+                    >
+                      <v-icon start icon="mdi-alert-circle-outline" size="small" />
+                      {{ t('balance.codex.status_limited', '已达上限') }}
+                    </v-chip>
+                    <v-chip
+                      v-else-if="getCodexSummary(b)?.allowed"
+                      size="default"
+                      variant="tonal"
+                      color="success"
+                      class="font-weight-bold"
+                      style="padding-block: 4px; min-height: 24px"
+                    >
+                      <v-icon start icon="mdi-check-circle-outline" size="small" />
+                      {{ t('balance.codex.status_normal', '正常') }}
+                    </v-chip>
+                  </div>
+
+                  <span
+                    v-if="getCodexSummary(b)?.email"
+                    class="text-caption text-medium-emphasis text-truncate"
+                    :title="getCodexSummary(b)?.email || ''"
+                    style="max-width: 180px"
+                  >
+                    {{ getCodexSummary(b)?.email }}
+                  </span>
+                </div>
+
+                <!-- Primary window (5h Session Quota) -->
+                <div
+                  v-if="getCodexSummary(b)?.primaryWindow"
+                  class="rounded-lg pa-3"
+                  style="background-color: rgba(var(--v-theme-surface-variant), 0.35)"
+                >
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center ga-1">
+                      <v-icon icon="mdi-clock-fast" size="small" color="primary" />
+                      <span class="text-subtitle-2 font-weight-bold">
+                        {{ t('balance.codex.5h_window', '5 小时配额') }}
+                      </span>
+                    </div>
+                    <div class="d-flex align-baseline ga-2">
+                      <span class="text-body-1 font-weight-bold text-primary">
+                        {{ getCodexSummary(b)?.primaryWindow?.remainingPercent }}%
+                      </span>
+                      <span class="text-caption text-medium-emphasis">
+                        / 已用 {{ getCodexSummary(b)?.primaryWindow?.usedPercent }}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <v-progress-linear
+                    :model-value="getCodexSummary(b)?.primaryWindow?.usedPercent ?? 0"
+                    height="8"
+                    rounded
+                    :color="
+                      (getCodexSummary(b)?.primaryWindow?.usedPercent ?? 0) > 85
+                        ? 'error'
+                        : (getCodexSummary(b)?.primaryWindow?.usedPercent ?? 0) > 60
+                          ? 'warning'
+                          : 'primary'
+                    "
+                  />
+
+                  <div
+                    class="d-flex align-center justify-space-between mt-2 text-caption text-medium-emphasis flex-wrap ga-1"
+                  >
+                    <span>
+                      <v-icon icon="mdi-restore" size="x-small" class="mr-1" />
+                      {{ formatCountdown(getCodexSummary(b)?.primaryWindow?.resetAfterSeconds) }}
+                    </span>
+                    <span v-if="getCodexSummary(b)?.primaryWindow?.resetAt">
+                      {{ formatTargetDate(getCodexSummary(b)?.primaryWindow?.resetAt) }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Secondary window (Weekly Quota) -->
+                <div
+                  v-if="getCodexSummary(b)?.secondaryWindow"
+                  class="rounded-lg pa-3"
+                  style="background-color: rgba(var(--v-theme-surface-variant), 0.35)"
+                >
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center ga-1">
+                      <v-icon icon="mdi-calendar-range" size="small" color="secondary" />
+                      <span class="text-subtitle-2 font-weight-bold">
+                        {{ t('balance.codex.weekly_window', '周配额') }}
+                      </span>
+                    </div>
+                    <div class="d-flex align-baseline ga-2">
+                      <span class="text-body-1 font-weight-bold text-secondary">
+                        {{ getCodexSummary(b)?.secondaryWindow?.remainingPercent }}%
+                      </span>
+                      <span class="text-caption text-medium-emphasis">
+                        / 已用 {{ getCodexSummary(b)?.secondaryWindow?.usedPercent }}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <v-progress-linear
+                    :model-value="getCodexSummary(b)?.secondaryWindow?.usedPercent ?? 0"
+                    height="8"
+                    rounded
+                    color="secondary"
+                  />
+
+                  <div
+                    class="d-flex align-center justify-space-between mt-2 text-caption text-medium-emphasis flex-wrap ga-1"
+                  >
+                    <span>
+                      <v-icon icon="mdi-calendar-clock" size="x-small" class="mr-1" />
+                      {{ formatCountdown(getCodexSummary(b)?.secondaryWindow?.resetAfterSeconds) }}
+                    </span>
+                    <span v-if="getCodexSummary(b)?.secondaryWindow?.resetAt">
+                      {{ formatTargetDate(getCodexSummary(b)?.secondaryWindow?.resetAt) }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Extra Credits & Resets Row -->
+                <div
+                  v-if="
+                    getCodexSummary(b)?.credits?.hasCredits ||
+                    (getCodexSummary(b)?.resetCredits?.availableCount ?? 0) > 0
+                  "
+                  class="d-flex align-center ga-2 flex-wrap text-caption"
+                >
+                  <v-chip
+                    v-if="getCodexSummary(b)?.credits?.hasCredits"
+                    size="default"
+                    variant="outlined"
+                    color="primary"
+                    style="padding-block: 4px; min-height: 24px"
+                  >
+                    按量额度: ${{ getCodexSummary(b)?.credits?.balance }}
+                  </v-chip>
+                  <v-chip
+                    v-if="(getCodexSummary(b)?.resetCredits?.availableCount ?? 0) > 0"
+                    size="default"
+                    variant="outlined"
+                    color="amber"
+                    style="padding-block: 4px; min-height: 24px"
+                  >
+                    快速重置: {{ getCodexSummary(b)?.resetCredits?.availableCount }} 次
+                  </v-chip>
+                </div>
+              </div>
+
               <!-- Normal Balance Display -->
               <div v-else class="d-flex flex-column">
                 <!-- Big Balance Text -->
@@ -1052,6 +1450,99 @@ onUnmounted(() => {
               该平台使用 Profile 隔离容器授权。可以在上方切换或新建 Profile，同一个 Profile
               内各厂商登录态互不冲突。
             </v-alert>
+          </div>
+
+          <!-- Codex Specific Inputs & Import -->
+          <div v-else-if="editingPlatform.type === 'codex'" class="d-flex flex-column ga-3">
+            <!-- Quick Import Bar -->
+            <div class="d-flex align-center flex-wrap ga-2">
+              <v-btn
+                v-if="defaultCodex?.exists"
+                color="primary"
+                variant="tonal"
+                class="text-none"
+                prepend-icon="mdi-file-import-outline"
+                @click="importLocalCodexIntoEdit"
+              >
+                {{ t('balance.codex.import_default', '导入 ~/.codex/auth.json') }}
+              </v-btn>
+              <v-btn
+                variant="tonal"
+                class="text-none"
+                prepend-icon="mdi-folder-open-outline"
+                @click="pickCodexFileIntoEdit"
+              >
+                {{ t('balance.codex.pick_file', '选择本地 auth.json') }}
+              </v-btn>
+            </div>
+
+            <v-alert
+              type="info"
+              variant="tonal"
+              density="comfortable"
+              class="rounded-lg text-caption"
+            >
+              支持一键读取本机 ~/.codex/auth.json，或在下方分别填入 Access Token 与 Account
+              ID。也可将 auth.json 文件内容完整粘贴到 Access Token 框中自动解析。
+            </v-alert>
+
+            <!-- Access Token -->
+            <v-text-field
+              v-model="editingPlatform.apiKey"
+              :type="showPassword ? 'text' : 'password'"
+              density="comfortable"
+              variant="outlined"
+              :label="
+                t('balance.codex.access_token', 'Access Token (支持直接粘贴 auth.json 自动解包)')
+              "
+              hide-details
+              :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showPassword = !showPassword"
+              @update:model-value="onCodexApiKeyInput"
+            >
+              <template #append>
+                <v-btn
+                  v-if="editingPlatform.apiKey"
+                  icon="mdi-content-copy"
+                  size="small"
+                  variant="text"
+                  :title="t('balance.card.copy_key', '复制密钥')"
+                  @click="copyText(editingPlatform.apiKey)"
+                />
+              </template>
+            </v-text-field>
+
+            <!-- Account ID -->
+            <v-text-field
+              :model-value="editingPlatform.extra?.accountId || ''"
+              density="comfortable"
+              variant="outlined"
+              :label="t('balance.codex.account_id', 'ChatGPT 账号 ID (ChatGPT-Account-Id)')"
+              placeholder="如 94a53fc3-15e3-4c5d-92ed-bd8b0cad9830"
+              hide-details
+              @update:model-value="
+                (val: string) => {
+                  if (!editingPlatform.extra) editingPlatform.extra = {}
+                  editingPlatform.extra.accountId = val.trim()
+                }
+              "
+            />
+
+            <!-- Refresh Token -->
+            <v-text-field
+              :model-value="editingPlatform.extra?.refreshToken || ''"
+              :type="showPassword ? 'text' : 'password'"
+              density="comfortable"
+              variant="outlined"
+              :label="t('balance.codex.refresh_token', 'Refresh Token (选填，用于过期自动续期)')"
+              hide-details
+              @update:model-value="
+                (val: string) => {
+                  if (!editingPlatform.extra) editingPlatform.extra = {}
+                  editingPlatform.extra.refreshToken = val.trim()
+                }
+              "
+            />
           </div>
 
           <!-- API Key for token-based platforms -->

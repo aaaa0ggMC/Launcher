@@ -80,5 +80,20 @@
   "balance.profiles.delete_confirm": "确定要删除 Profile「{name}」吗？此操作将解绑相关平台卡片并清除该容器的登录数据。",
   "balance.profiles.select_profile": "使用 Profile 容器",
   "balance.profiles.select_hint": "同一个 Profile 下的会话与 Cookie 在各厂商间互不冲突、自由共享",
-  "balance.profiles.create_quick": "新建 Profile"
+  "balance.profiles.create_quick": "新建 Profile",
+  "balance.codex.import_auth": "导入 Codex auth.json",
+  "balance.codex.import_default": "导入 ~/.codex/auth.json",
+  "balance.codex.pick_file": "选择本地 auth.json",
+  "balance.codex.import_success": "成功导入 Codex 凭据",
+  "balance.codex.access_token": "Access Token (支持直接粘贴 auth.json 自动解包)",
+  "balance.codex.account_id": "ChatGPT 账号 ID (ChatGPT-Account-Id)",
+  "balance.codex.refresh_token": "Refresh Token (选填，用于过期自动续期)",
+  "balance.codex.detected_default": "检测到本机已登录 Codex: ~/.codex/auth.json",
+  "balance.codex.5h_window": "5 小时配额",
+  "balance.codex.weekly_window": "周配额",
+  "balance.codex.status_normal": "正常",
+  "balance.codex.status_limited": "已达上限",
+  "balance.codex.primary_window": "5h 窗口: 剩余 {remaining}% (约 {minutes} 分钟后重置)",
+  "balance.codex.secondary_window": "周窗口: 剩余 {remaining}% (已用 {used}%)",
+  "balance.codex.credits": "点数余额: ${balance}"
 }

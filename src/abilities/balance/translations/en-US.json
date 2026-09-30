@@ -81,5 +81,20 @@
   "balance.profiles.delete_confirm": "Are you sure you want to delete Profile \"{name}\"? This will unbind associated platforms and clear storage data for this container.",
   "balance.profiles.select_profile": "Select Profile Container",
   "balance.profiles.select_hint": "Sessions and cookies within the same Profile are shared across non-conflicting providers",
-  "balance.profiles.create_quick": "New Profile"
+  "balance.profiles.create_quick": "New Profile",
+  "balance.codex.import_auth": "Import Codex auth.json",
+  "balance.codex.import_default": "Import ~/.codex/auth.json",
+  "balance.codex.pick_file": "Select auth.json File",
+  "balance.codex.import_success": "Successfully imported Codex credentials",
+  "balance.codex.access_token": "Access Token (Supports pasting full auth.json)",
+  "balance.codex.account_id": "ChatGPT Account ID (ChatGPT-Account-Id)",
+  "balance.codex.refresh_token": "Refresh Token (Optional, for auto-refresh)",
+  "balance.codex.detected_default": "Detected local Codex login: ~/.codex/auth.json",
+  "balance.codex.5h_window": "5h Quota",
+  "balance.codex.weekly_window": "Weekly Quota",
+  "balance.codex.status_normal": "Normal",
+  "balance.codex.status_limited": "Limit Reached",
+  "balance.codex.primary_window": "5h Window: {remaining}% remaining ({minutes}m until reset)",
+  "balance.codex.secondary_window": "Weekly Window: {remaining}% remaining ({used}% used)",
+  "balance.codex.credits": "Credits: ${balance}"
 }

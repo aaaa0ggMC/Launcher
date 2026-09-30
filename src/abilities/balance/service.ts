@@ -5,7 +5,12 @@ import { homedir } from 'os'
 import { abilityConfigPath } from '../../main/process/paths'
 import { makeLogger } from '../../main/process/logger'
 import { decryptSecret, encryptSecret } from './crypto'
-import { getFetcher, getProfilePartition, cacheOpenAISessionAuth } from './platforms'
+import {
+  getFetcher,
+  getProfilePartition,
+  cacheOpenAISessionAuth,
+  parseCodexAuth
+} from './platforms'
 import type {
   BalanceConfig,
   BalanceProfile,
@@ -99,6 +104,15 @@ const DEFAULT_CONFIG: BalanceConfig = {
       profileId: 'default',
       enabled: false,
       icon: 'gi:settings'
+    },
+    {
+      id: 'codex',
+      name: 'Codex (ChatGPT 配额)',
+      type: 'codex',
+      apiKey: '',
+      profileId: 'default',
+      enabled: false,
+      icon: 'default/lightning/padding'
     }
   ]
 }
@@ -1029,7 +1043,11 @@ export async function checkSinglePlatform(id: string): Promise<BalanceResult> {
     balanceCache.set(id, finalResult)
     return finalResult
   } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err)
+    const causeMsg =
+      err && typeof err === 'object' && 'cause' in err && err.cause
+        ? ` (${(err.cause as { message?: string }).message || String(err.cause)})`
+        : ''
+    const errMsg = `${err instanceof Error ? err.message : String(err)}${causeMsg}`
     const errResult: BalanceResult = {
       id: platform.id,
       name: platform.name,
@@ -1141,4 +1159,89 @@ export async function importLegacyConfig(filePath?: string): Promise<{ count: nu
   saveConfigInternal(config)
   log.info(`Imported ${count} platform configs from ${target}`)
   return { count }
+}
+
+/**
+ * Checks if default ~/.codex/auth.json exists and returns basic non-sensitive metadata.
+ */
+export async function checkDefaultCodexAuth(): Promise<{
+  exists: boolean
+  path: string
+  planType?: string
+}> {
+  const defaultPath = join(homedir(), '.codex', 'auth.json')
+  if (!existsSync(defaultPath)) {
+    return { exists: false, path: defaultPath }
+  }
+
+  try {
+    const raw = readFileSync(defaultPath, 'utf8')
+    const parsed = parseCodexAuth(raw)
+    return {
+      exists: !!parsed.accessToken,
+      path: defaultPath,
+      planType: parsed.planType
+    }
+  } catch {
+    return { exists: false, path: defaultPath }
+  }
+}
+
+/**
+ * Imports Codex auth credentials from a local auth.json file or JSON string.
+ */
+export async function importCodexAuth(options?: {
+  filePath?: string
+  content?: string
+  profileId?: string
+}): Promise<{ ok: boolean; platform: PlatformConfig; count: number }> {
+  const defaultPath = join(homedir(), '.codex', 'auth.json')
+  let raw = options?.content
+
+  if (!raw) {
+    const target = options?.filePath || defaultPath
+    if (!existsSync(target)) {
+      throw new Error(`未找到 Codex auth.json 文件: ${target}`)
+    }
+    raw = readFileSync(target, 'utf8')
+  }
+
+  const parsed = parseCodexAuth(raw)
+  if (!parsed.accessToken && !parsed.refreshToken) {
+    throw new Error('未能从 auth.json 解析出有效的 access_token 或 refresh_token')
+  }
+
+  const config = ensureConfig()
+  const existingIndex = config.platforms.findIndex((p) => p.type === 'codex')
+  const planSuffix = parsed.planType ? ` (${parsed.planType.toUpperCase()})` : ''
+  const platformId = existingIndex >= 0 ? config.platforms[existingIndex].id : 'codex'
+
+  const updatedPlatform: PlatformConfig = {
+    id: platformId,
+    name: `Codex${planSuffix}`,
+    type: 'codex',
+    apiKey: parsed.accessToken,
+    profileId:
+      options?.profileId ||
+      (existingIndex >= 0 ? config.platforms[existingIndex].profileId : 'default'),
+    enabled: true,
+    icon: 'default/lightning/padding',
+    extra: {
+      accountId: parsed.accountId,
+      refreshToken: parsed.refreshToken,
+      idToken: parsed.idToken,
+      authJsonPath: options?.filePath || (options?.content ? '' : defaultPath),
+      planType: parsed.planType
+    }
+  }
+
+  if (existingIndex >= 0) {
+    config.platforms[existingIndex] = updatedPlatform
+  } else {
+    config.platforms.push(updatedPlatform)
+  }
+
+  saveConfigInternal(config)
+  log.info(`Imported Codex auth configuration for platform ${platformId}`)
+  return { ok: true, platform: updatedPlatform, count: 1 }
 }

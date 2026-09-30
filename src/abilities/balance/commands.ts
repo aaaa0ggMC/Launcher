@@ -23,7 +23,9 @@ import {
   openPlatformWindow,
   removePlatform,
   saveBalanceConfig,
-  upsertPlatform
+  upsertPlatform,
+  checkDefaultCodexAuth,
+  importCodexAuth
 } from './service'
 import { makeLogger } from '../../main/process/logger'
 import type { BalanceConfig, BalanceProviderType, PlatformConfig } from './types'
@@ -326,6 +328,33 @@ export default [
       const url = ctx.named.url ? String(ctx.named.url).trim() : undefined
       const title = ctx.named.title ? String(ctx.named.title).trim() : undefined
       return await openPlatformWindow(id, type, url, title)
+    }
+  },
+  {
+    name: 'balance.codex.check_default',
+    description: '检测本地 ~/.codex/auth.json 是否存在及基本信息',
+    usage: 'balance.codex.check_default',
+    run: async () => {
+      return await checkDefaultCodexAuth()
+    }
+  },
+  {
+    name: 'balance.codex.import_auth',
+    description:
+      '从本地 ~/.codex/auth.json 或传入内容导入 Codex 凭据 (--path <path> 或 --content <json>)',
+    usage: 'balance.codex.import_auth [--path <path>] [--content <json>] [--profileId <profileId>]',
+    run: async (ctx) => {
+      const filePath = ctx.named.path ? String(ctx.named.path).trim() : undefined
+      const content = ctx.named.content ? String(ctx.named.content).trim() : undefined
+      const profileId = ctx.named.profileId ? String(ctx.named.profileId).trim() : undefined
+
+      try {
+        const res = await importCodexAuth({ filePath, content, profileId })
+        return { ok: true, platform: res.platform }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { ok: false, error: msg }
+      }
     }
   }
 ] satisfies CommandSpec[]

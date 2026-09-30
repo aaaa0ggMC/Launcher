@@ -1,5 +1,5 @@
 import type { BalanceResult, PlatformConfig } from '../types'
-import { createTimeoutSignal, type PlatformFetcher } from './base'
+import { createTimeoutSignal, platformFetch, type PlatformFetcher } from './base'
 
 export class CustomFetcher implements PlatformFetcher {
   readonly type = 'custom'
@@ -26,7 +26,7 @@ export class CustomFetcher implements PlatformFetcher {
       targetUrl = `${targetUrl.replace(/\/+$/, '')}/api/user/self`
     }
 
-    const res = await fetch(targetUrl, {
+    const res = await platformFetch(targetUrl, {
       method: 'GET',
       headers,
       signal: createTimeoutSignal(timeoutMs)

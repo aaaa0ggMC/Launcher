@@ -1,5 +1,5 @@
 import type { BalanceResult, PlatformConfig } from '../types'
-import { createTimeoutSignal, type PlatformFetcher } from './base'
+import { createTimeoutSignal, platformFetch, type PlatformFetcher } from './base'
 
 export class OpenRouterFetcher implements PlatformFetcher {
   readonly type = 'openrouter'
@@ -13,7 +13,7 @@ export class OpenRouterFetcher implements PlatformFetcher {
     }
 
     const url = config.baseUrl || 'https://openrouter.ai/api/v1/credits'
-    const res = await fetch(url, {
+    const res = await platformFetch(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${config.apiKey}`,

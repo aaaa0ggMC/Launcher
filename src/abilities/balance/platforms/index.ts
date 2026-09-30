@@ -10,6 +10,7 @@ import { MimoWebFetcher } from './mimo-web'
 import { BigModelFetcher } from './bigmodel'
 import { BigModelWebFetcher } from './bigmodel-web'
 import { GoogleAIStudioFetcher } from './google-ai-studio'
+import { CodexFetcher } from './codex'
 import { CustomFetcher } from './custom'
 
 export * from './base'
@@ -24,6 +25,7 @@ export * from './mimo-web'
 export * from './bigmodel'
 export * from './bigmodel-web'
 export * from './google-ai-studio'
+export * from './codex'
 export * from './custom'
 
 const fetchers: Record<string, PlatformFetcher> = {
@@ -38,6 +40,7 @@ const fetchers: Record<string, PlatformFetcher> = {
   bigmodel: new BigModelFetcher(),
   bigmodel_web: new BigModelWebFetcher(),
   google_ai_studio: new GoogleAIStudioFetcher(),
+  codex: new CodexFetcher(),
   custom: new CustomFetcher()
 }
 
@@ -85,6 +88,11 @@ export function listSupportedPlatformTypes(): Array<{
       type: 'google_ai_studio',
       name: 'Google AI Studio (网页控制台直达)',
       defaultIcon: 'gi:settings'
+    },
+    {
+      type: 'codex',
+      name: 'Codex (ChatGPT 配额)',
+      defaultIcon: 'default/lightning/padding'
     },
     { type: 'custom', name: '自定义 / New API', defaultIcon: 'gi:settings' }
   ]

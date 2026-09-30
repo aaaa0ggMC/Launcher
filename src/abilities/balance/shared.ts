@@ -44,6 +44,11 @@ export const SUPPORTED_PLATFORM_TYPES: SupportedPlatformType[] = [
     name: 'Google AI Studio (网页控制台直达)',
     defaultIcon: 'gi:settings'
   },
+  {
+    type: 'codex',
+    name: 'Codex (ChatGPT 配额)',
+    defaultIcon: 'default/lightning/padding'
+  },
   { type: 'custom', name: '自定义 / New API', defaultIcon: 'gi:settings' }
 ]
 
@@ -61,6 +66,9 @@ export function formatBalanceDisplay(bal: Partial<BalanceResult>): string {
   const sym = symbols[currency] ?? `${currency} `
   const amount = bal.amount ?? 0
 
+  if (currency === '%' || bal.unit === '%') {
+    return `${Math.round(amount)}%`
+  }
   if (bal.cost) {
     return `- ${sym}${Math.abs(amount).toFixed(2)} / 月`
   }

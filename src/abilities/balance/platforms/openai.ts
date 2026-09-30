@@ -1,5 +1,5 @@
 import type { BalanceResult, PlatformConfig } from '../types'
-import { createTimeoutSignal, type PlatformFetcher } from './base'
+import { createTimeoutSignal, platformFetch, type PlatformFetcher } from './base'
 import { OpenAIWebFetcher } from './openai-web'
 
 export class OpenAIFetcher implements PlatformFetcher {
@@ -37,7 +37,7 @@ export class OpenAIFetcher implements PlatformFetcher {
       const url =
         config.baseUrl?.trim() || 'https://api.openai.com/v1/dashboard/billing/credit_grants'
 
-      const res = await fetch(url, {
+      const res = await platformFetch(url, {
         method: 'GET',
         headers: {
           Authorization: token,
@@ -89,7 +89,7 @@ export class OpenAIFetcher implements PlatformFetcher {
     const baseUrl = config.baseUrl || 'https://api.openai.com'
     const costsUrl = `${baseUrl.replace(/\/+$/, '')}/v1/organization/costs?start_time=${startTimeUnix}&end_time=${endTimeUnix}&limit=100`
 
-    const res = await fetch(costsUrl, {
+    const res = await platformFetch(costsUrl, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,

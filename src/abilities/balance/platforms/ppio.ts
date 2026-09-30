@@ -1,5 +1,5 @@
 import type { BalanceResult, PlatformConfig } from '../types'
-import { createTimeoutSignal, type PlatformFetcher } from './base'
+import { createTimeoutSignal, platformFetch, type PlatformFetcher } from './base'
 
 export class PPIOFetcher implements PlatformFetcher {
   readonly type = 'ppio'
@@ -13,7 +13,7 @@ export class PPIOFetcher implements PlatformFetcher {
     }
 
     const url = config.baseUrl || 'https://api.ppio.com/openapi/v1/user/info'
-    const res = await fetch(url, {
+    const res = await platformFetch(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${config.apiKey}`,

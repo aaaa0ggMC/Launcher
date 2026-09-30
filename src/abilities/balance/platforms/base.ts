@@ -1,3 +1,4 @@
+import { net } from 'electron'
 import type { BalanceResult, PlatformConfig } from '../types'
 export { formatBalanceDisplay } from '../shared'
 
@@ -6,6 +7,20 @@ export interface PlatformFetcher {
   readonly defaultName: string
   readonly defaultIcon: string
   fetchBalance(config: PlatformConfig, timeoutMs: number): Promise<BalanceResult>
+}
+
+/**
+ * Executes a network request using Electron's Chromium network stack (net.fetch)
+ * to properly respect system proxy / session proxy / pac rules, with a fallback to global fetch.
+ */
+export async function platformFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
+    return await (net.fetch as typeof fetch)(input, init)
+  }
+  return await fetch(input, init)
 }
 
 /**
