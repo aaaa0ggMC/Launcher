@@ -33,7 +33,21 @@ try {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [
+      externalizeDepsPlugin(),
+      {
+        // hustpass 的依赖 sm-crypto 是 CJS，内联后会经 rollup 的 commonjsRequire 桩函数
+        // 动态引用 Node 内置模块（如 crypto），桩函数直接 throw，应用一加载就崩。
+        // 主进程输出本身就是 CJS，把桩函数换成真 require 即可。
+        name: 'cockpit-commonjs-require-shim',
+        renderChunk(code) {
+          const stub = /function commonjsRequire\(path\w*\) \{\s*throw new Error\([^\n]*\);\s*\}/
+          return stub.test(code)
+            ? { code: code.replace(stub, 'function commonjsRequire(id) { return require(id); }'), map: null }
+            : null
+        }
+      }
+    ],
     resolve: {
       alias: {
         '@shared': resolve('src/shared'),
