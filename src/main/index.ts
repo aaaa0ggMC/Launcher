@@ -179,6 +179,11 @@ if (!gotLock) {
     setBackgroundBroadcast((event) => broadcast('cockpit:bt', event))
     setWindowBroadcast((event) => broadcast('cockpit:windows', event))
     startWindowDebug()
+    // Local secret vault (AES master key, safeStorage-wrapped when available).
+    // Must run after app ready so Electron safeStorage can talk to the OS keyring.
+    const { ensureVault, vaultStatus } = await import('./process/encrypt')
+    ensureVault()
+    log.info('secret vault', vaultStatus())
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
