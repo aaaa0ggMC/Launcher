@@ -8,7 +8,15 @@
     "src/shared/**/*",
     "src/preload/*.d.ts"
   ],
-  "exclude": ["src/abilities/*/commands.ts"],
+  "exclude": [
+    "src/abilities/*/commands.ts",
+    "src/abilities/*/service.ts",
+    "src/abilities/*/jobs.ts",
+    "src/abilities/*/jobs/**",
+    "src/abilities/*/commands/**",
+    "src/abilities/campusinfo/sections.ts",
+    "src/abilities/campusinfo/hustpass-api.d.ts"
+  ],
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",

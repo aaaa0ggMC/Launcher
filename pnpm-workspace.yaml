@@ -1,5 +1,11 @@
 packages:
   - 'src/abilities/*'
+# hustnet (github:aaaa0ggMC/husthelper#path:hustnet) 依赖 hustcore@workspace:*，
+# 在本仓库里没有 hustcore workspace 成员；override 成同仓 git 子路径。
+# blockExoticSubdeps:false 允许子依赖走 git（pnpm 11 默认禁止）。
+overrides:
+  hustcore: github:aaaa0ggMC/husthelper#path:hustcore
+blockExoticSubdeps: false
 allowBuilds:
   electron: true
   electron-winstaller: true

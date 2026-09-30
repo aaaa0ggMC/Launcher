@@ -5,11 +5,20 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
-    "src/abilities/*/commands.ts"
+    "src/abilities/*/commands.ts",
+    "src/abilities/campusnet/hustnet-api.d.ts",
+    "src/abilities/campusinfo/hustpass-api.d.ts"
   ],
   "exclude": ["src/main/ui"],
   "compilerOptions": {
     "composite": true,
-    "types": ["electron-vite/node"]
+    "types": ["electron-vite/node"],
+    // hustnet 真包是带 `.ts` 扩展名 import 的源码；typecheck 走本地声明
+    // （src/abilities/campusnet/hustnet-api.d.ts），避免 TS5097 / TS5096。
+    // 运行时由 electron.vite.config.ts 的 resolve.alias 指回 node_modules 真包。
+    "paths": {
+      "hustnet": ["./src/abilities/campusnet/hustnet-api.d.ts"],
+      "hustpass": ["./src/abilities/campusinfo/hustpass-api.d.ts"]
+    }
   }
 }

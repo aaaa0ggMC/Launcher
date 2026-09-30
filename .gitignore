@@ -23,3 +23,7 @@ src/abilities/bilistats/
 
 *.tsbuildinfo
 
+
+# 校园系列（个人自用，独立私有仓库 launcher-campusnet / launcher-campusinfo）
+src/abilities/campusnet/
+src/abilities/campusinfo/
