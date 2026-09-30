@@ -1,6 +1,6 @@
 export type BalanceCurrency = 'CNY' | 'USD' | 'EUR' | 'Credits' | string
 
-export type BalanceProviderType = 'openai' | 'mimo' | 'bigmodel' | 'google'
+export type BalanceProviderType = 'openai' | 'mimo' | 'bigmodel' | 'google' | 'stepfun'
 
 export interface ProfileProviderStatus {
   isLoggedIn: boolean
@@ -40,7 +40,7 @@ export interface BalanceResult {
 export interface PlatformConfig {
   id: string
   name: string
-  type: string // 'deepseek' | 'openrouter' | 'ppio' | 'tavily' | 'openai' | 'openai_web' | 'mimo' | 'mimo_web' | 'bigmodel' | 'bigmodel_web' | 'google_ai_studio' | 'custom'
+  type: string // 'deepseek' | 'openrouter' | 'ppio' | 'tavily' | 'openai' | 'openai_web' | 'mimo' | 'mimo_web' | 'bigmodel' | 'bigmodel_web' | 'stepfun_web' | 'google_ai_studio' | 'custom'
   apiKey: string
   profileId?: string
   enabled: boolean

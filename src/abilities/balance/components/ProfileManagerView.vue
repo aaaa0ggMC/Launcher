@@ -66,6 +66,13 @@ const PROVIDERS: Array<{
     color: 'indigo'
   },
   {
+    key: 'stepfun',
+    name: '阶跃星辰 Step Plan',
+    icon: 'gi:settings',
+    consoleUrl: 'https://platform.stepfun.ai/step-plan',
+    color: 'deep-purple'
+  },
+  {
     key: 'google',
     name: 'Google AI Studio',
     icon: 'gi:settings',
@@ -489,7 +496,9 @@ onMounted(() => {
                         ? 'mdi-cellphone-cog'
                         : prov.key === 'bigmodel'
                           ? 'mdi-brain'
-                          : 'mdi-google'
+                          : prov.key === 'stepfun'
+                            ? 'mdi-stairs-up'
+                            : 'mdi-google'
                   "
                   size="20"
                   :color="prov.color"

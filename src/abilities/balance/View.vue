@@ -308,6 +308,7 @@ interface CodexDisplaySummary {
   limitReached: boolean
   email?: string | null
   primaryWindow: {
+    label?: string
     usedPercent: number
     remainingPercent: number
     windowHours: number
@@ -327,15 +328,32 @@ interface CodexDisplaySummary {
     balance: string
     hasCredits: boolean
     unlimited?: boolean
+    label?: string
   } | null
   resetCredits: {
     availableCount: number
     applicableCount: number
   } | null
+  subscription: {
+    expiresAt: number | null
+    renewsAt: number | null
+    willRenew: boolean | null
+    source: 'api' | 'token'
+  } | null
+}
+
+function subscriptionLabel(sub: NonNullable<CodexDisplaySummary['subscription']>): string {
+  const end = sub.willRenew === false ? sub.expiresAt : (sub.renewsAt ?? sub.expiresAt)
+  if (!end) return ''
+  const days = Math.ceil((end - Date.now()) / 86400000)
+  const date = new Date(end).toLocaleDateString()
+  const verb = sub.willRenew !== false && sub.renewsAt ? '续订' : '到期'
+  if (days < 0) return `订阅已于 ${date} 到期（数据可能过期）`
+  return `订阅 ${date} ${verb}（${days} 天后）`
 }
 
 function getCodexSummary(b: BalanceResult): CodexDisplaySummary | null {
-  if (b.type !== 'codex' || !b.raw) return null
+  if ((b.type !== 'codex' && b.type !== 'claude_code') || !b.raw) return null
   const raw = b.raw as Record<string, unknown>
   const summary = raw.summary as Record<string, unknown> | undefined
   return {
@@ -346,7 +364,8 @@ function getCodexSummary(b: BalanceResult): CodexDisplaySummary | null {
     primaryWindow: summary?.primaryWindow as CodexDisplaySummary['primaryWindow'],
     secondaryWindow: summary?.secondaryWindow as CodexDisplaySummary['secondaryWindow'],
     credits: summary?.credits as CodexDisplaySummary['credits'],
-    resetCredits: summary?.resetCredits as CodexDisplaySummary['resetCredits']
+    resetCredits: summary?.resetCredits as CodexDisplaySummary['resetCredits'],
+    subscription: summary?.subscription as CodexDisplaySummary['subscription']
   }
 }
 
@@ -529,7 +548,8 @@ const loggingInCards = ref<Record<string, boolean>>({})
 
 function getPlatformUrl(b: BalanceResult): string {
   if (b.type === 'codex') return 'https://chatgpt.com/codex/settings/usage'
-  if (b.type === 'google_ai_studio') {
+  if (b.type === 'claude_code') return 'https://claude.ai/settings/usage'
+  if (b.type === 'google_ai_studio' || b.raw?.isPortal === true) {
     const rawTarget = typeof b.raw?.targetUrl === 'string' ? b.raw.targetUrl : ''
     return rawTarget || 'https://aistudio.google.com/billing'
   }
@@ -569,6 +589,7 @@ async function handleCardLogin(b: BalanceResult): Promise<void> {
     if (b.type.includes('openai')) provider = 'openai'
     else if (b.type.includes('mimo')) provider = 'mimo'
     else if (b.type.includes('bigmodel')) provider = 'bigmodel'
+    else if (b.type.includes('stepfun')) provider = 'stepfun'
     else if (b.type.includes('google')) provider = 'google'
 
     const profileId = b.profileId || 'default'
@@ -929,7 +950,7 @@ onUnmounted(() => {
               <!-- Status & Latency Chip -->
               <div class="d-flex align-center ga-1 flex-shrink-0">
                 <v-chip
-                  v-if="b.type === 'google_ai_studio'"
+                  v-if="b.type === 'google_ai_studio' || b.raw?.isPortal === true"
                   size="small"
                   color="primary"
                   variant="tonal"
@@ -970,7 +991,12 @@ onUnmounted(() => {
                 </v-chip>
 
                 <v-chip
-                  v-if="b.latencyMs && !loadingCards[b.id] && b.type !== 'google_ai_studio'"
+                  v-if="
+                    b.latencyMs &&
+                    !loadingCards[b.id] &&
+                    b.type !== 'google_ai_studio' &&
+                    b.raw?.isPortal !== true
+                  "
                   size="small"
                   variant="outlined"
                   class="balance-chip text-caption font-mono"
@@ -986,8 +1012,13 @@ onUnmounted(() => {
               style="min-height: 72px"
             >
               <!-- Google AI Studio Direct Portal View -->
-              <div v-if="b.type === 'google_ai_studio'" class="d-flex flex-column ga-2 py-1">
-                <div class="text-caption text-medium-emphasis">Google 计费控制台快捷通道：</div>
+              <div
+                v-if="b.type === 'google_ai_studio' || b.raw?.isPortal === true"
+                class="d-flex flex-column ga-2 py-1"
+              >
+                <div class="text-caption text-medium-emphasis">
+                  {{ (b.raw?.portalHint as string) || 'Google 计费控制台快捷通道：' }}
+                </div>
                 <v-btn
                   color="primary"
                   variant="tonal"
@@ -995,7 +1026,7 @@ onUnmounted(() => {
                   class="font-weight-bold rounded-lg text-none"
                   @click.stop="openPlatformWebsite(b)"
                 >
-                  打开 Google 计费页面
+                  {{ (b.raw?.portalLabel as string) || '打开 Google 计费页面' }}
                 </v-btn>
               </div>
 
@@ -1039,7 +1070,10 @@ onUnmounted(() => {
               </div>
 
               <!-- Codex Comprehensive Quota Display -->
-              <div v-else-if="b.type === 'codex'" class="d-flex flex-column ga-3">
+              <div
+                v-else-if="b.type === 'codex' || b.type === 'claude_code'"
+                class="d-flex flex-column ga-3"
+              >
                 <!-- Status & Plan Header -->
                 <div class="d-flex align-center justify-space-between flex-wrap ga-2">
                   <div class="d-flex align-center ga-2 flex-wrap">
@@ -1099,7 +1133,10 @@ onUnmounted(() => {
                     <div class="d-flex align-center ga-1">
                       <v-icon icon="mdi-clock-fast" size="small" color="primary" />
                       <span class="text-subtitle-2 font-weight-bold">
-                        {{ t('balance.codex.5h_window', '5 小时配额') }}
+                        {{
+                          getCodexSummary(b)?.primaryWindow?.label ??
+                          t('balance.codex.5h_window', '5 小时配额')
+                        }}
                       </span>
                     </div>
                     <div class="d-flex align-baseline ga-2">
@@ -1185,10 +1222,23 @@ onUnmounted(() => {
                 <div
                   v-if="
                     getCodexSummary(b)?.credits?.hasCredits ||
-                    (getCodexSummary(b)?.resetCredits?.availableCount ?? 0) > 0
+                    (getCodexSummary(b)?.resetCredits?.availableCount ?? 0) > 0 ||
+                    getCodexSummary(b)?.subscription
                   "
                   class="d-flex align-center ga-2 flex-wrap text-caption"
                 >
+                  <v-chip
+                    v-if="getCodexSummary(b)?.subscription"
+                    size="default"
+                    variant="outlined"
+                    :color="
+                      getCodexSummary(b)!.subscription!.willRenew === false ? 'warning' : 'success'
+                    "
+                    prepend-icon="mdi-calendar-clock"
+                    style="padding-block: 4px; min-height: 24px"
+                  >
+                    {{ subscriptionLabel(getCodexSummary(b)!.subscription!) }}
+                  </v-chip>
                   <v-chip
                     v-if="getCodexSummary(b)?.credits?.hasCredits"
                     size="default"
@@ -1196,7 +1246,10 @@ onUnmounted(() => {
                     color="primary"
                     style="padding-block: 4px; min-height: 24px"
                   >
-                    按量额度: ${{ getCodexSummary(b)?.credits?.balance }}
+                    {{
+                      getCodexSummary(b)?.credits?.label ??
+                      `按量额度: $${getCodexSummary(b)?.credits?.balance}`
+                    }}
                   </v-chip>
                   <v-chip
                     v-if="(getCodexSummary(b)?.resetCredits?.availableCount ?? 0) > 0"
@@ -1437,6 +1490,7 @@ onUnmounted(() => {
               editingPlatform.type === 'openai_web' ||
               editingPlatform.type === 'mimo_web' ||
               editingPlatform.type === 'bigmodel_web' ||
+              editingPlatform.type === 'stepfun_web' ||
               editingPlatform.type === 'google_ai_studio'
             "
             class="d-flex flex-column ga-2"

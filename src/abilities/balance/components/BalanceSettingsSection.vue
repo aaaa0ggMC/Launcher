@@ -454,6 +454,7 @@ onMounted(() => {
               editingPlatform.type === 'openai_web' ||
               editingPlatform.type === 'mimo_web' ||
               editingPlatform.type === 'bigmodel_web' ||
+              editingPlatform.type === 'stepfun_web' ||
               editingPlatform.type === 'google_ai_studio'
             "
             class="d-flex flex-column ga-2"
@@ -471,7 +472,9 @@ onMounted(() => {
                     ? '小米 MiMo 平台采用原生 Chromium 独立隔离会话授权，无需配置 API Key。'
                     : editingPlatform.type === 'bigmodel_web'
                       ? '智谱 BigModel 平台采用原生 Chromium 独立隔离会话授权，无需配置 API Key。'
-                      : 'Google AI Studio 计费控制台快捷卡片。无需配置 API Key，保存后点击卡片即可直达控制台查看。'
+                      : editingPlatform.type === 'stepfun_web'
+                        ? '阶跃星辰 Step Plan 采用原生 Chromium 独立隔离会话授权，无需配置 API Key。'
+                        : 'Google AI Studio 计费控制台快捷卡片。无需配置 API Key，保存后点击卡片即可直达控制台查看。'
               }}
             </v-alert>
           </div>

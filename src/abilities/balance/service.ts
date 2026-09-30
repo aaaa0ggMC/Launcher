@@ -113,6 +113,24 @@ const DEFAULT_CONFIG: BalanceConfig = {
       profileId: 'default',
       enabled: false,
       icon: 'default/lightning/padding'
+    },
+    {
+      id: 'claude_code',
+      name: 'Claude Code (订阅配额)',
+      type: 'claude_code',
+      apiKey: '',
+      profileId: 'default',
+      enabled: false,
+      icon: 'default/lightning/padding'
+    },
+    {
+      id: 'stepfun_web',
+      name: '阶跃星辰 Step Plan (网页端/免Key)',
+      type: 'stepfun_web',
+      apiKey: '',
+      profileId: 'default',
+      enabled: false,
+      icon: 'default/lightning/padding'
     }
   ]
 }
@@ -388,6 +406,11 @@ async function detectProviderAuth(
           c.name.includes('userId')
       )
     }
+    if (provider === 'stepfun') {
+      return cookies.some(
+        (c) => c.domain?.includes('stepfun') && /token|oasis|session|auth/i.test(c.name)
+      )
+    }
     if (provider === 'google') {
       return cookies.some(
         (c) =>
@@ -406,7 +429,7 @@ async function detectProviderAuth(
  */
 export async function listProfiles(): Promise<BalanceProfile[]> {
   const config = ensureConfig()
-  const providers: BalanceProviderType[] = ['openai', 'mimo', 'bigmodel', 'google']
+  const providers: BalanceProviderType[] = ['openai', 'mimo', 'bigmodel', 'stepfun', 'google']
 
   const tasks = config.profiles.map(async (profile) => {
     const partition = getProfilePartition(profile.id)
@@ -526,7 +549,7 @@ export async function checkProfileStatus(profileId: string): Promise<BalanceProf
 
   const partition = getProfilePartition(profile.id)
   const ses = session.fromPartition(partition)
-  const providers: BalanceProviderType[] = ['openai', 'mimo', 'bigmodel', 'google']
+  const providers: BalanceProviderType[] = ['openai', 'mimo', 'bigmodel', 'stepfun', 'google']
   const statusMap: Partial<
     Record<BalanceProviderType, { isLoggedIn: boolean; lastChecked: number }>
   > = {}
@@ -767,6 +790,35 @@ export async function loginProfileProvider(
     })
   }
 
+  if (provider === 'stepfun') {
+    return new Promise((resolve) => {
+      const win = new BrowserWindow({
+        width: 780,
+        height: 820,
+        title: '登录阶跃星辰账号',
+        autoHideMenuBar: true,
+        webPreferences: {
+          partition,
+          sandbox: false,
+          backgroundThrottling: false
+        }
+      })
+
+      // 站点没有稳定的登录探测方式：用户在窗口里登录后手动关闭即视为完成授权
+      let resolved = false
+      win.on('close', () => {
+        void win.webContents.session.cookies.flushStore().catch(() => undefined)
+      })
+      win.on('closed', () => {
+        if (resolved) return
+        resolved = true
+        resolve({ ok: true, loggedIn: true })
+      })
+
+      win.loadURL(customUrl?.trim() || 'https://platform.stepfun.ai/step-plan')
+    })
+  }
+
   if (provider === 'google') {
     return new Promise((resolve) => {
       ses.setUserAgent(CHROME_UA)
@@ -863,6 +915,7 @@ export async function logoutProfileProvider(
     openai: ['openai.com', 'chatgpt.com', 'auth0.com'],
     mimo: ['xiaomimimo.com', 'xiaomi.com', 'mi.com'],
     bigmodel: ['bigmodel.cn', 'zhipuai.cn'],
+    stepfun: ['stepfun.ai', 'stepfun.com'],
     google: ['google.com', 'aistudio.google.com']
   }
 
@@ -932,6 +985,7 @@ export async function openProfileWindow(
     openai: 'https://platform.openai.com/home',
     mimo: 'https://platform.xiaomimimo.com/console/balance',
     bigmodel: 'https://bigmodel.cn/finance-center/finance/overview',
+    stepfun: 'https://platform.stepfun.ai/step-plan',
     google: 'https://aistudio.google.com/billing'
   }
 
@@ -988,6 +1042,17 @@ export async function logoutBigModelWeb(profileOrPlatformId = 'default'): Promis
   await logoutProfileProvider(resolveProfileId(profileOrPlatformId), 'bigmodel')
 }
 
+export async function loginStepFunWeb(
+  profileOrPlatformId = 'default',
+  customUrl?: string
+): Promise<{ ok: boolean; loggedIn: boolean }> {
+  return await loginProfileProvider(resolveProfileId(profileOrPlatformId), 'stepfun', customUrl)
+}
+
+export async function logoutStepFunWeb(profileOrPlatformId = 'default'): Promise<void> {
+  await logoutProfileProvider(resolveProfileId(profileOrPlatformId), 'stepfun')
+}
+
 export async function openPlatformWindow(
   platformId: string,
   platformType?: string,
@@ -999,6 +1064,7 @@ export async function openPlatformWindow(
   if (platformType?.includes('openai')) provider = 'openai'
   else if (platformType?.includes('mimo')) provider = 'mimo'
   else if (platformType?.includes('bigmodel')) provider = 'bigmodel'
+  else if (platformType?.includes('stepfun')) provider = 'stepfun'
   else if (platformType?.includes('google')) provider = 'google'
 
   return await openProfileWindow(profileId, provider, targetUrl, title)

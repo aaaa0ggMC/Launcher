@@ -11,6 +11,8 @@ import { BigModelFetcher } from './bigmodel'
 import { BigModelWebFetcher } from './bigmodel-web'
 import { GoogleAIStudioFetcher } from './google-ai-studio'
 import { CodexFetcher } from './codex'
+import { ClaudeCodeFetcher } from './claude-code'
+import { StepFunWebFetcher } from './stepfun-web'
 import { CustomFetcher } from './custom'
 
 export * from './base'
@@ -26,6 +28,8 @@ export * from './bigmodel'
 export * from './bigmodel-web'
 export * from './google-ai-studio'
 export * from './codex'
+export * from './claude-code'
+export * from './stepfun-web'
 export * from './custom'
 
 const fetchers: Record<string, PlatformFetcher> = {
@@ -41,6 +45,8 @@ const fetchers: Record<string, PlatformFetcher> = {
   bigmodel_web: new BigModelWebFetcher(),
   google_ai_studio: new GoogleAIStudioFetcher(),
   codex: new CodexFetcher(),
+  claude_code: new ClaudeCodeFetcher(),
+  stepfun_web: new StepFunWebFetcher(),
   custom: new CustomFetcher()
 }
 

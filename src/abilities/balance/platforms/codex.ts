@@ -10,6 +10,7 @@ const log = makeLogger('balance:codex')
 const DEFAULT_AUTH_PATH = join(homedir(), '.codex', 'auth.json')
 const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
 const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage'
+const ACCOUNT_CHECK_URL = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27'
 const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 
 export interface CodexAuthData {
@@ -70,6 +71,7 @@ export function parseCodexAuth(raw: string | object): {
   refreshToken: string
   idToken?: string
   planType?: string
+  subscriptionUntil?: string
 } {
   let data: CodexAuthData
   if (typeof raw === 'string') {
@@ -91,6 +93,7 @@ export function parseCodexAuth(raw: string | object): {
   const idToken = tokens.id_token
 
   let planType: string | undefined
+  let subscriptionUntil: string | undefined
   if (idToken) {
     try {
       const parts = idToken.split('.')
@@ -102,13 +105,20 @@ export function parseCodexAuth(raw: string | object): {
         if (authClaim && typeof authClaim === 'object' && authClaim.chatgpt_plan_type) {
           planType = String(authClaim.chatgpt_plan_type)
         }
+        if (
+          authClaim &&
+          typeof authClaim === 'object' &&
+          authClaim.chatgpt_subscription_active_until
+        ) {
+          subscriptionUntil = String(authClaim.chatgpt_subscription_active_until)
+        }
       }
     } catch {
       // Ignore token parse error
     }
   }
 
-  return { accessToken, accountId, refreshToken, idToken, planType }
+  return { accessToken, accountId, refreshToken, idToken, planType, subscriptionUntil }
 }
 
 /**
@@ -186,6 +196,8 @@ export class CodexFetcher implements PlatformFetcher {
       }
     }
 
+    let fileUntil: string | undefined
+
     // 2. If missing token or accountId, attempt reading from ~/.codex/auth.json or custom path
     if (!accessToken || !accountId) {
       const authPath = (config.extra?.authJsonPath as string) || DEFAULT_AUTH_PATH
@@ -196,6 +208,7 @@ export class CodexFetcher implements PlatformFetcher {
           if (!accessToken && parsed.accessToken) accessToken = parsed.accessToken
           if (!accountId && parsed.accountId) accountId = parsed.accountId
           if (!refreshToken && parsed.refreshToken) refreshToken = parsed.refreshToken
+          if (parsed.subscriptionUntil) fileUntil = parsed.subscriptionUntil
         } catch (e) {
           log.warn('Failed to read local auth.json:', e)
         }
@@ -204,6 +217,17 @@ export class CodexFetcher implements PlatformFetcher {
 
     if (!accessToken) {
       throw new Error('未配置 Access Token，请在平台设置中填入或点击「导入 ~/.codex/auth.json」')
+    }
+
+    let claimUntil: string | undefined
+    for (const src of [config.extra?.idToken, accessToken.startsWith('{') ? accessToken : '']) {
+      if (typeof src === 'string' && src) {
+        try {
+          claimUntil = parseCodexAuth({ tokens: { id_token: src } }).subscriptionUntil
+        } catch {
+          // ignore
+        }
+      }
     }
 
     // Helper to send query
@@ -257,6 +281,62 @@ export class CodexFetcher implements PlatformFetcher {
     }
 
     const data = (await resp.json()) as WhamUsageResponse
+
+    // Subscription expiry: accounts/check (live) → id_token claim (offline, may be stale)
+    let subscription: {
+      expiresAt: number | null
+      renewsAt: number | null
+      willRenew: boolean | null
+      source: 'api' | 'token'
+    } | null = null
+    try {
+      const chk = await platformFetch(ACCOUNT_CHECK_URL, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'User-Agent': 'codex/0.149.1',
+          Accept: 'application/json',
+          ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {})
+        },
+        signal: createTimeoutSignal(timeoutMs)
+      })
+      if (chk.ok) {
+        const cj = (await chk.json()) as {
+          accounts?: Record<
+            string,
+            {
+              entitlement?: {
+                has_active_subscription?: boolean
+                expires_at?: string
+                renews_at?: string
+                cancels_at?: string | null
+              }
+            }
+          >
+        }
+        const acc = (accountId && cj.accounts?.[accountId]) || cj.accounts?.default
+        const ent = acc?.entitlement
+        if (ent?.has_active_subscription && (ent.expires_at || ent.renews_at)) {
+          const toMs = (v?: string): number | null => {
+            const t = v ? Date.parse(v) : NaN
+            return isNaN(t) ? null : t
+          }
+          subscription = {
+            expiresAt: toMs(ent.cancels_at || ent.expires_at),
+            renewsAt: toMs(ent.renews_at),
+            willRenew: !ent.cancels_at,
+            source: 'api'
+          }
+        }
+      }
+    } catch (e) {
+      log.warn('accounts/check failed, falling back to id_token claim:', e)
+    }
+    if (!subscription) {
+      const t = Date.parse(claimUntil || fileUntil || '')
+      if (!isNaN(t))
+        subscription = { expiresAt: t, renewsAt: null, willRenew: null, source: 'token' }
+    }
 
     const rate = data.rate_limit || {}
     const pw = rate.primary_window
@@ -324,6 +404,7 @@ export class CodexFetcher implements PlatformFetcher {
                 applicableCount: resetCredits.applicable_available_count ?? 0
               }
             : null,
+          subscription,
           email: data.email || null,
           accountId: data.account_id || null
         }

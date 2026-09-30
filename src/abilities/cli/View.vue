@@ -157,7 +157,7 @@ defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div class="d-flex flex-column fill-height">
+  <div class="cli-page d-flex flex-column">
     <div class="text-h6 font-weight-medium mb-1">{{ translate(uiLang, 'cli.heading') }}</div>
     <div
       class="text-caption on-surface-variant mb-3"
@@ -213,6 +213,12 @@ defineExpose({ toMarkdown })
 </template>
 
 <style scoped>
+/* 定高：宿主外壳只有 min-height，fill-height 撑不住，输出区会把整页撑出全局滚动条；
+   固定为可视区高度（100vh − appbar 64px − 容器 padding 32px），滚动只发生在输出区内部 */
+.cli-page {
+  height: calc(100vh - 96px);
+  overflow: hidden;
+}
 .gap-1 {
   gap: 4px;
 }

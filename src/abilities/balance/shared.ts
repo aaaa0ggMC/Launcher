@@ -49,6 +49,16 @@ export const SUPPORTED_PLATFORM_TYPES: SupportedPlatformType[] = [
     name: 'Codex (ChatGPT 配额)',
     defaultIcon: 'default/lightning/padding'
   },
+  {
+    type: 'claude_code',
+    name: 'Claude Code (订阅配额)',
+    defaultIcon: 'default/lightning/padding'
+  },
+  {
+    type: 'stepfun_web',
+    name: '阶跃星辰 Step Plan (网页端/免Key)',
+    defaultIcon: 'default/lightning/padding'
+  },
   { type: 'custom', name: '自定义 / New API', defaultIcon: 'gi:settings' }
 ]
 

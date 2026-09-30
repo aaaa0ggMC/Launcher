@@ -19,6 +19,8 @@ import {
   loginMimoWeb,
   logoutMimoWeb,
   loginBigModelWeb,
+  loginStepFunWeb,
+  logoutStepFunWeb,
   logoutBigModelWeb,
   openPlatformWindow,
   removePlatform,
@@ -189,7 +191,7 @@ export default [
   {
     name: 'balance.profiles.login',
     description:
-      '在指定 Profile 中登录特定厂商 (--id <profileId> --provider <openai|mimo|bigmodel|google>)',
+      '在指定 Profile 中登录特定厂商 (--id <profileId> --provider <openai|mimo|bigmodel|stepfun|google>)',
     usage: 'balance.profiles.login --id <profileId> --provider <provider> [--url <url>]',
     run: async (ctx) => {
       const id = String(ctx.named.id ?? 'default').trim()
@@ -315,6 +317,26 @@ export default [
     run: async (ctx) => {
       const id = String(ctx.named.id ?? 'default').trim()
       await logoutBigModelWeb(id)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'balance.stepfun_web.login',
+    description: '弹出原生窗口登录阶跃星辰账号 (--id <profileId|platformId> [--url <url>])',
+    usage: 'balance.stepfun_web.login [--id <profileId|platformId>] [--url <url>]',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? 'default').trim()
+      const url = ctx.named.url ? String(ctx.named.url).trim() : undefined
+      return await loginStepFunWeb(id, url)
+    }
+  },
+  {
+    name: 'balance.stepfun_web.logout',
+    description: '清除阶跃星辰授权会话 (--id <profileId|platformId>)',
+    usage: 'balance.stepfun_web.logout [--id <profileId|platformId>]',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? 'default').trim()
+      await logoutStepFunWeb(id)
       return { ok: true }
     }
   },
