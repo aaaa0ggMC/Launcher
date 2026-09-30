@@ -492,7 +492,9 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 
 ### 11.4 私有能力仓库
 
-不入主仓库的能力（`fnaf/ut/mt/rungame/bilistats/campusnet/campusinfo`）各自是**独立的私有 git 仓库** `aaaa0ggMC/launcher-<id>`（嵌套在 `src/abilities/<id>/` 里，主仓库 `.gitignore` 忽略）。改这些能力要到对应目录里 `git commit`/`git push`，不会出现在主仓库 `git status` 里；新增同类能力照此建私有仓库并写 `.gitignore`（`node_modules`、`*.log*`、`*.tsbuildinfo`）。
+不入主仓库的能力（`fnaf/ut/mt/rungame/bilistats/biliviewer/campusnet/campusinfo`）各自是**独立的私有 git 仓库** `aaaa0ggMC/launcher-<id>`（嵌套在 `src/abilities/<id>/` 里，主仓库 `.gitignore` 忽略）。改这些能力要到对应目录里 `git commit`/`git push`，不会出现在主仓库 `git status` 里；新增同类能力照此建私有仓库并写 `.gitignore`（`node_modules`、`*.log*`、`*.tsbuildinfo`）。
+
+`biliviewer`（本地 B 站缓存播放器）的播放通路：DASH `m4s` 经 MSE 按 sidx 分段直播（`player/dash.ts`）；FLV/blv 多段走 mpegts.js；浏览器解不了的编码（缓存多为 HEVC）由 ffmpeg 实时转成分片 MP4，经仅监听 `127.0.0.1`、URL 带随机 token 的 HTTP 推给 `<video>`（`stream.ts`，拖动进度 = 带 `?start=` 重新起流）。渲染端 `fetch('cockpit-audio://…')` 依赖 `src/main/ui/index.html` CSP 的 `connect-src` 含 `cockpit-audio:`（`*` 不匹配自定义协议）。弹幕不用官方播放器（它不能加载本地文件），`danmaku/` 自带 XML 解析 + Canvas 引擎。
 
 ### 11.5 「校园信息类」能力的敏感字段
 

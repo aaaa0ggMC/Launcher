@@ -20,6 +20,7 @@ src/abilities/rungame/
 
 # Bilistats 个人数据（整包 ability）
 src/abilities/bilistats/
+src/abilities/biliviewer/
 
 *.tsbuildinfo
 
