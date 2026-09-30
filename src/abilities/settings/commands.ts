@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
+import { copyFile } from 'fs/promises'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { readJson, writeJsonAtomic } from '../../main/process/util'
 import { CONFIG_JSON, SIDEBAR_ORDER_JSON } from '../../main/process/paths'
@@ -64,8 +65,21 @@ registerStartupHook(async () => {
 
 async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
   try {
-    const cfg = (await readJson<Record<string, unknown>>(CONFIG_JSON)) ?? {}
+    const existed = existsSync(CONFIG_JSON)
+    const current = await readJson<Record<string, unknown>>(CONFIG_JSON)
+    // 文件存在却读不出来（解析失败 / 瞬时读失败）时绝不能按空配置合并再写回，
+    // 否则整份配置会被这次的补丁（如只有 { language }）覆盖。
+    if (existed && current === null) {
+      throw new Error('config.json 存在但无法读取，为避免覆盖已有配置已中止保存')
+    }
+    const cfg = current ?? {}
     const merged = { ...cfg, ...patch }
+    // 写入前留一份上一版备份，误覆盖时可手动还原。
+    if (existed) {
+      await copyFile(CONFIG_JSON, `${CONFIG_JSON}.bak`).catch((e) =>
+        log.warn('config backup failed', { error: e instanceof Error ? e.message : String(e) })
+      )
+    }
     const changedKeys = Object.keys(patch).filter((k) => cfg[k] !== patch[k])
     await writeJsonAtomic(CONFIG_JSON, merged)
     for (const win of BrowserWindow.getAllWindows()) {

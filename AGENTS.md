@@ -504,3 +504,17 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 - **验证分工**：下游只做静态验收（eslint / tsc / 至多一个离线自检脚本），并如实列出「没验证的」；build、启动应用、真实调用命令、看真实界面**一律由副总监做**。brief 里明确写「不要启动应用 / 不要 pnpm build / 不要占端口」，并且**不要让下游必读本章 §11.1**；
 - 明确不许改的文件（尤其 `electron.vite.config.ts`、`tsconfig*.json`、`package.json`）；
 - 副总监自己 review 时逐项对照本章，而不是只看下游汇报。
+
+### 11.7 自检脚本与真实用户目录（曾因此覆盖了用户的 config.json）
+
+任何会读写 `~/.config/LinuxCockpit/`（含 `config.json`）的脚本——无论是自己写的还是下游写的——**运行前必须把 `HOME` 和 `XDG_CONFIG_HOME` 指到临时目录**，并且脚本自己要在最开头断言这一点，而不是依赖调用者记得设置：
+
+```ts
+// 必须在 import 任何项目模块之前执行
+const home = process.env.HOME ?? ''
+if (!home.startsWith('/tmp/'))
+  throw new Error('拒绝运行：HOME 必须是 /tmp 下的临时目录，避免改写真实用户配置')
+```
+
+- **复跑下游写的脚本之前先读它的文件头**：头部若写了「需要设置 HOME」之类的前提，照做，别直接执行。
+- 应用自身写 `config.json` 时（`config.set`）：读失败不得当空配置合并写回；每次写入前保留 `config.json.bak`。
