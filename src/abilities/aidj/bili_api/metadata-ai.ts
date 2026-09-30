@@ -40,7 +40,7 @@ export async function extractBiliMetadataAi(
 
   const systemPrompt = `You are an expert music metadata curator. Given information from a Bilibili music video (title, uploader, description, tags, lyrics/subtitles, listener comments, and bullet screen danmaku), return a JSON object with EXACTLY these fields:
 - "song_title": string — the clean, canonical song title (strip clutter like "【MV】", "【4K60帧】", "【高音质】", episode tags, etc.).
-- "artist": string — the primary music artist or singer. If it's an original song by the uploader, use the uploader or singer name; if it's a cover, credit the actual singer/producer.
+- "artist": string — the primary music artist, band, composer, or singer. If it's an original song by the uploader, use the uploader or singer name; if it's a cover, credit the actual singer/producer. Crucially: if the specific artist/singer cannot be determined (such as for anime soundtracks, OST collections, BGMs, or videos uploaded by reposter/aggregator channels like "天使动漫", "搬运工", etc.), extract and use franchise or work clues from the video title or description—such as the anime title, animation name, or game title (e.g., "Sonny Boy", "漂流少年", "葬送的芙莉莲", "原神")—as the artist. If no artist, singer, anime, or franchise name can be determined, fallback to "Unknown". Never use generic reposter/aggregator uploader names as the artist.
 - "language": string — dominant language ("Chinese", "Japanese", "English", "Instrumental", etc.).
 - "emotion": string or string[] — 1 to 3 concise mood keywords (e.g. "energetic", "melancholic", "dreamy").
 - "genre": string or string[] — 1 to 3 musical genres (e.g. "J-Pop", "Rock", "ACG", "Electronic", "Ballad").
@@ -50,7 +50,7 @@ export async function extractBiliMetadataAi(
 RULES:
 - Always respond in valid JSON format.
 - "song_title" must never be empty (fallback to a cleaned video title).
-- "artist" must never be empty (fallback to uploader).`
+- "artist" must never be empty. If the exact singer/artist is not identified, replace it with clues from the title/description such as anime/animation/franchise name; if completely unknown, fallback to "Unknown". Do NOT fallback to reposter/curator uploaders.`
 
   const resp = await client.chat.completions.create(
     {
@@ -80,7 +80,11 @@ RULES:
   }
 
   const song_title = (parsed.song_title || data.title).trim()
-  const artist = (parsed.artist || data.author).trim()
+  const rawArtist = (parsed.artist || '').trim()
+  const artist =
+    rawArtist && rawArtist.toLowerCase() !== 'null' && rawArtist.toLowerCase() !== 'undefined'
+      ? rawArtist
+      : 'Unknown'
 
   const meta: SongMeta = {
     language: parsed.language || 'Chinese',

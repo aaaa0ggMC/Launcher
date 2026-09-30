@@ -78,6 +78,13 @@ export interface PlaybackDetail {
   eqPreset?: string
   /** Current per-band EQ gains (dB), length 10. */
   eqGains?: number[]
+  /** Volbal state snapshot (web backend or config fallback). */
+  volbal?: {
+    enabled: boolean
+    method: string
+    anchor: number | null
+    baseVolume: number
+  }
 }
 
 /** State the renderer web-player engine reports up (extends PlaybackDetail). */
@@ -293,7 +300,8 @@ export class WebPlayerBackend implements PlayerBackend {
       crossfade: state.crossfade,
       crossfadeSeconds: state.crossfadeSeconds,
       eqPreset: this.eqPreset,
-      eqGains: state.eqGains
+      eqGains: state.eqGains,
+      volbal: this.getVolbalState()
     }
     if (typeof state.playbackRate === 'number') this.playbackRate = state.playbackRate
     if (typeof state.crossfade === 'boolean') this.crossfadeEnabled = state.crossfade

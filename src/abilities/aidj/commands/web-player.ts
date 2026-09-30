@@ -48,6 +48,9 @@ export const webPlayerCommands: CommandSpec[] = [
     enabled: webMode,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
+      if (!backend.isConnected) {
+        await backend.connect()
+      }
       if (ctx.named.enabled === undefined && ctx.named.method === undefined) {
         return { ok: true, ...backend.getVolbalState() }
       }

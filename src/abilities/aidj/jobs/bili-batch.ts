@@ -1,17 +1,20 @@
+import { join } from 'path'
 import { registerJobHandler, type JobControl } from '../../../main/process/background-tasks'
-import { loadAidjConfig } from '../services/config'
+import { loadAidjConfig, getAidjDir } from '../services/config'
 import { invalidateLibrary, scanMusicFiles } from '../services/library'
 import { getBiliDefaultSlotName } from '../services/metadata-slots'
 import { syncSlotsAndBroadcast } from '../commands/metadata-slots'
 import { state } from '../commands/shared'
 import { BiliClient, BiliCredential } from '../bili_api'
 import { processBiliItem, type BiliImportItemSpec } from './bili-import'
+import { checkBiliItemDownloaded } from '../services/bili-manifest'
 
 export interface BiliBatchDownloadArgs {
   items: BiliImportItemSpec[]
   folder?: string
   audioOnly?: boolean
   slotName?: string
+  skipExisting?: boolean
 }
 
 registerJobHandler(
@@ -55,7 +58,12 @@ registerJobHandler(
     }
 
     const targetSlot = args.slotName || (await getBiliDefaultSlotName())
-    control.pushLine(`开始批量下载 ${items.length} 个视频/音频项目，目标元数据槽位: ${targetSlot}`)
+    const skipExisting = args.skipExisting !== false
+    control.pushLine(
+      `开始批量下载 ${items.length} 个视频/音频项目，目标元数据槽位: ${targetSlot}${
+        skipExisting ? ' (已开启智能跳过已下载)' : ''
+      }`
+    )
 
     const { credential, sourcePath } = BiliCredential.resolve(
       config.preferences?.bili_credential_path
@@ -68,6 +76,7 @@ registerJobHandler(
     const client = new BiliClient({ credential })
 
     let successCount = 0
+    let skippedCount = 0
     let failedCount = 0
 
     for (let i = 0; i < items.length; i++) {
@@ -79,6 +88,25 @@ registerJobHandler(
 
       const item = items[i]
       const indexNum = i + 1
+
+      // Fast check if already downloaded to bypass remote metadata fetch & AI calls
+      const baseMusicFolder =
+        item.folder || args.folder || config.music_folders?.[0] || join(getAidjDir(), 'media')
+      const targetFolder = join(baseMusicFolder, 'Bilibili', item.bvid)
+
+      if (skipExisting) {
+        const check = await checkBiliItemDownloaded(targetFolder, item)
+        if (check.exists && check.cleanBase) {
+          control.pushLine(
+            `\n----------------------------------------\n[${indexNum}/${items.length}] ⏭️ 跳过已下载项目: 《${check.cleanBase}》`
+          )
+          skippedCount++
+          const overallPct = Math.round(((i + 1) / items.length) * 100)
+          control.setProgress(overallPct)
+          continue
+        }
+      }
+
       control.pushLine(
         `\n----------------------------------------\n[${indexNum}/${items.length}] 正在处理: ${item.title || item.bvid}`
       )
@@ -87,7 +115,8 @@ registerJobHandler(
         ...item,
         folder: item.folder || args.folder,
         audioOnly: item.audioOnly ?? args.audioOnly,
-        slotName: item.slotName || targetSlot
+        slotName: item.slotName || targetSlot,
+        skipExisting
       }
 
       try {
@@ -104,10 +133,17 @@ registerJobHandler(
         )
 
         if (res.ok) {
-          successCount++
-          control.pushLine(
-            `✅ [${indexNum}/${items.length}] 完成: 《${res.cleanBase || res.title}》`
-          )
+          if (res.skipped) {
+            skippedCount++
+            control.pushLine(
+              `⏭️ [${indexNum}/${items.length}] 跳过: 《${res.cleanBase || res.title}》`
+            )
+          } else {
+            successCount++
+            control.pushLine(
+              `✅ [${indexNum}/${items.length}] 完成: 《${res.cleanBase || res.title}》`
+            )
+          }
         } else {
           failedCount++
           control.pushLine(
@@ -131,8 +167,16 @@ registerJobHandler(
     } catch {
       /* ignore */
     }
+
+    const summaryParts = [`成功 ${successCount} 个`]
+    if (skippedCount > 0) {
+      summaryParts.push(`跳过 ${skippedCount} 个已存在项目`)
+    }
+    if (failedCount > 0) {
+      summaryParts.push(`失败 ${failedCount} 个`)
+    }
     control.pushLine(
-      `\n🎉 批量下载任务完成！成功 ${successCount} 个，失败 ${failedCount} 个。元数据已更新至 ${targetSlot}。`
+      `\n🎉 批量下载任务完成！${summaryParts.join('，')}。元数据已更新至 ${targetSlot}。`
     )
     control.setProgress(100)
     control.finish('exited')

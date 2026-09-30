@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, inject, type Ref } from 'vue'
 import { translate } from '../../../main/ui/i18n'
 import type { ResolvedBiliItem } from '../commands/metadata-slots'
 import type { MetadataSlotInfo } from '../services/metadata-slots'
@@ -18,10 +18,21 @@ const resolvedItems = ref<ResolvedBiliItem[]>([])
 
 // Download options
 const audioOnly = ref(false)
+const skipExisting = ref(true)
 const selectedSlot = ref('Bilibili-Current.metadata')
 const slotOptions = ref<{ title: string; value: string }[]>([
   { title: 'Bilibili-Current.metadata (B站专用)', value: 'Bilibili-Current.metadata' }
 ])
+
+const downloadedCount = computed(() => resolvedItems.value.filter((it) => it.isDownloaded).length)
+const countChipText = computed(() => {
+  const total = resolvedItems.value.length
+  const d = downloadedCount.value
+  if (d > 0) {
+    return `${total} 项 (${d} 项已下载)`
+  }
+  return `${total} 项待下载`
+})
 
 // Submission & feedback state
 const downloading = ref(false)
@@ -139,7 +150,8 @@ async function handleConfirmDownload(): Promise<void> {
       description: `批量下载 ${targetItems.length} 个 Bilibili 音视频并同步元数据`,
       items: targetItems,
       audioOnly: audioOnly.value,
-      slotName: selectedSlot.value
+      slotName: selectedSlot.value,
+      skipExisting: skipExisting.value
     })) as { ok?: boolean; task?: { id?: string }; error?: string }
 
     if (res?.ok || res?.task) {
@@ -187,7 +199,7 @@ onMounted(() => {
         variant="flat"
         class="count-chip"
       >
-        {{ `${resolvedItems.length} 项待下载` }}
+        {{ countChipText }}
       </v-chip>
     </div>
 
@@ -229,7 +241,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Options Toolbar (Slot Switcher & Audio/Video) -->
+    <!-- Options Toolbar (Slot Switcher & Audio/Video & Skip Existing) -->
     <div class="bili-options-box px-1 py-2 d-flex align-center ga-3 flex-wrap">
       <!-- User can switch metadata slot -->
       <div class="slot-select-wrap flex-grow-1 min-w-0">
@@ -244,6 +256,18 @@ onMounted(() => {
           :label="t('aidj.bili.slot_label', '元数据写入槽位')"
           prepend-inner-icon="mdi-database-outline"
           class="slot-select"
+        />
+      </div>
+
+      <!-- Skip already downloaded toggle -->
+      <div class="d-flex align-center ga-2 flex-shrink-0">
+        <v-switch
+          v-model="skipExisting"
+          density="compact"
+          color="primary"
+          hide-details
+          :label="t('aidj.bili.skip_existing', '跳过已下载')"
+          class="skip-switch"
         />
       </div>
 
@@ -325,15 +349,31 @@ onMounted(() => {
               </span>
             </div>
 
-            <!-- Multi-P Badge -->
-            <div v-if="it.isMultiPart" class="d-flex align-center ga-2 mt-1">
+            <!-- Multi-P Badge & Downloaded Badge -->
+            <div
+              v-if="it.isMultiPart || it.isDownloaded"
+              class="d-flex align-center ga-2 mt-1 flex-wrap"
+            >
               <v-chip
+                v-if="it.isMultiPart"
                 size="x-small"
                 color="secondary"
                 variant="tonal"
                 class="part-chip font-weight-medium"
               >
                 {{ `P${it.page}: ${it.partTitle || '分P'}` }}
+              </v-chip>
+
+              <v-chip
+                v-if="it.isDownloaded"
+                size="x-small"
+                color="success"
+                variant="tonal"
+                class="downloaded-chip font-weight-medium"
+                :title="it.downloadedFile ? `已存在: ${it.downloadedFile}` : undefined"
+              >
+                <v-icon start size="12">mdi-check-circle-outline</v-icon>
+                {{ t('aidj.bili.already_downloaded', '已下载') }}
               </v-chip>
             </div>
 

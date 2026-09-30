@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
 import OpenAI from 'openai'
 import { registerJobHandler, type JobControl } from '../../../main/process/background-tasks'
@@ -25,6 +25,7 @@ import {
   downloadBiliMedia,
   extractBiliMetadataAi
 } from '../bili_api'
+import { checkBiliItemDownloaded, recordBiliDownload } from '../services/bili-manifest'
 
 const log = makeLogger('aidj-bili-import')
 
@@ -41,6 +42,7 @@ export interface BiliImportItemSpec {
   folder?: string
   audioOnly?: boolean
   slotName?: string
+  skipExisting?: boolean
 }
 
 export interface BiliImportArgs extends BiliImportItemSpec {}
@@ -61,7 +63,7 @@ export async function processBiliItem(
   control: JobControl,
   abortSignal: AbortSignal,
   onProgress?: (pct: number) => void
-): Promise<{ ok: boolean; title: string; cleanBase?: string; error?: string }> {
+): Promise<{ ok: boolean; title: string; cleanBase?: string; error?: string; skipped?: boolean }> {
   if (abortSignal.aborted) {
     return { ok: false, title: item.title || item.bvid, error: 'Cancelled' }
   }
@@ -71,6 +73,18 @@ export async function processBiliItem(
     const err = `无法解析 BVID: "${item.bvid}"`
     control.pushLine(`错误: ${err}`, 'stderr')
     return { ok: false, title: item.title || item.bvid, error: err }
+  }
+
+  const baseMusicFolder = item.folder || config.music_folders?.[0] || join(getAidjDir(), 'media')
+  const targetFolder = join(baseMusicFolder, 'Bilibili', bvid)
+
+  // Fast pre-check before remote API and AI calls if item info is already populated
+  if (item.skipExisting !== false) {
+    const existing = await checkBiliItemDownloaded(targetFolder, item)
+    if (existing.exists && existing.cleanBase) {
+      control.pushLine(`⏭️ 项目已存在于本地，跳过下载: 《${existing.cleanBase}》`)
+      return { ok: true, title: item.title || bvid, cleanBase: existing.cleanBase, skipped: true }
+    }
   }
 
   // 1. Fetch video metadata
@@ -110,6 +124,22 @@ export async function processBiliItem(
   control.pushLine(
     `目标: ${displayTitle} (UP主: ${videoDetail.author}, 时长: ${Math.floor(videoDetail.duration / 60)}分${videoDetail.duration % 60}秒)`
   )
+
+  // Secondary check once targetCid and displayTitle are confirmed
+  if (item.skipExisting !== false) {
+    const existing = await checkBiliItemDownloaded(targetFolder, {
+      bvid,
+      cid: targetCid,
+      page: item.page,
+      partTitle: item.partTitle,
+      title: displayTitle,
+      isMultiPart: Boolean(item.page && item.page > 0)
+    })
+    if (existing.exists && existing.cleanBase) {
+      control.pushLine(`⏭️ 项目已存在于本地，跳过下载: 《${existing.cleanBase}》`)
+      return { ok: true, title: displayTitle, cleanBase: existing.cleanBase, skipped: true }
+    }
+  }
 
   // 2. Fetch subtitles
   control.pushLine('正在拉取官方/AI 字幕轨道...')
@@ -162,9 +192,11 @@ export async function processBiliItem(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     control.pushLine(`Metadata AI 分析失败: ${error}，将使用视频原标题`, 'stderr')
+    const titleMatch = displayTitle.match(/[『【「[](.*?)[』】」\]]/)
+    const fallbackArtist = titleMatch ? titleMatch[1].trim() : 'Unknown'
     aiResult = {
       song_title: displayTitle,
-      artist: videoDetail.author,
+      artist: fallbackArtist,
       meta: {
         language: 'Chinese',
         emotion: 'pop',
@@ -178,8 +210,6 @@ export async function processBiliItem(
   if (abortSignal.aborted) return { ok: false, title: displayTitle, error: 'Cancelled' }
 
   // 5. Target directory determination (folders[0]/Bilibili/<bvid>/) & distinct filename
-  const baseMusicFolder = item.folder || config.music_folders?.[0] || join(getAidjDir(), 'media')
-  const targetFolder = join(baseMusicFolder, 'Bilibili', bvid)
   await mkdir(targetFolder, { recursive: true })
 
   let baseTitle = `${aiResult.artist} - ${aiResult.song_title}`
@@ -191,10 +221,42 @@ export async function processBiliItem(
   let cleanBase = sanitizeFileName(baseTitle) || bvid
   const mediaExt = item.audioOnly ? '.m4a' : '.mp4'
   let targetMediaFile = join(targetFolder, `${cleanBase}${mediaExt}`)
-  // If target file exists and does not already include bvid, avoid collision
-  if (existsSync(targetMediaFile) && !cleanBase.includes(bvid)) {
-    cleanBase = `${cleanBase} [${bvid}]`
-    targetMediaFile = join(targetFolder, `${cleanBase}${mediaExt}`)
+
+  // If target file exists and skipExisting is enabled, skip downloading the stream
+  if (existsSync(targetMediaFile)) {
+    try {
+      const s = await stat(targetMediaFile)
+      if (s.size > 1024) {
+        if (item.skipExisting !== false) {
+          control.pushLine(`⏭️ 目标文件已存在，跳过流下载: ${cleanBase}${mediaExt}`)
+          await recordBiliDownload(targetFolder, {
+            bvid,
+            cid: targetCid,
+            page: item.page,
+            partTitle: item.partTitle,
+            cleanBase,
+            mediaFile: `${cleanBase}${mediaExt}`,
+            fileSize: s.size,
+            downloadedAt: Date.now()
+          })
+          const targetSlot = item.slotName || (await getBiliDefaultSlotName())
+          try {
+            await appendMetadata(cleanBase, aiResult.meta, targetSlot)
+          } catch {
+            /* ignore */
+          }
+          return { ok: true, title: displayTitle, cleanBase, skipped: true }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Avoid collision if user explicitly requests re-download
+    if (!cleanBase.includes(bvid)) {
+      cleanBase = `${cleanBase} [${bvid}]`
+      targetMediaFile = join(targetFolder, `${cleanBase}${mediaExt}`)
+    }
   }
   const targetLrcFile = join(targetFolder, `${cleanBase}.lrc`)
   const targetDanmakuFile = join(targetFolder, `${cleanBase}.danmaku.xml`)
@@ -295,6 +357,23 @@ export async function processBiliItem(
     log.warn('Failed to append metadata', { error: String(e) })
   }
 
+  // 10. Record in manifest
+  try {
+    const s = await stat(targetMediaFile)
+    await recordBiliDownload(targetFolder, {
+      bvid,
+      cid: targetCid,
+      page: item.page,
+      partTitle: item.partTitle,
+      cleanBase,
+      mediaFile: `${cleanBase}${mediaExt}`,
+      fileSize: s.size,
+      downloadedAt: Date.now()
+    })
+  } catch {
+    /* ignore */
+  }
+
   return { ok: true, title: displayTitle, cleanBase }
 }
 
@@ -359,7 +438,12 @@ registerJobHandler(
     } catch {
       /* ignore */
     }
-    control.pushLine(`🎉 导入成功！《${res.cleanBase || res.title}》现已加入曲库。`)
+
+    if (res.skipped) {
+      control.pushLine(`🎉 《${res.cleanBase || res.title}》已存在于本地，已跳过下载。`)
+    } else {
+      control.pushLine(`🎉 导入成功！《${res.cleanBase || res.title}》现已加入曲库。`)
+    }
     control.setProgress(100)
     control.finish('exited')
   }

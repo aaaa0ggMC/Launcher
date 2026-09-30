@@ -12,7 +12,9 @@ import {
   setBiliDefaultSlot
 } from '../services/metadata-slots'
 import { recomputeActiveLibraryMetadata, scanMusicFiles } from '../services/library'
-import { loadAidjConfig } from '../services/config'
+import { loadAidjConfig, getAidjDir } from '../services/config'
+import { join } from 'path'
+import { checkBiliItemDownloaded } from '../services/bili-manifest'
 import { BiliClient, BiliCredential, parseAllBvids, getVideoDetail } from '../bili_api'
 import type { SongMeta } from '../types'
 import { state, log } from './shared'
@@ -30,6 +32,8 @@ export interface ResolvedBiliItem {
   duration: number
   pic: string
   tags: string[]
+  isDownloaded?: boolean
+  downloadedFile?: string
 }
 
 export async function syncSlotsAndBroadcast(recomputed?: Map<string, SongMeta>): Promise<{
@@ -249,6 +253,21 @@ export const metadataSlotsCommands: CommandSpec[] = [
 
       if (items.length === 0 && errors.length > 0) {
         return { ok: false, error: `解析失败: ${errors.join('; ')}` }
+      }
+
+      // Check whether items are already downloaded
+      const baseMusicFolder = config?.music_folders?.[0] || join(getAidjDir(), 'media')
+      for (const it of items) {
+        const targetFolder = join(baseMusicFolder, 'Bilibili', it.bvid)
+        try {
+          const check = await checkBiliItemDownloaded(targetFolder, it)
+          if (check.exists) {
+            it.isDownloaded = true
+            it.downloadedFile = check.cleanBase
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
       return {

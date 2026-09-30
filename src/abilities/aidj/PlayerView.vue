@@ -22,7 +22,7 @@ const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 // -- state (shared commands + unified player-state, works in dbus & web) ------
-const mode = ref<'dbus' | 'web'>('dbus')
+const mode = ref<'dbus' | 'web'>('web')
 const status = ref('Unknown')
 const track = ref('')
 const positionMs = ref(0)
@@ -85,7 +85,11 @@ function formatMs(ms: number | null | undefined): string {
 async function pollMode(): Promise<void> {
   try {
     const r = (await window.cockpit.command('aidj.status')) as Record<string, unknown>
-    if (r?.mode === 'dbus' || r?.mode === 'web') mode.value = r.mode
+    if (r?.mode === 'dbus' || r?.mode === 'web') {
+      const changed = mode.value !== r.mode
+      mode.value = r.mode
+      if (changed && r.mode === 'web') void pollVolbal()
+    }
     if (r?.status && typeof r.status === 'object') {
       const s = r.status as Record<string, unknown>
       if (typeof s.status === 'string') status.value = s.status
@@ -118,6 +122,9 @@ async function pollState(): Promise<void> {
       if (typeof s.crossfade === 'boolean') crossfade.value = s.crossfade
       if (typeof s.crossfadeSeconds === 'number') crossfadeSeconds.value = s.crossfadeSeconds
       if (typeof s.eqPreset === 'string') eqActiveId.value = s.eqPreset
+      if (s.volbal && typeof s.volbal === 'object') {
+        applyVolbal({ ok: true, ...(s.volbal as Record<string, unknown>) })
+      }
       const url = String(s.url ?? '')
       if (url.startsWith('file://')) {
         const path = decodeURIComponent(url.slice('file://'.length))
@@ -509,7 +516,7 @@ function stopSpectrum(): void {
 function startPolling(): void {
   if (!modeTimer) modeTimer = setInterval(pollMode, 2000)
   if (!stateTimer) stateTimer = setInterval(pollState, 1000)
-  void pollMode()
+  void pollMode().then(() => pollVolbal())
   void pollState()
   void pollVolbal()
   void pollWebRemote()
@@ -519,7 +526,11 @@ function startPolling(): void {
   if (window.cockpit?.on && !modeUnsub) {
     modeUnsub = window.cockpit.on('cockpit:aidj-mode', (event: unknown) => {
       const ev = event as Record<string, unknown>
-      if (ev?.mode === 'dbus' || ev?.mode === 'web') mode.value = ev.mode
+      if (ev?.mode === 'dbus' || ev?.mode === 'web') {
+        const changed = mode.value !== ev.mode
+        mode.value = ev.mode
+        if (changed && ev.mode === 'web') void pollVolbal()
+      }
     })
   }
 }

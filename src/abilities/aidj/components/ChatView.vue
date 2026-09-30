@@ -458,17 +458,10 @@ let modeUnsub: (() => void) | null = null
 let slotsUnsub: (() => void) | null = null
 
 const visibleStatus = computed(() => {
-  return (
-    Object.entries(sbOrder.value)
-      .filter(([, v]) => v > 0)
-      // Volbal is dbus/continuous-only: in web mode the built-in player manages
-      // its own loudness balance live (PlayerView's bottom chip), and the shared
-      // `dynamic_balance_volume` toggle here only writes config — it can't apply
-      // to the running engine, so it would show a state that doesn't hold.
-      .filter(([k]) => !(mode.value === 'web' && k === 'volbal'))
-      .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
-      .map(([k]) => k)
-  )
+  return Object.entries(sbOrder.value)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1))
+    .map(([k]) => k)
 })
 
 async function toggleVolbal(): Promise<void> {
@@ -479,17 +472,26 @@ async function toggleVolbal(): Promise<void> {
   } else if (method === 'lufs') {
     next = { enabled: true, method: 'linear' }
   } else {
-    next = { enabled: false, method: 'linear' }
+    next = { enabled: false, method: 'lufs' }
   }
-  await window.cockpit.command('aidj.update-config', {
-    path: 'preferences.dynamic_balance_volume',
-    value: next.enabled
-  })
-  await window.cockpit.command('aidj.update-config', {
-    path: 'preferences.sound_adjust_method',
-    value: next.method
-  })
-  await window.cockpit.command('aidj.save-config')
+  if (mode.value === 'web') {
+    await window.cockpit
+      .command('aidj.player-volbal', {
+        enabled: next.enabled,
+        method: next.method
+      })
+      .catch(() => {})
+  } else {
+    await window.cockpit.command('aidj.update-config', {
+      path: 'preferences.dynamic_balance_volume',
+      value: next.enabled
+    })
+    await window.cockpit.command('aidj.update-config', {
+      path: 'preferences.sound_adjust_method',
+      value: next.method
+    })
+    await window.cockpit.command('aidj.save-config')
+  }
   sbVolbal.value = next
   await pollStatus()
 }

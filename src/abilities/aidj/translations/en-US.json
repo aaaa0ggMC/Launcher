@@ -573,5 +573,7 @@
   "aidj.bili.empty_hint": "Paste BV/AV IDs and click \"Resolve Videos\". Supports multi-part videos.",
   "aidj.bili.clear_all": "Clear All",
   "aidj.bili.remove_item": "Remove item",
-  "aidj.bili.confirm_download": "Confirm Download ({n} items)"
+  "aidj.bili.confirm_download": "Confirm Download ({n} items)",
+  "aidj.bili.skip_existing": "Skip downloaded",
+  "aidj.bili.already_downloaded": "Downloaded"
 }

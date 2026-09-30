@@ -234,12 +234,14 @@ watch(playing, (v) => {
   }
 })
 
+const hasLyrics = computed(() => Boolean(lrcLines.value.length || plainLyric.value))
+
 /** No lyric text → the card backdrop goes fully transparent. When
  *  `ignore_empty_lines` is off, an instrumental gap (empty current line) also
  *  hides the window fully transparent. */
 const cardEmpty = computed(() => {
   if (lyricsCfg.value.ignore_empty_lines === false && inGap.value) return true
-  return !(lrcLines.value.length || plainLyric.value)
+  return !hasLyrics.value
 })
 
 // -- right-click context menu (lock) ----------------------------------------
@@ -596,7 +598,13 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-else class="lyrics-line is-current lyrics-empty">
-              {{ hasTrack ? t('aidj.lyrics_page.noLyric') : t('aidj.lyrics_page.waiting') }}
+              {{
+                hasTrack
+                  ? hasLyrics
+                    ? ''
+                    : t('aidj.lyrics_page.noLyric')
+                  : t('aidj.lyrics_page.waiting')
+              }}
             </div>
           </template>
         </div>
@@ -752,6 +760,7 @@ onBeforeUnmount(() => {
   font-size: calc(var(--lyr-size) * 0.6);
   font-weight: 500;
   opacity: 0.5;
+  min-height: calc(var(--lyr-size) * var(--lyr-line-height));
 }
 /* Timestamp-less lyrics: show the whole text as a bounded, scrollable block
    (the window height is fixed, so cap it and scroll internally). */

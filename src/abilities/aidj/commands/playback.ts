@@ -9,7 +9,7 @@ import {
   getCurrentDbusTrackInfo,
   getCoverArt
 } from '../service'
-import { getActiveBackend, getPlayerMode, setPlayerMode } from '../player-backend'
+import { getActiveBackend, getPlayerMode, setPlayerMode, WebPlayerBackend } from '../player-backend'
 import { state, dbusMode } from './shared'
 
 export const playbackCommands: CommandSpec[] = [
@@ -104,7 +104,12 @@ export const playbackCommands: CommandSpec[] = [
       // its own status model.
       const backend = await getActiveBackend()
       if (backend?.mode === 'web') {
-        return { ...base, status: await backend.getStatus() }
+        const volState = backend instanceof WebPlayerBackend ? backend.getVolbalState() : undefined
+        return {
+          ...base,
+          volbal: volState ? { enabled: volState.enabled, method: volState.method } : base.volbal,
+          status: await backend.getStatus()
+        }
       }
       let dbus = getDbusManager()
       if (!dbus && state.config) dbus = await initDbusManager(state.config)
