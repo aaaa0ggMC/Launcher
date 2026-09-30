@@ -305,6 +305,8 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 
 ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时回落 game-icon-pack，再不行才用 emoji。
 
+> **新增/改动能力图标：一律用单色 SVG（`gi:<name>` 或 `default/<name>/padding`），不要用 emoji。** 侧栏其余图标都是跟随主题色的单色 SVG，彩色 emoji 会在侧栏里格外突兀（曾因此被打回）。先 `find src/main/ui/assets/game-icon-pack/svg/padding -iname '*关键词*'` 确认文件存在，再写进 `icon`；写完看一眼侧栏效果，别只信 typecheck。
+
 ### 主题 / 配色方案
 
 - 每个配色方案是一个独立 JSON（`src/main/ui/color_schemes/*.json`），`color_schemes/index.ts` glob 注册并构建 Vuetify `ThemeDefinition`（`buildThemeDefinitions`）。
@@ -460,3 +462,43 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 > 新键必须同步添加到对应模块的 `translations/zh.json` 和 `translations/en-US.json`。
 > 主进程中的字符串使用 `src/main/process/i18n.ts` 的 `t(key, fallback?)` / `te(key, vars)`。
 > apps.json 的 `name`/`description`/`alias` 默认生成时至少包含 `zh` 和 `en_US` 两个语言。
+
+## 11. 验证与协作规范（吃过亏的教训）
+
+### 11.1 「做完」的定义：必须真的跑起来
+
+`pnpm typecheck && pnpm lint && pnpm build` 通过 **只说明能编译，不说明能用**。凡是新增/改动能力、引入第三方依赖、改 `electron.vite.config.ts`，都必须**启动应用**验证，至少做到：
+
+1. `pnpm build` 后 `pnpm start`（或 `electron . --remote-debugging-port=9333`）能起来，主进程日志无 `App threw an error during load`；
+2. 新能力的侧栏条目出现，图标与其他条目风格一致；
+3. 至少调用一次新命令（页面里 `window.cockpit.command('<ability>.<cmd>')` 或 CLI），确认返回的是预期结果/预期错误码，而不是异常；
+4. UI 改动看真实界面，不只看代码。
+
+验证时用临时 `HOME`/`XDG_CONFIG_HOME` 隔离，避免污染真实 `~/.config/LinuxCockpit`；不要用 `pkill -f <含自身命令行的模式>`（会把自己的 shell 一起杀掉），改用 `pgrep` 取 PID 再 `kill`。
+
+### 11.2 主进程内联第三方 CJS 包的坑
+
+能力专属依赖会被内联进 `out/main/index.js`（见 §2.2）。某些 CJS 包（如 hustpass 依赖的 `sm-crypto`）内联后会经 rollup 的 `commonjsRequire` 桩函数动态引用 Node 内置模块，**桩函数直接 throw，应用一加载就崩**，且构建、typecheck、lint 全部不报错。`electron.vite.config.ts` 已用 `cockpit-commonjs-require-shim` 插件把桩函数换成真 `require`；引入新依赖后必须按 §11.1 启动验证。
+
+### 11.3 源码型 SDK 的接入模式（hustnet / hustpass）
+
+这类包是带 `.ts` 扩展名 import 的源码：
+
+- typecheck 走能力目录里的本地声明（`hustnet-api.d.ts` / `hustpass-api.d.ts`，`tsconfig.node.json` 的 `paths`），运行时由 `electron.vite.config.ts` 的 `resolve.alias` 指回真包；
+- 渲染端 tsconfig（`tsconfig.web.json`）必须 `exclude` 会 import 该 SDK 的主进程文件（`sections.ts` 等）与 `.d.ts`，否则 vue-tsc 会跟进 SDK 源码报 TS5097；
+- 打包后 `import.meta.url` 失效：SDK 的子进程/资源路径要在构建期解析并经 `define` 注入。
+
+### 11.4 私有能力仓库
+
+不入主仓库的能力（`fnaf/ut/mt/rungame/bilistats/campusnet/campusinfo`）各自是**独立的私有 git 仓库** `aaaa0ggMC/launcher-<id>`（嵌套在 `src/abilities/<id>/` 里，主仓库 `.gitignore` 忽略）。改这些能力要到对应目录里 `git commit`/`git push`，不会出现在主仓库 `git status` 里；新增同类能力照此建私有仓库并写 `.gitignore`（`node_modules`、`*.log*`、`*.tsbuildinfo`）。
+
+### 11.5 「校园信息类」能力的敏感字段
+
+涉及个人数据（学号、姓名、手机、邮箱、卡号、IP/MAC、余额、金额、成绩分数）的界面：**默认以 `•` 遮盖（长度固定 6–16 位，不泄露真实长度），点击该字段切换显示**；「复制为 Markdown」等导出也要遵守当前遮盖状态；密码类只写不回显，落盘走 `src/main/process/encrypt.ts`。
+
+### 11.6 给下游模型派活时 brief 必须包含
+
+- **AGENTS.md 相关章节与 DESIGN.md 的必读要求**，尤其：图标规则（§9「图标」）、i18n 规则（§10）、排版规范；
+- **验证不止 typecheck**：注明「不要只报告 typecheck/lint 通过」，要求汇报界面/命令的实际效果；启动验证由副总监亲自做；
+- 明确不许改的文件（尤其 `electron.vite.config.ts`、`tsconfig*.json`、`package.json`）；
+- 副总监自己 review 时逐项对照本章，而不是只看下游汇报。
