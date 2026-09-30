@@ -252,6 +252,14 @@ html.motion-off *::after {
   min-width: 0 !important;
 }
 
+/* Same for the vertical axis: a flex column child with `overflow` must be able
+   to shrink below its content height, otherwise it just grows and the scroll
+   container never engages (whole page scrolls / content is clipped by the
+   window). Vuetify ships no min-h-0 either. */
+.min-h-0 {
+  min-height: 0 !important;
+}
+
 /* ---------------------------------------------------------------------------
  * Page transition — animated ability switching (out-in). Controlled by the
  * animations config in 设置 → 外观 → 界面动画: `fade` | `slide` | off (empty

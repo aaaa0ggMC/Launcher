@@ -527,3 +527,5 @@ if (!home.startsWith('/tmp/'))
 - 表格：装不下（列数 × ~120px）时转「一行一张小卡」的堆叠布局（`DataTable.vue`）。
 - 周课表：容器 < 520 时转「按天分组的日程列表」（`TimetableGrid.vue`）。
 - 主从布局优于「一屏塞满卡片」：一次只看一个区块，信息宁可精简也不要靠滚动补全。
+- **用到的工具类必须先确认存在**：`min-h-0` 曾经根本没定义（全局只有 `.min-w-0`），导致所有 flex 容器按内容撑高、滚动容器不生效、内容被窗口裁掉，且 typecheck / lint / build 都不报错。现已在 `global.css` 补上；新增类似的工具类（`min-h-*` 等）前先 `grep` 确认。
+- **看布局要量，不要猜**：需要看真实布局又不想联网时，启动应用时把 `http_proxy` / `https_proxy` 指向 `http://127.0.0.1:9`（必然拒绝连接，不会有流量发出），用 CDP 读 `getBoundingClientRect` / 截图，并用 `Emulation.setDeviceMetricsOverride` 模拟窄宽度（详见 §11.1 的隔离要求）。
