@@ -15,6 +15,7 @@
     "src/abilities/*/jobs/**",
     "src/abilities/*/commands/**",
     "src/abilities/campusinfo/sections.ts",
+    "src/abilities/campusinfo/sections-extra/**",
     "src/abilities/campusinfo/hustpass-api.d.ts"
   ],
   "compilerOptions": {

@@ -465,7 +465,9 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 
 ## 11. 验证与协作规范（吃过亏的教训）
 
-### 11.1 「做完」的定义：必须真的跑起来
+### 11.1 「做完」的定义：必须真的跑起来（由主 agent / 副总监执行）
+
+> 本节的启动验证是**主 agent（副总监）**的职责。派给下游模型（opencode 等）的工作包**只做静态验收**（eslint / tsc / 一个离线自检脚本），不要求也不应该让它们 build、启动应用、开调试端口——并行包共享同一工作区与桌面，会互相抢端口、在用户桌面上弹窗。
 
 `pnpm typecheck && pnpm lint && pnpm build` 通过 **只说明能编译，不说明能用**。凡是新增/改动能力、引入第三方依赖、改 `electron.vite.config.ts`，都必须**启动应用**验证，至少做到：
 
@@ -499,6 +501,6 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 ### 11.6 给下游模型派活时 brief 必须包含
 
 - **AGENTS.md 相关章节与 DESIGN.md 的必读要求**，尤其：图标规则（§9「图标」）、i18n 规则（§10）、排版规范；
-- **验证不止 typecheck**：注明「不要只报告 typecheck/lint 通过」，要求汇报界面/命令的实际效果；启动验证由副总监亲自做；
+- **验证分工**：下游只做静态验收（eslint / tsc / 至多一个离线自检脚本），并如实列出「没验证的」；build、启动应用、真实调用命令、看真实界面**一律由副总监做**。brief 里明确写「不要启动应用 / 不要 pnpm build / 不要占端口」，并且**不要让下游必读本章 §11.1**；
 - 明确不许改的文件（尤其 `electron.vite.config.ts`、`tsconfig*.json`、`package.json`）；
 - 副总监自己 review 时逐项对照本章，而不是只看下游汇报。
