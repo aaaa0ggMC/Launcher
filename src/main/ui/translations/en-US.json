@@ -1,8 +1,8 @@
 {
   "app.brandSub": "System Control Center",
-  "search.placeholder": "Search abilities / app aliases",
-  "search.appsHeader": "Apps",
-  "search.noMatch": "No matching apps",
+  "search.placeholder": "Search abilities / apps / tools",
+  "search.appsHeader": "Quick launch",
+  "search.noMatch": "No matching quick actions",
   "appbar.selectTitle": "Select an ability",
   "appbar.selectText": "Pick from the sidebar, or use the top search box.",
   "quit.title": "Background tasks still running",

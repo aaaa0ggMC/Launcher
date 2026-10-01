@@ -52,6 +52,11 @@ export function listCommands(): CommandSpec[] {
   return [...commands.values()]
 }
 
+/** Logging follows the command's data-retention policy, independent of caller origin. */
+export function commandLogsArgs(name: string): boolean {
+  return commands.get(name)?.logArgs !== false
+}
+
 /**
  * Agent-only privacy middleware around a command run. UI / CLI origins pass
  * straight through. For agents: `agent: 'deny'` refuses, `requires` guards

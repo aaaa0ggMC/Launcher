@@ -1,0 +1,32 @@
+{
+  "name": "@cockpit/toolbox",
+  "private": true,
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "diff": "^8.0.2",
+    "docx": "^9.5.1",
+    "figlet": "^1.8.2",
+    "jimp": "^1.6.0",
+    "mammoth": "^1.10.0",
+    "marked": "^16.3.0",
+    "opencc-js": "^1.4.0",
+    "pdf-lib": "^1.17.1",
+    "pinyin-pro": "^3.27.0",
+    "prettier": "^3.7.4",
+    "qrcode": "^1.5.4",
+    "sql-formatter": "^15.6.10",
+    "terser": "^5.44.0",
+    "xlsx": "^0.18.5",
+    "yaml": "^2.8.1",
+    "clean-css": "^5.3.3",
+    "html-minifier-terser": "^7.2.0",
+    "jszip": "^3.10.1",
+    "fast-xml-parser": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/figlet": "^1.7.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/clean-css": "^4.2.11",
+    "@types/html-minifier-terser": "^7.0.2"
+  }
+}

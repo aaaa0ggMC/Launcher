@@ -677,6 +677,15 @@ function runQuickAction(action: QuickAction): void {
   activate(action.ability, action.target)
 }
 
+async function openFirstQuickAction(): Promise<void> {
+  const query = searchText.value.trim()
+  if (!query) return
+  await loadSearchQuick()
+  if (searchText.value.trim() !== query) return
+  const first = searchQuick.value[0]
+  if (first) runQuickAction(first)
+}
+
 /**
  * Debounce search input: keystrokes only schedule a fetch; the actual (possibly
  * IO-heavy) provider query runs after the user pauses. This keeps per-keystroke
@@ -951,6 +960,7 @@ onBeforeUnmount(() => {
           rounded="lg"
           @click:clear="searchText = ''"
           @input="scheduleSearchApps"
+          @keydown.enter.prevent="openFirstQuickAction"
         />
       </div>
 

@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { cliExec } from './cli'
-import { runCommand, listCommands, UnknownCommandError } from './commands/registry'
+import { runCommand, listCommands, commandLogsArgs, UnknownCommandError } from './commands/registry'
 import { withOrigin, type CallOrigin } from './privacy'
 import { isReservedWindowId, isReservedWindowView } from './privacy-consent'
 
@@ -234,9 +234,12 @@ export function registerIpc(): void {
       // to `agent-ui` (inspector-injected input in flight, see privacy.ts) —
       // a tag can never upgrade privileges, so trusting it is safe.
       const origin = rendererOrigin(meta, { kind: 'ui' })
-      // Log the concrete command + its (redacted) args. The file always keeps
-      // these (even `logs.*`) — the logs ability filters them via `excludeSelf`.
-      log.info(name, { args: redactArgs(args ?? {}), ...(origin.kind === 'ui' ? {} : { origin }) })
+      // Keep command names for diagnostics; commands handling private content
+      // can opt out of argument retention entirely, independent of origin.
+      log.info(name, {
+        ...(commandLogsArgs(name) ? { args: redactArgs(args ?? {}) } : {}),
+        ...(origin.kind === 'ui' ? {} : { origin })
+      })
       inflight++
       try {
         return await withOrigin(origin, () => runCommand(name, args ?? {}))

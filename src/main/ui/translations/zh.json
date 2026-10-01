@@ -1,8 +1,8 @@
 {
   "app.brandSub": "System Control Center",
-  "search.placeholder": "搜索能力 / 应用别名",
-  "search.appsHeader": "应用",
-  "search.noMatch": "无匹配应用",
+  "search.placeholder": "搜索能力 / 应用 / 工具",
+  "search.appsHeader": "快速启动",
+  "search.noMatch": "无匹配快捷操作",
   "appbar.selectTitle": "选择一个功能",
   "appbar.selectText": "从左侧边栏选择功能，或使用顶部搜索框。",
   "quit.title": "后台任务仍在运行",

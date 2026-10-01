@@ -20,6 +20,8 @@ export interface CommandSpec {
   name: string
   description: string
   usage?: string
+  /** Set false when user-supplied content must not be persisted in IPC logs. */
+  logArgs?: boolean
   run: (ctx: CommandContext) => unknown | Promise<unknown>
   /**
    * Optional runtime gate — when it resolves false the command behaves as NOT
