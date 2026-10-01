@@ -334,7 +334,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **MCP**：`http://127.0.0.1:47802/mcp`（Streamable HTTP），`Authorization: Bearer <~/.config/LinuxCockpit/agent/token>`。设置页「复制 Claude Code 接入命令」；只支持 stdio 的客户端用 `node scripts/cockpit-mcp.mjs`。
 - **Remote**：`POST http://127.0.0.1:47801/rpc`，JSON-RPC 2.0，方法名与 MCP 工具相同（`tools/list` 列出）。
 - 两者共用 `src/main/process/agent/tools.ts` 的工具表，执行都走命令注册表 → 隐私 SDK 自动生效。只监听 127.0.0.1，校验 Host、拒绝带 Origin 的浏览器请求。
-- **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示）、可信输入点击 / 输入 / 按键 / 滚动、截图（隐私区遮盖）。每次操作前等页面稳定（无进行中命令 + DOM 300ms 无变化）。
+- **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示、`<canvas>` 也给 ref；`--boxes true` 附上每个 ref 在截图上的位置）、截图（隐私区遮盖）。两种操作方式：按 ref（`ui.click` / `ui.type`），或像人一样按**截图像素坐标**（`ui.click-at` / `ui.move` / `ui.mouse down|up` / `ui.drag` / `ui.scroll --x --y`），键盘支持字母 / 数字 / F 键、`--hold` 按住、`--action down|up`、组合键（游戏可加 `--settle false` 跳过等待）。按坐标操作前先做命中测试：落在隐私区要授权、禁区拒绝，规则与 ref 操作一致；AI 每次点击在屏幕上闪一个标记。每次操作前等页面就绪（App 的 `data-ability-ready`：异步页面组件加载、挂载完成）与稳定（无进行中命令 + DOM 300ms 无变化）。
 - **UI 写法要求**：纯图标按钮给 `aria-label` 或 `title`，否则 AI 只能看到图标名；揭示隐私的按钮（「全部显示」等）加 `v-privacy-action="'<scope>'"`。
 - 开发调试：`privacy.debug-as-agent --cmd ui.snapshot`（dev only）以 AI 身份执行任意命令，查看 AI 视角。
 

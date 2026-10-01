@@ -82,6 +82,24 @@ const QUIET_JS = (quiet: number, max: number): string => `new Promise((resolve) 
   setTimeout(done, ${max})
 })`
 
+/**
+ * 等当前页面就绪：App 在异步页面组件加载、挂载、过渡结束后把根节点的 `data-ability-ready`
+ * 设为当前能力 id。加载期间 DOM 不变，单靠 settle 会误判成「已稳定」而拍到空白占位。
+ */
+const READY_MAX_MS = 8000
+async function waitPageReady(cdp: Cdp, expect?: string): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < READY_MAX_MS) {
+    const st = await evaluate<{ cur: string; ready: string }>(
+      cdp,
+      `(() => { const el = document.querySelector('[data-current-ability]'); return { cur: el?.getAttribute('data-current-ability') ?? '', ready: el?.getAttribute('data-ability-ready') ?? '' } })()`
+    )
+    const target = expect ?? st.cur
+    if (!target || st.ready === target) return
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
 /** 等：没有进行中的渲染端命令，且 DOM 安静 300ms（上限 4s）。返回耗时 ms。 */
 async function settle(cdp: Cdp): Promise<number> {
   const start = Date.now()
@@ -123,6 +141,8 @@ interface Mark {
   password?: boolean
   /** "scrollTop,scrollHeight,clientHeight" */
   scroll?: string
+  /** <canvas>：无障碍树里通常没有语义，但游戏 / 图表需要按坐标操作，单独给 ref */
+  canvas?: boolean
 }
 
 const INTERACTIVE = new Set([
@@ -180,7 +200,7 @@ const SKIP_ROLES = new Set(['InlineTextBox', 'LineBreak'])
 let refMap = new Map<string, number>()
 
 const MARK_SELECTOR =
-  '[data-privacy],[data-privacy-action],[data-agent="forbidden"],input[type="password"],[data-cockpit-scroll]'
+  '[data-privacy],[data-privacy-action],[data-agent="forbidden"],input[type="password"],[data-cockpit-scroll],canvas'
 
 /** 页面端：给当前可滚动的容器打上 data-cockpit-scroll（位置信息），供快照标注。 */
 const TAG_SCROLLABLES_JS = `(() => {
@@ -219,7 +239,8 @@ async function collectMarks(cdp: Cdp): Promise<Map<number, Mark>> {
       action: attrs.get('data-privacy-action') || undefined,
       forbidden: attrs.get('data-agent') === 'forbidden',
       password: node.nodeName === 'INPUT' && attrs.get('type') === 'password',
-      scroll: attrs.get('data-cockpit-scroll')
+      scroll: attrs.get('data-cockpit-scroll'),
+      canvas: node.nodeName === 'CANVAS'
     })
   }
   return marks
@@ -300,6 +321,8 @@ async function namelessIconHints(cdp: Cdp, nodes: AXNode[]): Promise<Map<number,
 export interface SnapshotOptions {
   /** interactive（默认）：可交互元素 + 结构；full：外加全部文本 */
   mode?: 'interactive' | 'full'
+  /** 给每个 ref 附上它在截图上的位置 `@(x,y wxh)`（截图像素），便于对照截图按坐标操作 */
+  boxes?: boolean
 }
 
 export interface SnapshotResult {
@@ -307,6 +330,8 @@ export interface SnapshotResult {
   page: string
   url: string
   viewport: { width: number; height: number; zoom: number }
+  /** 截图像素 / CSS 像素；ui.click_at 等默认按截图像素接收坐标 */
+  scale: number
   settledMs: number
   /** 快照时仍在进行中的渲染端命令数（> 0 = 页面还在加载，稍后可再 snapshot） */
   pendingCommands: number
@@ -318,7 +343,10 @@ export interface SnapshotResult {
 export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResult> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
-  const settledMs = await settle(cdp)
+  const t0 = Date.now()
+  await waitPageReady(cdp)
+  await settle(cdp)
+  const settledMs = Date.now() - t0
   const full = opts.mode === 'full'
   const reader = isAgentReader()
   const marks = await collectMarks(cdp)
@@ -378,6 +406,23 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
       // 隐私区：只露出 scope 占位与其中的可交互元素（名字同样脱敏）
       emit(depth, `group ${redactedMarker(scope!)} [privacy=${scope}]`)
       kidsDeeper('')
+      return
+    }
+    if (mark?.canvas) {
+      // 画布（游戏 / 图表）：无障碍树里没有内容，给个 ref + 位置，供按坐标操作
+      const ref = newRef(n)
+      const label = str(n.name)
+      emit(
+        depth,
+        [
+          'canvas',
+          label ? quote(label) : '',
+          ref ? `[ref=${ref}]` : '',
+          scope ? `[privacy=${scope}]` : ''
+        ]
+          .filter(Boolean)
+          .join(' ')
+      )
       return
     }
     if (n.ignored || SKIP_ROLES.has(role)) {
@@ -447,17 +492,55 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
 
   const iconHints = await namelessIconHints(cdp, nodes)
   walk(nodes[0], 0, undefined, '')
+  let text = lines.join('\n')
+  if (opts.boxes) text = await appendBoxes(cdp, text, meta.zoom)
   return {
     ok: true,
     page: meta.page,
     url: wc.getURL(),
     viewport: { width: meta.w, height: meta.h, zoom: meta.zoom },
+    scale: meta.zoom,
     settledMs,
     pendingCommands: inflightCommands(),
     refs: refMap.size,
-    text: lines.join('\n') + (truncated ? `\n… (truncated at ${MAX_SNAPSHOT_LINES} lines)` : ''),
+    text: text + (truncated ? `\n… (truncated at ${MAX_SNAPSHOT_LINES} lines)` : ''),
     ...(truncated ? { truncated } : {})
   }
+}
+
+/** 给快照里每个 `[ref=eN]` 追加 `@(x,y wxh)`（截图像素，左上角 + 尺寸）；不在可视区内的标 `@offscreen`。 */
+async function appendBoxes(cdp: Cdp, text: string, scale: number): Promise<string> {
+  const vp = await evaluate<{ w: number; h: number }>(cdp, '({ w: innerWidth, h: innerHeight })')
+  const boxes = new Map<string, string>()
+  let n = 0
+  for (const [ref, backendNodeId] of refMap) {
+    if (++n > 400) break
+    try {
+      const { quads } = (await cdp('DOM.getContentQuads', { backendNodeId })) as {
+        quads: number[][]
+      }
+      const q = quads?.[0]
+      if (!q) continue
+      const xs = [q[0], q[2], q[4], q[6]]
+      const ys = [q[1], q[3], q[5], q[7]]
+      const x = Math.min(...xs)
+      const y = Math.min(...ys)
+      const w = Math.max(...xs) - x
+      const h = Math.max(...ys) - y
+      const visible = x + w > 0 && y + h > 0 && x < vp.w && y < vp.h
+      boxes.set(
+        ref,
+        visible
+          ? `@(${Math.round(x * scale)},${Math.round(y * scale)} ${Math.round(w * scale)}x${Math.round(h * scale)})`
+          : '@offscreen'
+      )
+    } catch {
+      /* node without layout (display:none etc.) */
+    }
+  }
+  return text.replace(/\[ref=(e\d+)\]/g, (m, ref: string) =>
+    boxes.has(ref) ? `${m} ${boxes.get(ref)}` : m
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -503,7 +586,28 @@ async function objectIdOf(cdp: Cdp, ref: string): Promise<string> {
   }
 }
 
-/** 定位元素 + 隐私检查（禁区拒绝；隐私区先 guard）。 */
+/**
+ * 隐私检查（ref 操作与坐标操作共用）：禁区直接拒绝；隐私区 / 揭示类按钮先 guard。
+ * 只对 agent 来源生效——用户自己（ui / cli）的操作不受影响。
+ */
+async function guardElement(info: ElementInfo, action: string, fallback: string): Promise<void> {
+  if (!isAgentOrigin()) return
+  if (info.forbidden) {
+    throw new PrivacyDeniedError('agent_denied', [], `${fallback} 位于 AI 禁区，不能${action}`)
+  }
+  const scopes = [
+    ...(info.privacy ? [info.privacy] : []),
+    ...(info.action ? info.action.split(',').map((x) => x.trim()) : [])
+  ].filter(Boolean)
+  if (scopes.length) {
+    await guard(
+      [...new Set(scopes)],
+      info.label ? `${action}「${info.label}」` : `${action} ${fallback}`
+    )
+  }
+}
+
+/** 定位元素 + 隐私检查。 */
 async function prepare(cdp: Cdp, ref: string, action: string): Promise<ElementInfo> {
   const objectId = await objectIdOf(cdp, ref)
   const r = (await cdp('Runtime.callFunctionOn', {
@@ -512,23 +616,223 @@ async function prepare(cdp: Cdp, ref: string, action: string): Promise<ElementIn
     returnByValue: true
   })) as { result: { value: ElementInfo } }
   const info = r.result.value
-  if (isAgentOrigin()) {
-    if (info.forbidden) {
-      throw new PrivacyDeniedError('agent_denied', [], `${ref} 位于 AI 禁区，不能${action}`)
-    }
-    const scopes = [
-      ...(info.privacy ? [info.privacy] : []),
-      ...(info.action ? info.action.split(',').map((x) => x.trim()) : [])
-    ].filter(Boolean)
-    if (scopes.length) {
-      await guard(
-        [...new Set(scopes)],
-        info.label ? `${action}「${info.label}」` : `${action} ${ref}`
-      )
-    }
-  }
+  await guardElement(info, action, ref)
   if (info.w <= 0 || info.h <= 0) throw new Error(`${ref} 不可见（尺寸为 0），无法${action}`)
   return info
+}
+
+// -- 坐标操作 ---------------------------------------------------------------------
+
+/** 坐标空间：image = 截图像素（默认，AI 对着截图找位置）；css = 页面 CSS 像素。 */
+export type CoordSpace = 'image' | 'css'
+
+export interface Point {
+  x: number
+  y: number
+}
+
+async function toCss(cdp: Cdp, p: Point, space: CoordSpace = 'image'): Promise<Point> {
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) throw new Error('坐标需要是数字')
+  if (space === 'css') return p
+  const scale = await evaluate<number>(cdp, 'devicePixelRatio')
+  return { x: p.x / scale, y: p.y / scale }
+}
+
+/** 坐标命中测试：该点下面是哪个元素、是否在隐私区 / 禁区（不滚动页面）。 */
+const HIT_FN = (x: number, y: number): string => `(() => {
+  const el = document.elementFromPoint(${x}, ${y})
+  if (!el) return null
+  const p = el.closest('[data-privacy]')
+  const a = el.closest('[data-privacy-action]')
+  const r = el.getBoundingClientRect()
+  return {
+    privacy: p ? p.getAttribute('data-privacy') : null,
+    action: a ? a.getAttribute('data-privacy-action') : null,
+    label: (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || el.tagName.toLowerCase()).trim().slice(0, 40),
+    forbidden: !!el.closest('[data-agent="forbidden"]'),
+    x: ${x}, y: ${y}, w: r.width, h: r.height
+  }
+})()`
+
+/** 坐标点的命中 + 隐私检查；点在窗口外 → 报错。返回命中元素的简述（给 AI 确认点到了什么）。 */
+async function guardPoint(cdp: Cdp, p: Point, action: string): Promise<string> {
+  const info = await evaluate<ElementInfo | null>(cdp, HIT_FN(p.x, p.y))
+  if (!info) throw new Error(`坐标 (${Math.round(p.x)}, ${Math.round(p.y)}) 不在窗口内`)
+  await guardElement(info, action, `(${Math.round(p.x)}, ${Math.round(p.y)})`)
+  // 隐私区里的元素，返回给 agent 的描述不能带出文字
+  return info.privacy && !hasClearance(info.privacy) ? redactedMarker(info.privacy) : info.label
+}
+
+/** AI 操作位置的可视提示：屏幕上闪一个圆点，让用户看到 AI 点了哪里（不拦截事件）。 */
+async function showMarker(
+  cdp: Cdp,
+  p: Point,
+  kind: 'click' | 'press' | 'move' = 'click'
+): Promise<void> {
+  if (!isAgentOrigin()) return
+  const size = kind === 'move' ? 10 : 22
+  await evaluate(
+    cdp,
+    `(() => {
+      const d = document.createElement('div')
+      d.className = '__cockpit_ai_marker'
+      d.style.cssText = 'position:fixed;left:${p.x - size / 2}px;top:${p.y - size / 2}px;width:${size}px;height:${size}px;border-radius:50%;pointer-events:none;z-index:2147483646;border:2px solid rgb(var(--v-theme-primary));background:rgba(var(--v-theme-primary),0.25);transition:opacity .6s ease, transform .6s ease'
+      document.documentElement.appendChild(d)
+      requestAnimationFrame(() => { d.style.opacity = '0'; d.style.transform = 'scale(1.8)' })
+      setTimeout(() => d.remove(), 700)
+    })()`
+  ).catch(() => {})
+}
+
+/** 当前按住的鼠标键（CDP 的 buttons 位掩码：左 1 / 右 2 / 中 4），拖动时 mouseMoved 要带上。 */
+let heldButtons = 0
+const BUTTON_MASK: Record<string, number> = { left: 1, right: 2, middle: 4 }
+
+export type MouseButton = 'left' | 'right' | 'middle'
+
+interface ActOptions {
+  space?: CoordSpace
+  /** false = 不等页面稳定（游戏等连续操作）；默认等 */
+  settle?: boolean
+}
+
+async function finish(cdp: Cdp, opts: ActOptions): Promise<number> {
+  return opts.settle === false ? 0 : settle(cdp)
+}
+
+/** 在坐标处点击（可右键 / 双击）。点到隐私区会先要求许可，点到禁区直接拒绝。 */
+export async function clickAt(
+  point: Point,
+  opts: ActOptions & { button?: MouseButton; double?: boolean } = {}
+): Promise<{ ok: true; target: string; settledMs: number }> {
+  const wc = mainContents()
+  const cdp = cdpFor(wc)
+  const p = await toCss(cdp, point, opts.space)
+  const target = await guardPoint(cdp, p, '点击')
+  tagAgentInput(wc)
+  await showMarker(cdp, p)
+  await mouseClick(cdp, p.x, p.y, opts.button ?? 'left', opts.double ? 2 : 1)
+  return { ok: true, target, settledMs: await finish(cdp, opts) }
+}
+
+/** 移动鼠标（悬停）；按住键时即拖动中的移动。 */
+export async function moveTo(
+  point: Point,
+  opts: ActOptions = {}
+): Promise<{ ok: true; settledMs: number }> {
+  const wc = mainContents()
+  const cdp = cdpFor(wc)
+  const p = await toCss(cdp, point, opts.space)
+  tagAgentInput(wc)
+  await cdp('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: p.x,
+    y: p.y,
+    buttons: heldButtons
+  })
+  if (heldButtons) await showMarker(cdp, p, 'move')
+  return { ok: true, settledMs: await finish(cdp, opts) }
+}
+
+/** 单独按下 / 松开鼠标键（按住不放、配合 moveTo 做复杂拖动）。按下的位置同样做隐私检查。 */
+export async function mouseButton(
+  action: 'down' | 'up',
+  point: Point,
+  opts: ActOptions & { button?: MouseButton } = {}
+): Promise<{ ok: true; target?: string; settledMs: number }> {
+  const wc = mainContents()
+  const cdp = cdpFor(wc)
+  const p = await toCss(cdp, point, opts.space)
+  const button = opts.button ?? 'left'
+  const target = action === 'down' ? await guardPoint(cdp, p, '按下') : undefined
+  tagAgentInput(wc)
+  if (action === 'down') {
+    heldButtons |= BUTTON_MASK[button]
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: p.x,
+      y: p.y,
+      buttons: heldButtons
+    })
+    await showMarker(cdp, p, 'press')
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: p.x,
+      y: p.y,
+      button,
+      buttons: heldButtons,
+      clickCount: 1
+    })
+  } else {
+    heldButtons &= ~BUTTON_MASK[button]
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: p.x,
+      y: p.y,
+      button,
+      buttons: heldButtons,
+      clickCount: 1
+    })
+  }
+  return {
+    ok: true,
+    ...(target !== undefined ? { target } : {}),
+    settledMs: await finish(cdp, opts)
+  }
+}
+
+/** 拖动：按下 → 分步移动 → 松开。起点与终点都做隐私检查。 */
+export async function drag(
+  from: Point,
+  to: Point,
+  opts: ActOptions & { button?: MouseButton; steps?: number; durationMs?: number } = {}
+): Promise<{ ok: true; settledMs: number }> {
+  const wc = mainContents()
+  const cdp = cdpFor(wc)
+  const a = await toCss(cdp, from, opts.space)
+  const b = await toCss(cdp, to, opts.space)
+  await guardPoint(cdp, a, '拖动')
+  await guardPoint(cdp, b, '拖动到')
+  const button = opts.button ?? 'left'
+  const steps = Math.min(Math.max(Math.round(opts.steps ?? 12), 1), 100)
+  const pause = Math.min(Math.max(opts.durationMs ?? 240, 0), 5000) / steps
+  tagAgentInput(wc)
+  await showMarker(cdp, a, 'press')
+  heldButtons |= BUTTON_MASK[button]
+  await cdp('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: a.x,
+    y: a.y,
+    buttons: heldButtons
+  })
+  await cdp('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: a.x,
+    y: a.y,
+    button,
+    buttons: heldButtons,
+    clickCount: 1
+  })
+  try {
+    for (let i = 1; i <= steps; i++) {
+      const x = a.x + ((b.x - a.x) * i) / steps
+      const y = a.y + ((b.y - a.y) * i) / steps
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: heldButtons })
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause))
+    }
+  } finally {
+    heldButtons &= ~BUTTON_MASK[button]
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: b.x,
+      y: b.y,
+      button,
+      buttons: heldButtons,
+      clickCount: 1
+    })
+  }
+  await showMarker(cdp, b)
+  return { ok: true, settledMs: await finish(cdp, opts) }
 }
 
 /** 注入输入前通知渲染端：接下来的 IPC 归属 agent（只降权）。 */
@@ -548,32 +852,57 @@ async function mouseClick(
   button = 'left',
   clickCount = 1
 ): Promise<void> {
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: heldButtons })
+  const mask = BUTTON_MASK[button] ?? 1
   for (let i = 1; i <= clickCount; i++) {
-    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: i })
-    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: i })
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x,
+      y,
+      button,
+      buttons: heldButtons | mask,
+      clickCount: i
+    })
+    await cdp('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x,
+      y,
+      button,
+      buttons: heldButtons,
+      clickCount: i
+    })
   }
 }
 
 export async function click(
   ref: string,
-  opts: { button?: 'left' | 'right' | 'middle'; double?: boolean } = {}
+  opts: { button?: MouseButton; double?: boolean } = {}
 ): Promise<{ ok: true; settledMs: number }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const info = await prepare(cdp, ref, '点击')
   tagAgentInput(wc)
+  await showMarker(cdp, info)
   await mouseClick(cdp, info.x, info.y, opts.button ?? 'left', opts.double ? 2 : 1)
   return { ok: true, settledMs: await settle(cdp) }
 }
 
-const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
+// -- 键盘 ---------------------------------------------------------------------------
+
+interface KeyDef {
+  key: string
+  code: string
+  keyCode: number
+  text?: string
+}
+
+const NAMED_KEYS: Record<string, Omit<KeyDef, 'key'> & { key?: string }> = {
   Enter: { code: 'Enter', keyCode: 13, text: '\r' },
   Escape: { code: 'Escape', keyCode: 27 },
   Tab: { code: 'Tab', keyCode: 9 },
   Backspace: { code: 'Backspace', keyCode: 8 },
   Delete: { code: 'Delete', keyCode: 46 },
-  Space: { code: 'Space', keyCode: 32, text: ' ' },
+  Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
   ArrowUp: { code: 'ArrowUp', keyCode: 38 },
   ArrowDown: { code: 'ArrowDown', keyCode: 40 },
   ArrowLeft: { code: 'ArrowLeft', keyCode: 37 },
@@ -581,56 +910,153 @@ const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   PageUp: { code: 'PageUp', keyCode: 33 },
   PageDown: { code: 'PageDown', keyCode: 34 },
   Home: { code: 'Home', keyCode: 36 },
-  End: { code: 'End', keyCode: 35 }
+  End: { code: 'End', keyCode: 35 },
+  Shift: { code: 'ShiftLeft', keyCode: 16 },
+  Control: { code: 'ControlLeft', keyCode: 17 },
+  Alt: { code: 'AltLeft', keyCode: 18 },
+  Meta: { code: 'MetaLeft', keyCode: 91 }
 }
 
-async function pressKey(cdp: Cdp, key: string): Promise<void> {
-  const k = KEYS[key]
-  if (!k) throw new Error(`不支持的按键：${key}（可用：${Object.keys(KEYS).join(', ')}）`)
-  const base = { key: key === 'Space' ? ' ' : key, code: k.code, windowsVirtualKeyCode: k.keyCode }
+/** 按键名 → CDP 键定义：命名键、单个字母 / 数字 / 符号、F1–F12。 */
+function keyDef(name: string): KeyDef {
+  const named = NAMED_KEYS[name]
+  if (named)
+    return { key: named.key ?? name, code: named.code, keyCode: named.keyCode, text: named.text }
+  if (/^F([1-9]|1[0-2])$/.test(name)) {
+    return { key: name, code: name, keyCode: 111 + Number(name.slice(1)) }
+  }
+  if (/^[a-zA-Z]$/.test(name)) {
+    const up = name.toUpperCase()
+    return { key: name, code: `Key${up}`, keyCode: up.charCodeAt(0), text: name }
+  }
+  if (/^[0-9]$/.test(name))
+    return { key: name, code: `Digit${name}`, keyCode: 48 + Number(name), text: name }
+  if (name.length === 1) return { key: name, code: '', keyCode: 0, text: name }
+  throw new Error(
+    `不支持的按键：${name}（可用：${Object.keys(NAMED_KEYS).join(', ')}、F1–F12、单个字母 / 数字 / 符号）`
+  )
+}
+
+export type Modifier = 'Shift' | 'Control' | 'Alt' | 'Meta'
+const MOD_MASK: Record<Modifier, number> = { Alt: 1, Control: 2, Meta: 4, Shift: 8 }
+
+async function keyEvent(
+  cdp: Cdp,
+  type: 'keyDown' | 'keyUp',
+  def: KeyDef,
+  modifiers: number
+): Promise<void> {
+  // 带 Control / Alt / Meta 的组合键不产生文本输入（Ctrl+A 不能插入「a」）
+  const withText = type === 'keyDown' && def.text && (modifiers & ~MOD_MASK.Shift) === 0
   await cdp('Input.dispatchKeyEvent', {
-    type: 'keyDown',
-    ...base,
-    ...(k.text ? { text: k.text } : {})
+    type: withText ? 'keyDown' : type === 'keyDown' ? 'rawKeyDown' : 'keyUp',
+    key: def.key,
+    code: def.code,
+    windowsVirtualKeyCode: def.keyCode,
+    modifiers,
+    ...(withText ? { text: def.text } : {})
   })
-  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
 }
 
+async function pressKey(
+  cdp: Cdp,
+  name: string,
+  opts: { modifiers?: Modifier[]; holdMs?: number; action?: 'press' | 'down' | 'up' } = {}
+): Promise<void> {
+  const def = keyDef(name)
+  const mods = opts.modifiers ?? []
+  const mask = mods.reduce((m, k) => m | (MOD_MASK[k] ?? 0), 0)
+  const action = opts.action ?? 'press'
+  if (action !== 'up') {
+    for (const m of mods) await keyEvent(cdp, 'keyDown', keyDef(m), mask)
+    await keyEvent(cdp, 'keyDown', def, mask)
+  }
+  if (action === 'press') {
+    const hold = Math.min(Math.max(opts.holdMs ?? 0, 0), 10_000)
+    if (hold > 0) await new Promise((r) => setTimeout(r, hold))
+  }
+  if (action !== 'down') {
+    await keyEvent(cdp, 'keyUp', def, mask)
+    for (const m of [...mods].reverse()) await keyEvent(cdp, 'keyUp', keyDef(m), 0)
+  }
+}
+
+/** 往当前焦点元素输入前的隐私检查（焦点在隐私区 / 禁区的输入框里）。 */
+async function guardFocused(cdp: Cdp): Promise<void> {
+  const info = await evaluate<ElementInfo | null>(
+    cdp,
+    `(() => {
+      const el = document.activeElement
+      if (!el || el === document.body) return null
+      const p = el.closest('[data-privacy]')
+      return {
+        privacy: p ? p.getAttribute('data-privacy') : null,
+        action: null,
+        label: (el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.tagName.toLowerCase()).slice(0, 40),
+        forbidden: !!el.closest('[data-agent="forbidden"]'),
+        x: 0, y: 0, w: 1, h: 1
+      }
+    })()`
+  )
+  if (info) await guardElement(info, '输入', '当前焦点')
+}
+
+/** 输入文本：给 ref 先点击聚焦；不给 ref 则输入到当前焦点（如游戏 / 已聚焦的输入框）。 */
 export async function type(
-  ref: string,
+  ref: string | undefined,
   text: string,
   opts: { clear?: boolean; submit?: boolean } = {}
 ): Promise<{ ok: true; settledMs: number }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
-  const info = await prepare(cdp, ref, '输入')
-  tagAgentInput(wc)
-  await mouseClick(cdp, info.x, info.y)
-  if (opts.clear) {
-    const objectId = await objectIdOf(cdp, ref)
-    await cdp('Runtime.callFunctionOn', {
-      objectId,
-      functionDeclaration: `function () {
-        const el = this.matches?.('input,textarea') ? this : this.querySelector?.('input,textarea') ?? document.activeElement
-        el?.select?.()
-      }`
-    })
+  if (ref) {
+    const info = await prepare(cdp, ref, '输入')
+    tagAgentInput(wc)
+    await showMarker(cdp, info)
+    await mouseClick(cdp, info.x, info.y)
+    if (opts.clear) {
+      const objectId = await objectIdOf(cdp, ref)
+      await cdp('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function () {
+          const el = this.matches?.('input,textarea') ? this : this.querySelector?.('input,textarea') ?? document.activeElement
+          el?.select?.()
+        }`
+      })
+    }
+  } else {
+    await guardFocused(cdp)
+    tagAgentInput(wc)
+    if (opts.clear) await pressKey(cdp, 'a', { modifiers: ['Control'] })
   }
   if (text) await cdp('Input.insertText', { text })
   if (opts.submit) await pressKey(cdp, 'Enter')
   return { ok: true, settledMs: await settle(cdp) }
 }
 
-export async function key(name: string): Promise<{ ok: true; settledMs: number }> {
+/**
+ * 按键：press（默认，可 holdMs 按住一段时间，适合游戏移动）/ down / up（自己控制按住与松开）。
+ * modifiers 组合键，如 ['Control'] + 'a'。
+ */
+export async function key(
+  name: string,
+  opts: ActOptions & {
+    modifiers?: Modifier[]
+    holdMs?: number
+    action?: 'press' | 'down' | 'up'
+  } = {}
+): Promise<{ ok: true; settledMs: number }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
+  if (opts.action !== 'up') await guardFocused(cdp)
   tagAgentInput(wc)
-  await pressKey(cdp, name)
-  return { ok: true, settledMs: await settle(cdp) }
+  await pressKey(cdp, name, opts)
+  return { ok: true, settledMs: await finish(cdp, opts) }
 }
 
+/** 滚轮：在 ref 上、指定坐标处，或页面中央。 */
 export async function scroll(
-  opts: { ref?: string; dy?: number; dx?: number } = {}
+  opts: ActOptions & { ref?: string; at?: Point; dy?: number; dx?: number } = {}
 ): Promise<{ ok: true; settledMs: number }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
@@ -644,6 +1070,8 @@ export async function scroll(
       returnByValue: true
     })) as { result: { value: { x: number; y: number } } }
     ;({ x, y } = r.result.value)
+  } else if (opts.at) {
+    ;({ x, y } = await toCss(cdp, opts.at, opts.space))
   } else {
     const vp = await evaluate<{ w: number; h: number }>(cdp, '({ w: innerWidth, h: innerHeight })')
     x = vp.w / 2
@@ -657,7 +1085,7 @@ export async function scroll(
     deltaX: opts.dx ?? 0,
     deltaY: opts.dy ?? 400
   })
-  return { ok: true, settledMs: await settle(cdp) }
+  return { ok: true, settledMs: await finish(cdp, opts) }
 }
 
 /** 切换到某个能力页面（等价于点击侧栏条目）。 */
@@ -685,6 +1113,7 @@ export async function navigate(
     if (page === ability) break
     await new Promise((r) => setTimeout(r, 50))
   }
+  if (page === ability) await waitPageReady(cdp, ability)
   await settle(cdp)
   return page === ability ? { ok: true, page } : { ok: false, page, error: '切换超时' }
 }
@@ -747,6 +1176,7 @@ const OVERLAY_JS = (cleared: string[], maskForbidden: boolean): string => `(() =
     n++
   }
   document.documentElement.appendChild(host)
+  for (const m of document.querySelectorAll('.__cockpit_ai_marker')) m.remove()
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(n))))
 })()`
 
@@ -755,6 +1185,8 @@ export interface ScreenshotResult {
   mime: 'image/png'
   width: number
   height: number
+  /** 截图像素 / CSS 像素；ui.click_at 等默认就用截图像素坐标，无需换算 */
+  scale: number
   redactedRegions: number
   /** base64（save=false 时） */
   data?: string
@@ -796,6 +1228,7 @@ export async function screenshot(
     await evaluate(cdp, `document.getElementById('${OVERLAY_ID}')?.remove()`).catch(() => {})
   }
   const buf = Buffer.from(png.data, 'base64')
+  const scale = await evaluate<number>(cdp, 'devicePixelRatio')
   const width = buf.readUInt32BE(16)
   const height = buf.readUInt32BE(20)
   const save = opts.save ?? !reader
@@ -804,9 +1237,9 @@ export async function screenshot(
     await mkdir(dir, { recursive: true })
     const path = join(dir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`)
     await writeFile(path, buf)
-    return { ok: true, mime: 'image/png', width, height, redactedRegions, path }
+    return { ok: true, mime: 'image/png', width, height, scale, redactedRegions, path }
   }
-  return { ok: true, mime: 'image/png', width, height, redactedRegions, data: png.data }
+  return { ok: true, mime: 'image/png', width, height, scale, redactedRegions, data: png.data }
 }
 
 /** 当前页面与侧栏可跳转的能力（id + 显示名），给 agent 的 overview 用。 */

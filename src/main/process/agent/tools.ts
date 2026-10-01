@@ -41,9 +41,12 @@ const USAGE_HINT = `Linux Cockpit is a desktop control center. Typical loop:
 2. ui_click / ui_type / ui_key / ui_scroll with those refs (every action waits for the page to settle).
 3. ui_snapshot again (refs are only valid for the latest snapshot).
 Use ui_navigate to switch pages, ui_screenshot to see layout / images.
-Privacy: protected values appear as «redacted:<scope>»; [privacy-action=...] elements and
-"privacy_pending" errors mean the user must approve in a consent window you cannot see —
-call request_clearance / wait_clearance, then retry. Never try to work around a redaction.`
+No ref (canvas, game, map)? Act like a person: take ui_screenshot and use its pixel coordinates with
+ui_click_at / ui_move / ui_drag / ui_mouse / ui_scroll; ui_key supports hold_ms and down/up for games
+(pass settle=false for fast repeated input). ui_snapshot boxes=true maps refs to screenshot pixels.
+Privacy: protected values appear as «redacted:<scope>»; [privacy-action=...] elements, clicks that land
+in protected areas, and "privacy_pending" errors mean the user must approve in a consent window you cannot
+see — call request_clearance / wait_clearance, then retry. Never try to work around a redaction.`
 
 export const AGENT_TOOLS: AgentTool[] = [
   {
@@ -70,11 +73,14 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'ui_snapshot',
     title: 'UI snapshot',
     description:
-      'Accessibility-tree snapshot of the main window. Interactive elements have [ref=eN] for the ui_* tools; scrollable areas show their position ("more below" → scroll to load more). mode=full also includes plain text.',
-    shape: { mode: z.enum(['interactive', 'full']).optional() },
+      'Accessibility-tree snapshot of the main window. Interactive elements have [ref=eN] for the ui_* tools; <canvas> elements (games / charts) get a ref too. Scrollable areas show their position ("more below" → scroll to load more). boxes=true appends each ref\'s position on the screenshot as @(x,y wxh) in screenshot pixels. mode=full also includes plain text.',
+    shape: {
+      mode: z.enum(['interactive', 'full']).optional(),
+      boxes: z.boolean().optional().describe('append @(x,y wxh) screenshot-pixel boxes to refs')
+    },
     readOnly: true,
     run: async (a) => {
-      const r = (await runCommand('ui.snapshot', { mode: a.mode })) as {
+      const r = (await runCommand('ui.snapshot', { mode: a.mode, boxes: a.boxes })) as {
         text: string
         [k: string]: unknown
       }
@@ -91,7 +97,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'ui_click',
-    title: 'Click',
+    title: 'Click (ref)',
     description: 'Click an element by ref from the latest ui_snapshot.',
     shape: {
       ref: z.string().describe('e.g. "e12"'),
@@ -101,12 +107,86 @@ export const AGENT_TOOLS: AgentTool[] = [
     run: async (a) => json(await runCommand('ui.click', a))
   },
   {
+    name: 'ui_click_at',
+    title: 'Click (coordinates)',
+    description:
+      'Click at a point like a person would — for canvases, games, maps or anything without a ref. Coordinates are SCREENSHOT pixels by default (read them off ui_screenshot, or from ui_snapshot boxes=true); space="css" for CSS pixels. Returns what was under the point. Clicking inside a protected area asks the user first (privacy_pending) and forbidden areas are refused. A short marker shows the user where you clicked. settle=false skips waiting for the page to settle (fast game input).',
+    shape: {
+      x: z.number(),
+      y: z.number(),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      double: z.boolean().optional(),
+      space: z.enum(['image', 'css']).optional(),
+      settle: z.boolean().optional()
+    },
+    run: async (a) => json(await runCommand('ui.click-at', a))
+  },
+  {
+    name: 'ui_move',
+    title: 'Move mouse',
+    description:
+      'Move the mouse to a point (hover). While a button is held (ui_mouse down) this is a drag move. Same coordinate rules as ui_click_at.',
+    shape: {
+      x: z.number(),
+      y: z.number(),
+      space: z.enum(['image', 'css']).optional(),
+      settle: z.boolean().optional()
+    },
+    run: async (a) => json(await runCommand('ui.move', a))
+  },
+  {
+    name: 'ui_mouse',
+    title: 'Mouse button down / up',
+    description:
+      'Press or release a mouse button at a point (hold, then ui_move, then release — for custom drags or long-press). Pressing inside protected areas follows the same privacy rules as clicks.',
+    shape: {
+      action: z.enum(['down', 'up']),
+      x: z.number(),
+      y: z.number(),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      space: z.enum(['image', 'css']).optional(),
+      settle: z.boolean().optional()
+    },
+    run: async (a) => json(await runCommand('ui.mouse', a))
+  },
+  {
+    name: 'ui_drag',
+    title: 'Drag',
+    description:
+      'Drag from one point to another (press → move in steps → release). Both ends are privacy-checked. Same coordinate rules as ui_click_at.',
+    shape: {
+      from_x: z.number(),
+      from_y: z.number(),
+      to_x: z.number(),
+      to_y: z.number(),
+      steps: z.number().optional(),
+      duration_ms: z.number().optional(),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      space: z.enum(['image', 'css']).optional(),
+      settle: z.boolean().optional()
+    },
+    run: async (a) =>
+      json(
+        await runCommand('ui.drag', {
+          'from-x': a.from_x,
+          'from-y': a.from_y,
+          'to-x': a.to_x,
+          'to-y': a.to_y,
+          steps: a.steps,
+          duration: a.duration_ms,
+          button: a.button,
+          space: a.space,
+          settle: a.settle
+        })
+      )
+  },
+  {
     name: 'ui_type',
     title: 'Type',
     description:
-      'Type text into an input (click-focus first). clear=true replaces existing text; submit=true presses Enter.',
+      'Type text. With ref: click-focus that input first (clear=true replaces existing text). Without ref: type into whatever has focus. submit=true presses Enter.',
     shape: {
-      ref: z.string(),
+      ref: z.string().optional(),
       text: z.string(),
       clear: z.boolean().optional(),
       submit: z.boolean().optional()
@@ -117,16 +197,39 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'ui_key',
     title: 'Press key',
     description:
-      'Press a key: Enter, Escape, Tab, Backspace, Delete, Space, Arrow*, PageUp/PageDown, Home/End.',
-    shape: { key: z.string() },
-    run: async (a) => json(await runCommand('ui.key', a))
+      'Press a key: Enter, Escape, Tab, Backspace, Delete, Space, Arrow*, PageUp/PageDown, Home/End, Shift/Control/Alt/Meta, F1–F12, or any single letter / digit / symbol. hold_ms keeps it pressed (game movement). action="down"/"up" holds until you release it. modifiers for combos, e.g. key "a" + ["Control"].',
+    shape: {
+      key: z.string(),
+      hold_ms: z.number().optional(),
+      action: z.enum(['press', 'down', 'up']).optional(),
+      modifiers: z.array(z.enum(['Shift', 'Control', 'Alt', 'Meta'])).optional(),
+      settle: z.boolean().optional()
+    },
+    run: async (a) =>
+      json(
+        await runCommand('ui.key', {
+          key: a.key,
+          hold: a.hold_ms,
+          action: a.action,
+          modifiers: a.modifiers,
+          settle: a.settle
+        })
+      )
   },
   {
     name: 'ui_scroll',
     title: 'Scroll',
     description:
-      'Mouse-wheel scroll over an element (ref) or the page centre. dy > 0 scrolls down.',
-    shape: { ref: z.string().optional(), dy: z.number().optional(), dx: z.number().optional() },
+      'Mouse-wheel scroll over an element (ref), at a point (x,y — same coordinate rules as ui_click_at), or the page centre. dy > 0 scrolls down.',
+    shape: {
+      ref: z.string().optional(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      dy: z.number().optional(),
+      dx: z.number().optional(),
+      space: z.enum(['image', 'css']).optional(),
+      settle: z.boolean().optional()
+    },
     run: async (a) => json(await runCommand('ui.scroll', a))
   },
   {
@@ -146,7 +249,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'ui_screenshot',
     title: 'Screenshot',
     description:
-      'Screenshot of the main window (or one element by ref). Protected regions are covered with labelled boxes.',
+      'Screenshot of the main window (or one element by ref). Protected regions are covered with labelled boxes. Pixel coordinates in this image can be passed straight to ui_click_at / ui_move / ui_drag / ui_scroll (scale = image pixels per CSS pixel is returned for reference).',
     shape: { ref: z.string().optional() },
     readOnly: true,
     run: async (a) => {

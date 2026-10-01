@@ -100,5 +100,7 @@
   "balance.privacy.amount": "Balances & usage",
   "balance.privacy.amount_desc": "Per-platform balance, vouchers, used / total quota, raw responses",
   "balance.privacy.account": "Platform login accounts",
-  "balance.privacy.account_desc": "Accounts (e-mail etc.) signed in on web platforms"
+  "balance.privacy.account_desc": "Accounts (e-mail etc.) signed in on web platforms",
+  "ability.balance.name": "Balance",
+  "ability.balance.category": "Tools"
 }

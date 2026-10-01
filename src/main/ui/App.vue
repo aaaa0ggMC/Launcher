@@ -335,6 +335,33 @@ const abilities = computed<SidebarAbility[]>(() => {
 const currentAbility = computed(() => abilities.value.find((a) => a.id === currentId.value) ?? null)
 
 /**
+ * 页面就绪标记（`data-ability-ready`）：能力页面是异步组件（按需加载），切换后要等代码加载完、
+ * 挂载、过渡结束才算可用。inspector 的 ui.navigate / ui.snapshot 等这个标记，避免在空白占位上
+ * 拍快照（加载期间 DOM 没变化，单靠「DOM 安静」判断不出来）。
+ */
+const readyAbility = ref('')
+let readySeq = 0
+watch(
+  () => currentAbility.value,
+  async (a) => {
+    const seq = ++readySeq
+    readyAbility.value = ''
+    if (!a) return
+    const loader = (a.comp as { __asyncLoader?: () => Promise<unknown> } | undefined)?.__asyncLoader
+    try {
+      await loader?.()
+    } catch {
+      /* load failure surfaces in the page itself */
+    }
+    await nextTick()
+    // out-in 页面过渡：等新页面进入后再标记（动画关闭时立即完成）
+    await new Promise((r) => setTimeout(r, pageTransitionName.value ? 350 : 0))
+    if (seq === readySeq) readyAbility.value = a.id
+  },
+  { immediate: true }
+)
+
+/**
  * Ability switch transition (设置 → 外观 → 界面动画). Empty name = off
  * (instant swap); otherwise the CSS class prefix for the active style.
  */
@@ -874,7 +901,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-app :class="windowRounded ? 'win-rounded' : ''" :data-current-ability="currentId">
+  <v-app
+    :class="windowRounded ? 'win-rounded' : ''"
+    :data-current-ability="currentId"
+    :data-ability-ready="readyAbility"
+  >
     <BackgroundLayer
       :mode="backgroundMode"
       :image-url="backgroundImage"
