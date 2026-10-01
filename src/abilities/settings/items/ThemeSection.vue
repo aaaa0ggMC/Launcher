@@ -47,8 +47,9 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
   <v-card rounded="lg" variant="tonal" class="card-fill">
     <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'theme.title') }}</v-card-title>
     <v-card-text>
-      <v-row dense>
-        <v-col v-for="s in schemeList" :key="s.id" cols="6" sm="4" md="3" lg="2" class="pb-2">
+      <!-- 按容器宽度自动排列（不看窗口断点）：卡片所在栏变窄时减少列数，而不是挤压格子 -->
+      <div class="theme-grid">
+        <div v-for="s in schemeList" :key="s.id">
           <v-card
             variant="tonal"
             class="theme-card"
@@ -80,8 +81,8 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
               <v-icon size="16">mdi-check</v-icon>
             </div>
           </v-card>
-        </v-col>
-      </v-row>
+        </div>
+      </div>
     </v-card-text>
   </v-card>
 </template>
@@ -104,19 +105,31 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
   box-shadow: 0 0 0 1px rgb(var(--v-theme-primary));
 }
 
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+
+/* 预览按宽度等比缩放（固定宽高比），色点随之缩放并始终保持正圆 */
 .theme-preview {
-  height: 52px;
+  aspect-ratio: 16 / 9;
+  /* 格子变宽时预览不再无限变高（与改版前的 52px 一致） */
+  max-height: 52px;
+  width: calc(100% - 12px);
   border-radius: 6px;
   margin: 6px;
+  padding: 0 8%;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 6%;
   overflow: hidden;
 }
 .theme-dot {
-  width: 16px;
-  height: 16px;
+  flex: 0 1 16px;
+  min-width: 0;
+  aspect-ratio: 1;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
@@ -125,14 +138,19 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
 }
 
 .theme-card__label {
-  padding: 4px 8px 8px;
-  font-size: 0.78rem;
-  line-height: 1.2;
+  padding: 2px 8px 8px;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  /* 最多两行：「极光（紫罗兰）」这类名字窄格子里换行而不是截成「极光（…」 */
+  min-height: calc(2 * 1.3em + 10px);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
   color: rgb(var(--v-theme-on-surface));
   text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .theme-card__check {
   position: absolute;
