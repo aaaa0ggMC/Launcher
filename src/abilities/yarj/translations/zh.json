@@ -382,5 +382,7 @@
   "yarj.build.geotagFromRouteDesc": "通过 GPX 时间戳对齐与插值纠正拍摄位置",
   "yarj.prefs.gpsPriorityTitle": "GPS 坐标生效优先级",
   "yarj.prefs.restoreDefaultPriority": "恢复默认顺序",
-  "yarj.prefs.gpsPriorityDesc": "当单张照片同时存在多种来源的地理信息时，系统按照下列排序自上而下选用首个有效坐标："
+  "yarj.prefs.gpsPriorityDesc": "当单张照片同时存在多种来源的地理信息时，系统按照下列排序自上而下选用首个有效坐标：",
+  "yarj.privacy.location": "照片位置与行程",
+  "yarj.privacy.location_desc": "照片 GPS、运动航线、旅途站点与地址"
 }

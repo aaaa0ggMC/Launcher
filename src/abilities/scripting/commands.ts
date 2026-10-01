@@ -1,3 +1,4 @@
+import { SCOPE_EXEC } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import {
   listUserScripts,
@@ -15,6 +16,7 @@ import './jobs'
 export default [
   {
     name: 'scripting.run',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '运行 JS/TS 脚本 (--code <code> --lang ts|js)',
     usage: 'scripting.run --code "cockpit.log(1+1)" --lang js',
     run: async (ctx) => {
@@ -48,6 +50,7 @@ export default [
   },
   {
     name: 'scripting.eval',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '快速评估 JS/TS 表达式 (--expr <expression>)',
     usage: 'scripting.eval --expr "cockpit.listCommands()"',
     run: async (ctx) => {

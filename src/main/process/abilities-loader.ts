@@ -39,6 +39,11 @@ const commandModules = import.meta.glob<{ default?: CommandSpec[] }>(
 
 const metaModules = import.meta.glob<AbilityMeta>('../../abilities/*/meta.ts', { eager: true })
 
+// Privacy scope declarations (`definePrivacyScopes` runs on import) — loaded
+// eagerly so every scope is known (settings page / consent window) even when
+// the owning ability's commands never import them directly.
+import.meta.glob('../../abilities/*/privacy.ts', { eager: true })
+
 /** Resolve the shared meta for an ability folder id. */
 function abilityMeta(id: string): AbilityMeta {
   return metaModules[`../../abilities/${id}/meta.ts`] ?? {}

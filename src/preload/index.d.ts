@@ -113,6 +113,10 @@ export interface CockpitApi {
   }) => Promise<string | null>
   copyText: (text: string) => Promise<void>
   openExternal: (url: string) => Promise<void>
+  /** Privacy consent window only (other senders get an empty result). */
+  privacyPending: () => Promise<unknown[]>
+  privacyDecide: (id: string, decision: 'deny' | 'once' | 'session') => Promise<boolean>
+  privacyDenyAll: () => Promise<number>
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 }
 

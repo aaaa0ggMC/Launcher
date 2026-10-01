@@ -3,6 +3,8 @@ import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpc } from './process/ipc'
+import { initPrivacyConsent } from './process/privacy-consent'
+import { initAgentServices, handleSecondInstanceArgv } from './process/agent'
 import { registerIconProtocol } from './process/icon-protocol'
 import { registerAudioProtocol } from './process/audio-protocol'
 import { loadExternalAbilities } from './process/ability-loader'
@@ -156,7 +158,9 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
+    // `cockpit --with-mcp` on a running instance → enable it here (this run only)
+    handleSecondInstanceArgv(argv)
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
@@ -187,6 +191,10 @@ if (!gotLock) {
     // Register every built-in ability's commands before any IPC dispatch.
     registerAbilityCommands()
     registerIpc()
+    // Privacy SDK: consent window presenter + policy from config.json (agent.privacy).
+    initPrivacyConsent()
+    // Remote / MCP (off by default; settings or --with-remote / --with-mcp for this run).
+    void initAgentServices(process.argv)
     // Abilities self-start (watchers, eager bindings) via registered hooks.
     await runStartupHooks()
     // Renderer confirmed it's OK to close despite running tasks.

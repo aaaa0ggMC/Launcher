@@ -2809,7 +2809,7 @@ async function reloadPreferences(): Promise<void> {
       </div>
     </Transition>
 
-    <div ref="mapEl" class="yarj-map">
+    <div ref="mapEl" v-privacy="'yarj.location'" class="yarj-map">
       <!-- 区域名称标签（仅本地 MBTiles 模式下生效） -->
       <div ref="labelsEl" class="yarj-labels" />
     </div>

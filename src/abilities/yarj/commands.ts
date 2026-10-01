@@ -3,6 +3,8 @@
  * 模块加载时（abilities-loader eager 导入，早于 app ready）注册 yarj.scan
  * 命名作业与 cockpit-tile 协议的 startup hook（协议需 ready 后才可 handle）。
  */
+import { SCOPE_CONTROL } from '../../main/process/privacy'
+import { withPrivacy } from './privacy'
 import { shell } from 'electron'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { makeLogger } from '../../main/process/logger'
@@ -74,7 +76,7 @@ function parsePatch(v: unknown): Record<string, unknown> {
   return (v ?? {}) as Record<string, unknown>
 }
 
-export default [
+const specs: CommandSpec[] = [
   {
     name: 'yarj.config',
     description: '读取 yarj 配置（图库目录 / 地图文件 / 探索半径）',
@@ -416,6 +418,7 @@ export default [
   },
   {
     name: 'yarj.open-path',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '使用系统默认关联程序打开指定文件或目录 (--path)',
     usage: 'yarj.open-path --path /path/to/file',
     run: async (ctx) => {
@@ -684,4 +687,6 @@ export default [
       return { ok: true, gpsPriority: priority }
     }
   }
-] satisfies CommandSpec[]
+]
+
+export default withPrivacy(specs)

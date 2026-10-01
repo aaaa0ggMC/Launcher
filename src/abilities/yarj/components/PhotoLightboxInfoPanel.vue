@@ -271,7 +271,7 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="photo" class="lightbox-info-drawer">
+  <div v-if="photo" v-privacy="'yarj.location'" class="lightbox-info-drawer">
     <div class="drawer-header d-flex align-center justify-space-between px-4 py-3">
       <span class="text-subtitle-1 font-weight-bold">{{
         t('yarj.lightbox.details', '照片详细信息')

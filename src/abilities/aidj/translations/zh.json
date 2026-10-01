@@ -575,5 +575,7 @@
   "aidj.bili.remove_item": "删除该条目",
   "aidj.bili.confirm_download": "确认下载 ({n} 项)",
   "aidj.bili.skip_existing": "跳过已下载",
-  "aidj.bili.already_downloaded": "已下载"
+  "aidj.bili.already_downloaded": "已下载",
+  "aidj.privacy.bili": "B 站账号概况",
+  "aidj.privacy.listening": "听歌统计"
 }

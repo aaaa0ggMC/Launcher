@@ -759,6 +759,12 @@ export function createChildWindow(
   return { ok: true, created: true }
 }
 
+/** The live BrowserWindow behind a child id (framework use: sender checks). */
+export function getChildWindow(id: string): BrowserWindow | null {
+  const entry = children.get(id)
+  return entry && !entry.win.isDestroyed() ? entry.win : null
+}
+
 export function destroyChildWindow(id: string): boolean {
   const entry = children.get(id)
   if (!entry || entry.win.isDestroyed()) return false

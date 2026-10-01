@@ -30,13 +30,16 @@ import {
   importCodexAuth
 } from './service'
 import { makeLogger } from '../../main/process/logger'
+import { SCOPE_CONTROL } from '../../main/process/privacy'
+import { P, shieldBalance } from './privacy'
 import type { BalanceConfig, BalanceProviderType, PlatformConfig } from './types'
 
 const log = makeLogger('balance')
 
-export default [
+const specs = [
   {
     name: 'balance.list',
+    privacy: { reads: [P.amount, P.account] },
     description: '获取所有平台余额列表 (--refresh 强制重新查询)',
     usage: 'balance.list [--refresh true|false]',
     run: async (ctx) => {
@@ -49,6 +52,7 @@ export default [
   },
   {
     name: 'balance.check',
+    privacy: { reads: [P.amount, P.account] },
     description: '查询单个平台余额 (--id <platformId>)',
     usage: 'balance.check --id deepseek',
     run: async (ctx) => {
@@ -62,6 +66,7 @@ export default [
   },
   {
     name: 'balance.config.get',
+    privacy: { reads: [P.amount, P.account] },
     description: '获取余额查询配置 (--reveal true 返回解密密钥)',
     usage: 'balance.config.get [--reveal true|false]',
     run: async (ctx) => {
@@ -71,6 +76,8 @@ export default [
   },
   {
     name: 'balance.config.set',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '保存余额配置 (--config <json>)',
     usage: 'balance.config.set --config <json>',
     run: async (ctx) => {
@@ -90,6 +97,8 @@ export default [
   },
   {
     name: 'balance.config.upsert',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '添加或修改单个平台配置 (--platform <json>)',
     usage: 'balance.config.upsert --platform <json>',
     run: async (ctx) => {
@@ -109,6 +118,7 @@ export default [
   },
   {
     name: 'balance.config.remove',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '删除平台配置 (--id <platformId>)',
     usage: 'balance.config.remove --id <platformId>',
     run: async (ctx) => {
@@ -122,6 +132,7 @@ export default [
   },
   {
     name: 'balance.profiles.list',
+    privacy: { reads: [P.amount, P.account] },
     description: '获取所有 Browser Profile 及其登录状态',
     usage: 'balance.profiles.list',
     run: async () => {
@@ -130,6 +141,8 @@ export default [
   },
   {
     name: 'balance.profiles.upsert',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '创建或更新 Profile (--id <id> --name <name> 或 --profile <json>)',
     usage: 'balance.profiles.upsert [--id <id>] --name <name>',
     run: async (ctx) => {
@@ -153,6 +166,7 @@ export default [
   },
   {
     name: 'balance.profiles.remove',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '删除 Profile (--id <profileId> [--clearStorage true|false])',
     usage: 'balance.profiles.remove --id <profileId>',
     run: async (ctx) => {
@@ -172,6 +186,7 @@ export default [
   },
   {
     name: 'balance.profiles.check',
+    privacy: { reads: [P.amount, P.account] },
     description: '检测单个 Profile 各厂商的实时登录状态 (--id <profileId>)',
     usage: 'balance.profiles.check --id <profileId>',
     run: async (ctx) => {
@@ -190,6 +205,8 @@ export default [
   },
   {
     name: 'balance.profiles.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description:
       '在指定 Profile 中登录特定厂商 (--id <profileId> --provider <openai|mimo|bigmodel|stepfun|google>)',
     usage: 'balance.profiles.login --id <profileId> --provider <provider> [--url <url>]',
@@ -202,6 +219,8 @@ export default [
   },
   {
     name: 'balance.profiles.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '在指定 Profile 中注销厂商或清空会话 (--id <profileId> [--provider <provider>])',
     usage: 'balance.profiles.logout --id <profileId> [--provider <provider>]',
     run: async (ctx) => {
@@ -214,6 +233,8 @@ export default [
   },
   {
     name: 'balance.profiles.open_window',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description:
       '在指定 Profile 的隔离环境中打开厂商控制台 (--id <profileId> --provider <provider>)',
     usage:
@@ -228,6 +249,8 @@ export default [
   },
   {
     name: 'balance.import',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '从 balance_checker 导入旧配置 (--path <filePath>)',
     usage: 'balance.import [--path ~/Apps/balance_checker/config.json]',
     run: async (ctx) => {
@@ -243,6 +266,8 @@ export default [
   },
   {
     name: 'balance.openai_web.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '弹出原生窗口登录 OpenAI 账号 (--id <profileId|platformId>)',
     usage: 'balance.openai_web.login [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -252,6 +277,8 @@ export default [
   },
   {
     name: 'balance.openai_web.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '清除 OpenAI 授权会话 (--id <profileId|platformId>)',
     usage: 'balance.openai_web.logout [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -262,6 +289,8 @@ export default [
   },
   {
     name: 'balance.google_web.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '弹出原生窗口登录 Google 账号 (--id <profileId|platformId> [--url <url>])',
     usage: 'balance.google_web.login [--id <profileId|platformId>] [--url <url>]',
     run: async (ctx) => {
@@ -272,6 +301,8 @@ export default [
   },
   {
     name: 'balance.google_web.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '清除 Google 网页端授权会话 (--id <profileId|platformId>)',
     usage: 'balance.google_web.logout [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -282,6 +313,8 @@ export default [
   },
   {
     name: 'balance.mimo_web.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '弹出原生窗口登录小米账号 (--id <profileId|platformId> [--url <url>])',
     usage: 'balance.mimo_web.login [--id <profileId|platformId>] [--url <url>]',
     run: async (ctx) => {
@@ -292,6 +325,8 @@ export default [
   },
   {
     name: 'balance.mimo_web.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '清除小米 MiMo 授权会话 (--id <profileId|platformId>)',
     usage: 'balance.mimo_web.logout [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -302,6 +337,8 @@ export default [
   },
   {
     name: 'balance.bigmodel_web.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '弹出原生窗口登录智谱账号 (--id <profileId|platformId> [--url <url>])',
     usage: 'balance.bigmodel_web.login [--id <profileId|platformId>] [--url <url>]',
     run: async (ctx) => {
@@ -312,6 +349,8 @@ export default [
   },
   {
     name: 'balance.bigmodel_web.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '清除智谱 BigModel 授权会话 (--id <profileId|platformId>)',
     usage: 'balance.bigmodel_web.logout [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -322,6 +361,8 @@ export default [
   },
   {
     name: 'balance.stepfun_web.login',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '弹出原生窗口登录阶跃星辰账号 (--id <profileId|platformId> [--url <url>])',
     usage: 'balance.stepfun_web.login [--id <profileId|platformId>] [--url <url>]',
     run: async (ctx) => {
@@ -332,6 +373,8 @@ export default [
   },
   {
     name: 'balance.stepfun_web.logout',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '清除阶跃星辰授权会话 (--id <profileId|platformId>)',
     usage: 'balance.stepfun_web.logout [--id <profileId|platformId>]',
     run: async (ctx) => {
@@ -342,6 +385,8 @@ export default [
   },
   {
     name: 'balance.open_window',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description: '在 Electron 原生独立隔离窗口中打开指定平台控制台页面',
     usage: 'balance.open_window --id <platformId> [--type <type>] [--url <url>] [--title <title>]',
     run: async (ctx) => {
@@ -354,6 +399,7 @@ export default [
   },
   {
     name: 'balance.codex.check_default',
+    privacy: { reads: [P.amount, P.account] },
     description: '检测本地 ~/.codex/auth.json 是否存在及基本信息',
     usage: 'balance.codex.check_default',
     run: async () => {
@@ -362,6 +408,8 @@ export default [
   },
   {
     name: 'balance.codex.import_auth',
+    // 凭据 / 登录窗口相关：只能由用户本人操作
+    privacy: { agent: 'deny' },
     description:
       '从本地 ~/.codex/auth.json 或传入内容导入 Codex 凭据 (--path <path> 或 --content <json>)',
     usage: 'balance.codex.import_auth [--path <path>] [--content <json>] [--profileId <profileId>]',
@@ -380,3 +428,13 @@ export default [
     }
   }
 ] satisfies CommandSpec[]
+
+/**
+ * 凡声明了 `privacy.reads` 的命令，结果统一过一遍 shieldBalance：
+ * agent 来源下余额 / 账号脱敏、API Key 占位；UI / CLI 原样返回。
+ */
+export default specs.map((spec) =>
+  spec.privacy && 'reads' in spec.privacy
+    ? { ...spec, run: async (ctx) => shieldBalance(await spec.run(ctx)) }
+    : spec
+) satisfies CommandSpec[]

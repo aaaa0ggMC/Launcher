@@ -382,5 +382,7 @@
   "yarj.build.geotagFromRouteDesc": "Align and interpolate photo coordinates via GPX timestamps",
   "yarj.prefs.gpsPriorityTitle": "GPS Coordinate Priority",
   "yarj.prefs.restoreDefaultPriority": "Restore Default Priority",
-  "yarj.prefs.gpsPriorityDesc": "When a photo has multiple location sources, the system applies the first available coordinate in this order:"
+  "yarj.prefs.gpsPriorityDesc": "When a photo has multiple location sources, the system applies the first available coordinate in this order:",
+  "yarj.privacy.location": "Photo locations & trips",
+  "yarj.privacy.location_desc": "Photo GPS, activity routes, journey stops and addresses"
 }

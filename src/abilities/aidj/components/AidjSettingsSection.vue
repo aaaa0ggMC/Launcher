@@ -666,6 +666,7 @@ defineExpose({
           <v-col cols="12" md="6">
             <v-text-field
               v-model="apiKey"
+              v-agent-forbidden
               :label="t('aidj.settings.api_key', 'API 密钥')"
               type="password"
               hide-details
@@ -1890,7 +1891,7 @@ defineExpose({
 
       <!-- NCM Disclaimer Dialog -->
       <v-dialog v-model="ncmDialog" max-width="560" persistent>
-        <v-card rounded="lg">
+        <v-card v-agent-forbidden rounded="lg">
           <v-card-title class="d-flex align-center ga-2 px-4 pt-4 pb-2">
             <v-icon color="warning">mdi-alert-circle-outline</v-icon>
             <span class="text-h6 font-weight-bold">{{
@@ -1960,7 +1961,7 @@ defineExpose({
 
       <!-- Bilibili Disclaimer Dialog -->
       <v-dialog v-model="biliDialog" max-width="560" persistent>
-        <v-card rounded="lg">
+        <v-card v-agent-forbidden rounded="lg">
           <v-card-title class="d-flex align-center ga-2 px-4 pt-4 pb-2">
             <v-icon color="warning">mdi-alert-circle-outline</v-icon>
             <span class="text-h6 font-weight-bold">{{
@@ -2030,7 +2031,7 @@ defineExpose({
 
       <!-- Bilibili QR Login Dialog -->
       <v-dialog v-model="qrDialog" max-width="440" persistent>
-        <v-card rounded="lg">
+        <v-card v-agent-forbidden rounded="lg">
           <v-card-title class="d-flex align-center justify-space-between px-4 pt-4 pb-2">
             <div class="d-flex align-center ga-2">
               <v-icon color="primary">mdi-qrcode-scan</v-icon>
@@ -2085,7 +2086,7 @@ defineExpose({
 
       <!-- Bilibili Import Credential Dialog -->
       <v-dialog v-model="importDialog" max-width="560">
-        <v-card rounded="lg">
+        <v-card v-agent-forbidden rounded="lg">
           <v-card-title class="d-flex align-center justify-space-between px-4 pt-4 pb-2">
             <div class="d-flex align-center ga-2">
               <v-icon color="primary">mdi-file-import-outline</v-icon>

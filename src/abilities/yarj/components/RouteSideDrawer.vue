@@ -101,7 +101,7 @@ function onRouteClick(route: Route): void {
 
 <template>
   <Transition name="drawer-slide">
-    <div v-if="modelValue" class="yarj-route-drawer">
+    <div v-if="modelValue" v-privacy="'yarj.location'" class="yarj-route-drawer">
       <!-- 抽屉头部 -->
       <div class="pa-4 pb-2 border-b d-flex align-center justify-space-between flex-shrink-0">
         <div class="d-flex align-center ga-2">

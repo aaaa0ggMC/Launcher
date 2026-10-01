@@ -13,6 +13,9 @@ import {
   listAbilityStates
 } from '../../main/process/ability-runtime'
 import { getLoadedAbilityIds } from '../../main/process/abilities-loader'
+import { isAgentOrigin, PrivacyDeniedError } from '../../main/process/privacy'
+import { reloadPrivacyPolicy } from '../../main/process/privacy-consent'
+import { reloadAgentServices } from '../../main/process/agent'
 
 const log = makeLogger('settings')
 
@@ -65,6 +68,11 @@ registerStartupHook(async () => {
 })
 
 async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // `agent.*`（远程 / MCP 开关、隐私策略、永久授权）只能由用户在设置页修改——
+  // agent 若能写它，就能给自己授权（docs/agent-access-design.md §5.4）。
+  if (isAgentOrigin() && patch && typeof patch === 'object' && 'agent' in patch) {
+    throw new PrivacyDeniedError('agent_denied', [], 'agent may not modify agent.* settings')
+  }
   try {
     const existed = existsSync(CONFIG_JSON)
     const current = await readJson<Record<string, unknown>>(CONFIG_JSON)
@@ -86,6 +94,8 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('cockpit:config-changed', merged)
     }
+    if ('agent' in patch || 'uiScale' in patch) await reloadPrivacyPolicy()
+    if ('agent' in patch) void reloadAgentServices()
     log.info('config.set broadcast', { keys: Object.keys(merged) })
     log.debug('config.set changed', { changedKeys, previousKeys: Object.keys(cfg) })
     return merged

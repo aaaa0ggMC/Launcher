@@ -1,3 +1,4 @@
+import { SCOPE_EXEC, SCOPE_CONTROL, guard, scrubForAgent } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import type { BtTaskInfo } from '../../shared/types'
 import {
@@ -27,6 +28,9 @@ const log = makeLogger('background')
  * the primary API is programmatic (any ability can call startProcessTask /
  * startJobTask directly), the commands exist for the global UI panel + CLI.
  */
+/** 会执行调用方提供的代码的命名作业。 */
+const EXEC_JOBS = new Set(['script-run'])
+
 export default [
   {
     name: 'background.list',
@@ -44,11 +48,13 @@ export default [
         log.warn('background.output missing id')
         return { ok: false, error: '需要 --id' }
       }
-      return { ok: true, id, messages: getTaskOutput(id) }
+      // agent 读取：已知凭据值 / 凭据 key 替换成占位符（任务可能是用户发起的）
+      return { ok: true, id, messages: scrubForAgent(getTaskOutput(id)) }
     }
   },
   {
     name: 'background.export',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '导出后台任务的缓冲输出到文件 (--id --path)',
     usage: 'background.export --id bt-xxx --path /abs/output.log',
     run: async (ctx) => {
@@ -81,6 +87,7 @@ export default [
   },
   {
     name: 'background.start',
+    privacy: { requires: [SCOPE_EXEC] },
     description:
       '启动一个进程后台任务 (--name --command <json argv | space-separated> [--cwd] [--description])',
     usage: 'background.start --name "ncm api" --command ["node","app.js"] --cwd ~/Apps/Music',
@@ -124,6 +131,7 @@ export default [
   },
   {
     name: 'background.input',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '向后台任务写入 stdin (--id --data)',
     usage: 'background.input --id bt-xxx --data "y\\n"',
     run: async (ctx) => {
@@ -136,6 +144,7 @@ export default [
   },
   {
     name: 'background.signal',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '向后台任务发送信号 (--id --signal SIGINT)',
     usage: 'background.signal --id bt-xxx --signal SIGINT',
     run: async (ctx) => {
@@ -148,6 +157,7 @@ export default [
   },
   {
     name: 'background.job',
+    privacy: {},
     description: '启动一个注册的后台作业 (--name <handler> --args <json>), 如 download',
     usage:
       'background.job --name download --args {"name":"x","url":"https://...","out":"~/Downloads/x"}',
@@ -169,6 +179,8 @@ export default [
       } else if (ctx.named.args && typeof ctx.named.args === 'object') {
         args = ctx.named.args as Record<string, unknown>
       }
+      // 执行任意代码的作业（脚本运行）需要 system.exec 许可
+      if (EXEC_JOBS.has(name)) await guard(SCOPE_EXEC, `background.job ${name}`)
       const task = await startJobByName(name, args)
       if (!task) return { ok: false, error: `未知作业处理器: ${name}` }
       log.info('background.job ok', { name, id: task.id })
@@ -177,6 +189,7 @@ export default [
   },
   {
     name: 'background.stop',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '停止后台任务 (--id, 进程: SIGTERM→SIGKILL; 任务: 取消)',
     usage: 'background.stop --id bt-xxx',
     run: async (ctx) => {
@@ -189,6 +202,7 @@ export default [
   },
   {
     name: 'background.kill',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '强制结束后台进程任务 (--id, SIGKILL)',
     usage: 'background.kill --id bt-xxx',
     run: async (ctx) => {
@@ -223,6 +237,7 @@ export default [
   },
   {
     name: 'background.restart',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '重启后台进程任务 (--id)',
     usage: 'background.restart --id bt-xxx',
     run: async (ctx) => {

@@ -315,6 +315,29 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - 主题切换：开启「现代动效」时用 View Transitions API 做波纹揭示，扩散起点由 `animations.themeTransition` 决定（`corner`=左上角、`cursor`=鼠标处，见 `App.vue` 的 `applyTheme` 与 `global.css` 的 `--vt-origin-*`），关闭则即时切换。`<html>` 加 `motion-off` 类可全局关闭所有 CSS 过渡。
 - ft 等画布类渲染端的配色跟随当前主题（读取 `--v-theme-*` CSS 变量），不是硬编码 hex。
 
+### 隐私 SDK（AI / 远程访问的数据边界）
+
+设计见 `docs/agent-access-design.md`。用法和 `encrypt.ts` 一样：**能力在产生数据的地方自己 wrap**。
+
+- **调用来源**：`withOrigin` 经 AsyncLocalStorage 贯穿调用链。IPC = `ui`、CLI = `cli`；agent（`remote` / `mcp` / `script-agent` / `agent-ui`）由各自入口打标。渲染端只能把自己降权成 `agent-ui`，不能提权。**非 agent 来源下所有 API 原样透传**。
+- **声明 scope**：`src/abilities/<id>/privacy.ts` 里 `definePrivacyScopes('<id>', { … })`（loader 自动 glob）。级别：`personal`（不能关联到真人，默认对 AI 可见）/ `sensitive`（能关联到真人、或涉及金钱 / 位置，默认脱敏、可申请）/ `secret`（凭据，永不可读）。翻译键放本能力 translations。
+- **主进程**：`shield(scope, v)` / `shieldFields(obj, resolver)` 脱敏，`secret(v)` 凭据占位，`await guard(scope)` 动作前要求许可（弹授权窗口并等待）。
+- **命令声明** `CommandSpec.privacy`：`reads`（结果含哪些 scope）/ `requires`（agent 调用前需要的许可，如 `SCOPE_EXEC` / `SCOPE_CONTROL`）/ `agent: 'deny'`（凭据登录、修改账号等只能用户本人做）。未声明的命令 agent 也能调，但结果会再过一遍凭据 key 兜底脱敏。
+  - `system.exec`：**调用方决定执行什么**（任意命令行 / 代码 / 任意路径写文件）；`system.control`：行为固定但改变系统状态。能力内部用固定参数调外部程序不算 exec。
+- **渲染端**：`v-privacy="'<scope>'"` 给子树打标签（AI 快照 / 截图按标签脱敏，**与用户是否点开明文无关**）；`v-agent-forbidden` 标禁区（凭据输入框、授权相关设置）；打码文本用 `@ui/components/PrivacyText.vue`。
+- **授权窗口**（`privacy-consent.ts` + `windows/PrivacyConsent.vue`）：窗口 id / view 保留，渲染端无法创建或替换；决定只走 `privacy:decide` IPC 并校验 sender。**绝不能把「批准」做成命令**。开发模式可用 `privacy.debug-request --scopes <id> --reason ...` 手动弹出测试。
+- 新增 / 改动涉及个人数据的能力：先按上面的标准定级，再在命令和界面两侧同时接入。
+
+### AI 与远程（Remote / MCP / UI inspector）
+
+- **默认关闭**。设置 →「AI 与远程」开启（`config.json` 的 `agent.mcp` / `agent.remote`），或只对本次运行：`pnpm dev -- --with-mcp --with-remote`（注意 `--`；也可用环境变量 `COCKPIT_WITH=mcp,remote`）。已运行时再执行带参数的命令会经 second-instance 转交。
+- **MCP**：`http://127.0.0.1:47802/mcp`（Streamable HTTP），`Authorization: Bearer <~/.config/LinuxCockpit/agent/token>`。设置页「复制 Claude Code 接入命令」；只支持 stdio 的客户端用 `node scripts/cockpit-mcp.mjs`。
+- **Remote**：`POST http://127.0.0.1:47801/rpc`，JSON-RPC 2.0，方法名与 MCP 工具相同（`tools/list` 列出）。
+- 两者共用 `src/main/process/agent/tools.ts` 的工具表，执行都走命令注册表 → 隐私 SDK 自动生效。只监听 127.0.0.1，校验 Host、拒绝带 Origin 的浏览器请求。
+- **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示）、可信输入点击 / 输入 / 按键 / 滚动、截图（隐私区遮盖）。每次操作前等页面稳定（无进行中命令 + DOM 300ms 无变化）。
+- **UI 写法要求**：纯图标按钮给 `aria-label` 或 `title`，否则 AI 只能看到图标名；揭示隐私的按钮（「全部显示」等）加 `v-privacy-action="'<scope>'"`。
+- 开发调试：`privacy.debug-as-agent --cmd ui.snapshot`（dev only）以 AI 身份执行任意命令，查看 AI 视角。
+
 ### 镜像源 toggle 安全性
 
 - `toggleMirror` 只修改目标 Server 行的 `# ` 注释前缀，其余行原样保留
@@ -389,9 +412,10 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 3. **依赖声明** `src/abilities/<id>/package.json`（workspace 成员；有专属第三方依赖就写 `dependencies`，没有就留空，见 §2.2）
 4. **领域类型** `src/abilities/<id>/types.ts`（不进 shared）
 5. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
-6. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）
+6. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）；页面里要打开自己的设置用 `useSettings().open('<id>')`（`@ui/composables/settings`）：有设置页就跳到本能力的分类（可选定位到设置项），没有设置页则弹浮窗——**不要**写 `activate('settings', …)`，能力不应依赖 settings 能力存在。无页面的后端能力也可以注入设置
 7. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
 8. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
+9. **（涉及个人数据时必做）隐私声明**：`privacy.ts` 定义 scope，命令声明 `privacy`、结果 `shield`，界面 `v-privacy` / `v-agent-forbidden`（见上「隐私 SDK」）
 
 **无需改任何 yaml/注册表**——侧栏按 `category`/`name` 字母序自注入（见上）。
 

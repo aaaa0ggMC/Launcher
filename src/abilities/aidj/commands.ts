@@ -11,6 +11,7 @@ import { chatContinuousCommands } from './commands/chat-continuous'
 import { configLyricsCommands } from './commands/config-lyrics'
 import { approveCommands } from './commands/approve'
 import { metadataSlotsCommands } from './commands/metadata-slots'
+import { withPrivacy } from './privacy'
 
 export { getCurrentAbortSignal, abortCurrentRequest } from './commands/shared'
 
@@ -18,7 +19,7 @@ export { getCurrentAbortSignal, abortCurrentRequest } from './commands/shared'
 // when the app boots into dbus mode (Linux default), show it in web mode.
 registerStartupHook(() => reconcilePlayerAbilityVisibility())
 
-const commands: CommandSpec[] = [
+const commands: CommandSpec[] = withPrivacy([
   ...curateCommands,
   ...playbackCommands,
   ...sessionsCommands,
@@ -27,6 +28,6 @@ const commands: CommandSpec[] = [
   ...chatContinuousCommands,
   ...approveCommands,
   ...metadataSlotsCommands
-]
+])
 
 export default commands

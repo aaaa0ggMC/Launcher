@@ -1,3 +1,4 @@
+import { SCOPE_CONTROL } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { listWallpapers, applyWallpaper, listOutputs } from './service'
 import { makeLogger } from '../../main/process/logger'
@@ -17,6 +18,7 @@ export default [
   },
   {
     name: 'display.apply',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '应用壁纸 (--path)',
     usage: 'display.apply --path /abs/to/wallpaper.jpg',
     run: async (ctx) => {

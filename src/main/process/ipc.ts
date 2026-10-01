@@ -4,10 +4,28 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { cliExec } from './cli'
 import { runCommand, listCommands, UnknownCommandError } from './commands/registry'
+import { withOrigin, type CallOrigin } from './privacy'
+import { isReservedWindowId, isReservedWindowView } from './privacy-consent'
 
 /** Argument keys whose values should never land in the log (config patches,
  *  file payloads, credentials). */
 const SENSITIVE_KEYS = new Set(['patch', 'data', 'password', 'token', 'secret', 'apiKey', 'env'])
+
+/** Renderer `command:run` calls currently in flight (inspector waits for 0 before snapshotting). */
+let inflight = 0
+export function inflightCommands(): number {
+  return inflight
+}
+
+/** Renderer may only DOWNGRADE itself to `agent-ui`; anything else is the fallback origin. */
+function rendererOrigin(
+  meta: { agentSession?: unknown } | undefined,
+  fallback: CallOrigin
+): CallOrigin {
+  return typeof meta?.agentSession === 'string' && meta.agentSession
+    ? { kind: 'agent-ui', session: meta.agentSession }
+    : fallback
+}
 
 function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -124,14 +142,23 @@ export function registerIpc(): void {
 
   // Child window manager — BrowserWindows can only be created in the main
   // process; the renderer sends a declarative spec and this owns lifecycle.
-  ipcMain.handle('window:create', (_e, spec: WindowSpec) => createChildWindow(spec))
-  ipcMain.handle('window:destroy', (_e, id: string) => destroyChildWindow(id))
+  // Framework-owned ids (the privacy consent window) are reserved: a renderer
+  // must never be able to pre-create / replace / close them, otherwise the
+  // consent IPC sender check could be satisfied by a window it controls.
+  ipcMain.handle('window:create', (_e, spec: WindowSpec) =>
+    isReservedWindowId(spec?.id) || isReservedWindowView(spec?.view)
+      ? { ok: false, error: 'reserved window' }
+      : createChildWindow(spec)
+  )
+  ipcMain.handle('window:destroy', (_e, id: string) =>
+    isReservedWindowId(id) ? false : destroyChildWindow(id)
+  )
   ipcMain.handle('window:focus', (_e, id: string) => focusChildWindow(id))
   ipcMain.handle('window:list', () => listChildWindows())
   ipcMain.handle(
     'window:control',
     (_e, id: string, action: WindowControlAction, patch?: Record<string, unknown>) =>
-      controlChildWindow(id, action, patch)
+      isReservedWindowId(id) ? false : controlChildWindow(id, action, patch)
   )
 
   // Desktop wallpaper for the `wallpaper` background preset.
@@ -200,34 +227,51 @@ export function registerIpc(): void {
   })
 
   // CLI-first dispatcher: single source of truth for every ability action.
-  ipcMain.handle('command:run', async (_e, name: string, args: Record<string, unknown>) => {
-    // Log the concrete command + its (redacted) args. The file always keeps
-    // these (even `logs.*`) — the logs ability filters them via `excludeSelf`.
-    log.info(name, { args: redactArgs(args ?? {}) })
-    try {
-      return await runCommand(name, args ?? {})
-    } catch (err) {
-      // Command not registered (backing ability removed etc.) — notify every
-      // window so the renderer can show a friendly toast, then rethrow so
-      // existing callers keep their current error semantics. Mode/platform-
-      // GATED commands are silent (not exposed ≠ broken), so no toast.
-      if (err instanceof UnknownCommandError) {
-        log.warn('unknown command', err.commandName)
-        if (!err.silent) {
-          for (const win of BrowserWindow.getAllWindows()) {
-            win.webContents.send('cockpit:command-error', err.commandName)
+  ipcMain.handle(
+    'command:run',
+    async (_e, name: string, args: Record<string, unknown>, meta?: { agentSession?: unknown }) => {
+      // Renderer IPC is the user (`ui`). The renderer may only DOWNGRADE itself
+      // to `agent-ui` (inspector-injected input in flight, see privacy.ts) —
+      // a tag can never upgrade privileges, so trusting it is safe.
+      const origin = rendererOrigin(meta, { kind: 'ui' })
+      // Log the concrete command + its (redacted) args. The file always keeps
+      // these (even `logs.*`) — the logs ability filters them via `excludeSelf`.
+      log.info(name, { args: redactArgs(args ?? {}), ...(origin.kind === 'ui' ? {} : { origin }) })
+      inflight++
+      try {
+        return await withOrigin(origin, () => runCommand(name, args ?? {}))
+      } catch (err) {
+        // Command not registered (backing ability removed etc.) — notify every
+        // window so the renderer can show a friendly toast, then rethrow so
+        // existing callers keep their current error semantics. Mode/platform-
+        // GATED commands are silent (not exposed ≠ broken), so no toast.
+        if (err instanceof UnknownCommandError) {
+          log.warn('unknown command', err.commandName)
+          if (!err.silent) {
+            for (const win of BrowserWindow.getAllWindows()) {
+              win.webContents.send('cockpit:command-error', err.commandName)
+            }
           }
+        } else {
+          log.error(`${name} failed`, err instanceof Error ? err.message : String(err))
         }
-      } else {
-        log.error(`${name} failed`, err instanceof Error ? err.message : String(err))
+        throw err
+      } finally {
+        inflight--
       }
-      throw err
     }
-  })
+  )
   ipcMain.handle('command:list', async () =>
-    listCommands().map(({ name, description, usage }) => ({ name, description, usage }))
+    listCommands().map(({ name, description, usage, privacy }) => ({
+      name,
+      description,
+      usage,
+      privacy
+    }))
   )
 
   // CLI REPL.
-  ipcMain.handle('cli:exec', async (_e, cmd: string) => cliExec(cmd))
+  ipcMain.handle('cli:exec', async (_e, cmd: string, meta?: { agentSession?: unknown }) =>
+    withOrigin(rendererOrigin(meta, { kind: 'cli' }), () => cliExec(cmd))
+  )
 }

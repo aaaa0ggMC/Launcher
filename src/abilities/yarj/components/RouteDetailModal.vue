@@ -248,7 +248,7 @@ function handleGeotag(): void {
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <v-card v-if="route" rounded="xl" class="route-modal-card">
+    <v-card v-if="route" v-privacy="'yarj.location'" rounded="xl" class="route-modal-card">
       <!-- 头部：标题与活动状态 -->
       <v-card-title
         class="pa-5 pb-3 d-flex align-center justify-space-between flex-wrap ga-2 border-b flex-shrink-0 route-modal-title"

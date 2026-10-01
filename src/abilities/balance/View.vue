@@ -769,8 +769,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Summary Stats Row -->
-      <v-row class="ma-0 ga-3 ga-md-0" dense>
+      <!-- Summary Stats Row（总额 → 隐私标签，AI 快照 / 截图脱敏） -->
+      <v-row v-privacy="'balance.amount'" class="ma-0 ga-3 ga-md-0" dense>
         <!-- Total CNY -->
         <v-col cols="12" sm="6" md="3">
           <v-card variant="tonal" class="rounded-xl stat-card pa-4" color="primary">
@@ -1264,7 +1264,7 @@ onUnmounted(() => {
               </div>
 
               <!-- Normal Balance Display -->
-              <div v-else class="d-flex flex-column">
+              <div v-else v-privacy="'balance.amount'" class="d-flex flex-column">
                 <!-- Big Balance Text -->
                 <div class="d-flex align-baseline ga-2 flex-wrap">
                   <span class="balance-amount font-weight-bold">
@@ -1381,7 +1381,8 @@ onUnmounted(() => {
 
     <!-- Add/Edit Platform Dialog Modal -->
     <v-dialog v-model="showEditModal" max-width="580px">
-      <v-card class="rounded-2xl">
+      <!-- 编辑平台（含 API Key / 凭据导入）：AI 禁区 -->
+      <v-card v-agent-forbidden class="rounded-2xl">
         <v-card-title
           class="px-6 pt-5 pb-3 font-weight-bold d-flex align-center justify-space-between"
         >

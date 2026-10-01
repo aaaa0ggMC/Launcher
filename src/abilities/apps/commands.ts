@@ -1,3 +1,4 @@
+import { SCOPE_EXEC, SCOPE_CONTROL } from '../../main/process/privacy'
 import { isAbsolute, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { AppEntry } from './types'
@@ -57,6 +58,7 @@ export default [
   },
   {
     name: 'apps.update',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '更新/创建条目 (--root --id --patch <json>)',
     usage: 'apps.update --root ~/Apps --id bili-viewer --patch {"name":"x"}',
     run: async (ctx) => {
@@ -74,6 +76,7 @@ export default [
   },
   {
     name: 'apps.delete',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '删除条目 (--root --id)',
     usage: 'apps.delete --root ~/Apps --id start-rdp',
     run: async (ctx) => {
@@ -89,6 +92,7 @@ export default [
   },
   {
     name: 'apps.add-root',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '添加搜索目录 (--path)',
     usage: 'apps.add-root --path /home/aaaa0ggmc/Apps',
     run: async (ctx) => {
@@ -99,6 +103,7 @@ export default [
   },
   {
     name: 'apps.remove-root',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '移除搜索目录 (--path)',
     usage: 'apps.remove-root --path /home/aaaa0ggmc/Apps',
     run: async (ctx) => {
@@ -124,6 +129,7 @@ export default [
   },
   {
     name: 'apps.create',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '创建新条目 (--root --id --patch <json> [--mkdir true])',
     usage:
       'apps.create --root ~/Apps --id myapp --patch {"name":"My App","exec":{"type":"custom","command":["run.sh"]}}',
@@ -158,6 +164,8 @@ export default [
   },
   {
     name: 'launch.run',
+    // 只能启动用户已登记的应用（命令行由用户写在 apps.json）→ control；root 应用的提权见 P4
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '启动应用 (--root --id)',
     usage: 'launch.run --root ~/Apps --id bili-viewer',
     run: async (ctx) => {
@@ -174,6 +182,7 @@ export default [
   },
   {
     name: 'launch.action',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '运行应用的附加操作 (--root --id --action)',
     usage: 'launch.action --root ~/Apps --id new-api --action stop',
     run: async (ctx) => {

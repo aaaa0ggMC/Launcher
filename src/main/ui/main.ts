@@ -9,6 +9,7 @@ import './styles/global.css'
 import App from './App.vue'
 import { resolveWindowView } from './windows'
 import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
+import { vPrivacy, vPrivacyAction, vAgentForbidden } from './privacy'
 
 const vuetify = createVuetify({
   components,
@@ -97,7 +98,13 @@ async function mountRoot(): Promise<void> {
       root = fb.default
     }
   }
-  createApp(root).use(vuetify).mount('#app')
+  createApp(root)
+    .use(vuetify)
+    // Privacy SDK tags (data-privacy / data-agent) — read by the agent inspector.
+    .directive('privacy', vPrivacy)
+    .directive('privacy-action', vPrivacyAction)
+    .directive('agent-forbidden', vAgentForbidden)
+    .mount('#app')
 }
 
 void mountRoot()

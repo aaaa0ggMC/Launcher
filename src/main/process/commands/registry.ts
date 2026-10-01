@@ -1,6 +1,13 @@
 import type { CommandSpec } from './types'
 import { makeLogger } from '../logger'
 import { registerCommand, isCommandRunnable } from '../ability-runtime'
+import {
+  isAgentOrigin,
+  guard,
+  redactSecretKeys,
+  currentOrigin,
+  PrivacyDeniedError
+} from '../privacy'
 
 const log = makeLogger('commands')
 
@@ -43,6 +50,27 @@ export function registerAll(specs: CommandSpec[], abilityId?: string): void {
 
 export function listCommands(): CommandSpec[] {
   return [...commands.values()]
+}
+
+/**
+ * Agent-only privacy middleware around a command run. UI / CLI origins pass
+ * straight through. For agents: `agent: 'deny'` refuses, `requires` guards
+ * (may block on the consent window), and the result gets the credential-key
+ * fallback redaction so an undeclared command can't leak a password field.
+ */
+async function runWithPrivacy(
+  spec: CommandSpec,
+  ctx: Parameters<CommandSpec['run']>[0]
+): Promise<unknown> {
+  if (!isAgentOrigin()) return await spec.run(ctx)
+  const p = spec.privacy
+  if (p?.agent === 'deny') {
+    log.warn('agent denied command', { name: spec.name, origin: currentOrigin() })
+    throw new PrivacyDeniedError('agent_denied', [], `agent may not call ${spec.name}`)
+  }
+  if (p?.requires?.length) await guard(p.requires, spec.name)
+  if (!p) log.debug('agent called unclassified command', { name: spec.name })
+  return redactSecretKeys(await spec.run(ctx))
 }
 
 /** Parse `--key value` pairs + bare positional tokens. */
@@ -100,7 +128,7 @@ export async function tryRunCommand(input: string): Promise<string | null> {
   }
   const { named, positional } = parseArgs(tokens.slice(1))
   try {
-    const result = await spec.run({ named, positional })
+    const result = await runWithPrivacy(spec, { named, positional })
     return formatResult(result)
   } catch (e) {
     log.error('command failed', { name, error: e instanceof Error ? e.message : String(e) })
@@ -118,5 +146,5 @@ export async function runCommand(
   // Gated (mode/platform-exclusive) commands are "silently unknown" — the
   // renderer shouldn't toast for them.
   if (!(await isCommandRunnable(name))) throw new UnknownCommandError(name, true)
-  return await spec.run({ named: args, positional: [] })
+  return await runWithPrivacy(spec, { named: args, positional: [] })
 }

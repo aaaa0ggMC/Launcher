@@ -289,7 +289,9 @@ onMounted(() => {
           </div>
 
           <div class="d-flex align-center ga-2">
+            <!-- 显示 API Key：凭据不可申请，AI 点击直接被拒绝 -->
             <v-btn
+              v-privacy-action="'secret'"
               variant="tonal"
               :prepend-icon="revealKeys ? 'mdi-eye-off' : 'mdi-eye'"
               @click="toggleRevealKeys"
@@ -339,7 +341,7 @@ onMounted(() => {
                 </v-chip>
               </v-list-item-title>
 
-              <v-list-item-subtitle class="text-caption font-mono mt-1">
+              <v-list-item-subtitle v-privacy="'secret'" class="text-caption font-mono mt-1">
                 {{ p.apiKey ? (revealKeys ? p.apiKey : '••••••••••••••••') : '（未设置 API Key）' }}
               </v-list-item-subtitle>
 
@@ -364,7 +366,8 @@ onMounted(() => {
 
     <!-- Add/Edit Platform Dialog -->
     <v-dialog v-model="showEditDialog" max-width="560px">
-      <v-card class="rounded-xl">
+      <!-- 编辑平台（含 API Key）：AI 禁区 -->
+      <v-card v-agent-forbidden class="rounded-xl">
         <v-card-title class="px-6 pt-5 pb-3 font-weight-bold">
           {{
             isNew ? t('balance.add_platform', '添加平台') : t('balance.edit_platform', '编辑平台')

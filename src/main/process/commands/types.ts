@@ -29,4 +29,19 @@ export interface CommandSpec {
    * normal dispatch (the gate is evaluated at every dispatch).
    */
   enabled?: () => boolean | Promise<boolean>
+  /**
+   * Agent-facing privacy declaration (see `src/main/process/privacy.ts` and
+   * docs/agent-access-design.md §3.4). Only consulted for agent origins
+   * (remote / mcp / script-agent); UI / CLI dispatch is unaffected.
+   */
+  privacy?: CommandPrivacy
+}
+
+export interface CommandPrivacy {
+  /** Scopes the result may contain (already shielded at the source) — shown to agents. */
+  reads?: string[]
+  /** Scopes an agent must hold before the command runs (`guard` is applied by the registry). */
+  requires?: string[]
+  /** `deny` = agents may never call this command (credential login, privacy settings…). */
+  agent?: 'deny'
 }

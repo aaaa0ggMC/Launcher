@@ -1,3 +1,4 @@
+import { SCOPE_CONTROL } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { listSystemd, systemdAction } from './service'
 import { makeLogger } from '../../main/process/logger'
@@ -16,6 +17,7 @@ export default [
   },
   {
     name: 'systemd.action',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '启动/停止/重启服务 (--name --action)',
     usage: 'systemd.action --name myservice --action restart',
     run: async (ctx) => {

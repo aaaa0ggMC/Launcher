@@ -1,3 +1,4 @@
+import { SCOPE_CONTROL } from '../../main/process/privacy'
 import { BrowserWindow } from 'electron'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { getDashboardLayout, setDashboardLayout, resetDashboardLayout } from './ui-state'
@@ -38,6 +39,7 @@ export default [
   },
   {
     name: 'hardware.pm-toggle',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '切换 0↔1 (pkexec, 重启生效)',
     usage: 'hardware.pm-toggle',
     run: async () => {
@@ -64,6 +66,7 @@ export default [
   },
   {
     name: 'docker.action',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '启动/停止/重启容器 (--name --action)',
     usage: 'docker.action --name new-api --action start',
     run: async (ctx) => {

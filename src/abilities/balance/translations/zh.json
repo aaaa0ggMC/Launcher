@@ -95,5 +95,9 @@
   "balance.codex.status_limited": "已达上限",
   "balance.codex.primary_window": "5h 窗口: 剩余 {remaining}% (约 {minutes} 分钟后重置)",
   "balance.codex.secondary_window": "周窗口: 剩余 {remaining}% (已用 {used}%)",
-  "balance.codex.credits": "点数余额: ${balance}"
+  "balance.codex.credits": "点数余额: ${balance}",
+  "balance.privacy.amount": "余额与用量",
+  "balance.privacy.amount_desc": "各平台余额、赠送券、已用 / 总额度、原始响应",
+  "balance.privacy.account": "平台登录账号",
+  "balance.privacy.account_desc": "网页登录的账号（邮箱等）"
 }

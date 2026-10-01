@@ -96,5 +96,9 @@
   "balance.codex.status_limited": "Limit Reached",
   "balance.codex.primary_window": "5h Window: {remaining}% remaining ({minutes}m until reset)",
   "balance.codex.secondary_window": "Weekly Window: {remaining}% remaining ({used}% used)",
-  "balance.codex.credits": "Credits: ${balance}"
+  "balance.codex.credits": "Credits: ${balance}",
+  "balance.privacy.amount": "Balances & usage",
+  "balance.privacy.amount_desc": "Per-platform balance, vouchers, used / total quota, raw responses",
+  "balance.privacy.account": "Platform login accounts",
+  "balance.privacy.account_desc": "Accounts (e-mail etc.) signed in on web platforms"
 }

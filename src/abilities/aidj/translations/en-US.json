@@ -575,5 +575,7 @@
   "aidj.bili.remove_item": "Remove item",
   "aidj.bili.confirm_download": "Confirm Download ({n} items)",
   "aidj.bili.skip_existing": "Skip downloaded",
-  "aidj.bili.already_downloaded": "Downloaded"
+  "aidj.bili.already_downloaded": "Downloaded",
+  "aidj.privacy.bili": "Bilibili account overview",
+  "aidj.privacy.listening": "Listening stats"
 }

@@ -1,3 +1,4 @@
+import { SCOPE_EXEC } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { listFtPresets, loadFtPreset, loadFtFile, exportFtFile } from './presets'
 import { makeLogger } from '../../main/process/logger'
@@ -43,6 +44,7 @@ export default [
   },
   {
     name: 'ft.export',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '导出矢量到 JSON 文件 (--path --data <json>)',
     usage: 'ft.export --path /abs/vectors.json --data {"vectors":[]}',
     run: async (ctx) => {

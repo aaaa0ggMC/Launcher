@@ -27,6 +27,7 @@ import { join } from 'node:path'
 import { app, safeStorage } from 'electron'
 import { USER_CONFIG_DIR } from './paths'
 import { makeLogger } from './logger'
+import { noteSecretValue } from './privacy'
 
 const log = makeLogger('encrypt')
 
@@ -310,9 +311,12 @@ export function encryptSecret(plainText: string): string {
 /** 解密；非密文原样返回；失败返回空串（避免把密文当密码用出去）。 */
 export function decryptSecret(cipherText: string): string {
   if (!cipherText) return ''
-  if (cipherText.startsWith(SECRET_PREFIX_V2)) return decryptV2(cipherText)
-  if (cipherText.startsWith(SECRET_PREFIX_V1)) return decryptV1Legacy(cipherText)
-  return cipherText
+  let plain = cipherText
+  if (cipherText.startsWith(SECRET_PREFIX_V2)) plain = decryptV2(cipherText)
+  else if (cipherText.startsWith(SECRET_PREFIX_V1)) plain = decryptV1Legacy(cipherText)
+  // 登记明文指纹：agent 读日志 / 任务输出时，出现这个值就替换成占位符（privacy.scrubForAgent）。
+  noteSecretValue(plain)
+  return plain
 }
 
 function decryptV2(cipherText: string): string {

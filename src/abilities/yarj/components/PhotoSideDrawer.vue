@@ -149,7 +149,7 @@ function formatCoords(coords: [number, number] | null): string {
 
 <template>
   <Transition name="drawer-slide">
-    <div v-if="open" class="yarj-photo-drawer">
+    <div v-if="open" v-privacy="'yarj.location'" class="yarj-photo-drawer">
       <!-- 抽屉顶部栏 -->
       <div class="drawer-header d-flex align-center justify-space-between px-4 py-3">
         <div class="d-flex align-center ga-3 min-w-0 flex-grow-1 mr-2">

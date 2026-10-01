@@ -3,6 +3,26 @@ import { contextBridge, ipcRenderer, webFrame, IpcRendererEvent } from 'electron
 type CommandArgs = Record<string, unknown>
 
 /**
+ * Agent-input window (inspector, docs/agent-access-design.md §2.1): right
+ * before injecting a click / key into this page the main process sends
+ * `cockpit:agent-input`; IPC commands issued while it is active are tagged so
+ * the main process attributes them to the agent (`agent-ui`). The tag can only
+ * DOWNGRADE privileges — the main process never trusts a renderer upgrade.
+ */
+let agentInput: { session: string; until: number } | null = null
+ipcRenderer.on('cockpit:agent-input', (_e, v: { session?: unknown; until?: unknown }) => {
+  agentInput =
+    typeof v?.session === 'string' && typeof v?.until === 'number'
+      ? { session: v.session, until: v.until }
+      : null
+})
+function agentMeta(): { agentSession: string } | undefined {
+  return agentInput && Date.now() < agentInput.until
+    ? { agentSession: agentInput.session }
+    : undefined
+}
+
+/**
  * window.cockpit.* — every operation is a CLI-first command dispatched through
  * the command registry in the main process (commands.ts). The typed methods
  * below are thin wrappers over `command(...)`, so the UI executes the exact
@@ -14,7 +34,7 @@ type CommandArgs = Record<string, unknown>
 const cockpit = {
   // -- command dispatcher (CLI-first core) ----------------------------------
   command: (name: string, args: CommandArgs = {}): Promise<unknown> =>
-    ipcRenderer.invoke('command:run', name, args),
+    ipcRenderer.invoke('command:run', name, args, agentMeta()),
   listCommands: (): Promise<{ name: string; description: string; usage?: string }[]> =>
     ipcRenderer.invoke('command:list'),
 
@@ -103,7 +123,7 @@ const cockpit = {
   outputs: (): Promise<unknown> => cockpit.command('display.outputs'),
 
   // cli
-  cliExec: (cmd: string): Promise<string> => ipcRenderer.invoke('cli:exec', cmd),
+  cliExec: (cmd: string): Promise<string> => ipcRenderer.invoke('cli:exec', cmd, agentMeta()),
 
   // ui zoom (true uniform zoom via Electron webFrame)
   setZoom: (factor: number): void => {
@@ -167,6 +187,13 @@ const cockpit = {
   }): Promise<string | null> => ipcRenderer.invoke('dialog:save-file', opts),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
+
+  // privacy consent window ONLY — the main process rejects these from any other
+  // sender (privacy-consent.ts), so exposing them everywhere grants nothing.
+  privacyPending: (): Promise<unknown[]> => ipcRenderer.invoke('privacy:pending'),
+  privacyDecide: (id: string, decision: 'deny' | 'once' | 'session'): Promise<boolean> =>
+    ipcRenderer.invoke('privacy:decide', id, decision),
+  privacyDenyAll: (): Promise<number> => ipcRenderer.invoke('privacy:deny-all'),
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {

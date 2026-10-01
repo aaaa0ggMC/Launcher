@@ -1,3 +1,4 @@
+import { SCOPE_CONTROL } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { listAutostart, toggleAutostart } from './service'
 import { makeLogger } from '../../main/process/logger'
@@ -16,6 +17,7 @@ export default [
   },
   {
     name: 'autostart.toggle',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '启用/禁用启动项 (--file --hidden true|false)',
     usage: 'autostart.toggle --file "Clash Verge.desktop" --hidden true',
     run: async (ctx) => {

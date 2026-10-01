@@ -1,3 +1,4 @@
+import { SCOPE_CONTROL } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { getMirrorInfo, toggleMirror, testMirrors } from './service'
 import { makeLogger } from '../../main/process/logger'
@@ -16,6 +17,7 @@ export default [
   },
   {
     name: 'mirror.toggle',
+    privacy: { requires: [SCOPE_CONTROL] },
     description: '启用/禁用镜像源 (--name --enable true|false, pkexec)',
     usage: 'mirror.toggle --name USTC --enable true',
     run: async (ctx) => {

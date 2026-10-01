@@ -1,3 +1,4 @@
+import { SCOPE_EXEC, scrubForAgent } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import type { LogLevel } from './types'
 import { queryLogs, exportLogs, logAt, makeLogger } from '../../main/process/logger'
@@ -14,6 +15,7 @@ function isSelfEntry(e: { scope: string; message: string }): boolean {
 export default [
   {
     name: 'logs.query',
+    privacy: {},
     description:
       '查询当前会话日志 (--level --before --limit [--scope] [--exclude-scopes a,b] [--exclude-self])',
     usage: 'logs.query --level warn --limit 200 --exclude-self',
@@ -36,11 +38,13 @@ export default [
       const filter = excludeSelf
         ? (e: { scope: string; message: string }) => !isSelfEntry(e)
         : undefined
-      return queryLogs({ level, before, limit, scope, excludeScopes, filter })
+      // agent 读取：日志里出现的已知凭据值替换成占位符
+      return scrubForAgent(queryLogs({ level, before, limit, scope, excludeScopes, filter }))
     }
   },
   {
     name: 'logs.export',
+    privacy: { requires: [SCOPE_EXEC] },
     description: '导出当前会话日志到文件 (--path [--level])',
     usage: 'logs.export --path /abs/session.log --level info',
     run: async (ctx) => {
