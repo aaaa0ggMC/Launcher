@@ -14,7 +14,7 @@ import type { WebPlayerReport } from '../player-backend'
 import type { EqProfile } from '../types'
 import { EQ_BAND_COUNT } from '../types'
 import { isWebRemoteRunning, getWebRemotePort, stopWebRemoteServer } from '../web-remote'
-import { log, webMode, findWebRemoteTaskId } from './shared'
+import { log, WEB_ONLY, findWebRemoteTaskId } from './shared'
 
 export const webPlayerCommands: CommandSpec[] = [
   {
@@ -22,7 +22,7 @@ export const webPlayerCommands: CommandSpec[] = [
     description: '渲染端内置播放器状态上报（内部）',
     usage: 'aidj.web-player-report --state <json>',
     // web-exclusive: no renderer engine exists in dbus mode
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       // The renderer engine passes the report directly as named args; the CLI
       // form is `--state <json>`.
@@ -45,7 +45,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-volbal',
     description: '查询或设置内置播放器的响度平衡（--enabled <bool> --method <lufs|linear>）',
     usage: 'aidj.player-volbal [--enabled <true|false>] [--method <lufs|linear>]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
       if (!backend.isConnected) {
@@ -78,7 +78,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-rebase',
     description: '将当前音量设为内置播放器响度平衡的新基准',
     usage: 'aidj.player-rebase --base <0-1>',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const base = Number(ctx.named.base)
       if (isNaN(base) || base < 0 || base > 1) return { ok: false, error: '需要 --base (0-1)' }
@@ -90,7 +90,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-clear-queue',
     description: '清空内置播放器的播放队列（停止播放并移除全部曲目）',
     usage: 'aidj.player-clear-queue',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       await getWebPlayerBackend().clearQueue()
       return { ok: true }
@@ -100,7 +100,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-crossfade',
     description: '查询或设置内置播放器的曲间淡入淡出（--enabled <bool> [--seconds <n>]）',
     usage: 'aidj.player-crossfade [--enabled <true|false>] [--seconds <n>]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
       const enabled =
@@ -130,7 +130,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-list',
     description: '列出所有 EQ 配置（内置 + 用户自定义）与当前激活项',
     usage: 'aidj.eq-list',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       const profiles = await loadEqProfiles()
       const config = await loadAidjConfig()
@@ -143,7 +143,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-range',
     description: '查询或设置 EQ 最大增益范围（±dB，默认 20，范围 12–60）',
     usage: 'aidj.eq-range [--set <12-60>]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const config = await loadAidjConfig()
       if (ctx.named.set === undefined) {
@@ -165,7 +165,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-reset',
     description: '重置内置 EQ 预设为出厂默认（用户自定义配置保留）',
     usage: 'aidj.eq-reset',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       const profiles = await loadEqProfiles()
       // Restore builtin profiles' gains + names to factory defaults; keep any
@@ -182,7 +182,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-save',
     description: '新增或更新一个 EQ 配置（--name <名> --gains <JSON 数组> [--id <id>]）',
     usage: 'aidj.eq-save --name <name> --gains "[..10 个 dB..]" [--id <id>]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const name = String(ctx.named.name ?? '').trim()
       if (!name) return { ok: false, error: '需要 --name' }
@@ -225,7 +225,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-delete',
     description: '删除一个用户 EQ 配置（内置不可删）',
     usage: 'aidj.eq-delete --id <id>',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const id = String(ctx.named.id ?? '')
       const profiles = await loadEqProfiles()
@@ -251,7 +251,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.eq-active',
     description: '应用某个 EQ 配置（--id <id>）',
     usage: 'aidj.eq-active --id <id>',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const id = String(ctx.named.id ?? '')
       const profile = await findEqProfile(id)
@@ -275,7 +275,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-eq',
     description: '查询或实时预览 EQ 曲线（--gains <JSON 数组>，不落盘）',
     usage: 'aidj.player-eq [--gains "[..10 个 dB..]"]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
       if (ctx.named.gains === undefined) {
@@ -306,7 +306,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-rate',
     description: '查询或设置内置播放器的播放倍速（任意正数；>16 为静音快进）',
     usage: 'aidj.player-rate [--set <rate>]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
       const rate = ctx.named.set !== undefined ? Number(ctx.named.set) : undefined
@@ -333,7 +333,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-abloop',
     description: '设置内置播放器的 AB 循环点（秒；--off 清除）',
     usage: 'aidj.player-abloop [--a <sec>] [--b <sec>] [--off true]',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const backend = getWebPlayerBackend()
       if (String(ctx.named.off ?? '') === 'true') {
@@ -353,7 +353,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.player-sleep',
     description: '设置内置播放器的睡眠定时（分钟；0 = 取消）',
     usage: 'aidj.player-sleep --minutes <n>',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async (ctx) => {
       const minutes = Number(ctx.named.minutes)
       if (isNaN(minutes) || minutes < 0) return { ok: false, error: '需要 --minutes 非负分钟数' }
@@ -365,7 +365,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.web-remote-status',
     description: '查询内置播放器局域网遥控服务器的运行状态',
     usage: 'aidj.web-remote-status',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       const config = await loadAidjConfig()
       return {
@@ -379,7 +379,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.web-remote-start',
     description: '启动内置播放器的局域网遥控服务器（后台任务）',
     usage: 'aidj.web-remote-start',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       if (isWebRemoteRunning()) {
         return { ok: true, alreadyRunning: true, port: getWebRemotePort() }
@@ -398,7 +398,7 @@ export const webPlayerCommands: CommandSpec[] = [
     name: 'aidj.web-remote-stop',
     description: '停止内置播放器的局域网遥控服务器',
     usage: 'aidj.web-remote-stop',
-    enabled: webMode,
+    ...WEB_ONLY,
     run: async () => {
       if (!isWebRemoteRunning()) return { ok: true, running: false }
       const stopped = await stopTask(findWebRemoteTaskId())

@@ -298,6 +298,32 @@ export function findWebRemoteTaskId(): string {
 export const dbusMode = (): Promise<boolean> => getPlayerMode().then((m) => m === 'dbus')
 export const webMode = (): Promise<boolean> => getPlayerMode().then((m) => m === 'web')
 
+/**
+ * Gate capsules for CommandSpec.enabled — spreading one of these applies both
+ * the mode check AND the reason string, so an agent that trips the gate in the
+ * other mode gets "command X 当前不可用: <reason>" instead of a bare
+ * "unknown command" (see `unavailableReason` in commands/types.ts).
+ *
+ * Switching the backend for real: AIDJ 设置 → 「播放后端」select
+ * (`preferences.player_mode`, components/AidjSettingsSection.vue), which calls
+ * `aidj.player-mode --set dbus|web` (player-backend.ts `setPlayerMode`).
+ */
+export const DBUS_ONLY = {
+  enabled: dbusMode,
+  unavailableReason:
+    '当前为内置播放器 (web) 模式，此命令仅在外部播放器 (MPRIS / DBus) 模式下可用。' +
+    '切换方式：AIDJ 设置 → 「播放后端」选「外部播放器 (MPRIS / DBus)」，或执行 aidj.player-mode --set dbus' +
+    '（切换会停止运行中的连续播放 / 持久会话）'
+} as const
+
+export const WEB_ONLY = {
+  enabled: webMode,
+  unavailableReason:
+    '当前为外部播放器 (MPRIS / DBus) 模式，此命令仅在内置播放器 (web) 模式下可用。' +
+    '切换方式：AIDJ 设置 → 「播放后端」选「内置播放器」，或执行 aidj.player-mode --set web' +
+    '（切换会停止运行中的连续播放 / 持久会话；内置播放器为实验性后端）'
+} as const
+
 export const MAX_VARIANT_CACHE_BYTES = 80 * 1024 * 1024
 export const AVG_VARIANT_ENTRY_BYTES = 4500
 

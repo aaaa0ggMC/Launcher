@@ -10,7 +10,7 @@ import {
   getCoverArt
 } from '../service'
 import { getActiveBackend, getPlayerMode, setPlayerMode, WebPlayerBackend } from '../player-backend'
-import { state, dbusMode } from './shared'
+import { state, DBUS_ONLY } from './shared'
 
 export const playbackCommands: CommandSpec[] = [
   {
@@ -56,6 +56,7 @@ export const playbackCommands: CommandSpec[] = [
   {
     name: 'aidj.status',
     description: '获取播放器状态',
+    ui: ['AIDJ 聊天框 /persist'],
     run: async () => {
       if (!state.config) state.config = await loadAidjConfig()
       // Warm the library cache in the BACKGROUND — the first status poll (the
@@ -172,7 +173,7 @@ export const playbackCommands: CommandSpec[] = [
     name: 'aidj.current-dbus-track',
     description: '获取当前 DBus 播放器的歌曲信息（用于“从此刻开始”）',
     usage: 'aidj.current-dbus-track',
-    enabled: dbusMode,
+    ...DBUS_ONLY,
     run: async () => {
       return await getCurrentDbusTrackInfo()
     }

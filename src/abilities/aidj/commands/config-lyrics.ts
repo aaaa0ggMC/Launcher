@@ -23,7 +23,7 @@ import type { AidjLyricsPageConfig } from '../types'
 import { loadTimeStats, queryTimeRange } from '../listening-stats'
 import {
   state,
-  dbusMode,
+  DBUS_ONLY,
   lyricWindowId,
   currentLyricsKey,
   getWebLyricPlayback,
@@ -115,7 +115,7 @@ export const configLyricsCommands: CommandSpec[] = [
     description: '列出所有可用的 MPRIS 播放器',
     usage: 'aidj.list-players [--force true]',
     // dbus-exclusive: not exposed in web-player mode (no session bus on non-Linux)
-    enabled: dbusMode,
+    ...DBUS_ONLY,
     run: async (ctx) => {
       const force = String(ctx.named.force ?? '') === 'true'
       const players = await listAvailablePlayers(force)
@@ -129,7 +129,7 @@ export const configLyricsCommands: CommandSpec[] = [
     name: 'aidj.select-player',
     description: '切换到指定播放器',
     usage: 'aidj.select-player --name <player>',
-    enabled: dbusMode,
+    ...DBUS_ONLY,
     run: async (ctx) => {
       const name = ctx.named.name as string
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器名称' }
@@ -220,7 +220,7 @@ export const configLyricsCommands: CommandSpec[] = [
     name: 'aidj.lyrics-select-player',
     description: '绑定歌词页到指定 MPRIS 播放器（或 __auto__ 自动跟随）',
     usage: 'aidj.lyrics-select-player --name <player>',
-    enabled: dbusMode,
+    ...DBUS_ONLY,
     run: async (ctx) => {
       const name = ctx.named.name as string
       if (!name) return { ok: false, error: '需要 --name 参数指定播放器' }

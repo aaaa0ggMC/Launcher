@@ -19,6 +19,7 @@ import {
   SessionManager
 } from '../service'
 import { resetPlayerMode, reconcilePlayerAbilityVisibility } from '../player-backend'
+import { searchLibrary } from '../services/library-search'
 import type { RawHistoryMessage } from '../types'
 import {
   state,
@@ -136,6 +137,7 @@ export const curateCommands: CommandSpec[] = [
     name: 'aidj.curate',
     description: '从随机候选中 AI 精选成连贯歌单（计入上下文）',
     usage: 'aidj.curate --count <number>',
+    ui: ['AIDJ 聊天框 /pr'],
     run: async (ctx) => {
       const count = Number(ctx.named.count)
       if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
@@ -222,6 +224,7 @@ export const curateCommands: CommandSpec[] = [
     name: 'aidj.random',
     description: '随机选取 N 首歌曲，作为 AIDJ 推送计入会话上下文',
     usage: 'aidj.random --count <number>',
+    ui: ['AIDJ 聊天框 /random'],
     run: async (ctx) => {
       const count = Number(ctx.named.count)
       if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
@@ -251,6 +254,7 @@ export const curateCommands: CommandSpec[] = [
     name: 'aidj.explore',
     description: '发现未听过/最少播放的歌曲，作为 AIDJ 推送计入会话上下文',
     usage: 'aidj.explore --count <number>',
+    ui: ['AIDJ 聊天框 /explore'],
     run: async (ctx) => {
       const count = Number(ctx.named.count)
       if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
@@ -303,6 +307,7 @@ export const curateCommands: CommandSpec[] = [
       '按表达式过滤曲库（--query 完整表达式，compare=title/lyrics/all，支持 [字段:值] 元数据筛选）',
     usage:
       'aidj.filter --query --compare=title ("The Weeknd" and "Justin Bieber") or ("Taylor") [emotion:孤独]',
+    ui: ['AIDJ 聊天框 /filter'],
     run: async (ctx) => {
       const query = String(ctx.named.query ?? '')
       if (!query) return { ok: false, error: '需要 --query 过滤表达式' }
@@ -365,6 +370,7 @@ export const curateCommands: CommandSpec[] = [
     name: 'aidj.ftop',
     description: '推送播放次数 Top N / 倒数 N / 区间 A-B 歌曲',
     usage: 'aidj.ftop [--count N] [--bottom true] [--from A] [--to B]',
+    ui: ['AIDJ 聊天框 /ftop'],
     run: async (ctx) => {
       const { session } = await ensureInit()
       const freq = await loadFrequency()
@@ -448,18 +454,33 @@ export const curateCommands: CommandSpec[] = [
   },
   {
     name: 'aidj.search',
-    description: '搜索曲库',
-    usage: 'aidj.search --q <query>',
+    description: '搜索曲库（子串 / 分词匹配，模糊兜底）',
+    usage: 'aidj.search --q <query> [--limit 20]',
     run: async (ctx) => {
       const query = (ctx.named.q as string) || ctx.positional.join(' ')
-      if (!query) return { ok: false, error: '需要搜索关键词' }
+      if (!query?.trim()) return { ok: false, error: '需要搜索关键词' }
+      const limit = Math.min(200, Math.max(1, Number(ctx.named.limit) || 20))
       const { session } = await ensureInit()
       const keys = [...session.metadata.keys()].filter((k) => session.musicPaths.has(k))
-      const results = keys
-        .map((name) => ({ name, score: session['tokenSortRatio'](query, name) }))
-        .filter((r) => r.score >= 80)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 20)
+      const extraFor = (name: string): string => {
+        const meta = session.metadata.get(name)
+        if (!meta || typeof meta !== 'object') return ''
+        const parts: string[] = []
+        // review 是 LLM 写的长评语，参与匹配会让短词大量误中
+        for (const [key, val] of Object.entries(meta)) {
+          if (key === 'review') continue
+          if (typeof val === 'string' && val.trim()) parts.push(val)
+          else if (Array.isArray(val)) {
+            for (const item of val) if (typeof item === 'string' && item.trim()) parts.push(item)
+          }
+        }
+        return parts.join(' ')
+      }
+      const results = searchLibrary(query, keys, { limit, extra: extraFor }).map((r) => ({
+        name: r.name,
+        score: r.score,
+        matched: r.matched
+      }))
       return { ok: true, results }
     }
   },
@@ -540,6 +561,7 @@ export const curateCommands: CommandSpec[] = [
     name: 'aidj.analyse',
     description: '元数据分布分析',
     usage: 'aidj.analyse --field <language|emotion|genre|loudness>',
+    ui: ['AIDJ 聊天框 /analyse'],
     run: async (ctx) => {
       const field = (ctx.named.field as string) || 'language'
       await ensureLibraryLoaded()

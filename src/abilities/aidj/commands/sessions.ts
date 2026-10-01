@@ -1,6 +1,7 @@
 import type { CommandSpec } from '../../../main/process/commands/types'
 import { getBroadcast } from '../../../main/process/broadcast'
 import { listTasks, startJobByName } from '../../../main/process/background-tasks'
+import { CHAT_COMMANDS } from '../components/chat-commands'
 import {
   loadLibrary,
   loadAidjConfig,
@@ -13,9 +14,9 @@ import { SEPARATOR } from '../types'
 import { getChatTask, clearContinuousPending } from '../jobs'
 import {
   state,
+  DBUS_ONLY,
   ensureInit,
   log,
-  dbusMode,
   computeRawKeep,
   rawToChatHistory,
   rawToRollingHistory,
@@ -192,6 +193,8 @@ export const sessionsCommands: CommandSpec[] = [
     name: 'aidj.session-fork',
     description: '将当前会话分支为新会话 (--keep <n> 截断；--become true 载入为新会话)',
     usage: 'aidj.session-fork [--keep <n>] [--become true]',
+    ui: ['AIDJ 聊天框 /persist'],
+    related: ['job:aidj.chat'],
     run: async (ctx) => {
       if (!state.sessionId) return { ok: false, error: '当前没有会话可分支' }
       const keep = Number(ctx.named.keep)
@@ -300,9 +303,11 @@ export const sessionsCommands: CommandSpec[] = [
   },
   {
     name: 'aidj.start-persistent',
-    description: '启动持久模式',
+    description:
+      '启动旧版 MPRIS 持久模式（PersistentSession）。注意：聊天框 /persist 不走这里，而是 aidj.session-fork + 作业 aidj.chat',
     usage: 'aidj.start-persistent --prompt <text> [--anchor <value>]',
-    enabled: dbusMode,
+    ...DBUS_ONLY,
+    related: ['aidj.session-fork', 'job:aidj.chat', 'aidj.chat', 'aidj.slash-commands'],
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
       if (!prompt) return { ok: false, error: '需要初始提示词' }
@@ -326,8 +331,10 @@ export const sessionsCommands: CommandSpec[] = [
   },
   {
     name: 'aidj.stop-persistent',
-    description: '停止持久模式',
-    enabled: dbusMode,
+    description:
+      '停止旧版 MPRIS 持久模式（PersistentSession）。注意：聊天框 /persist-stop 不走这里，而是 background.stop --id <taskId>',
+    ...DBUS_ONLY,
+    related: ['background.stop', 'aidj.chat', 'aidj.slash-commands'],
     run: async () => {
       const ps = getPersistentSession()
       if (!ps) return { ok: false, error: '持久模式未运行' }
@@ -392,6 +399,7 @@ export const sessionsCommands: CommandSpec[] = [
   {
     name: 'aidj.stream-status',
     description: '获取当前流式生成的字符数',
+    ui: ['AIDJ 聊天框 /pr'],
     run: async () => {
       return {
         ok: true,
@@ -401,6 +409,23 @@ export const sessionsCommands: CommandSpec[] = [
         retryWaitMs: state.retryWaitMs,
         retryElapsed: state.retryStart ? Date.now() - state.retryStart : 0,
         retryLastError: state.retryLastError
+      }
+    }
+  },
+  {
+    name: 'aidj.slash-commands',
+    description: '列出 AIDJ 聊天框斜杠命令及其对应的后端命令 / 作业（UI ↔ 命令映射）',
+    usage: 'aidj.slash-commands',
+    run: async () => {
+      return {
+        ok: true,
+        commands: CHAT_COMMANDS.map((c) => ({
+          slash: `/${c.name}`,
+          aliases: c.aliases ?? [],
+          args: c.args,
+          description: c.descFallback,
+          backend: c.backend
+        }))
       }
     }
   }

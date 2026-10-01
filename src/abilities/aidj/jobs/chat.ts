@@ -73,6 +73,30 @@ export async function chatResendPlaylist(
   return ensureContinuousPlayer(st.player, songs)
 }
 
+/**
+ * `aidj.chat` — persistent chat session started by the chat box /persist
+ * (ChatView.runPersistCommand: `aidj.session-fork` → `aidj.status` → this job).
+ *
+ * NOTE: this is the named JOB `aidj.chat`; the same-named COMMAND
+ * `aidj.chat --task <id> --text <msg>` sends follow-up messages into a
+ * running instance. Start one as an agent with
+ * `background.job --name aidj.chat --args '<json>'`.
+ *
+ * args (all optional except `prompt`):
+ * - `prompt`         (string, required) the seed user message of the session
+ * - `history`        (ChatMessage[]) prior conversation, replayed then answered
+ *                    with `prompt` as the last user turn — use `[]` for a fresh
+ *                    session
+ * - `rollingHistory` (string[]) song names already played / queued, so the DJ
+ *                    avoids repeating them (derive from prior playlists)
+ * - `sessionId`      (string) session to attach to — empty creates a new one
+ * - `player`         (string) push target: `'__auto__'` / empty resolves the
+ *                    active target (web mode always uses the built-in engine),
+ *                    otherwise a concrete MPRIS player name
+ * - `view`           (string) background-panel view id, e.g. `'chat'`
+ * - `tags`           (string[]) task tags, e.g. `['aidj-playback']` so the
+ *                    player-mode switch stops it together with other playback
+ */
 registerJobHandler('aidj.chat', async (control, args) => {
   const initialPrompt = (args.prompt as string) || ''
   const history = (args.history ?? []) as ChatMessage[]

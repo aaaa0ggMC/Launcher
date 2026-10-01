@@ -60,4 +60,33 @@ describe('AIDJ chat-commands', () => {
     assert.equal(applyChatCommand('/ran 5', cmd), '/random 5')
     assert.equal(applyChatCommand('/r 20', cmd), '/random 20')
   })
+
+  it('every command declares a non-empty backend mapping', () => {
+    for (const c of CHAT_COMMANDS) {
+      assert.ok(
+        Array.isArray(c.backend) && c.backend.length > 0,
+        `/${c.name} must list the backend commands / jobs it calls`
+      )
+      for (const ref of c.backend) {
+        assert.ok(ref.trim().length > 0, `/${c.name} has an empty backend ref`)
+      }
+    }
+  })
+
+  it('persist maps to the fork + chat job, never the legacy MPRIS persistent mode', () => {
+    const persist = CHAT_COMMANDS.find((c) => c.name === 'persist')!
+    assert.ok(persist)
+    assert.ok(persist.backend.includes('aidj.session-fork'))
+    assert.ok(persist.backend.includes('job:aidj.chat'))
+    assert.ok(!persist.backend.includes('aidj.start-persistent'))
+    assert.deepEqual(persist.aliases ?? [], ['pc'])
+
+    const stop = CHAT_COMMANDS.find((c) => c.name === 'persist-stop')!
+    assert.ok(stop)
+    assert.deepEqual(stop.aliases ?? [], ['pc-stop'])
+  })
+
+  it('filterChatCommands ignores alias spellings (popup only lists canonical names)', () => {
+    assert.deepEqual(filterChatCommands('/pc'), [])
+  })
 })
