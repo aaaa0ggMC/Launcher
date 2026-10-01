@@ -28,3 +28,6 @@ src/abilities/biliviewer/
 # 校园系列（个人自用，独立私有仓库 launcher-campusnet / launcher-campusinfo）
 src/abilities/campusnet/
 src/abilities/campusinfo/
+
+# 掌机（mGBA wasm，独立私有仓库 aaaa0ggMC/launcher-gameboy）
+src/abilities/gameboy/

@@ -51,6 +51,19 @@ export interface AgentTool {
 
 const json = (value: unknown): ToolOutput => ({ kind: 'json', value })
 
+/**
+ * 命令结果约定：顶层带 `$image: { data: <base64>, mimeType }` 的结果以图片返回，
+ * 其余字段作为 meta（游戏画面等，不必为每个能力单独加网关工具）。
+ */
+function imageOrJson(value: unknown): ToolOutput {
+  if (value && typeof value === 'object' && '$image' in value) {
+    const { $image, ...meta } = value as { $image?: { data?: unknown; mimeType?: unknown } }
+    if (typeof $image?.data === 'string' && typeof $image.mimeType === 'string')
+      return { kind: 'image', data: $image.data, mimeType: $image.mimeType, meta }
+  }
+  return json(value)
+}
+
 const USAGE_HINT = `Linux Cockpit is a desktop control center. Typical loop:
 1. ui_snapshot → read the page; interactive elements carry [ref=eN].
 2. ui_click / ui_type / ui_key / ui_scroll with those refs (every action waits for the page to settle).
@@ -340,13 +353,14 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'command_run',
     title: 'Run command',
-    description: 'Run a backend command by name with structured args (see commands_list).',
+    description:
+      'Run a backend command by name with structured args (see commands_list). Commands whose result carries an image (e.g. gameboy.screen) return it as an image.',
     shape: {
       name: z.string(),
       args: z.record(z.string(), z.unknown()).optional()
     },
     run: async (a) =>
-      json(await runCommand(String(a.name), (a.args as Record<string, unknown>) ?? {}))
+      imageOrJson(await runCommand(String(a.name), (a.args as Record<string, unknown>) ?? {}))
   },
   {
     name: 'privacy_scopes',

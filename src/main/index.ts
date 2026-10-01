@@ -54,6 +54,10 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
+// SharedArrayBuffer without cross-origin isolation: the gameboy ability's mGBA
+// wasm core runs on pthreads. COOP/COEP headers would also work, but
+// `require-corp` would block other abilities' cross-origin images / protocols.
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
 
 let mainWindow: BrowserWindow | null = null
 // Once the user has confirmed quitting (or confirmed via the renderer), the
