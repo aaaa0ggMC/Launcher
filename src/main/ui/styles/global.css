@@ -12,14 +12,19 @@ body,
   overflow: hidden;
 }
 
+/* Font family: `--cockpit-font` is injected on <html> by App.vue's applyFont()
+ * (default = unset, i.e. the CJK stack below; system / custom come from
+ * 设置 → 外观 → 字体). */
 body {
-  font-family:
+  font-family: var(
+    --cockpit-font,
     'Noto Sans SC',
     'Noto Sans CJK SC',
     system-ui,
     -apple-system,
     'Segoe UI',
-    sans-serif;
+    sans-serif
+  );
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -31,13 +36,15 @@ body {
 
 /* Vuetify components inherit from .v-application — force the CJK stack. */
 .v-application {
-  font-family:
+  font-family: var(
+    --cockpit-font,
     'Noto Sans SC',
     'Noto Sans CJK SC',
     system-ui,
     -apple-system,
     'Segoe UI',
-    sans-serif !important;
+    sans-serif
+  ) !important;
 }
 
 .font-family-mono,

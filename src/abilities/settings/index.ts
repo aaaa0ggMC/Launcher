@@ -47,6 +47,25 @@ export default {
           component: defineAsyncComponent(() => import('./items/ZoomSection.vue'))
         },
         {
+          key: 'font',
+          label: '字体',
+          icon: 'mdi-format-font',
+          description: '全局界面字体：默认 Noto / 跟随系统 / 自定义字体族',
+          keywords: [
+            '字体',
+            '字形',
+            '默认',
+            '跟随系统',
+            '自定义',
+            'font',
+            'family',
+            'Noto',
+            'system',
+            'typography'
+          ],
+          component: defineAsyncComponent(() => import('./items/FontSection.vue'))
+        },
+        {
           key: 'window',
           label: '窗口',
           icon: 'mdi-window-maximize',

@@ -456,12 +456,48 @@ function applyUiScale(): void {
   window.cockpit.setZoom(Number.isFinite(scale) && scale > 0 ? scale : 1.1)
 }
 
+/** Characters that could terminate the declaration or break out of the value
+ *  when a user-supplied family name is injected as a CSS custom property. */
+function sanitizeFontFamily(raw: string): string {
+  return raw
+    .replace(/["'`;{}()<>\\]/g, '')
+    .trim()
+    .slice(0, 120)
+}
+
+/**
+ * Global interface font (设置 → 外观 → 字体). Exposes `--cockpit-font` on
+ * <html>; global.css consumes it for `body` + `.v-application` (mono stack is
+ * untouched). Modes: default → unset (the built-in Noto CJK stack), system →
+ * the platform UI font, custom → the user's family name quoted once, with a
+ * system fallback tail. An empty / whitespace custom family falls back to
+ * default rather than emitting a broken declaration.
+ */
+function applyFont(): void {
+  const font = runtimeConfig.value.font as { mode?: string; family?: string } | undefined
+  const mode = font?.mode ?? 'default'
+  const style = document.documentElement.style
+  if (mode === 'system') {
+    style.setProperty('--cockpit-font', "system-ui, -apple-system, 'Segoe UI', sans-serif")
+    return
+  }
+  if (mode === 'custom') {
+    const family = sanitizeFontFamily(typeof font?.family === 'string' ? font.family : '')
+    if (family) {
+      style.setProperty('--cockpit-font', `'${family}', system-ui, sans-serif`)
+      return
+    }
+  }
+  style.removeProperty('--cockpit-font')
+}
+
 function onConfigChanged(cfg: Record<string, unknown> | null): void {
   runtimeConfig.value = cfg ?? {}
   applyTheme()
   applyMotionClass()
   applyWindowRounded()
   applyUiScale()
+  applyFont()
   resolveBackgroundImage()
 }
 

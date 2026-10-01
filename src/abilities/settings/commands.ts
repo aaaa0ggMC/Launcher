@@ -25,6 +25,7 @@ const DEFAULT_GLOBAL_CONFIG = {
   theme: 'dark',
   language: 'zh',
   uiScale: 1.1,
+  font: { mode: 'default', family: '' },
   animations: {
     modernMotion: true,
     enabled: true,
