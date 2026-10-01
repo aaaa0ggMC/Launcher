@@ -337,6 +337,11 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示、`<canvas>` 也给 ref；`--boxes true` 附上每个 ref 在截图上的位置）、截图（隐私区遮盖）。两种操作方式：按 ref（`ui.click` / `ui.type`），或像人一样按**截图像素坐标**（`ui.click-at` / `ui.move` / `ui.mouse down|up` / `ui.drag` / `ui.scroll --x --y`），键盘支持字母 / 数字 / F 键、`--hold` 按住、`--action down|up`、组合键（游戏可加 `--settle false` 跳过等待）。按坐标操作前先做命中测试：落在隐私区要授权、禁区拒绝，规则与 ref 操作一致；AI 每次点击在屏幕上闪一个标记。每次操作前等页面就绪（App 的 `data-ability-ready`：异步页面组件加载、挂载完成）与稳定（无进行中命令 + DOM 300ms 无变化）。
 - **UI 写法要求**：纯图标按钮给 `aria-label` 或 `title`，否则 AI 只能看到图标名；揭示隐私的按钮（「全部显示」等）加 `v-privacy-action="'<scope>'"`。
 - 开发调试：`privacy.debug-as-agent --cmd ui.snapshot`（dev only）以 AI 身份执行任意命令，查看 AI 视角。
+- **元数据不许骗人**（AI 使用反馈的教训）：
+  - 带 `enabled` 门控的命令必须写 `unavailableReason`（说明需要什么模式、怎么切换）——门控关闭时 dispatch 抛 `CommandUnavailableError`「命令 X 当前不可用: <原因>」（agent 侧 `code: command_unavailable`），`commands_list` 标 `available` / `unavailable_reason`；不再冒充「未知命令」。
+  - UI 流程（斜杠命令、按钮）若组合调用多条命令 / 作业，在相关 `CommandSpec` 上写 `ui`（UI 入口）与 `related`（相关命令，作业写 `job:<name>`），让 agent 能从界面叫法找到命令，反之亦然。同名的命令和作业（如 `aidj.chat`）尤其要在 description 里讲清区别。
+  - 命令结果里出现 `«redacted:…»` 时，网关自动附上结构化 `privacy` 说明（MCP 为首段文本、Remote 为 `_privacy`）：被脱敏的 scope、其中**授权已过期**的、可申请的。`request_clearance` 的结果带 `grants[].expiresAt`，`privacy_scopes` 带 `expires_in_s`。产生占位符的新代码要走 `shield` / `shieldFields` / `secret`，或手动 `noteRedaction(scope)`，否则这份说明会漏。
+  - `ability.describe --id <能力>`（`--format md` 出 Markdown）由注册表自动生成能力清单：命令（含可用性）、后台作业、UI 入口、help 页面。
 
 ### 镜像源 toggle 安全性
 

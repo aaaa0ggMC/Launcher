@@ -5,9 +5,20 @@
  * （`runCommand`），所以命令的 privacy 声明、inspector 的脱敏 / 守卫全部自动生效。
  */
 import { z } from 'zod'
-import { listCommands, runCommand } from '../commands/registry'
+import {
+  listCommands,
+  runCommand,
+  commandUnavailableReason,
+  CommandUnavailableError,
+  UnknownCommandError
+} from '../commands/registry'
+import { commandOwnerOf } from '../ability-runtime'
 import { pageInfo } from '../inspector'
 import {
+  clearanceInfo,
+  collectRedactions,
+  privacyNotice,
+  type PrivacyNotice,
   getPrivacyScope,
   hasClearance,
   isGrantable,
@@ -20,9 +31,13 @@ import {
   GUARD_WAIT_MS
 } from '../privacy'
 
-export type ToolOutput =
+export type ToolOutput = (
   | { kind: 'json'; value: unknown }
   | { kind: 'image'; data: string; mimeType: string; meta: unknown }
+) & {
+  /** 本次结果里有被脱敏的值时附上：哪些 scope、是否授权过期、能否申请 */
+  privacy?: PrivacyNotice
+}
 
 export interface AgentTool {
   name: string
@@ -44,9 +59,29 @@ Use ui_navigate to switch pages, ui_screenshot to see layout / images.
 No ref (canvas, game, map)? Act like a person: take ui_screenshot and use its pixel coordinates with
 ui_click_at / ui_move / ui_drag / ui_mouse / ui_scroll; ui_key supports hold_ms and down/up for games
 (pass settle=false for fast repeated input). ui_snapshot boxes=true maps refs to screenshot pixels.
-Privacy: protected values appear as «redacted:<scope>»; [privacy-action=...] elements, clicks that land
-in protected areas, and "privacy_pending" errors mean the user must approve in a consent window you cannot
-see — call request_clearance / wait_clearance, then retry. Never try to work around a redaction.`
+Backend: commands_list shows every command with available / unavailable_reason (mode-gated commands say
+why), related commands/jobs and the UI entry points (ui) that trigger them. ability.describe --id <ability>
+(via command_run) gives a generated per-ability manual incl. background jobs and help pages
+(help.read --ability <id> --path <path>).
+Privacy: protected values appear as «redacted:<scope>»; whenever a result contains them it also carries a
+"privacy" notice (which scopes, whether your clearance EXPIRED, whether it can be requested). Clearances
+from request_clearance may be time-limited (grants[].expiresAt) — after that, values are redacted again.
+[privacy-action=...] elements, clicks that land in protected areas, and "privacy_pending" errors mean the
+user must approve in a consent window you cannot see — call request_clearance / wait_clearance, then retry.
+Never try to work around a redaction.`
+
+/**
+ * 网关（MCP / Remote）统一的工具执行入口：收集本次调用产生的脱敏，附上 privacy 说明。
+ * 调用方需已在 agent origin 下（withOrigin）。
+ */
+export async function runAgentTool(
+  tool: AgentTool,
+  args: Record<string, unknown>
+): Promise<ToolOutput> {
+  const { value, redacted } = await collectRedactions(() => tool.run(args))
+  const notice = privacyNotice(redacted)
+  return notice ? { ...value, privacy: notice } : value
+}
 
 export const AGENT_TOOLS: AgentTool[] = [
   {
@@ -62,7 +97,7 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...info,
         clearances: listPrivacyScopes()
           .filter((s) => hasClearance(s.id))
-          .map((s) => s.id),
+          .map((s) => clearanceInfo(s.id)),
         runGrants: listRunGrants(),
         pendingRequests: listPendingRequests().length,
         usage: USAGE_HINT
@@ -266,22 +301,40 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'commands_list',
     title: 'List commands',
     description:
-      'Every backend command (CLI-first: each UI action is also a command). Optional substring filter. privacy.requires lists clearances needed.',
-    shape: { filter: z.string().optional() },
+      'Every backend command (CLI-first: each UI action is also a command). Optional substring filter. available=false means it exists but cannot run right now (unavailable_reason says why, e.g. a player mode). related lists linked commands / jobs ("job:<name>" = start via background.job), ui lists the UI entry points that trigger it. privacy.requires lists clearances needed.',
+    shape: {
+      filter: z.string().optional(),
+      available_only: z.boolean().optional().describe('hide commands that cannot run right now')
+    },
     readOnly: true,
     run: async (a) => {
       const f = String(a.filter ?? '').toLowerCase()
-      return json(
-        listCommands()
-          .filter((c) => !f || c.name.includes(f) || c.description.toLowerCase().includes(f))
-          .filter((c) => c.privacy?.agent !== 'deny')
-          .map((c) => ({
+      const specs = listCommands()
+        .filter(
+          (c) =>
+            !f ||
+            c.name.includes(f) ||
+            c.description.toLowerCase().includes(f) ||
+            (c.ui ?? []).some((u) => u.toLowerCase().includes(f))
+        )
+        .filter((c) => c.privacy?.agent !== 'deny')
+      const rows = await Promise.all(
+        specs.map(async (c) => {
+          const reason = await commandUnavailableReason(c.name)
+          return {
             name: c.name,
+            ability: commandOwnerOf(c.name) || undefined,
             description: c.description,
             usage: c.usage,
+            available: reason === null,
+            unavailable_reason: reason ?? undefined,
+            related: c.related,
+            ui: c.ui,
             privacy: c.privacy
-          }))
+          }
+        })
       )
+      return json(a.available_only ? rows.filter((r) => r.available) : rows)
     }
   },
   {
@@ -299,18 +352,28 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'privacy_scopes',
     title: 'Privacy scopes',
     description:
-      'All privacy scopes, their level, whether they can be requested, and whether you hold them.',
+      'All privacy scopes, their level, whether they can be requested, whether you hold them, how (policy / run / once) and when a time-limited clearance expires (expires_in_s) or expired.',
     shape: {},
     readOnly: true,
     run: async () =>
       json(
-        listPrivacyScopes().map((s) => ({
-          id: s.id,
-          level: s.level,
-          capability: s.capability,
-          grantable: isGrantable(s.id),
-          held: hasClearance(s.id)
-        }))
+        listPrivacyScopes().map((s) => {
+          const info = clearanceInfo(s.id)
+          return {
+            id: s.id,
+            level: s.level,
+            capability: s.capability,
+            grantable: isGrantable(s.id),
+            held: info.held,
+            via: info.via,
+            expires_at: info.expiresAt,
+            expires_in_s:
+              info.expiresAt !== undefined
+                ? Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000))
+                : undefined,
+            expired_at: info.expiredAt
+          }
+        })
       )
   },
   {
@@ -336,6 +399,22 @@ export const AGENT_TOOLS: AgentTool[] = [
 export function describeError(e: unknown): Record<string, unknown> {
   if (e instanceof PrivacyDeniedError) {
     return { error: e.message, code: e.code, scopes: e.scopes, requestId: e.requestId }
+  }
+  if (e instanceof CommandUnavailableError) {
+    return {
+      error: e.message,
+      code: 'command_unavailable',
+      command: e.commandName,
+      reason: e.reason
+    }
+  }
+  if (e instanceof UnknownCommandError) {
+    return {
+      error: e.message,
+      code: 'unknown_command',
+      command: e.commandName,
+      hint: 'see commands_list'
+    }
   }
   return { error: e instanceof Error ? e.message : String(e) }
 }

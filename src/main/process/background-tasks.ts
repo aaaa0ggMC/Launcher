@@ -110,6 +110,11 @@ export function registerJobHandler(name: string, handler: JobHandler, gate?: Job
   jobHandlers.set(name, { handler, gate })
 }
 
+/** Registered named job handlers, sorted (for `ability.describe`). */
+export function listJobHandlerNames(): string[] {
+  return [...jobHandlers.keys()].sort()
+}
+
 interface InternalTask {
   info: BtTaskInfo
   options?: StartProcessOptions

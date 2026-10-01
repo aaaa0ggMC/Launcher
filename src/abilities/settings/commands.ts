@@ -13,6 +13,11 @@ import {
   listAbilityStates
 } from '../../main/process/ability-runtime'
 import { getLoadedAbilityIds } from '../../main/process/abilities-loader'
+import {
+  describeAbility,
+  describeAllAbilities,
+  renderAbilityMarkdown
+} from '../../main/process/ability-describe'
 import { isAgentOrigin, PrivacyDeniedError } from '../../main/process/privacy'
 import { reloadPrivacyPolicy } from '../../main/process/privacy-consent'
 import { reloadAgentServices } from '../../main/process/agent'
@@ -230,6 +235,23 @@ export default [
     run: async () => {
       const ids = getLoadedAbilityIds()
       return { ok: true, disabled: getDisabledAbilities(), states: listAbilityStates(ids) }
+    }
+  },
+  {
+    name: 'ability.describe',
+    description:
+      '按能力列出命令（含可用性与原因）、后台作业、UI 入口与帮助文档 —— 由注册表自动生成',
+    usage: 'ability.describe --id <ability> [--format json|md]',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? ctx.positional[0] ?? '').trim()
+      // 不带 id → 全部能力的摘要，方便 agent/CLI 先看有哪些能力。
+      if (!id) return { ok: true, abilities: await describeAllAbilities() }
+      const described = await describeAbility(id)
+      if (!described) return { ok: false, error: `未知能力: ${id}` }
+      if (String(ctx.named.format ?? '') === 'md') {
+        return { ok: true, markdown: renderAbilityMarkdown(described) }
+      }
+      return { ok: true, ability: described }
     }
   }
 ] satisfies CommandSpec[]

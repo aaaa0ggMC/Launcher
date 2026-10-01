@@ -25,6 +25,7 @@ import {
   isAgentOrigin,
   isAgentReader,
   listPrivacyScopes,
+  noteRedaction,
   redactedMarker,
   PrivacyDeniedError,
   SCOPE_SECRET
@@ -404,6 +405,7 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
 
     if (enteredPrivacy) {
       // 隐私区：只露出 scope 占位与其中的可交互元素（名字同样脱敏）
+      noteRedaction(scope!)
       emit(depth, `group ${redactedMarker(scope!)} [privacy=${scope}]`)
       kidsDeeper('')
       return
@@ -435,7 +437,10 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
       if (name) name = redactedMarker(scope)
       if (value) value = redactedMarker(scope)
     }
-    if (mark?.password && reader && value) value = redactedMarker(SCOPE_SECRET)
+    if (mark?.password && reader && value) {
+      value = redactedMarker(SCOPE_SECRET)
+      noteRedaction(SCOPE_SECRET)
+    }
 
     if (TEXT_ROLES.has(role)) {
       if (showText && name && name !== parentName && !scope) emit(depth, `text ${quote(name, 200)}`)
@@ -660,7 +665,11 @@ async function guardPoint(cdp: Cdp, p: Point, action: string): Promise<string> {
   if (!info) throw new Error(`坐标 (${Math.round(p.x)}, ${Math.round(p.y)}) 不在窗口内`)
   await guardElement(info, action, `(${Math.round(p.x)}, ${Math.round(p.y)})`)
   // 隐私区里的元素，返回给 agent 的描述不能带出文字
-  return info.privacy && !hasClearance(info.privacy) ? redactedMarker(info.privacy) : info.label
+  if (info.privacy && !hasClearance(info.privacy)) {
+    noteRedaction(info.privacy)
+    return redactedMarker(info.privacy)
+  }
+  return info.label
 }
 
 /** AI 操作位置的可视提示：屏幕上闪一个圆点，让用户看到 AI 点了哪里（不拦截事件）。 */
@@ -1162,6 +1171,7 @@ const OVERLAY_JS = (cleared: string[], maskForbidden: boolean): string => `(() =
   host.id = '${OVERLAY_ID}'
   host.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647'
   let n = 0
+  const seen = new Set()
   for (const el of document.querySelectorAll('[data-privacy],[data-agent="forbidden"],input[type="password"]')) {
     const forbidden = el.getAttribute('data-agent') === 'forbidden'
     if (forbidden && !${maskForbidden}) continue
@@ -1174,10 +1184,12 @@ const OVERLAY_JS = (cleared: string[], maskForbidden: boolean): string => `(() =
     b.textContent = '🔒 ' + scope
     host.appendChild(b)
     n++
+    if (!forbidden) seen.add(scope)
   }
   document.documentElement.appendChild(host)
   for (const m of document.querySelectorAll('.__cockpit_ai_marker')) m.remove()
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(n))))
+  const out = { n, scopes: [...seen] }
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(out))))
 })()`
 
 export interface ScreenshotResult {
@@ -1219,7 +1231,9 @@ export async function screenshot(
   let redactedRegions = 0
   let png: { data: string }
   try {
-    redactedRegions = await evaluate<number>(cdp, OVERLAY_JS(cleared, reader))
+    const masked = await evaluate<{ n: number; scopes: string[] }>(cdp, OVERLAY_JS(cleared, reader))
+    redactedRegions = masked.n
+    if (reader) for (const sc of masked.scopes) noteRedaction(sc)
     png = (await cdp('Page.captureScreenshot', {
       format: 'png',
       ...(clip ? { clip } : {})

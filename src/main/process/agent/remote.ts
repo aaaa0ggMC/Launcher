@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { z } from 'zod'
 import { withOrigin } from '../privacy'
 import { makeLogger } from '../logger'
-import { AGENT_TOOLS, describeError } from './tools'
+import { AGENT_TOOLS, describeError, runAgentTool } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
 import { touchSession } from './sessions'
 
@@ -93,12 +93,18 @@ export class RemoteService {
     touchSession(session, 'remote', client)
     try {
       const out = await withOrigin({ kind: 'remote', session, client }, () =>
-        tool.run(parsed.data as Record<string, unknown>)
+        runAgentTool(tool, parsed.data as Record<string, unknown>)
       )
-      const result =
+      const base =
         out.kind === 'image'
           ? { image: { mimeType: out.mimeType, data: out.data }, ...((out.meta as object) ?? {}) }
           : out.value
+      // 有脱敏时附 `_privacy`；非对象结果（数组 / 字符串）包一层，保证说明不丢
+      const result = !out.privacy
+        ? base
+        : base && typeof base === 'object' && !Array.isArray(base)
+          ? { ...base, _privacy: out.privacy }
+          : { result: base, _privacy: out.privacy }
       return sendJson(res, 200, { jsonrpc: '2.0', id, result })
     } catch (e) {
       return sendJson(res, 200, rpcError(id, -32000, 'tool failed', describeError(e)))

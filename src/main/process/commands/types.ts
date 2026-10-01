@@ -32,6 +32,24 @@ export interface CommandSpec {
    */
   enabled?: () => boolean | Promise<boolean>
   /**
+   * Why the command is unavailable when `enabled` resolves false — surfaced in
+   * the command catalog and in the dispatch error (instead of a bare "unknown
+   * command"), e.g. `'需要 MPRIS/DBus 播放模式（当前为内置播放器模式）'`.
+   */
+  unavailableReason?: string
+  /**
+   * Related commands / named jobs an agent should know about — e.g. the newer
+   * command that supersedes this one, or the job a UI flow actually starts.
+   * Free-form refs: `'aidj.session-fork'`, `'job:aidj.chat'`.
+   */
+  related?: string[]
+  /**
+   * UI entry points that trigger this command (cross-layer map), e.g.
+   * `['aidj 聊天框 /persist']`. Lets an agent go from what the user sees to
+   * the command, and back.
+   */
+  ui?: string[]
+  /**
    * Agent-facing privacy declaration (see `src/main/process/privacy.ts` and
    * docs/agent-access-design.md §3.4). Only consulted for agent origins
    * (remote / mcp / script-agent); UI / CLI dispatch is unaffected.

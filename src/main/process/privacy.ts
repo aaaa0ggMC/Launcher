@@ -216,6 +216,13 @@ const sessionGrants = new Set<string>()
 const onceGrants = new Map<string, number>()
 /** `${session}\0${scope}` → 拒绝时间 */
 const recentDenials = new Map<string, number>()
+/**
+ * `${session}\0${scope}` → once 授权过期的时间。保留一段时间，让 agent 看到的
+ * 占位符能说明「授权已过期、可重新申请」，而不是被误读成数据本身没有值。
+ */
+const expiredGrants = new Map<string, number>()
+/** 过期记录保留多久。 */
+export const EXPIRED_NOTICE_MS = 30 * 60_000
 
 let now: () => number = () => Date.now()
 /** 测试用：替换时钟。 */
@@ -234,29 +241,64 @@ export function isGrantable(scope: string): boolean {
 
 /** 当前来源是否持有该 scope 的许可。非 agent 来源恒为 true。 */
 export function hasClearance(scope: string, origin: CallOrigin = currentOrigin()): boolean {
-  if (!isAgentOrigin(origin)) return true
+  return clearanceVia(scope, origin) !== null
+}
+
+type ClearanceVia = 'non-agent' | 'policy' | 'run' | 'once'
+
+/** hasClearance 的实现：返回许可来自哪里（null = 未持有）。once 过期时顺带记录过期时间。 */
+function clearanceVia(scope: string, origin: CallOrigin): ClearanceVia | null {
+  if (!isAgentOrigin(origin)) return 'non-agent'
   const level = levelOf(scope)
-  if (level === 'secret') return false
-  if (level === 'public') return true
-  if (level === 'personal' && policy.personal === 'allow') return true
-  if (scope === SCOPE_CONTROL && policy.control === 'allow') return true
+  if (level === 'secret') return null
+  if (level === 'public') return 'policy'
+  if (level === 'personal' && policy.personal === 'allow') return 'policy'
+  if (scope === SCOPE_CONTROL && policy.control === 'allow') return 'policy'
   if (scope !== SCOPE_EXEC) {
-    if (policy.alwaysAllowAll) return true
-    if (policy.alwaysAllow.includes(scope)) return true
+    if (policy.alwaysAllowAll) return 'policy'
+    if (policy.alwaysAllow.includes(scope)) return 'policy'
   }
-  if (sessionGrants.has(scope)) return true
-  const until = onceGrants.get(sessionKey(origin, scope))
+  if (sessionGrants.has(scope)) return 'run'
+  const key = sessionKey(origin, scope)
+  const until = onceGrants.get(key)
   if (until !== undefined) {
-    if (until > now()) return true
-    onceGrants.delete(sessionKey(origin, scope))
+    if (until > now()) return 'once'
+    onceGrants.delete(key)
+    expiredGrants.set(key, until)
   }
-  return false
+  return null
+}
+
+export interface ClearanceInfo {
+  scope: string
+  held: boolean
+  /** policy = 设置页策略放行；run = 本次运行始终允许；once = 限时授权 */
+  via?: 'policy' | 'run' | 'once'
+  /** once 授权的到期时间（ms epoch）；policy / run 没有到期时间 */
+  expiresAt?: number
+  /** 未持有、但本会话的 once 授权在这个时间过期了（近 EXPIRED_NOTICE_MS 内） */
+  expiredAt?: number
+}
+
+/** 许可详情：持有方式与到期时间，或「刚过期」。给 agent 的 TTL 信号都从这里来。 */
+export function clearanceInfo(scope: string, origin: CallOrigin = currentOrigin()): ClearanceInfo {
+  const via = clearanceVia(scope, origin)
+  const key = sessionKey(origin, scope)
+  if (via === 'once') return { scope, held: true, via, expiresAt: onceGrants.get(key) }
+  if (via !== null) return { scope, held: true, via: via === 'non-agent' ? 'policy' : via }
+  const at = expiredGrants.get(key)
+  if (at !== undefined && now() - at > EXPIRED_NOTICE_MS) expiredGrants.delete(key)
+  return at !== undefined && now() - at <= EXPIRED_NOTICE_MS
+    ? { scope, held: false, expiredAt: at }
+    : { scope, held: false }
 }
 
 /** 撤销某个会话的全部 once 授权（会话断开时调用）。 */
 export function revokeSessionGrants(session: string): void {
-  for (const key of [...onceGrants.keys()]) {
-    if (key.startsWith(`${session}\0`)) onceGrants.delete(key)
+  for (const map of [onceGrants, expiredGrants]) {
+    for (const key of [...map.keys()]) {
+      if (key.startsWith(`${session}\0`)) map.delete(key)
+    }
   }
 }
 
@@ -280,6 +322,57 @@ export function redactedMarker(scope: string): Redacted {
   return `«redacted:${scope}»`
 }
 
+/**
+ * 每次 agent 工具调用的脱敏收集器：网关在调用外层 `collectRedactions`，期间所有
+ * shield / shieldFields / inspector 产生的占位符都记下 scope，最后汇总成
+ * `privacyNotice` 随结果返回——agent 因此知道「这是脱敏，不是没值」以及该不该重新申请。
+ */
+const redactionStore = new AsyncLocalStorage<Set<string>>()
+
+/** 登记一次脱敏（不在收集器内则忽略）。产生 «redacted:…» 的地方都应调用。 */
+export function noteRedaction(scope: string): void {
+  redactionStore.getStore()?.add(scope)
+}
+
+export async function collectRedactions<T>(
+  fn: () => Promise<T>
+): Promise<{ value: T; redacted: string[] }> {
+  const set = new Set<string>()
+  const value = await redactionStore.run(set, fn)
+  return { value, redacted: [...set] }
+}
+
+export interface PrivacyNotice {
+  /** 本次结果里被脱敏的 scope */
+  redacted: string[]
+  /** 其中：之前持有的 once 授权已过期的 scope（重新 request_clearance 即可） */
+  expired: { scope: string; expiredAt: number }[]
+  /** 其中：可以申请的 scope（secret 永远不行） */
+  requestable: string[]
+  hint: string
+}
+
+/** 把收集到的脱敏 scope 变成给 agent 的结构化说明；没有脱敏返回 null。 */
+export function privacyNotice(
+  redacted: string[],
+  origin: CallOrigin = currentOrigin()
+): PrivacyNotice | null {
+  if (redacted.length === 0) return null
+  const expired: PrivacyNotice['expired'] = []
+  for (const s of redacted) {
+    const info = clearanceInfo(s, origin)
+    if (!info.held && info.expiredAt !== undefined)
+      expired.push({ scope: s, expiredAt: info.expiredAt })
+  }
+  const requestable = redacted.filter((s) => isGrantable(s))
+  const hint = expired.length
+    ? `Your clearance for ${expired.map((e) => e.scope).join(', ')} EXPIRED — the «redacted:…» values are hidden, not empty. Call request_clearance again if you still need them.`
+    : requestable.length
+      ? 'Values shown as «redacted:<scope>» are hidden by privacy, not empty. Call request_clearance with a reason if you need them.'
+      : 'Values shown as «redacted:secret» are credentials and can never be revealed.'
+  return { redacted, expired, requestable, hint }
+}
+
 export function isRedacted(v: unknown): v is Redacted {
   return typeof v === 'string' && v.startsWith('«redacted:') && v.endsWith('»')
 }
@@ -296,12 +389,14 @@ function isEmpty(v: unknown): boolean {
 export function shield<T>(scope: string, value: T): T | Redacted {
   if (isEmpty(value) || !isAgentReader() || hasClearance(scope)) return value
   audit({ type: 'redact', scope })
+  noteRedaction(scope)
   return redactedMarker(scope)
 }
 
 /** 凭据：agent 永远拿到占位符，不可申请。 */
 export function secret<T>(value: T): T | Redacted {
   if (isEmpty(value) || !isAgentReader()) return value
+  noteRedaction(SCOPE_SECRET)
   return redactedMarker(SCOPE_SECRET)
 }
 
@@ -335,7 +430,7 @@ export function shieldFields<T>(
             : val !== null && typeof val === 'object'
               ? hasClearance(scope)
                 ? val
-                : redactedMarker(scope)
+                : (noteRedaction(scope), redactedMarker(scope))
               : shield(scope, val)
     }
     return out
@@ -373,7 +468,10 @@ export function scrubKnownSecrets(text: string): string {
   if (!text || knownSecrets.size === 0) return text
   let out = text
   for (const s of knownSecrets) {
-    if (out.includes(s)) out = out.split(s).join(redactedMarker(SCOPE_SECRET))
+    if (out.includes(s)) {
+      out = out.split(s).join(redactedMarker(SCOPE_SECRET))
+      noteRedaction(SCOPE_SECRET)
+    }
   }
   return out
 }
@@ -388,7 +486,9 @@ export function scrubForAgent<T>(value: T): T {
     const out: Record<string, unknown> = {}
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
       out[k] =
-        SECRET_KEY_RE.test(k) && !isEmpty(val) ? redactedMarker(SCOPE_SECRET) : walk(val, depth + 1)
+        SECRET_KEY_RE.test(k) && !isEmpty(val)
+          ? (noteRedaction(SCOPE_SECRET), redactedMarker(SCOPE_SECRET))
+          : walk(val, depth + 1)
     }
     return out
   }
@@ -545,6 +645,12 @@ export interface ClearanceResult {
   granted: string[]
   /** 不可申请的 scope（secret） */
   refused: string[]
+  /** 已持有 scope 的持有方式与到期时间（once 授权有 expiresAt，到期后结果会重新脱敏） */
+  grants?: ClearanceInfo[]
+}
+
+function withGrants(r: ClearanceResult, origin: CallOrigin): ClearanceResult {
+  return r.granted.length ? { ...r, grants: r.granted.map((s) => clearanceInfo(s, origin)) } : r
 }
 
 /**
@@ -563,7 +669,10 @@ export async function requestClearance(
   const wanted = uniq.filter((s) => isGrantable(s) && !hasClearance(s, origin))
   const held = uniq.filter((s) => isGrantable(s) && hasClearance(s, origin))
   if (wanted.length === 0) {
-    return { status: refused.length ? 'denied' : 'granted', granted: held, refused }
+    return withGrants(
+      { status: refused.length ? 'denied' : 'granted', granted: held, refused },
+      origin
+    )
   }
 
   // 冷却：刚被拒绝的 scope 自动拒绝，防止 AI 反复弹窗
@@ -610,7 +719,7 @@ export async function requestClearance(
   }
   const res = await waitClearance(entry.req.id, opts.waitMs)
   const nowHeld = uniq.filter((s) => isGrantable(s) && hasClearance(s, origin))
-  return { ...res, granted: nowHeld, refused }
+  return withGrants({ ...res, granted: nowHeld, refused }, origin)
 }
 
 /** 等待某个请求的结果，最多 `waitMs`（缺省等到结束）。 */
@@ -638,12 +747,15 @@ export function waitClearance(requestId: string, waitMs?: number): Promise<Clear
 }
 
 function toResult(r: ConsentRequest): ClearanceResult {
-  return {
-    status: r.status,
-    requestId: r.id,
-    granted: r.status === 'granted' ? r.scopes : [],
-    refused: []
-  }
+  return withGrants(
+    {
+      status: r.status,
+      requestId: r.id,
+      granted: r.status === 'granted' ? r.scopes : [],
+      refused: []
+    },
+    r.origin
+  )
 }
 
 /**
@@ -687,6 +799,7 @@ export function __resetPrivacyState(): void {
   sessionGrants.clear()
   onceGrants.clear()
   recentDenials.clear()
+  expiredGrants.clear()
   knownSecrets.clear()
   policy = { ...DEFAULT_PRIVACY_POLICY, alwaysAllow: [] }
   presenter = () => {}

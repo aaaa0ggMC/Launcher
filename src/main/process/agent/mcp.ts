@@ -10,7 +10,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { app } from 'electron'
 import { withOrigin } from '../privacy'
 import { makeLogger } from '../logger'
-import { AGENT_TOOLS, describeError, type ToolOutput } from './tools'
+import { AGENT_TOOLS, describeError, runAgentTool, type ToolOutput } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
 import { endSession, touchSession } from './sessions'
 
@@ -24,6 +24,14 @@ request_clearance with an honest reason — the user approves in a window you ca
 type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
 
 function toMcp(out: ToolOutput): { content: McpContent[] } {
+  const r = toMcpContent(out)
+  // 脱敏说明单独一段文本，放最前：agent 先读到「这是脱敏 / 授权已过期」再读数据
+  if (out.privacy)
+    r.content.unshift({ type: 'text', text: JSON.stringify({ privacy: out.privacy }) })
+  return r
+}
+
+function toMcpContent(out: ToolOutput): { content: McpContent[] } {
   if (out.kind === 'image') {
     return {
       content: [
@@ -67,7 +75,7 @@ function buildServer(session: () => { id: string; client: string }): McpServer {
         touchSession(s.id, 'mcp', s.client)
         return withOrigin({ kind: 'mcp', session: s.id, client: s.client }, async () => {
           try {
-            return toMcp(await tool.run(args ?? {}))
+            return toMcp(await runAgentTool(tool, args ?? {}))
           } catch (e) {
             log.info('tool error', { tool: tool.name, ...describeError(e) })
             return {

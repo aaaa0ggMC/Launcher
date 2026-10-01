@@ -45,7 +45,7 @@ const metaModules = import.meta.glob<AbilityMeta>('../../abilities/*/meta.ts', {
 import.meta.glob('../../abilities/*/privacy.ts', { eager: true })
 
 /** Resolve the shared meta for an ability folder id. */
-function abilityMeta(id: string): AbilityMeta {
+export function getAbilityMeta(id: string): AbilityMeta {
   return metaModules[`../../abilities/${id}/meta.ts`] ?? {}
 }
 
@@ -56,7 +56,7 @@ export function getLoadedAbilityIds(): string[] {
 
 /** Platform eligibility of an ability folder for the running platform. */
 function platformOk(id: string): boolean {
-  const ps = abilityMeta(id).platforms
+  const ps = getAbilityMeta(id).platforms
   return !(ps && ps.length > 0 && !ps.includes(process.platform))
 }
 
@@ -80,10 +80,10 @@ function resolveAvailable(allIds: string[]): {
     }
     if (path.has(id)) return true // cycle — cmd-only dep, ignore
     path.add(id)
-    const meta = abilityMeta(id)
+    const meta = getAbilityMeta(id)
     const ok = (meta.dependencies ?? []).every((cap) => {
       const providers = allIds.filter(
-        (p) => p !== id && platformOk(p) && (abilityMeta(p).provides ?? []).includes(cap)
+        (p) => p !== id && platformOk(p) && (getAbilityMeta(p).provides ?? []).includes(cap)
       )
       return providers.some((p) => canResolve(p))
     })
@@ -97,10 +97,10 @@ function resolveAvailable(allIds: string[]): {
 
 /** Unsatisfied capabilities of an ability (for the warning message). */
 function missingCaps(id: string, resolvable: (id: string) => boolean): string[] {
-  return (abilityMeta(id).dependencies ?? []).filter((cap) => {
+  return (getAbilityMeta(id).dependencies ?? []).filter((cap) => {
     const providers = Object.keys(commandModules)
       .map((k) => k.split('/').at(-2) ?? k)
-      .filter((p) => p !== id && platformOk(p) && (abilityMeta(p).provides ?? []).includes(cap))
+      .filter((p) => p !== id && platformOk(p) && (getAbilityMeta(p).provides ?? []).includes(cap))
     return !providers.some((p) => resolvable(p))
   })
 }
@@ -115,11 +115,11 @@ function dependencyOrder(available: Set<string>): string[] {
   const ids = [...available]
   const order: string[] = []
   const depsOf = (id: string): string[] => {
-    const meta = abilityMeta(id)
+    const meta = getAbilityMeta(id)
     const deps: string[] = []
     for (const cap of meta.dependencies ?? []) {
       for (const p of ids) {
-        if (p !== id && (abilityMeta(p).provides ?? []).includes(cap) && !deps.includes(p)) {
+        if (p !== id && (getAbilityMeta(p).provides ?? []).includes(cap) && !deps.includes(p)) {
           deps.push(p)
         }
       }
@@ -167,7 +167,7 @@ export function registerAbilityCommands(): void {
   }
 
   for (const id of allIds) {
-    const ps = abilityMeta(id).platforms
+    const ps = getAbilityMeta(id).platforms
     if (ps && ps.length > 0 && !ps.includes(process.platform)) {
       log.info('ability commands skipped (platform mismatch)', { ability: id, platforms: ps })
       ignoredPlatform.push(id)

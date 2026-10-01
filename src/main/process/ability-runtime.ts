@@ -43,19 +43,31 @@ export function isAbilityDisabled(id: string): boolean {
   return disabledAbilities.has(id)
 }
 
-/** Whether a command may be dispatched right now (owner enabled + gate open). */
-export async function isCommandRunnable(name: string): Promise<boolean> {
+/** Owning ability folder id of a registered command ('' when unknown). */
+export function commandOwnerOf(name: string): string {
+  return commandOwner.get(name) ?? ''
+}
+
+export type CommandBlock = 'ability-disabled' | 'gated' | 'gate-error'
+
+/** Why a command can't run right now (`null` = runnable). */
+export async function commandBlock(name: string): Promise<CommandBlock | null> {
   const owner = commandOwner.get(name)
-  if (owner && disabledAbilities.has(owner)) return false
+  if (owner && disabledAbilities.has(owner)) return 'ability-disabled'
   const gate = commandGates.get(name)
   if (gate) {
     try {
-      if (!(await gate())) return false
+      if (!(await gate())) return 'gated'
     } catch {
-      return false
+      return 'gate-error'
     }
   }
-  return true
+  return null
+}
+
+/** Whether a command may be dispatched right now (owner enabled + gate open). */
+export async function isCommandRunnable(name: string): Promise<boolean> {
+  return (await commandBlock(name)) === null
 }
 
 /**

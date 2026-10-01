@@ -1,6 +1,6 @@
 import type { CommandSpec } from './types'
 import { makeLogger } from '../logger'
-import { registerCommand, isCommandRunnable } from '../ability-runtime'
+import { registerCommand, commandBlock, commandOwnerOf } from '../ability-runtime'
 import {
   isAgentOrigin,
   guard,
@@ -27,6 +27,31 @@ export class UnknownCommandError extends Error {
     this.silent = silent
     this.name = 'UnknownCommandError'
   }
+}
+
+/**
+ * A registered command that can't run right now (owning ability disabled, or
+ * its mode/platform gate is closed). Subclass of UnknownCommandError so the
+ * existing "not exposed → no toast" handling keeps working, but the message and
+ * `reason` say WHY instead of pretending the command doesn't exist.
+ */
+export class CommandUnavailableError extends UnknownCommandError {
+  readonly reason: string
+  constructor(name: string, reason: string) {
+    super(name, true)
+    this.reason = reason
+    this.message = `命令 ${name} 当前不可用: ${reason}`
+    this.name = 'CommandUnavailableError'
+  }
+}
+
+/** Human-readable reason a command can't run, or null when it can. */
+export async function commandUnavailableReason(name: string): Promise<string | null> {
+  const block = await commandBlock(name)
+  if (!block) return null
+  if (block === 'ability-disabled') return `所属能力 ${commandOwnerOf(name)} 已被运行时禁用`
+  if (block === 'gate-error') return '可用性检查失败'
+  return commands.get(name)?.unavailableReason ?? '当前模式下不可用'
 }
 
 /**
@@ -126,10 +151,11 @@ export async function tryRunCommand(input: string): Promise<string | null> {
   const name = tokens[0]
   const spec = commands.get(name)
   if (!spec) return null
-  if (!(await isCommandRunnable(name))) {
-    // Registered but gated off (mode/platform) → treat as unknown, do NOT fall
-    // through to app-alias resolution.
-    return `未知命令: ${name}`
+  const unavailable = await commandUnavailableReason(name)
+  if (unavailable) {
+    // Registered but gated off (mode/platform) → say why; do NOT fall through
+    // to app-alias resolution.
+    return `命令 ${name} 当前不可用: ${unavailable}`
   }
   const { named, positional } = parseArgs(tokens.slice(1))
   try {
@@ -148,8 +174,9 @@ export async function runCommand(
 ): Promise<unknown> {
   const spec = commands.get(name)
   if (!spec) throw new UnknownCommandError(name)
-  // Gated (mode/platform-exclusive) commands are "silently unknown" — the
-  // renderer shouldn't toast for them.
-  if (!(await isCommandRunnable(name))) throw new UnknownCommandError(name, true)
+  // Gated (mode/platform-exclusive) commands are silent for the renderer (no
+  // toast), but the error says why it's unavailable.
+  const unavailable = await commandUnavailableReason(name)
+  if (unavailable) throw new CommandUnavailableError(name, unavailable)
   return await runWithPrivacy(spec, { named: args, positional: [] })
 }

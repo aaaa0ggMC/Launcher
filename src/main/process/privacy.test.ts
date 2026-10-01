@@ -20,6 +20,9 @@ import {
   noteSecretValue,
   scrubForAgent,
   revokeSessionGrants,
+  clearanceInfo,
+  collectRedactions,
+  privacyNotice,
   PrivacyDeniedError,
   SCOPE_EXEC,
   SCOPE_CONTROL,
@@ -234,4 +237,52 @@ test('guard: undecided within waitMs → privacy_pending, request kept, retry su
   assert.ok(req, 'request still pending')
   decideConsent(req.id, 'once')
   await asAgent(() => guard(P.id))
+})
+
+test('clearanceInfo: once grant has expiresAt; after expiry it reports expiredAt', async () => {
+  let t = 1_000_000
+  __setPrivacyClock(() => t)
+  setConsentPresenter((list) => list.forEach((r) => decideConsent(r.id, 'once')))
+  const res = await asAgent(() => requestClearance([P.id], 'need it'))
+  assert.equal(res.status, 'granted')
+  assert.deepEqual(res.grants, [
+    { scope: P.id, held: true, via: 'once', expiresAt: t + ONCE_GRANT_MS }
+  ])
+  t += ONCE_GRANT_MS + 1
+  const info = asAgent(() => clearanceInfo(P.id))
+  assert.equal(info.held, false)
+  assert.equal(info.expiredAt, 1_000_000 + ONCE_GRANT_MS)
+  revokeSessionGrants('s1')
+  assert.equal(asAgent(() => clearanceInfo(P.id)).expiredAt, undefined)
+})
+
+test('collectRedactions + privacyNotice: redaction is signalled, expiry flagged', async () => {
+  let t = 5_000_000
+  __setPrivacyClock(() => t)
+  const clean = await asAgent(() => collectRedactions(async () => shield(P.fans, 1)))
+  assert.deepEqual(clean.redacted, [])
+  assert.equal(privacyNotice(clean.redacted), null)
+
+  const r1 = await asAgent(() =>
+    collectRedactions(async () => shieldFields({ a: 'x', b: { c: 1 } }, { a: P.id, b: P.id }))
+  )
+  assert.deepEqual(r1.redacted, [P.id])
+  const n1 = asAgent(() => privacyNotice(r1.redacted))
+  assert.deepEqual(n1?.expired, [])
+  assert.deepEqual(n1?.requestable, [P.id])
+
+  setConsentPresenter((list) => list.forEach((r) => decideConsent(r.id, 'once')))
+  await asAgent(() => guard(P.id))
+  assert.equal(
+    asAgent(() => shield(P.id, 'U1')),
+    'U1'
+  )
+  t += ONCE_GRANT_MS + 1
+  const r2 = await asAgent(() => collectRedactions(async () => shield(P.id, 'U1')))
+  const n2 = asAgent(() => privacyNotice(r2.redacted))
+  assert.equal(n2?.expired[0]?.scope, P.id)
+  assert.match(n2?.hint ?? '', /EXPIRED/)
+
+  const r3 = await asAgent(() => collectRedactions(async () => secret('pw')))
+  assert.deepEqual(asAgent(() => privacyNotice(r3.redacted))?.requestable, [])
 })
