@@ -5,7 +5,7 @@
   "settings.emptyText": "No ability has injected configuration options yet.",
   "settings.searchEmpty": "No matching settings",
   "settings.searchEmptyText": "Try different keywords — search matches category names and setting content.",
-  "settings.caption": "Settings are injected by abilities · multi-level menu · search matches categories and content",
+  "settings.caption": "Settings injected by each ability · search matches categories and individual settings",
   "settings.searchPlaceholder": "Search settings…",
   "settings.resultCount": "{n} settings",
   "theme.title": "Theme",
@@ -123,5 +123,8 @@
   "desc.settings.abilities.ability-toggle": "Toggle each ability's availability",
   "settings.on": "On",
   "settings.off": "Off",
-  "settings.none": "None"
+  "settings.none": "None",
+  "settings.group.general": "General",
+  "settings.group.other": "Other",
+  "settings.jumpTo": "Settings category"
 }

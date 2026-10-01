@@ -188,6 +188,11 @@ export interface AbilityLoadReport {
   ignoredDependency: string[]
   /** backend-only abilities (commands but no sidebar page) */
   backendOnly: string[]
+  /**
+   * Backend-only abilities that passed the same platform / disabled /
+   * capability checks — they have no page, but may still inject settings.
+   */
+  backendEligible: { id: string; name: string; category: string }[]
 }
 
 /** Platform eligibility of an ability folder. */
@@ -268,12 +273,21 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
   const ignoredPlatform: string[] = []
   const ignoredDependency: string[] = []
   const backendOnly: string[] = []
+  const backendEligible: AbilityLoadReport['backendEligible'] = []
 
   const { available, resolvable } = resolveAvailable(registry, platform)
 
   for (const [id, { ability: meta, platforms }] of Object.entries(registry)) {
     if (!meta.component) {
       backendOnly.push(id)
+      // No page, but settings injection still needs the same eligibility rules.
+      if (
+        platformOk(platforms, platform) &&
+        !disabledAbilities.value.includes(id) &&
+        available.has(id)
+      ) {
+        backendEligible.push({ id, name: meta.name, category: meta.category })
+      }
       continue
     }
     if (!platformOk(platforms, platform)) {
@@ -321,7 +335,7 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
       `backend-only abilities (commands, no sidebar page): ${backendOnly.join(', ')}`
     )
   }
-  return { loaded, ignoredPlatform, ignoredDependency, backendOnly }
+  return { loaded, ignoredPlatform, ignoredDependency, backendOnly, backendEligible }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +363,8 @@ export interface SettingsCategory {
   id: string
   abilityId: string
   abilityName: string
+  /** owning ability's category (sidebar group), used to group the settings nav */
+  abilityCategory: string
   label: string
   icon: string
   description: string
@@ -360,6 +376,8 @@ export interface SettingsCategory {
 export interface AbilityModuleEntry {
   id: string
   name: string
+  /** owning ability's (translated) sidebar category — groups the settings nav */
+  category?: string
 }
 
 /**
@@ -401,6 +419,7 @@ export function buildSettingsSections(
         id: categoryId,
         abilityId: a.id,
         abilityName: a.name,
+        abilityCategory: a.category ?? '',
         label: s.label,
         icon: s.icon ?? 'mdi-tune-variant',
         description: s.description ?? '',

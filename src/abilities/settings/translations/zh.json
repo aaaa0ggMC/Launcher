@@ -5,7 +5,7 @@
   "settings.emptyText": "当前没有能力注入设置选项",
   "settings.searchEmpty": "没有匹配的设置",
   "settings.searchEmptyText": "换个关键词试试，可搜索分类名或具体设置内容",
-  "settings.caption": "设置由各能力注入 · 多级菜单 · 搜索可匹配分类与具体设置内容",
+  "settings.caption": "各能力注入的设置 · 可搜索分类与具体设置项",
   "settings.searchPlaceholder": "搜索设置…",
   "settings.resultCount": "{n} 项设置",
   "theme.title": "主题",
@@ -123,5 +123,8 @@
   "desc.settings.abilities.ability-toggle": "切换各能力的可用状态",
   "settings.on": "开",
   "settings.off": "关",
-  "settings.none": "无"
+  "settings.none": "无",
+  "settings.group.general": "通用",
+  "settings.group.other": "其他",
+  "settings.jumpTo": "设置分类"
 }

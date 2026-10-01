@@ -11,6 +11,10 @@ import {
   nextTick
 } from 'vue'
 import { useTheme } from 'vuetify'
+import {
+  applyUiScale as applyUiScaleFromConfig,
+  applyFont as applyFontFromConfig
+} from './appearance'
 import type { Ability } from './ability'
 import {
   getAbilityModules,
@@ -24,6 +28,8 @@ import type { SettingsCategory, AbilityLoadReport } from './ability-registry'
 import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
+import { SETTINGS_API, normalizeTarget, type SettingsApi } from './composables/settings'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
 import { fileIconUrl } from './icon'
@@ -347,7 +353,18 @@ const pageTransitionName = computed(() => {
  * uses, then provided to the settings page so it never re-scans.
  */
 const settingsSections = computed<SettingsCategory[]>(() =>
-  buildSettingsSections(abilities.value, getAbilityModules())
+  buildSettingsSections(
+    [
+      ...abilities.value,
+      // backend-only abilities (no page) can still inject settings (e.g. agent)
+      ...sidebarReport.value.backendEligible.map((a) => ({
+        id: a.id,
+        name: t(`ability.${a.id}.name`, a.name),
+        category: t(`ability.${a.id}.category`, a.category)
+      }))
+    ],
+    getAbilityModules()
+  )
 )
 // keep-alive caches only abilities that opted in (keepAlive !== false).
 // Each cached page must declare a matching name via defineOptions.
@@ -452,43 +469,11 @@ function applyTheme(): void {
 }
 
 function applyUiScale(): void {
-  const scale = Number(runtimeConfig.value.uiScale)
-  window.cockpit.setZoom(Number.isFinite(scale) && scale > 0 ? scale : 1.1)
+  applyUiScaleFromConfig(runtimeConfig.value.uiScale)
 }
 
-/** Characters that could terminate the declaration or break out of the value
- *  when a user-supplied family name is injected as a CSS custom property. */
-function sanitizeFontFamily(raw: string): string {
-  return raw
-    .replace(/["'`;{}()<>\\]/g, '')
-    .trim()
-    .slice(0, 120)
-}
-
-/**
- * Global interface font (设置 → 外观 → 字体). Exposes `--cockpit-font` on
- * <html>; global.css consumes it for `body` + `.v-application` (mono stack is
- * untouched). Modes: default → unset (the built-in Noto CJK stack), system →
- * the platform UI font, custom → the user's family name quoted once, with a
- * system fallback tail. An empty / whitespace custom family falls back to
- * default rather than emitting a broken declaration.
- */
 function applyFont(): void {
-  const font = runtimeConfig.value.font as { mode?: string; family?: string } | undefined
-  const mode = font?.mode ?? 'default'
-  const style = document.documentElement.style
-  if (mode === 'system') {
-    style.setProperty('--cockpit-font', "system-ui, -apple-system, 'Segoe UI', sans-serif")
-    return
-  }
-  if (mode === 'custom') {
-    const family = sanitizeFontFamily(typeof font?.family === 'string' ? font.family : '')
-    if (family) {
-      style.setProperty('--cockpit-font', `'${family}', system-ui, sans-serif`)
-      return
-    }
-  }
-  style.removeProperty('--cockpit-font')
+  applyFontFromConfig(runtimeConfig.value.font)
 }
 
 function onConfigChanged(cfg: Record<string, unknown> | null): void {
@@ -544,9 +529,14 @@ async function resolveBackgroundImage(): Promise<void> {
 }
 
 let configUnsub: (() => void) | null = null
+let navigateUnsub: (() => void) | null = null
 function subscribeConfig(): void {
   configUnsub = window.cockpit.on('cockpit:config-changed', (cfg) => {
     if (cfg && typeof cfg === 'object') onConfigChanged(cfg as Record<string, unknown>)
+  })
+  // `ui.navigate`（inspector）：等价于点击侧栏条目；只接受侧栏里存在的能力
+  navigateUnsub = window.cockpit.on('cockpit:navigate', (id) => {
+    if (typeof id === 'string' && abilities.value.some((a) => a.id === id)) openAbility(id)
   })
 }
 
@@ -714,6 +704,45 @@ const abilityConfigs = computed(() => {
 
 provide('cockpit:config', runtimeConfig)
 provide('cockpit:settings', settingsSections)
+
+// ---------------------------------------------------------------------------
+// useSettings().open(...) — jump to an ability's own settings category. With
+// the settings page present → navigate there; without it (removed / disabled)
+// → show that ability's injected settings in a dialog, so abilities never
+// depend on the settings ability existing.
+// ---------------------------------------------------------------------------
+const settingsDialog = ref<{
+  open: boolean
+  categories: SettingsCategory[]
+  highlight: string | null
+}>({ open: false, categories: [], highlight: null })
+const hasSettingsPage = computed(() => abilities.value.some((a) => a.id === 'settings'))
+const settingsApi: SettingsApi = {
+  has: (ability, category) =>
+    settingsSections.value.some(
+      (c) => c.abilityId === ability && (!category || c.id === `${ability}.${category}`)
+    ),
+  open: (raw) => {
+    const target = normalizeTarget(raw)
+    const cats = settingsSections.value.filter((c) => c.abilityId === target.ability)
+    const category = target.category
+      ? cats.find((c) => c.id === `${target.ability}.${target.category}`)
+      : cats[0]
+    if (!category) return 'none'
+    const item = target.item ? `${category.id}.${target.item}` : undefined
+    if (hasSettingsPage.value) {
+      activate('settings', { category: category.id, ...(item ? { item } : {}) })
+      return 'page'
+    }
+    settingsDialog.value = {
+      open: true,
+      categories: target.category ? [category] : cats,
+      highlight: item ?? null
+    }
+    return 'dialog'
+  }
+}
+provide(SETTINGS_API, settingsApi)
 // Ability 可调用以打开全局面板 (BackgroundTasksDialog)，如后台任务已在运行。
 provide('cockpit:open-bt', (): void => {
   btOpen.value = true
@@ -831,6 +860,7 @@ onBeforeUnmount(() => {
   orderUnsub?.()
   winUnsub?.()
   configUnsub?.()
+  navigateUnsub?.()
   commandErrorUnsub?.()
   schemeMedia?.removeEventListener?.('change', onSchemeChange)
   btUnsub?.()
@@ -844,7 +874,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-app :class="windowRounded ? 'win-rounded' : ''">
+  <v-app :class="windowRounded ? 'win-rounded' : ''" :data-current-ability="currentId">
     <BackgroundLayer
       :mode="backgroundMode"
       :image-url="backgroundImage"
@@ -943,6 +973,7 @@ onBeforeUnmount(() => {
             <v-list-item
               v-for="a in filteredAbilities"
               :key="a.id"
+              :data-ability-id="a.id"
               :title="a.name"
               density="compact"
               :active="currentId === a.id"
@@ -960,6 +991,7 @@ onBeforeUnmount(() => {
               <v-list-item
                 v-for="a in g.items"
                 :key="a.id"
+                :data-ability-id="a.id"
                 :title="a.name"
                 density="compact"
                 :active="currentId === a.id"
@@ -980,8 +1012,11 @@ onBeforeUnmount(() => {
         <v-list density="compact" nav class="px-1">
           <v-tooltip v-for="a in abilities" :key="a.id" location="end">
             <template #activator="{ props }">
+              <!-- 纯图标：aria-label 给无障碍树 / inspector 快照一个名字 -->
               <v-list-item
                 v-bind="props"
+                :data-ability-id="a.id"
+                :aria-label="a.name"
                 :active="currentId === a.id"
                 density="compact"
                 rounded="lg"
@@ -1045,7 +1080,13 @@ onBeforeUnmount(() => {
         }}</span>
       </v-app-bar-title>
       <v-spacer />
-      <v-btn icon="mdi-cog-outline" variant="text" @click="openAbility('settings')" />
+      <v-btn
+        v-if="hasSettingsPage"
+        icon="mdi-cog-outline"
+        variant="text"
+        :aria-label="t('ability.settings.name', '设置')"
+        @click="openAbility('settings')"
+      />
       <template v-if="isFrameless">
         <v-btn icon="mdi-window-minimize" variant="text" @click="winMinimize" />
         <v-btn
@@ -1081,6 +1122,11 @@ onBeforeUnmount(() => {
 
     <!-- Background tasks panel (framework-level) -->
     <BackgroundTasksDialog v-model="btOpen" />
+    <SettingsDialog
+      v-model="settingsDialog.open"
+      :categories="settingsDialog.categories"
+      :highlight="settingsDialog.highlight"
+    />
 
     <!-- Quit confirmation when background tasks are still running -->
     <v-dialog v-model="quitConfirmOpen" width="440" persistent>
