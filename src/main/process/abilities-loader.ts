@@ -5,6 +5,9 @@ import { makeLogger } from './logger'
 
 const log = makeLogger('abilities-loader')
 
+/** 构建期被 src/abilities/toggle.json 排除的能力（electron.vite.config.ts 注入）。 */
+declare const __DISABLED_ABILITIES__: string[]
+
 /**
  * Built-in ability command loader.
  *
@@ -202,5 +205,9 @@ export function registerAbilityCommands(): void {
     ignoredPlatform,
     ignoredDependency
   })
+  if (__DISABLED_ABILITIES__.length)
+    log.info('abilities excluded at build time (toggle.json)', {
+      abilities: __DISABLED_ABILITIES__
+    })
   log.info(`total ${listCommands().length} commands across ${loaded.length} abilities`)
 }

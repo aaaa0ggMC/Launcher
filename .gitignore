@@ -29,5 +29,11 @@ src/abilities/biliviewer/
 src/abilities/campusnet/
 src/abilities/campusinfo/
 
+# Claude 历险记（独立公开仓库 aaaa0ggMC/launcher-claudeadv）
+src/abilities/claudeadv/
+
 # 掌机（mGBA wasm，独立私有仓库 aaaa0ggMC/launcher-gameboy）
 src/abilities/gameboy/
+
+# 能力开关（个人文件，见 AGENTS.md「toggle.json」）
+src/abilities/toggle.json
