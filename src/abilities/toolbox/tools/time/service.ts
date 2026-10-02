@@ -1,4 +1,5 @@
 import type { ToolArgs, ToolResult } from '../../types'
+import { currency } from './currency'
 const NS_PER_MS = 1_000_000n
 const factors: Record<string, bigint> = { s: 1_000_000_000n, ms: NS_PER_MS, us: 1_000n, ns: 1n }
 const DATE_LIMIT_MS = 8_640_000_000_000_000n
@@ -296,6 +297,8 @@ export async function execute(id: string, args: ToolArgs): Promise<ToolResult> {
         }))
         return { ok: true, text: data.map((r) => `${r.zone}: ${r.zonedDate}`).join('\n'), data }
       }
+      case 'currency':
+        return await currency(args)
       default:
         return { ok: false, error: '未知时间工具' }
     }

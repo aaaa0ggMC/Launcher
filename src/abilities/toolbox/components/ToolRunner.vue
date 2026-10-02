@@ -299,6 +299,7 @@ function preview(file: ToolFile): string | undefined {
       variant="tonal"
       :text="`${t('toolbox.dependency')}: ${tool.dependency}`"
     />
+    <v-alert v-if="tool.network" type="warning" variant="tonal" :text="t('toolbox.networkNote')" />
     <v-card variant="outlined" class="pa-6">
       <h2 class="text-h6 mb-5">{{ t('toolbox.input') }}</h2>
       <v-form v-privacy="'toolbox.content'" @submit.prevent="run">

@@ -221,7 +221,8 @@ defineExpose({ onActivate })
           </p>
           <div class="text-caption text-medium-emphasis mt-4">
             {{ t(`toolbox.category.${tool.category}`)
-            }}<span v-if="tool.dependency"> · {{ tool.dependency }}</span>
+            }}<span v-if="tool.dependency"> · {{ tool.dependency }}</span
+            ><span v-if="tool.network"> · {{ t('toolbox.network') }}</span>
           </div>
         </v-card>
       </div>

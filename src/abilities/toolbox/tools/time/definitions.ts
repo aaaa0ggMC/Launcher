@@ -46,6 +46,8 @@ const descriptionsEn: Record<string, string> = {
   duration: 'Convert seconds to days, hours, minutes, seconds and an ISO 8601 duration.',
   'special-epoch':
     'Convert FILETIME, .NET ticks, WebKit, OADate, Discord Snowflake and hexadecimal Unix time.',
+  currency:
+    'Convert an amount between currencies using live public exchange rates (requires network).',
   'world-clock': 'Show the same instant in multiple IANA time zones.'
 }
 const tool = (
@@ -252,5 +254,33 @@ export const definitions: ToolDefinition[] = [
       }
     ],
     ['world clock', 'timezone', '时区', '世界时钟']
-  )
+  ),
+  {
+    ...tool(
+      'currency',
+      '汇率换算',
+      'Currency Converter',
+      '按公开实时汇率换算金额，支持约 160 种货币，可同时换成多种目标货币（需联网）。',
+      [
+        { key: 'amount', label: '金额', labelEn: 'Amount', type: 'text', default: '100' },
+        {
+          key: 'from',
+          label: '源货币',
+          labelEn: 'From',
+          type: 'text',
+          default: 'USD',
+          hint: '3 位 ISO 4217 代码，如 USD / CNY / JPY'
+        },
+        {
+          key: 'to',
+          label: '目标货币（逗号或空格分隔）',
+          labelEn: 'To (comma or space separated)',
+          type: 'text',
+          default: 'CNY, EUR, JPY'
+        }
+      ],
+      ['currency', 'exchange rate', 'forex', '汇率', '货币', '外汇', '美元', '人民币', '兑换']
+    ),
+    network: true
+  }
 ]

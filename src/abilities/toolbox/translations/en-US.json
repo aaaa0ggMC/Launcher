@@ -1,6 +1,8 @@
 {
   "toolbox.title": "Local Toolbox",
   "toolbox.subtitle": "Find a tool and get things done. Pin favorites or open tools directly from global search.",
+  "toolbox.network": "Online",
+  "toolbox.networkNote": "This tool needs network access: only currency codes are sent to public rate APIs, never the amount; rates are cached for 1 hour.",
   "toolbox.offline": "Processed locally",
   "toolbox.search": "Search by name, purpose or keyword (epoch, JSON, QR…)",
   "toolbox.back": "All tools",

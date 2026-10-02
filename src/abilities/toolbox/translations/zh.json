@@ -1,6 +1,8 @@
 {
   "toolbox.title": "本地工具箱",
   "toolbox.subtitle": "搜索工具，直接处理。常用工具可收藏，也可从侧栏全局搜索打开。",
+  "toolbox.network": "联网",
+  "toolbox.networkNote": "此工具需要联网：只发送货币代码查询公开汇率接口，不发送金额；汇率缓存 1 小时。",
   "toolbox.offline": "完全本地处理",
   "toolbox.search": "搜索名称、用途或关键词（例如 epoch、JSON、二维码）",
   "toolbox.back": "全部工具",

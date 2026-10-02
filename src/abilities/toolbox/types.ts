@@ -28,6 +28,8 @@ export interface ToolDefinition {
   view?: 'epoch' | 'pomodoro'
   /** Fixed external executable requirement, shown before users run the tool. */
   dependency?: string
+  /** Needs outbound network access (the only exception to the offline rule). */
+  network?: boolean
   /** Secrets/password-based operations stay user-only. */
   agentDenied?: boolean
 }
