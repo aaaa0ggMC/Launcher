@@ -9,6 +9,7 @@ import {
   type,
   key,
   scroll,
+  inputTimeline,
   navigate,
   waitFor,
   screenshot,
@@ -192,6 +193,20 @@ export default [
         settle: settleOpt(ctx.named.settle),
         dy: num(ctx.named.dy),
         dx: num(ctx.named.dx)
+      })
+  },
+  {
+    name: 'ui.input-timeline',
+    description:
+      '输入时间轴：一次提交按相对时间（t 毫秒）派发的键盘 / 鼠标 / 截帧事件，中途不往返、不等页面稳定，适合游戏（边跑边跳、长按蓄力、拖动瞄准）。结束或出错自动松开仍按着的键。--events JSON 数组：{t,type:"key",key,action:press|down|up,hold_ms,modifiers} / {t,type:"mouse",action:move|down|up|click|wheel,x,y,button,hold_ms,duration_ms,double,dx,dy} / {t,type:"screenshot",label}（坐标默认截图像素，--space css；最长 30s、500 条、6 帧）',
+    usage:
+      'ui.input-timeline --events \'[{"t":0,"type":"key","key":"ArrowRight","action":"down"},{"t":150,"type":"key","key":"Space","hold_ms":300},{"t":450,"type":"screenshot"},{"t":900,"type":"key","key":"ArrowRight","action":"up"}]\'',
+    related: ['ui.key', 'ui.mouse', 'ui.move', 'ui.screenshot'],
+    privacy: {},
+    run: async (ctx) =>
+      inputTimeline(ctx.named.events ?? ctx.positional[0], {
+        space: space(ctx.named.space),
+        save: ctx.named.save === undefined ? undefined : bool(ctx.named.save)
       })
   },
   {

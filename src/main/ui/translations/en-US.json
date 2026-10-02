@@ -1,4 +1,8 @@
 {
+  "agent.onPage": "Operating page: {page}",
+  "agent.idle": "Idle",
+  "agent.lastTool": "Last action",
+  "agent.unknownClient": "AI client",
   "app.brandSub": "System Control Center",
   "search.placeholder": "Search abilities / apps / tools",
   "search.appsHeader": "Quick launch",
@@ -15,6 +19,11 @@
   "copy.exported": "Exported from Linux Cockpit",
   "appbar.copyTooltip": "Copy current view as Markdown",
   "appbar.btTooltip": "Background tasks",
+  "appbar.helpTooltip": "Help for the current ability",
+  "help.title": "Help",
+  "help.overview": "Overview",
+  "help.none": "\"{name}\" has no help yet",
+  "help.loadFailed": "Could not load help content",
   "bt.dialogTitle": "Background Tasks",
   "bt.tooltip": "Close",
   "bt.runningCount": "{n} running",
@@ -137,5 +146,14 @@
   "privacy.scope.system_control": "Change system state",
   "privacy.scope.system_control_desc": "Fixed actions: services, containers, wallpaper, autostart…",
   "privacy.text.click_reveal": "Click to reveal",
-  "privacy.text.click_hide": "Click to hide"
+  "privacy.text.click_hide": "Click to hide",
+  "agent.view.chip": "AI view",
+  "agent.view.hint": "This is the AI's own view: what you do here and what the AI does affect each other",
+  "agent.view.title": "AI view",
+  "agent.follow_hint": "Click to watch its view",
+  "agent.view_shown": "View open",
+  "agent.view_hidden": "Background view",
+  "agent.view.back": "Back to my UI",
+  "window.minimize": "Minimize",
+  "window.close": "Close"
 }

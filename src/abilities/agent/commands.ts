@@ -1,7 +1,10 @@
 import type { CommandSpec } from '../../main/process/commands/types'
 import { getAgentStatus, disconnectSession, restartForNewToken } from '../../main/process/agent'
 import { getAgentToken, regenerateAgentToken } from '../../main/process/agent/config'
-import { listSessions } from '../../main/process/agent/sessions'
+import { listSessions, setSessionPage } from '../../main/process/agent/sessions'
+import { followAgentView, unfollowAgentView } from '../../main/process/agent/views'
+import { followModeSetting } from '../../main/process/agent/config'
+import { currentOrigin } from '../../main/process/privacy'
 import { listRunGrants, revokeRunGrants } from '../../main/process/privacy'
 
 /** 只能由用户本人（设置页 / CLI）调用：token、断开会话、撤销授权。 */
@@ -25,6 +28,36 @@ export default [
     usage: 'agent.sessions',
     privacy: {},
     run: () => ({ sessions: listSessions(), runGrants: listRunGrants() })
+  },
+  {
+    name: 'agent.follow',
+    description:
+      '查看某个 agent 的独立视图 (--id)：默认在主窗口里跟随（agent.ui.followMode 可改为单独窗口），没有视图就先建。agent 在这个视图里操作，不影响你自己的界面',
+    usage: 'agent.follow --id <sessionId>',
+    privacy: USER_ONLY,
+    ui: ['标题栏 AI 图标条：点击头像'],
+    run: async (ctx) => ({
+      ok: await followAgentView(String(ctx.named.id ?? ''), await followModeSetting())
+    })
+  },
+  {
+    name: 'agent.unfollow',
+    description: '结束跟随某个 agent (--id)：回到你自己的界面，它的视图继续在后台替它工作',
+    usage: 'agent.unfollow --id <sessionId>',
+    privacy: USER_ONLY,
+    run: (ctx) => ({ ok: unfollowAgentView(String(ctx.named.id ?? '')) })
+  },
+  {
+    name: 'agent.report-page',
+    description:
+      'agent 视图上报自己当前所在页面 (--page <能力id>)，仅对 agent 视图发出的调用生效，用于标题栏悬停提示',
+    usage: 'agent.report-page --page aidj',
+    privacy: {},
+    run: (ctx) => {
+      const o = currentOrigin()
+      if (o.kind === 'agent-ui' && o.session) setSessionPage(o.session, ctx.named.page)
+      return { ok: true }
+    }
   },
   {
     name: 'agent.token',

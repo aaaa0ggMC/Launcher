@@ -16,6 +16,8 @@
     "src/abilities/*/commands/**",
     "src/abilities/campusinfo/sections.ts",
     "src/abilities/campusinfo/sections-extra/**",
+    "src/abilities/campusinfo/loginlog.ts",
+    "src/abilities/campusinfo/mail/**",
     "src/abilities/campusinfo/hustpass-api.d.ts"
   ],
   "compilerOptions": {

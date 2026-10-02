@@ -8,6 +8,7 @@ defineOptions({ name: 'cockpit-settings-agent' })
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { translate, translateTemplate } from '@ui/i18n'
+import { AGENT_UI_LIMITS, resolveAgentUi, type AgentUiConfig } from '@ui/composables/agentUi'
 
 interface TransportStatus {
   enabled: boolean
@@ -30,6 +31,7 @@ interface AgentCfg {
   remote?: { enabled?: boolean; port?: number }
   mcp?: { enabled?: boolean; port?: number }
   privacy?: Record<string, unknown>
+  ui?: Partial<AgentUiConfig>
 }
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -47,12 +49,43 @@ const ports = ref<Record<Transport, string>>({ mcp: '', remote: '' })
 const toast = ref({ show: false, text: '' })
 const confirmRegen = ref(false)
 
+const ui = computed(() => resolveAgentUi(agentCfg.value.ui))
+type UiNumKey = keyof typeof AGENT_UI_LIMITS
+const uiNums = ref<Record<UiNumKey, string>>({
+  busyTimeoutSec: '',
+  statusTtlSec: '',
+  hideIdleAfterMin: ''
+})
+function syncUiNums(): void {
+  for (const k of Object.keys(AGENT_UI_LIMITS) as UiNumKey[]) uiNums.value[k] = String(ui.value[k])
+}
+
+async function setUi<K extends keyof AgentUiConfig>(key: K, v: AgentUiConfig[K]): Promise<void> {
+  await patchAgent({ ui: { ...ui.value, [key]: v } })
+}
+
+/** 数值项：超范围 / 非数字 → 夹紧到合法范围并提示，再写盘。 */
+async function saveUiNum(key: UiNumKey): Promise<void> {
+  const { min, max } = AGENT_UI_LIMITS[key]
+  const raw = Number(uiNums.value[key])
+  const n = Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : ui.value[key]
+  if (String(n) !== uiNums.value[key].trim()) {
+    toast.value = {
+      show: true,
+      text: tt('agent.ui_range', { min: String(min), max: String(max) }, `取值范围 ${min}–${max}`)
+    }
+  }
+  uiNums.value[key] = String(n)
+  if (n !== ui.value[key]) await setUi(key, n)
+}
+
 const personal = computed(() => (agentCfg.value.privacy?.personal === 'ask' ? 'ask' : 'allow'))
 const control = computed(() => (agentCfg.value.privacy?.control === 'ask' ? 'ask' : 'allow'))
 
 async function refresh(): Promise<void> {
   const cfg = (await window.cockpit.getConfig()) as { agent?: AgentCfg } | null
   agentCfg.value = cfg?.agent ?? {}
+  syncUiNums()
   status.value = (await window.cockpit.command('agent.status')) as Record<
     Transport,
     TransportStatus
@@ -294,6 +327,148 @@ defineExpose({
       </v-card-actions>
     </v-card>
 
+    <!-- AI 指示（标题栏图标条 / 描边） -->
+    <v-card rounded="lg" variant="tonal">
+      <v-card-title class="pt-4">{{ t('agent.ui_title', 'AI 指示') }}</v-card-title>
+      <v-card-subtitle class="agent-wrap">
+        {{
+          t(
+            'agent.ui_desc',
+            'AI 操作时界面如何提示：标题栏图标条、全窗口描边、悬停信息。这些设置 AI 自己改不了。'
+          )
+        }}
+      </v-card-subtitle>
+      <v-card-text class="d-flex flex-column ga-6 pt-4 pb-6">
+        <div class="agent-grid agent-grid--switches">
+          <v-switch
+            :model-value="ui.isolateView"
+            :label="t('agent.ui_isolate', 'AI 在独立视图里操作（不动我的窗口）')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('isolateView', !!v)"
+          />
+          <v-switch
+            :model-value="ui.showBar"
+            :label="t('agent.ui_show_bar', '标题栏显示 AI 图标条')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('showBar', !!v)"
+          />
+          <v-switch
+            :model-value="ui.outline"
+            :label="t('agent.ui_outline', 'AI 操作时描边整个窗口')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('outline', !!v)"
+          />
+          <v-switch
+            :model-value="ui.tooltipDetail"
+            :label="t('agent.ui_tooltip', '悬停显示页面 / 状态 / 最近操作')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('tooltipDetail', !!v)"
+          />
+          <v-switch
+            :model-value="ui.allowAvatar"
+            :label="t('agent.ui_avatar', '接受 AI 自带的头像')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('allowAvatar', !!v)"
+          />
+        </div>
+        <div class="agent-grid agent-grid--fields">
+          <v-text-field
+            v-model="uiNums.busyTimeoutSec"
+            :label="t('agent.ui_busy', 'Agent 过期时间')"
+            :hint="t('agent.ui_busy_hint', '距上次调用多久内算正在操作，描边也按它渐隐')"
+            persistent-hint
+            suffix="s"
+            type="number"
+            variant="outlined"
+            class="agent-field"
+            @blur="saveUiNum('busyTimeoutSec')"
+            @keydown.enter="saveUiNum('busyTimeoutSec')"
+          />
+          <v-text-field
+            v-model="uiNums.statusTtlSec"
+            :label="t('agent.ui_status_ttl', '状态文字有效期')"
+            :hint="t('agent.ui_status_ttl_hint', 'AI 用 set_status 写的「在忙什么」多久后消失')"
+            persistent-hint
+            suffix="s"
+            type="number"
+            variant="outlined"
+            class="agent-field"
+            @blur="saveUiNum('statusTtlSec')"
+            @keydown.enter="saveUiNum('statusTtlSec')"
+          />
+          <v-text-field
+            v-model="uiNums.hideIdleAfterMin"
+            :label="t('agent.ui_hide_idle', '空闲后隐藏图标')"
+            :hint="t('agent.ui_hide_idle_hint', '空闲超过多久从图标条消失；0 = 不隐藏')"
+            persistent-hint
+            suffix="min"
+            type="number"
+            variant="outlined"
+            class="agent-field"
+            @blur="saveUiNum('hideIdleAfterMin')"
+            @keydown.enter="saveUiNum('hideIdleAfterMin')"
+          />
+        </div>
+        <v-select
+          :model-value="ui.followMode"
+          :label="t('agent.ui_follow_mode', '点头像跟随 AI 时')"
+          :items="[
+            {
+              title: t('agent.ui_follow_inplace', '在主窗口里跟随（返回按钮回到我的界面）'),
+              value: 'inplace'
+            },
+            { title: t('agent.ui_follow_window', '打开单独的窗口'), value: 'window' }
+          ]"
+          variant="outlined"
+          hide-details
+          class="agent-select"
+          @update:model-value="(v) => setUi('followMode', v)"
+        />
+        <v-select
+          :model-value="ui.screenshotMode"
+          :label="t('agent.ui_screenshot_mode', 'AI 截图方式')"
+          :hint="
+            t(
+              'agent.ui_screenshot_hint',
+              '自动：先用不闪的方式，窗口被遮挡导致失败时再换稳妥的方式（那一下透明窗口可能闪一下）'
+            )
+          "
+          persistent-hint
+          :items="[
+            { title: t('agent.ui_screenshot_auto', '自动（推荐）'), value: 'auto' },
+            {
+              title: t('agent.ui_screenshot_capture', '拷贝画面（不闪，窗口被遮挡时可能失败）'),
+              value: 'capture'
+            },
+            {
+              title: t('agent.ui_screenshot_cdp', '重新渲染（稳，透明窗口可能闪一下）'),
+              value: 'cdp'
+            }
+          ]"
+          variant="outlined"
+          class="agent-select"
+          @update:model-value="(v) => setUi('screenshotMode', v)"
+        />
+        <v-select
+          :model-value="ui.defaultIcon"
+          :label="t('agent.ui_default_icon', '没有头像时')"
+          :items="[
+            { title: t('agent.ui_icon_animal', '随机动物图标'), value: 'icon' },
+            { title: t('agent.ui_icon_initial', '名字首字母'), value: 'initial' }
+          ]"
+          variant="outlined"
+          hide-details
+          class="agent-select"
+          @update:model-value="(v) => setUi('defaultIcon', v)"
+        />
+      </v-card-text>
+    </v-card>
+
     <!-- Sessions -->
     <v-card rounded="lg" variant="tonal">
       <v-card-title class="pt-4">{{
@@ -413,6 +588,24 @@ defineExpose({
 .agent-chip {
   padding-block: 4px;
   min-height: 24px;
+}
+.agent-grid {
+  display: grid;
+  gap: 8px 32px;
+}
+.agent-grid--switches {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+/* 输入框下面有常驻提示，行距要比开关大，否则提示贴着下一行的标签 */
+.agent-grid--fields {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px 20px;
+}
+.agent-field {
+  min-width: 0;
+}
+.agent-select {
+  max-width: 360px;
 }
 .agent-port {
   max-width: 160px;

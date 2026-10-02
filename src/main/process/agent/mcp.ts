@@ -12,7 +12,13 @@ import { withOrigin } from '../privacy'
 import { makeLogger } from '../logger'
 import { AGENT_TOOLS, describeError, runAgentTool, type ToolOutput } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
-import { endSession, touchSession } from './sessions'
+import {
+  endSession,
+  sanitizeAvatar,
+  setSessionAvatar,
+  setSessionClient,
+  touchSession
+} from './sessions'
 
 const log = makeLogger('agent.mcp')
 
@@ -37,6 +43,17 @@ function toMcpContent(out: ToolOutput): { content: McpContent[] } {
       content: [
         { type: 'image', data: out.data, mimeType: out.mimeType },
         { type: 'text', text: JSON.stringify(out.meta) }
+      ]
+    }
+  }
+  if (out.kind === 'images') {
+    return {
+      content: [
+        { type: 'text', text: JSON.stringify(out.meta) },
+        ...out.images.flatMap((im): McpContent[] => [
+          { type: 'text', text: im.label },
+          { type: 'image', data: im.data, mimeType: im.mimeType }
+        ])
       ]
     }
   }
@@ -72,7 +89,7 @@ function buildServer(session: () => { id: string; client: string }): McpServer {
       },
       async (args: Record<string, unknown>) => {
         const s = session()
-        touchSession(s.id, 'mcp', s.client)
+        touchSession(s.id, 'mcp', s.client, undefined, tool.name)
         return withOrigin({ kind: 'mcp', session: s.id, client: s.client }, async () => {
           try {
             return toMcp(await runAgentTool(tool, args ?? {}))
@@ -149,13 +166,17 @@ export class McpService {
     if (req.method === 'POST') {
       const body = await readBody(req)
       if (existing) return existing.transport.handleRequest(req, res, body)
-      if (sid || !isInitializeRequest(body)) {
-        return sendJson(res, 400, {
+      // 客户端可能带着上一次进程遗留的 session id 重连。如果它发的是 initialize，
+      // 就为它建新会话，而不是把重连挡回去——否则应用一重启，agent 侧永远连不上
+      // （旧逻辑 `if (sid || !isInitializeRequest(body))` 会连 initialize 一起拒掉）。
+      if (!isInitializeRequest(body)) {
+        return sendJson(res, 404, {
           jsonrpc: '2.0',
           error: { code: -32000, message: 'unknown or missing MCP session' },
           id: null
         })
       }
+      if (sid) log.warn('ignoring stale MCP session on initialize', { stale: String(sid) })
       // onsessioninitialized 在 handleRequest 期间回调，那时 server 已建好；经 holder 引用
       const holder: { live?: Live } = {}
       const transport = new StreamableHTTPServerTransport({
@@ -166,6 +187,9 @@ export class McpService {
           this.sessions.set(id, live)
           const client = live.server.server.getClientVersion()?.name ?? 'mcp-client'
           touchSession(id, 'mcp', client, () => this.close(id))
+          // 头像：initialize 请求的 X-Cockpit-Avatar 头（此刻可读）；clientInfo.icons 要等握手完成，见 oninitialized
+          const hdr = req.headers['x-cockpit-avatar']
+          setSessionAvatar(id, typeof hdr === 'string' ? hdr : undefined)
           log.info('MCP session opened', { id, client })
         }
       })
@@ -181,13 +205,29 @@ export class McpService {
         id: transport.sessionId ?? 'mcp',
         client: server.server.getClientVersion()?.name ?? 'mcp-client'
       }))
+      // 握手完成后才有 clientInfo：补上真实名字，并在没有 header 头像时取 icons 里的 data: 图
+      server.server.oninitialized = () => {
+        const id = transport.sessionId
+        const cv = server.server.getClientVersion() as
+          { name?: string; icons?: { src?: string }[] } | undefined
+        if (!id || !cv) return
+        if (cv.name) setSessionClient(id, cv.name)
+        const icon = cv.icons?.map((i) => sanitizeAvatar(i?.src)).find(Boolean)
+        if (icon) setSessionAvatar(id, icon, false)
+      }
       holder.live = { transport, server }
       await server.connect(transport)
       return transport.handleRequest(req, res, body)
     }
 
     if (req.method === 'GET' || req.method === 'DELETE') {
-      if (!existing) return sendJson(res, 400, { error: 'unknown or missing MCP session' })
+      if (!existing) {
+        return sendJson(res, 404, {
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'unknown or missing MCP session' },
+          id: null
+        })
+      }
       return existing.transport.handleRequest(req, res)
     }
     res.writeHead(405).end()

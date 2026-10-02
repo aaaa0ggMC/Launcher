@@ -12,7 +12,7 @@ import { withOrigin } from '../privacy'
 import { makeLogger } from '../logger'
 import { AGENT_TOOLS, describeError, runAgentTool } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
-import { touchSession } from './sessions'
+import { setSessionAvatar, touchSession } from './sessions'
 
 const log = makeLogger('agent.remote')
 
@@ -90,7 +90,8 @@ export class RemoteService {
     if (!parsed.success) {
       return sendJson(res, 200, rpcError(id, -32602, parsed.error.message))
     }
-    touchSession(session, 'remote', client)
+    touchSession(session, 'remote', client, undefined, tool.name)
+    setSessionAvatar(session, header(req, 'x-cockpit-avatar'))
     try {
       const out = await withOrigin({ kind: 'remote', session, client }, () =>
         runAgentTool(tool, parsed.data as Record<string, unknown>)
@@ -98,7 +99,9 @@ export class RemoteService {
       const base =
         out.kind === 'image'
           ? { image: { mimeType: out.mimeType, data: out.data }, ...((out.meta as object) ?? {}) }
-          : out.value
+          : out.kind === 'images'
+            ? { ...((out.meta as object) ?? {}), images: out.images }
+            : out.value
       // 有脱敏时附 `_privacy`；非对象结果（数组 / 字符串）包一层，保证说明不丢
       const result = !out.privacy
         ? base

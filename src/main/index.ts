@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpc } from './process/ipc'
 import { initPrivacyConsent } from './process/privacy-consent'
 import { initAgentServices, handleSecondInstanceArgv } from './process/agent'
+import { allAgentViewContents, destroyAllAgentViews } from './process/agent/views'
 import { registerIconProtocol } from './process/icon-protocol'
 import { registerAudioProtocol } from './process/audio-protocol'
 import { loadExternalAbilities } from './process/ability-loader'
@@ -80,6 +81,8 @@ function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, ...args)
   }
+  // agent 视图（WebContentsView）不在 getAllWindows 里，要显式广播（主题 / 配置 / 会话变化等）
+  for (const wc of allAgentViewContents()) wc.send(channel, ...args)
 }
 
 async function createWindow(): Promise<void> {
@@ -142,7 +145,10 @@ async function createWindow(): Promise<void> {
   mainWindow.on('maximize', () => broadcast('cockpit:window-maximized', true))
   mainWindow.on('unmaximize', () => broadcast('cockpit:window-maximized', false))
   // Child windows live and die with the main shell.
-  mainWindow.on('closed', () => closeAllChildren())
+  mainWindow.on('closed', () => {
+    closeAllChildren()
+    destroyAllAgentViews()
+  })
   setMainWindow(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -235,4 +241,5 @@ if (!gotLock) {
 app.on('will-quit', () => {
   shutdownBackgroundTasks()
   closeAllChildren()
+  destroyAllAgentViews()
 })

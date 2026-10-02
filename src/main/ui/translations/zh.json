@@ -1,4 +1,8 @@
 {
+  "agent.onPage": "正在操作页面：{page}",
+  "agent.idle": "空闲",
+  "agent.lastTool": "最近操作",
+  "agent.unknownClient": "AI 客户端",
   "app.brandSub": "System Control Center",
   "search.placeholder": "搜索能力 / 应用 / 工具",
   "search.appsHeader": "快速启动",
@@ -15,6 +19,11 @@
   "copy.exported": "由 Linux Cockpit 导出",
   "appbar.copyTooltip": "复制当前页面为 Markdown",
   "appbar.btTooltip": "后台任务",
+  "appbar.helpTooltip": "当前功能的使用帮助",
+  "help.title": "使用帮助",
+  "help.overview": "概览",
+  "help.none": "「{name}」暂无使用帮助",
+  "help.loadFailed": "无法加载帮助内容",
   "bt.dialogTitle": "后台任务",
   "bt.tooltip": "关闭",
   "bt.runningCount": "{n} 个运行中",
@@ -137,5 +146,14 @@
   "privacy.scope.system_control": "修改系统状态",
   "privacy.scope.system_control_desc": "启停服务、容器、切换壁纸、开机自启等固定操作",
   "privacy.text.click_reveal": "点击显示",
-  "privacy.text.click_hide": "点击隐藏"
+  "privacy.text.click_hide": "点击隐藏",
+  "agent.view.chip": "AI 视图",
+  "agent.view.hint": "这是 AI 的独立视图：你在这里的操作会和 AI 互相影响",
+  "agent.view.title": "AI 视图",
+  "agent.follow_hint": "点击查看它的视图",
+  "agent.view_shown": "视图已打开",
+  "agent.view_hidden": "后台视图",
+  "agent.view.back": "返回我的界面",
+  "window.minimize": "最小化",
+  "window.close": "关闭"
 }

@@ -159,12 +159,22 @@ export async function tryRunCommand(input: string): Promise<string | null> {
   }
   const { named, positional } = parseArgs(tokens.slice(1))
   try {
+    for (const h of preRunHooks) if (name.startsWith(h.prefix)) await h.fn()
     const result = await runWithPrivacy(spec, { named, positional })
     return formatResult(result)
   } catch (e) {
     log.error('command failed', { name, error: e instanceof Error ? e.message : String(e) })
     return `错误: ${e instanceof Error ? e.message : String(e)}`
   }
+}
+
+/**
+ * 命令执行前的异步钩子（按命令名前缀）。inspector 用它在 agent 的 `ui.*` 调用前
+ * 把该会话的独立视图建好并等它加载完（`mainContents()` 本身是同步的）。
+ */
+const preRunHooks: { prefix: string; fn: () => Promise<void> }[] = []
+export function registerPreRunHook(prefix: string, fn: () => Promise<void>): void {
+  preRunHooks.push({ prefix, fn })
 }
 
 /** Run a command with structured args (UI path). Returns the raw structured result. */
@@ -178,5 +188,6 @@ export async function runCommand(
   // toast), but the error says why it's unavailable.
   const unavailable = await commandUnavailableReason(name)
   if (unavailable) throw new CommandUnavailableError(name, unavailable)
+  for (const h of preRunHooks) if (name.startsWith(h.prefix)) await h.fn()
   return await runWithPrivacy(spec, { named: args, positional: [] })
 }

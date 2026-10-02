@@ -41,6 +41,34 @@ export async function loadAgentConfig(): Promise<AgentConfig> {
   return { remote: normalize(cfg?.agent?.remote, 'remote'), mcp: normalize(cfg?.agent?.mcp, 'mcp') }
 }
 
+/**
+ * agent 是否在独立视图里操作（config.json `agent.ui.isolateView`，默认开）。
+ * 关闭 = 回到旧行为：agent 直接操作用户的主窗口。每次 ui.* 调用读一次（调用频率低，文件很小）。
+ */
+export async function isolateViewEnabled(): Promise<boolean> {
+  const cfg = await readJson<{ agent?: { ui?: { isolateView?: unknown } } }>(CONFIG_JSON)
+  return cfg?.agent?.ui?.isolateView !== false
+}
+
+/**
+ * 截图方式（`agent.ui.screenshotMode`）：
+ * - capture：`webContents.capturePage`，拷贝已合成的画面，不闪；但窗口被遮挡 / 降帧时拿到旧画面，遮罩进不了图 → 拒绝截图
+ * - cdp：`Page.captureScreenshot`，按需渲染新帧，不受遮挡影响；透明窗口在部分环境（Wayland）可能闪一下
+ * - auto（默认）：先 capture，核对不过再退到 cdp（只有这种时候才可能闪）
+ */
+export type ScreenshotMode = 'capture' | 'cdp' | 'auto'
+export async function screenshotModeSetting(): Promise<ScreenshotMode> {
+  const cfg = await readJson<{ agent?: { ui?: { screenshotMode?: unknown } } }>(CONFIG_JSON)
+  const v = cfg?.agent?.ui?.screenshotMode
+  return v === 'capture' || v === 'cdp' ? v : 'auto'
+}
+
+/** follow 的方式（`agent.ui.followMode`）：inplace = 主窗口里跟随（默认）；window = 单独窗口。 */
+export async function followModeSetting(): Promise<'inplace' | 'window'> {
+  const cfg = await readJson<{ agent?: { ui?: { followMode?: unknown } } }>(CONFIG_JSON)
+  return cfg?.agent?.ui?.followMode === 'window' ? 'window' : 'inplace'
+}
+
 /** 本次运行由启动参数 / 环境变量开启的传输（不写盘）。 */
 const sessionEnabled = new Set<AgentTransport>()
 

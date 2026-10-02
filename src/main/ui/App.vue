@@ -29,15 +29,20 @@ import AbilityIcon from './components/AbilityIcon.vue'
 import GameIcon from './components/GameIcon.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
+import HelpDialog from './components/HelpDialog.vue'
 import { SETTINGS_API, normalizeTarget, type SettingsApi } from './composables/settings'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
+import AgentBar from './components/AgentBar.vue'
+import { resolveAgentUi } from './composables/agentUi'
+import AgentActivityOverlay from './components/AgentActivityOverlay.vue'
 import { fileIconUrl } from './icon'
 import { translate, translateTemplate } from './i18n'
 import { resolveSchemeId } from './color_schemes'
 import { filterByQuery, scoreFields, fields } from './composables/search'
 import { getAllQuickActions, type QuickAction } from './quick-actions'
 import { PAGE_TRANSITIONS } from './animations'
+import type { HelpTreeResult } from '@shared/types'
 
 // ---------------------------------------------------------------------------
 // Ability loader: `src/abilities/index.ts` globs every ability's orchestrator
@@ -56,6 +61,8 @@ interface SidebarAbility {
   icon: string | null
   category: string
   keepAlive: boolean
+  /** source folder under `abilities/` — the help namespace. */
+  folder: string
   comp: Ability['component']
 }
 
@@ -74,13 +81,37 @@ function winMinimize(): void {
 async function winToggleMaximize(): Promise<void> {
   isMaximized.value = await window.cockpit.windowToggleMaximize()
 }
+
+/**
+ * AI 视图模式：主进程为每个 agent 会话开一个独立渲染进程，加载同一个 App（`?agent=<会话>&name=<客户端>`）。
+ * 这个实例是 agent 的「工作台」：不写用户的界面状态 / 使用统计、不显示 AI 图标条。
+ * 它可能在后台（1×1 宿主）、盖在用户的主窗口上（`main`，自带无边框外壳 + 「返回我的界面」）
+ * 或在单独窗口里（`window`）——主进程经 `cockpit:agent-host` 告知。
+ */
+const agentView = (() => {
+  const q = new URLSearchParams(window.location.search)
+  const id = q.get('agent')
+  return id ? { id, name: q.get('name') ?? '' } : null
+})()
+const agentHost = ref<'background' | 'main' | 'window'>('background')
+/** 视图盖在用户主窗口上：用户靠这个实例里的按钮返回 / 关闭 */
+const agentEmbedded = computed(() => !!agentView && agentHost.value === 'main')
+
 function winClose(): void {
-  window.cockpit.windowClose()
+  // 盖在主窗口上时，关闭 = 先回到用户自己的界面，再由主窗口走它的关闭确认（后台任务提示等）
+  if (agentEmbedded.value) void window.cockpit.agentViewControl('close-app')
+  else window.cockpit.windowClose()
+}
+function agentBack(): void {
+  void window.cockpit.agentViewControl('back')
 }
 
 /** Window prefs come from config.json (settings → 显示), applied on next launch. */
 const isFrameless = computed(
-  () => (runtimeConfig.value.window as { frameless?: boolean } | undefined)?.frameless !== false
+  () =>
+    // agent 视图的宿主始终无边框，外壳（窗口按钮）由 App 自己画
+    !!agentView ||
+    (runtimeConfig.value.window as { frameless?: boolean } | undefined)?.frameless !== false
 )
 const windowRounded = computed(
   () =>
@@ -95,6 +126,9 @@ const windowRadius = computed(
 )
 
 /** Current active language from config. */
+const agentUi = computed(() =>
+  resolveAgentUi((runtimeConfig.value.agent as { ui?: unknown } | undefined)?.ui)
+)
 const lang = computed(() => (runtimeConfig.value.language as string) ?? 'zh')
 provide('cockpit:lang', lang)
 
@@ -120,6 +154,55 @@ const copySnackOpen = ref(false)
 const copySnackText = ref('')
 const commandErrorOpen = ref(false)
 const commandErrorText = ref('')
+
+// ---------------------------------------------------------------------------
+// Help dialog — renders the current ability's `help/` markdown (help.tree /
+// help.read commands). Abilities without a help folder just get a notice.
+// ---------------------------------------------------------------------------
+const helpOpen = ref(false)
+const helpAbility = ref<{ id: string; name: string; folder: string; icon: string | null } | null>(
+  null
+)
+const helpTree = ref<HelpTreeResult | null>(null)
+const helpSnackOpen = ref(false)
+const helpSnackText = ref('')
+
+/** Open help for the active ability; notify instead when it ships none. */
+async function openHelp(): Promise<void> {
+  const a = currentAbility.value
+  if (!a) return
+  try {
+    const r = (await window.cockpit.command('help.tree', {
+      ability: a.folder,
+      lang: lang.value
+    })) as HelpTreeResult | null
+    if (!r?.hasHelp) {
+      helpSnackText.value = te('help.none', { name: a.name }, `「${a.name}」暂无使用帮助`)
+      helpSnackOpen.value = true
+      return
+    }
+    helpTree.value = r
+    helpAbility.value = { id: a.id, name: a.name, folder: a.folder, icon: a.icon }
+    helpOpen.value = true
+  } catch {
+    helpSnackText.value = t('help.loadFailed', '无法加载帮助内容')
+    helpSnackOpen.value = true
+  }
+}
+
+/** Re-fetch the help tree in the new language if the help dialog is open. */
+watch(lang, async () => {
+  if (!helpOpen.value || !helpAbility.value) return
+  try {
+    const r = (await window.cockpit.command('help.tree', {
+      ability: helpAbility.value.folder,
+      lang: lang.value
+    })) as HelpTreeResult | null
+    if (r?.hasHelp) helpTree.value = r
+  } catch {
+    /* noop */
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Background tasks (framework-level global panel)
@@ -230,6 +313,7 @@ async function copyCurrentView(): Promise<void> {
 const UI_STATE_KEY = 'cockpit-ui-state'
 
 function persistUiState(): void {
+  if (agentView) return // 不覆盖用户的「上次停留页面」
   localStorage.setItem(
     UI_STATE_KEY,
     JSON.stringify({ rail: rail.value, currentId: currentId.value })
@@ -237,6 +321,7 @@ function persistUiState(): void {
 }
 
 function restoreUiState(): void {
+  if (agentView) return // AI 视图从默认页面起步
   try {
     const raw = localStorage.getItem(UI_STATE_KEY)
     if (!raw) return
@@ -294,6 +379,7 @@ async function loadUsage(): Promise<void> {
 }
 /** Record a sidebar-entry open / app launch; used by frequency + recent sorts. */
 function recordOpen(id: string): void {
+  if (agentView) return // AI 的导航不计入用户的使用频次
   void window.cockpit.command('stats.record', { id })
 }
 
@@ -312,6 +398,7 @@ const abilities = computed<SidebarAbility[]>(() => {
       icon: meta.icon ?? null,
       category: t(`ability.${meta.id}.category`, meta.category),
       keepAlive: meta.keepAlive !== false,
+      folder: meta.folder,
       comp: meta.component ? markRaw(meta.component) : undefined
     }))
     .sort((a, b) => {
@@ -802,6 +889,10 @@ let winUnsub: (() => void) | null = null
 let btUnsub: (() => void) | null = null
 let quitUnsub: (() => void) | null = null
 let usageUnsub: (() => void) | null = null
+let hostUnsub: (() => void) | null = null
+let coverUnsub: (() => void) | null = null
+/** 有 AI 视图盖在本窗口上：本窗口的标题栏拖拽区要关掉，否则会吞掉上层视图里的按钮点击 */
+const agentCovered = ref(false)
 let abilityUnsub: (() => void) | null = null
 let orderUnsub: (() => void) | null = null
 
@@ -872,7 +963,16 @@ onMounted(async () => {
   subscribeCommandErrors()
   resolveBackgroundImage()
   btUnsub = window.cockpit.on('cockpit:bt', onBtEvent)
-  quitUnsub = window.cockpit.on('cockpit:confirm-quit', onQuitConfirm)
+  if (!agentView) {
+    quitUnsub = window.cockpit.on('cockpit:confirm-quit', onQuitConfirm)
+    coverUnsub = window.cockpit.on('cockpit:agent-cover', (c) => {
+      agentCovered.value = c === true
+    })
+  } else {
+    hostUnsub = window.cockpit.on('cockpit:agent-host', (m) => {
+      if (m === 'main' || m === 'window' || m === 'background') agentHost.value = m
+    })
+  }
   // restore the "don't remind me again" preference
   quitSuppress.value = localStorage.getItem(QUIT_SUPPRESS_KEY) === '1'
   // Track the last pointer position so the theme reveal can originate from
@@ -887,11 +987,21 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 watch(currentId, () => persistUiState(), { flush: 'post' })
+// AI 视图把自己当前所在页面报给主进程（标题栏图标悬停提示用）
+watch(
+  currentId,
+  (id) => {
+    if (agentView && id) void window.cockpit.command('agent.report-page', { page: id })
+  },
+  { flush: 'post', immediate: true }
+)
 watch(rail, () => persistUiState())
 
 onBeforeUnmount(() => {
   unsub?.()
   usageUnsub?.()
+  hostUnsub?.()
+  coverUnsub?.()
   abilityUnsub?.()
   orderUnsub?.()
   winUnsub?.()
@@ -911,7 +1021,7 @@ onBeforeUnmount(() => {
 
 <template>
   <v-app
-    :class="windowRounded ? 'win-rounded' : ''"
+    :class="[windowRounded ? 'win-rounded' : '', agentEmbedded ? 'ai-embedded' : '']"
     :data-current-ability="currentId"
     :data-ability-ready="readyAbility"
   >
@@ -922,6 +1032,10 @@ onBeforeUnmount(() => {
       :opacity="backgroundOpacity"
     />
     <FuseLayer :alpha="fuseAlpha" />
+    <AgentActivityOverlay
+      v-if="!agentView && agentUi.outline"
+      :idle-ms="agentUi.busyTimeoutSec * 1000"
+    />
     <v-navigation-drawer
       v-model="drawer"
       :rail="rail"
@@ -1102,6 +1216,20 @@ onBeforeUnmount(() => {
               </v-btn>
             </template>
           </v-tooltip>
+          <v-tooltip :text="t('appbar.helpTooltip')" location="end">
+            <template #activator="{ props: tp }">
+              <v-btn
+                v-bind="tp"
+                variant="tonal"
+                icon
+                :disabled="!currentAbility"
+                :aria-label="t('appbar.helpTooltip')"
+                @click="openHelp"
+              >
+                <v-icon>mdi-help-circle-outline</v-icon>
+              </v-btn>
+            </template>
+          </v-tooltip>
           <v-btn
             variant="tonal"
             icon
@@ -1114,13 +1242,46 @@ onBeforeUnmount(() => {
       </template>
     </v-navigation-drawer>
 
-    <v-app-bar color="surface" flat border :class="isFrameless ? 'cockpit-app-bar' : ''">
+    <v-app-bar
+      color="surface"
+      flat
+      border
+      :class="isFrameless && !agentCovered ? 'cockpit-app-bar' : ''"
+    >
       <v-app-bar-title @dblclick="isFrameless ? winToggleMaximize : undefined">
         <span class="text-subtitle-1 font-weight-medium">{{
           currentAbility?.name ?? 'Linux Cockpit'
         }}</span>
       </v-app-bar-title>
+      <v-chip
+        v-if="agentView"
+        class="ai-view-chip"
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-robot-happy-outline"
+        :title="t('agent.view.hint', '这是 AI 的独立视图：你在这里的操作会和 AI 互相影响')"
+        >{{ t('agent.view.chip', 'AI 视图')
+        }}{{ agentView.name ? ` · ${agentView.name}` : '' }}</v-chip
+      >
+      <AgentBar
+        v-if="!agentView && agentUi.showBar"
+        :lang="lang"
+        :ui="agentUi"
+        :current-id="currentId"
+        :ability-name="(id) => abilities.find((a) => a.id === id)?.name ?? ''"
+      />
       <v-spacer />
+      <v-btn
+        v-if="agentEmbedded"
+        v-agent-forbidden
+        class="text-none mr-2"
+        color="primary"
+        variant="flat"
+        prepend-icon="mdi-arrow-left"
+        @click="agentBack"
+      >
+        {{ t('agent.view.back', '返回我的界面') }}
+      </v-btn>
       <v-btn
         v-if="hasSettingsPage"
         icon="mdi-cog-outline"
@@ -1129,13 +1290,27 @@ onBeforeUnmount(() => {
         @click="openAbility('settings')"
       />
       <template v-if="isFrameless">
-        <v-btn icon="mdi-window-minimize" variant="text" @click="winMinimize" />
         <v-btn
+          v-agent-forbidden="!!agentView"
+          icon="mdi-window-minimize"
+          variant="text"
+          :aria-label="t('window.minimize', '最小化')"
+          @click="winMinimize"
+        />
+        <v-btn
+          v-agent-forbidden="!!agentView"
           :icon="isMaximized ? 'mdi-window-restore' : 'mdi-window-maximize'"
           variant="text"
           @click="winToggleMaximize"
         />
-        <v-btn icon="mdi-close" variant="text" class="win-close" @click="winClose" />
+        <v-btn
+          v-agent-forbidden="!!agentView"
+          icon="mdi-close"
+          variant="text"
+          class="win-close"
+          :aria-label="t('window.close', '关闭')"
+          @click="winClose"
+        />
       </template>
     </v-app-bar>
 
@@ -1168,6 +1343,7 @@ onBeforeUnmount(() => {
       :categories="settingsDialog.categories"
       :highlight="settingsDialog.highlight"
     />
+    <HelpDialog v-model="helpOpen" :ability="helpAbility" :tree="helpTree" />
 
     <!-- Quit confirmation when background tasks are still running -->
     <v-dialog v-model="quitConfirmOpen" width="440" persistent>
@@ -1203,6 +1379,10 @@ onBeforeUnmount(() => {
 
     <v-snackbar v-model="commandErrorOpen" :timeout="4000" color="error" location="top">
       {{ commandErrorText }}
+    </v-snackbar>
+
+    <v-snackbar v-model="helpSnackOpen" :timeout="2600" color="info" location="top">
+      {{ helpSnackText }}
     </v-snackbar>
   </v-app>
 </template>
@@ -1266,5 +1446,24 @@ body,
   padding: 0 4px;
   font-size: 0.68rem;
   line-height: 18px;
+}
+
+.ai-embedded::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 3500;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px rgb(var(--v-theme-primary));
+}
+.ai-view-chip {
+  padding-block: 4px;
+  min-height: 24px;
+  /* 相对整条标题栏居中（和 AgentBar 一致），而不是跟在标题后面 */
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 标题栏是拖拽区；chip 本身不需要点击，保持可拖动 */
 }
 </style>

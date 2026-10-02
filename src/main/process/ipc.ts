@@ -5,6 +5,7 @@ import { readFile } from 'fs/promises'
 import { cliExec } from './cli'
 import { runCommand, listCommands, commandLogsArgs, UnknownCommandError } from './commands/registry'
 import { withOrigin, type CallOrigin } from './privacy'
+import { originOfSender, windowOfSender } from './agent/views'
 import { isReservedWindowId, isReservedWindowView } from './privacy-consent'
 
 /** Argument keys whose values should never land in the log (config patches,
@@ -56,7 +57,8 @@ const log = makeLogger('ipc')
 
 /** The window that actually sent a request (main or a managed child window). */
 function senderWindow(e: Electron.IpcMainInvokeEvent): BrowserWindow | null {
-  return BrowserWindow.fromWebContents(e.sender)
+  // agent 视图是 WebContentsView，窗口按钮要作用于它当前所在的窗口（主窗口 / 宿主）
+  return windowOfSender(e.sender.id) ?? BrowserWindow.fromWebContents(e.sender)
 }
 
 /**
@@ -229,11 +231,12 @@ export function registerIpc(): void {
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle(
     'command:run',
-    async (_e, name: string, args: Record<string, unknown>, meta?: { agentSession?: unknown }) => {
+    async (e, name: string, args: Record<string, unknown>, meta?: { agentSession?: unknown }) => {
       // Renderer IPC is the user (`ui`). The renderer may only DOWNGRADE itself
       // to `agent-ui` (inspector-injected input in flight, see privacy.ts) —
       // a tag can never upgrade privileges, so trusting it is safe.
-      const origin = rendererOrigin(meta, { kind: 'ui' })
+      // agent 的独立视图（按 webContents 判定）整个都是 agent-ui，不依赖渲染端自报
+      const origin = originOfSender(e.sender.id) ?? rendererOrigin(meta, { kind: 'ui' })
       // Keep command names for diagnostics; commands handling private content
       // can opt out of argument retention entirely, independent of origin.
       log.info(name, {
@@ -274,7 +277,9 @@ export function registerIpc(): void {
   )
 
   // CLI REPL.
-  ipcMain.handle('cli:exec', async (_e, cmd: string, meta?: { agentSession?: unknown }) =>
-    withOrigin(rendererOrigin(meta, { kind: 'cli' }), () => cliExec(cmd))
+  ipcMain.handle('cli:exec', async (e, cmd: string, meta?: { agentSession?: unknown }) =>
+    withOrigin(originOfSender(e.sender.id) ?? rendererOrigin(meta, { kind: 'cli' }), () =>
+      cliExec(cmd)
+    )
   )
 }

@@ -15,6 +15,7 @@ import {
 import { commandOwnerOf } from '../ability-runtime'
 import { pageInfo } from '../inspector'
 import {
+  currentOrigin,
   clearanceInfo,
   collectRedactions,
   privacyNotice,
@@ -30,10 +31,12 @@ import {
   waitClearance,
   GUARD_WAIT_MS
 } from '../privacy'
+import { setSessionStatus } from './sessions'
 
 export type ToolOutput = (
   | { kind: 'json'; value: unknown }
   | { kind: 'image'; data: string; mimeType: string; meta: unknown }
+  | { kind: 'images'; images: { data: string; mimeType: string; label: string }[]; meta: unknown }
 ) & {
   /** 本次结果里有被脱敏的值时附上：哪些 scope、是否授权过期、能否申请 */
   privacy?: PrivacyNotice
@@ -71,7 +74,9 @@ const USAGE_HINT = `Linux Cockpit is a desktop control center. Typical loop:
 Use ui_navigate to switch pages, ui_screenshot to see layout / images.
 No ref (canvas, game, map)? Act like a person: take ui_screenshot and use its pixel coordinates with
 ui_click_at / ui_move / ui_drag / ui_mouse / ui_scroll; ui_key supports hold_ms and down/up for games
-(pass settle=false for fast repeated input). ui_snapshot boxes=true maps refs to screenshot pixels.
+(pass settle=false for fast repeated input). Real-time games (run + jump, charge, aim): your round-trips
+take seconds, so script the moves with ui_input_timeline — one call, keys + mouse at exact millisecond
+offsets, optional screenshots at chosen moments. ui_snapshot boxes=true maps refs to screenshot pixels.
 Backend: commands_list shows every command with available / unavailable_reason (mode-gated commands say
 why), related commands/jobs and the UI entry points (ui) that trigger them. ability.describe --id <ability>
 (via command_run) gives a generated per-ability manual incl. background jobs and help pages
@@ -121,7 +126,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'ui_snapshot',
     title: 'UI snapshot',
     description:
-      'Accessibility-tree snapshot of the main window. Interactive elements have [ref=eN] for the ui_* tools; <canvas> elements (games / charts) get a ref too. Scrollable areas show their position ("more below" → scroll to load more). boxes=true appends each ref\'s position on the screenshot as @(x,y wxh) in screenshot pixels. mode=full also includes plain text.',
+      'Accessibility-tree snapshot of your Cockpit view (a private window of your own — the main window of the user is not affected; the user can watch it by clicking your avatar in the title bar). Interactive elements have [ref=eN] for the ui_* tools; <canvas> elements (games / charts) get a ref too. Scrollable areas show their position ("more below" → scroll to load more). boxes=true appends each ref\'s position on the screenshot as @(x,y wxh) in screenshot pixels. mode=full also includes plain text.',
     shape: {
       mode: z.enum(['interactive', 'full']).optional(),
       boxes: z.boolean().optional().describe('append @(x,y wxh) screenshot-pixel boxes to refs')
@@ -265,6 +270,67 @@ export const AGENT_TOOLS: AgentTool[] = [
       )
   },
   {
+    name: 'ui_input_timeline',
+    title: 'Input timeline',
+    description:
+      'Play a scripted input sequence with exact timing — for real-time games and anything where the gap between separate tool calls (seconds) is too slow. Each event has t = ms from start; keyboard and mouse events can overlap freely (hold ArrowRight 0–900 while tapping Space at 150 for 300ms). key: action press (default; held hold_ms, default 50) / down / up, optional modifiers. mouse: move (duration_ms > 0 glides from the current position), down, up, click (hold_ms = long-press, double), wheel (dx/dy); coordinates as in ui_click_at. screenshot: captures a frame at that moment without pausing input (max 6) — frames come back as images labelled with their time. Does not wait for the page to settle. Keys / buttons still held at the end (or on error) are released automatically. Privacy: press points and the focused element are checked before starting (may need clearance); if the page changes mid-run and a press lands in an uncleared protected area the run aborts. Max 30 s, 500 events.',
+    shape: {
+      events: z
+        .array(
+          z.discriminatedUnion('type', [
+            z.object({
+              t: z.number().min(0),
+              type: z.literal('key'),
+              key: z.string(),
+              action: z.enum(['press', 'down', 'up']).optional(),
+              hold_ms: z.number().min(0).optional(),
+              modifiers: z.array(z.enum(['Shift', 'Control', 'Alt', 'Meta'])).optional()
+            }),
+            z.object({
+              t: z.number().min(0),
+              type: z.literal('mouse'),
+              action: z.enum(['move', 'down', 'up', 'click', 'wheel']),
+              x: z.number(),
+              y: z.number(),
+              button: z.enum(['left', 'right', 'middle']).optional(),
+              hold_ms: z.number().min(0).optional(),
+              duration_ms: z.number().min(0).optional(),
+              double: z.boolean().optional(),
+              dx: z.number().optional(),
+              dy: z.number().optional()
+            }),
+            z.object({
+              t: z.number().min(0),
+              type: z.literal('screenshot'),
+              label: z.string().optional()
+            })
+          ])
+        )
+        .min(1)
+        .max(500),
+      space: z.enum(['image', 'css']).optional()
+    },
+    run: async (a) => {
+      const r = (await runCommand('ui.input-timeline', {
+        events: a.events,
+        space: a.space,
+        save: false
+      })) as { frames: { t: number; at: number; label?: string; data?: string; mime: string }[] }
+      const frames = r.frames ?? []
+      const meta = { ...r, frames: frames.map((f) => ({ ...f, data: undefined })) }
+      if (!frames.length) return json(meta)
+      return {
+        kind: 'images',
+        images: frames.map((f) => ({
+          data: f.data ?? '',
+          mimeType: f.mime,
+          label: `frame t=${f.t}ms (actual ${f.at}ms)${f.label ? ` — ${f.label}` : ''}`
+        })),
+        meta
+      }
+    }
+  },
+  {
     name: 'ui_scroll',
     title: 'Scroll',
     description:
@@ -294,10 +360,26 @@ export const AGENT_TOOLS: AgentTool[] = [
     run: async (a) => json(await runCommand('ui.wait', a))
   },
   {
+    name: 'set_status',
+    title: 'Set status',
+    description:
+      'Tell the user what you are busy with. Shown in the Cockpit title bar next to your avatar (hover) — keep it short, e.g. "Testing level 2 of Claude Adventure". Optional progress 0-100. Empty text clears it. It expires after ~2 minutes, so refresh it on long tasks. Display only; it changes nothing else.',
+    shape: {
+      text: z.string().max(200).describe('what you are doing, one short line; "" clears'),
+      progress: z.number().min(0).max(100).optional()
+    },
+    readOnly: true,
+    run: async (a) => {
+      const id = currentOrigin().session
+      if (id) setSessionStatus(id, String(a.text ?? ''), a.progress as number | undefined)
+      return json({ ok: true })
+    }
+  },
+  {
     name: 'ui_screenshot',
     title: 'Screenshot',
     description:
-      'Screenshot of the main window (or one element by ref). Protected regions are covered with labelled boxes. Pixel coordinates in this image can be passed straight to ui_click_at / ui_move / ui_drag / ui_scroll (scale = image pixels per CSS pixel is returned for reference).',
+      'Screenshot of your Cockpit view (or one element by ref). Protected regions are covered with labelled boxes. Pixel coordinates in this image can be passed straight to ui_click_at / ui_move / ui_drag / ui_scroll (scale = image pixels per CSS pixel is returned for reference).',
     shape: { ref: z.string().optional() },
     readOnly: true,
     run: async (a) => {

@@ -292,6 +292,7 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 - **一文件夹多 Ability**：`index.ts` 可 default-export `Ability | Ability[]`——一个能力注册多个侧栏条目（如 AIDJ 注册 `aidj` 主页面 + `aidj-lyrics` 歌词页），`id` 必须唯一
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
 - 增删能力 = 增删 `src/abilities/<id>` 文件夹即可，无需改任何 yaml/注册表
+- **构建期开关 `src/abilities/toggle.json`**（个人文件，已 gitignore）：`{ "campusinfo": false, "fnaf": false }`，缺省 = 启用；`"*": false` 把默认改成关闭，再用 `"id": true` 点名（白名单）。`electron.vite.config.ts` 的 `cockpit-ability-toggle` 插件给每个 `import.meta.glob('…/abilities/*/…')` 追加 `!…/abilities/<id>/**`，被关的能力**不进主进程/渲染端任何 bundle**，等于文件夹不存在——别人写到一半的能力（语法错误、缺依赖）不再拖垮你的构建。改完重启 dev / 重新构建；`settings` 不允许关；启动日志有 `abilities excluded at build time`。与运行时开关 `ability.set-enabled`（瞬态、不落盘）互补：这个是构建期、落盘。
 - **依赖声明 = `package.json`**：每个 ability 文件夹是 pnpm workspace 成员，专属 npm 依赖写进自己的 `package.json`（见 §2.2），根目录 `pnpm install` 一键安装全部，主进程构建时自动内联进 `out/main`
 
 ### 图标
@@ -306,6 +307,19 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时回落 game-icon-pack，再不行才用 emoji。
 
 > **新增/改动能力图标：一律用单色 SVG（`gi:<name>` 或 `default/<name>/padding`），不要用 emoji。** 侧栏其余图标都是跟随主题色的单色 SVG，彩色 emoji 会在侧栏里格外突兀（曾因此被打回）。先 `find src/main/ui/assets/game-icon-pack/svg/padding -iname '*关键词*'` 确认文件存在，再写进 `icon`；写完看一眼侧栏效果，别只信 typecheck。
+
+### 帮助系统（`help/`）
+
+每个能力可选自带 `help/` 目录；外壳侧栏底部「后台任务 / 复制页面」之后的固定「?」按钮打开**当前能力**的帮助浮窗：
+
+- **语言目录**：正文都放在语言目录下，如 `help/zh-cn/main.md`、`help/en-us/Platforms/Overview.md`。目录名大小写不敏感，按语言族归一化到 `zh-cn` / `en-us`（框架语言码是 `zh` / `en-US`）。回退链：请求语言 → **根目录**（不在语言目录下的语言中立基准）→ `zh-cn` → 任意已有语言，保证有内容就显示得出来。语言目录**整树替换**，文件夹名也可本地化（`平台类型/` ↔ `Platforms/`），不做逐文件合并——否则两种语言目录名不同会产生重复的树。
+- **结构即目录**：`help/<lang>/main.md` 是根页面，语言目录下任意 `*.md` 都是帮助页；子目录在浮窗左侧变成分组（`help/en-us/Video/guide.md` → `Video` 分组），支持任意层级。页面标题取文件第一个 `# 标题`，没有则回退文件名。
+- **相互跳转**：正文里相对 `*.md` 链接在浮窗内跳转，`#锚点` 滚动，外部链接交给系统浏览器。
+- **后端命令**（能力 `src/abilities/help/`）：`help.tree --ability <文件夹id> [--lang <语言>]` 返回导航树 + 根页面，`help.read --ability <id> --path <相对路径> [--lang <语言>]` 返回 Markdown 原文。`App.vue` 传当前界面语言，浮窗内换语言会自动重取树与正文。Markdown 以 `?raw` 在构建期内联进 `out/main`，打包后无需磁盘文件。
+- **命名空间是能力文件夹 id**（多 Ability 文件夹如 aidj 共享同一份 help）；前端用 `SidebarAbilityMeta.folder` 传入，不要用 ability id。
+- 没有 `help/` 的能力点按钮只弹「暂无使用帮助」提示，不影响其他功能。
+- **渲染**：markdown-it（`html:false` → 原始 HTML 一律转义）+ markdown-it-anchor + 按需加载的 highlight.js；配色全部取 `--v-theme-*`，跟随 10 套主题。
+- 浮窗导航项必须 `:title` + `:aria-label` 暴露无障碍名，否则 inspector / AI 拿不到 ref（图标按钮同理，见上文「UI 写法要求」）。
 
 ### 主题 / 配色方案
 
@@ -333,8 +347,18 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **默认关闭**。设置 →「AI 与远程」开启（`config.json` 的 `agent.mcp` / `agent.remote`），或只对本次运行：`pnpm dev -- --with-mcp --with-remote`（注意 `--`；也可用环境变量 `COCKPIT_WITH=mcp,remote`）。已运行时再执行带参数的命令会经 second-instance 转交。
 - **MCP**：`http://127.0.0.1:47802/mcp`（Streamable HTTP），`Authorization: Bearer <~/.config/LinuxCockpit/agent/token>`。设置页「复制 Claude Code 接入命令」；只支持 stdio 的客户端用 `node scripts/cockpit-mcp.mjs`。
 - **Remote**：`POST http://127.0.0.1:47801/rpc`，JSON-RPC 2.0，方法名与 MCP 工具相同（`tools/list` 列出）。
+- **谁在操作**：标题栏中间的 `AgentBar.vue` 显示每个在线会话的头像（忙碌 = 4 秒内有调用，悬停看名称 / 当前页 / 状态 / 最近工具，放不下收成「+N」），`AgentActivityOverlay.vue` 在 agent 调用时给窗口描边并渐隐。agent 可调 `set_status`（`text` ≤120 字、可选 `progress` 0–100，2 分钟过期）告诉用户在忙什么；头像用 MCP initialize 请求的 `X-Cockpit-Avatar` 头（Remote 每次请求都可带）或 `clientInfo.icons`，**只收 ≤24KB 的 `data:image/png|jpeg|webp|svg+xml;base64`**，不抓远程 URL，没有则用首字母色块。
+- **AI 指示配置** `config.json` 的 `agent.ui`（设置 →「AI 与远程」→「AI 指示」；放在 `agent.*` 下，所以 AI 自己改不了）：`showBar`（图标条，默认开）/ `outline`（全窗口描边，默认开）/ `busyTimeoutSec`（**Agent 过期时间**，距上次调用多久内算正在操作，描边也按它渐隐，默认 60，范围 3–600）/ `statusTtlSec`（`set_status` 文字有效期，默认 120）/ `hideIdleAfterMin`（空闲多久从图标条隐藏，0 = 不隐藏）/ `tooltipDetail`（悬停显示页面 / 状态 / 最近工具）/ `allowAvatar`（接受 agent 自带头像）/ `defaultIcon`（`icon` 随机动物图标 | `initial` 首字母）。取值统一经 `src/main/ui/composables/agentUi.ts` 的 `resolveAgentUi` 归一化 + 夹紧，渲染端不要直接读原始值。默认图标池在 `sessions.ts` 的 `AGENT_ICONS`（16 个 mdi 扁平图标，随机取未被占用的，同名客户端重连尽量拿回同一个）。
+- **Agent 独立视图**（`src/main/process/agent/views.ts`）：每个 agent 会话有自己的渲染进程（同一个 App，`?agent=<会话>&name=<客户端>`，`WebContentsView`），`ui.*` / `overview` 按调用来源的会话路由到它（`inspector.ts` 的 `mainContents()` + `registerPreRunHook('ui.')` 提前建好并等加载），**用户自己的界面不受影响**。`agent.ui.isolateView=false` 回到旧行为（agent 直接操作主窗口）。要点：
+  - **后台 = 1×1 宿主窗口里的完整尺寸视图**。必须是 map 着的窗口：实测从没显示 / hide / 最小化的窗口 rAF 只有 0–2 fps（Wayland 没有 map 的 surface 拿不到帧回调，Wayland 也没有「最小化」状态通知，`isMinimized()` 不可信），游戏会冻住；1×1 透明窗口下是稳定 60 fps。代价：KDE 任务栏里会有一个无可见内容的「AI 视图 · 名字」条目（Wayland 下 `skipTaskbar` 无效）。
+  - **follow**：点标题栏头像 → `agent.follow`（仅用户，`agent: 'deny'`）。默认 `inplace`：把视图搬到主窗口上盖满整个窗口（视图里的 App 自带无边框外壳 + 「返回我的界面」，主窗口尺寸变化时视图跟着）；`agent.ui.followMode = 'window'` 则把宿主放大成单独窗口。同一时刻只有一个视图盖在主窗口上；`agent.unfollow` / 视图里的返回按钮回到后台。follow 时才出声，后台静音。**用户和 AI 操作的是同一个视图，会互相影响**（没有只读锁）。
+  - 视图里的窗口按钮 / 返回按钮是 AI 禁区（`v-agent-forbidden`），按钮走 `agent-view:control` IPC（只接受 agent 视图的 sender），因为视图发出的命令都是 `agent-ui` 来源、调不了用户专属命令。
+  - **隐私**：该 webContents 发出的 IPC 按 sender 一律打 `agent-ui`（`originOfSender`），不再靠「点击后 3 秒」的时间窗口。
+  - 视图不在 `BrowserWindow.getAllWindows()` 里：广播要带上 `allAgentViewContents()`（`index.ts` 的 `broadcast` 已处理）；窗口按钮 IPC 用 `windowOfSender`。
+  - 会话结束销毁视图；后台空闲 15 分钟也销毁（一整份 App 几百 MB）。`inspector.ts` 的 `refMap` / 鼠标状态按 webContents 各一份（`vs()`）。
+- **标题栏是拖拽区**（无边框窗口 `-webkit-app-region: drag`）会吞掉真实鼠标的悬停 / 滚轮，放进标题栏的可交互元素必须 `-webkit-app-region: no-drag`；CDP 合成事件绕过拖拽区，**这类问题只能用真实鼠标验证**。
 - 两者共用 `src/main/process/agent/tools.ts` 的工具表，执行都走命令注册表 → 隐私 SDK 自动生效。只监听 127.0.0.1，校验 Host、拒绝带 Origin 的浏览器请求。
-- **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示、`<canvas>` 也给 ref；`--boxes true` 附上每个 ref 在截图上的位置）、截图（隐私区遮盖）。两种操作方式：按 ref（`ui.click` / `ui.type`），或像人一样按**截图像素坐标**（`ui.click-at` / `ui.move` / `ui.mouse down|up` / `ui.drag` / `ui.scroll --x --y`），键盘支持字母 / 数字 / F 键、`--hold` 按住、`--action down|up`、组合键（游戏可加 `--settle false` 跳过等待）。按坐标操作前先做命中测试：落在隐私区要授权、禁区拒绝，规则与 ref 操作一致；AI 每次点击在屏幕上闪一个标记。每次操作前等页面就绪（App 的 `data-ability-ready`：异步页面组件加载、挂载完成）与稳定（无进行中命令 + DOM 300ms 无变化）。
+- **UI inspector**（`src/main/process/inspector.ts`，命令 `ui.*`）：CDP 无障碍树快照（`[ref=eN]`、可滚动位置、纯图标按钮的图标提示、`<canvas>` 也给 ref；`--boxes true` 附上每个 ref 在截图上的位置）、截图（隐私区遮盖）。两种操作方式：按 ref（`ui.click` / `ui.type`），或像人一样按**截图像素坐标**（`ui.click-at` / `ui.move` / `ui.mouse down|up` / `ui.drag` / `ui.scroll --x --y`），键盘支持字母 / 数字 / F 键、`--hold` 按住、`--action down|up`、组合键（游戏可加 `--settle false` 跳过等待）。实时游戏用 `ui.input-timeline`（MCP `ui_input_timeline`）：一次提交按毫秒偏移的键盘 / 鼠标 / 截帧事件（可交错、长按、平滑移动），主进程精确派发、中途不往返，结束或出错自动松开仍按着的键；开始前完整隐私检查，中途落到未授权区域直接中止。按坐标操作前先做命中测试：落在隐私区要授权、禁区拒绝，规则与 ref 操作一致；AI 每次点击在屏幕上闪一个标记。每次操作前等页面就绪（App 的 `data-ability-ready`：异步页面组件加载、挂载完成）与稳定（无进行中命令 + DOM 300ms 无变化）。
 - **UI 写法要求**：纯图标按钮给 `aria-label` 或 `title`，否则 AI 只能看到图标名；揭示隐私的按钮（「全部显示」等）加 `v-privacy-action="'<scope>'"`。
 - 开发调试：`privacy.debug-as-agent --cmd ui.snapshot`（dev only）以 AI 身份执行任意命令，查看 AI 视角。
 - **元数据不许骗人**（AI 使用反馈的教训）：
@@ -522,6 +546,8 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 ### 11.4 私有能力仓库
 
 不入主仓库的能力（`fnaf/ut/mt/rungame/bilistats/biliviewer/campusnet/campusinfo`）各自是**独立的私有 git 仓库** `aaaa0ggMC/launcher-<id>`（嵌套在 `src/abilities/<id>/` 里，主仓库 `.gitignore` 忽略）。改这些能力要到对应目录里 `git commit`/`git push`，不会出现在主仓库 `git status` 里；新增同类能力照此建私有仓库并写 `.gitignore`（`node_modules`、`*.log*`、`*.tsbuildinfo`）。
+
+`claudeadv`（Claude 历险记，2D 平台跳跃小游戏）同样嵌套在 `src/abilities/claudeadv/`、被主仓库忽略，但它是**公开**仓库 `aaaa0ggMC/launcher-claudeadv`（MIT）。背景图由本机 ComfyUI（Z-Image Turbo）生成，角色/敌人/音效全部程序化——AI 生图画不准主角，也出不了干净的透明小图。
 
 `biliviewer`（本地 B 站缓存播放器）的播放通路：DASH `m4s` 经 MSE 按 sidx 分段直播（`player/dash.ts`）；FLV/blv 多段走 mpegts.js；浏览器解不了的编码（缓存多为 HEVC）由 ffmpeg 实时转成分片 MP4，经仅监听 `127.0.0.1`、URL 带随机 token 的 HTTP 推给 `<video>`（`stream.ts`，拖动进度 = 带 `?start=` 重新起流）。渲染端 `fetch('cockpit-audio://…')` 依赖 `src/main/ui/index.html` CSP 的 `connect-src` 含 `cockpit-audio:`（`*` 不匹配自定义协议）。弹幕不用官方播放器（它不能加载本地文件），`danmaku/` 自带 XML 解析 + Canvas 引擎。
 

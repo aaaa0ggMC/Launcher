@@ -215,6 +215,56 @@ export interface LogQueryResult {
 // `meta.ts` means "no constraints".
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Ability help contract (`abilities/<id>/help/**/*.md`).
+//
+// An ability ships an optional `help/` folder: `main.md` is the root page and
+// any other `*.md` (including files inside sub-folders) becomes a page. The
+// folder structure is the navigation tree — `help/Video/guide.md` shows up as a
+// `Video` group in the help dialog. `help.tree` returns the structure,
+// `help.read` returns one page's raw Markdown. The shell renders it and turns
+// relative `*.md` links into in-dialog navigation.
+// ---------------------------------------------------------------------------
+
+/** One node in an ability's help navigation tree. */
+export interface HelpNode {
+  /** Display label — the file's first `# heading`, else its basename. */
+  title: string
+  /**
+   * Page path relative to the ability's `help/` dir, using `/` separators
+   * (e.g. `main.md`, `Video/guide.md`). Absent on group nodes.
+   */
+  path?: string
+  /** True for a folder node (rendered as a non-clickable group header). */
+  group?: boolean
+  /** Children (group nodes) or sibling pages, already sorted. */
+  children?: HelpNode[]
+}
+
+/** Result of `help.tree` — the navigation structure of one ability's help. */
+export interface HelpTreeResult {
+  ok: boolean
+  /** Ability folder id the tree belongs to. */
+  ability: string
+  /** False when the ability ships no `help/` markdown at all. */
+  hasHelp: boolean
+  /** Default page to open first (relative path), or null when `hasHelp` is false. */
+  root: string | null
+  tree: HelpNode[]
+  error?: string
+}
+
+/** Result of `help.read` — one help page's raw Markdown. */
+export interface HelpMessageResult {
+  ok: boolean
+  ability: string
+  /** Relative path that was read. */
+  path: string
+  /** Raw Markdown content. */
+  content: string
+  error?: string
+}
+
 export interface AbilityMeta {
   /**
    * Restrict the ability to these platforms (`process.platform` values:
