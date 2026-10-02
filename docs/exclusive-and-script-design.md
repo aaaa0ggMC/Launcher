@@ -72,11 +72,12 @@ onLeasesChanged(cb): () => void
 - 外壳在当前页面顶部（App bar 下方）显示窄条：「该页面的游戏正被 {client} 占用 · [接管]」——按 scope 前缀与当前能力 id 对应；接管按钮调 `exclusive.take-over`。
 - 设置 →「AI 与远程」→ 新增「独占」：空闲释放时间。
 
-### 1.7 掌机接入（第一个使用者）
+### 1.7 掌机接入（第一个使用者，已完成）
 
-- scope `gameboy.rom`，key = ROM id。`gameboy.load / press / step / speed / save-state / load-state / reset …` 写类命令声明 `exclusive`；`gameboy.screen / status` 为 `read`。
-- 渲染端 rpc 的 `load` 带上 `epoch`；存档 / 即时存档写盘命令（`internal-save-write` 等）必须带 epoch 并 `assertFence`。
-- `rpc()` 的目标渲染进程改用租约 `host`（回退到现有的 `engineTarget()`）。
+- 掌机主进程里的模拟器状态（`engineState`、存档写入）是**单例**，所以范围用 `gameboy.engine`、键固定 `main`（不是按 ROM）：同一时刻只有一个拥有者可以驱动模拟器 / 写存档。
+- 写类命令（`load / press / reset / stop / speed / state-save / state-load / rewind / pause / resume / step / internal-save-write`）声明 `exclusive`；`internal-state` 只在写时 `acquire`（读不抢）；`status / screen / library / states` 等只读命令不声明。
+- 存档写入走 `internal-*` 命令，来源是发起它的渲染进程：AI 视图的渲染进程是 `agent-ui`（算该 AI 的），用户主窗口是 `ui`（算用户）。所以用户自己的主窗口在存档时会接管 AI 的租约；被接管的 AI 视图再写存档会被拒绝——这就是 fencing，不需要额外传 epoch。
+- `rpc()` 的目标渲染进程仍由 `engineTarget()`（按调用者会话选视图）决定。
 
 ### 1.8 不做的事（本期）
 
@@ -153,6 +154,6 @@ return { hp: status.hp }
 | :-- | :-- | :-- |
 | A1 | `exclusive.ts` 核心 + `CommandSpec.exclusive` + registry 接入 + `ctx.lease` | 副总监 |
 | A2 | `exclusive.*` 命令 + `cockpit:exclusive` 广播 + 外壳窄条 + AI 图标条悬停行 + 设置项 + 翻译 | opencode |
-| A3 | 掌机接入（scope、命令声明、epoch 校验、rpc 目标） | 副总监 |
+| A3 | 掌机接入（scope、命令声明；写存档的拒绝靠「按来源获取租约」） | 副总监（已完成） |
 | B1 | `agent/script-sandbox.ts`：QuickJS 沙箱（纯模块：代码 + 宿主函数表 + 限额 → 结果）+ 离线自检 | opencode |
 | B2 | `command_script` 工具胶水：配置、作业任务、图片句柄、限额、设置页、说明文字 | opencode（依赖 B1 的接口，接口由副总监先定） |
