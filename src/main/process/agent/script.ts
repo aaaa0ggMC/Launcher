@@ -11,6 +11,7 @@ import { startJobTask } from '../background-tasks'
 import { runCommand } from '../commands/registry'
 import { makeLogger } from '../logger'
 import { currentOrigin } from '../privacy'
+import { callSignal } from './call-signal'
 import { scriptConfig } from './config'
 import { runScript, type HostApi, type SandboxResult } from './script-sandbox'
 import {
@@ -176,7 +177,8 @@ export async function runAgentScript(input: RunAgentScriptInput): Promise<ToolOu
 
   RUNNING.add(key)
   const started = Date.now()
-  const externalSignal = input.signal ? anySignal([ac.signal, input.signal]) : ac.signal
+  const callerSignal = input.signal ?? callSignal()
+  const externalSignal = callerSignal ? anySignal([ac.signal, callerSignal]) : ac.signal
   let result: SandboxResult
   try {
     result = await runScript(code, args, host, limits, externalSignal)

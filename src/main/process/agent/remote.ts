@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { withOrigin } from '../privacy'
+import { withCallSignal } from './call-signal'
 import { makeLogger } from '../logger'
 import { AGENT_TOOLS, describeError, runAgentTool } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
@@ -92,9 +93,14 @@ export class RemoteService {
     }
     touchSession(session, 'remote', client, undefined, tool.name)
     setSessionAvatar(session, header(req, 'x-cockpit-avatar'))
+    // 客户端断开（超时 / 放弃）→ 中止这次调用里还在跑的长命令
+    const ac = new AbortController()
+    res.on('close', () => {
+      if (!res.writableEnded) ac.abort()
+    })
     try {
       const out = await withOrigin({ kind: 'remote', session, client }, () =>
-        runAgentTool(tool, parsed.data as Record<string, unknown>)
+        withCallSignal(ac.signal, () => runAgentTool(tool, parsed.data as Record<string, unknown>))
       )
       const base =
         out.kind === 'image'

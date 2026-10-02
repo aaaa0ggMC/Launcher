@@ -9,6 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { app } from 'electron'
 import { withOrigin } from '../privacy'
+import { withCallSignal } from './call-signal'
 import { makeLogger } from '../logger'
 import { AGENT_TOOLS, describeError, runAgentTool, type ToolOutput } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
@@ -87,20 +88,22 @@ function buildServer(session: () => { id: string; client: string }): McpServer {
           openWorldHint: false
         }
       },
-      async (args: Record<string, unknown>) => {
+      async (args: Record<string, unknown>, extra?: { signal?: AbortSignal }) => {
         const s = session()
         touchSession(s.id, 'mcp', s.client, undefined, tool.name)
-        return withOrigin({ kind: 'mcp', session: s.id, client: s.client }, async () => {
-          try {
-            return toMcp(await runAgentTool(tool, args ?? {}))
-          } catch (e) {
-            log.info('tool error', { tool: tool.name, ...describeError(e) })
-            return {
-              isError: true,
-              content: [{ type: 'text' as const, text: JSON.stringify(describeError(e)) }]
+        return withOrigin({ kind: 'mcp', session: s.id, client: s.client }, () =>
+          withCallSignal(extra?.signal, async () => {
+            try {
+              return toMcp(await runAgentTool(tool, args ?? {}))
+            } catch (e) {
+              log.info('tool error', { tool: tool.name, ...describeError(e) })
+              return {
+                isError: true,
+                content: [{ type: 'text' as const, text: JSON.stringify(describeError(e)) }]
+              }
             }
-          }
-        })
+          })
+        )
       }
     )
   }
