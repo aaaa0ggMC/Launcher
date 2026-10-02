@@ -39,6 +39,8 @@ const metaModules = import.meta.glob<AbilityMeta>('../../abilities/*/meta.ts', {
 
 interface AbilityEntry {
   ability: Ability
+  /** source folder under `abilities/` — the help namespace (a folder may export several abilities). */
+  folder: string
   /** folder-level platforms from meta.ts (applies to every ability in the folder). */
   platforms: string[] | undefined
   /** folder-level capability lexicon (`provides`) from meta.ts. */
@@ -108,7 +110,7 @@ function loadRegistry(): Record<string, AbilityEntry> {
       if (out[a.id]) {
         console.warn(`[abilities] duplicate ability id "${a.id}" — overriding (${key})`)
       }
-      out[a.id] = { ability: a, platforms, provides, dependencies }
+      out[a.id] = { ability: a, folder, platforms, provides, dependencies }
     }
   }
   validateDependencies(out)
@@ -176,6 +178,8 @@ export interface SidebarAbilityMeta {
   icon: string | null
   category: string
   keepAlive: boolean
+  /** source folder under `abilities/` — used as the help namespace. */
+  folder: string
   component?: Component
 }
 
@@ -277,7 +281,7 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
 
   const { available, resolvable } = resolveAvailable(registry, platform)
 
-  for (const [id, { ability: meta, platforms }] of Object.entries(registry)) {
+  for (const [id, { ability: meta, platforms, folder }] of Object.entries(registry)) {
     if (!meta.component) {
       backendOnly.push(id)
       // No page, but settings injection still needs the same eligibility rules.
@@ -309,6 +313,7 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
       icon: meta.icon,
       category: meta.category,
       keepAlive: meta.keepAlive !== false,
+      folder,
       component: meta.component
     })
   }
