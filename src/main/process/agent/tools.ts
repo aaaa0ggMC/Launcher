@@ -32,6 +32,7 @@ import {
   GUARD_WAIT_MS
 } from '../privacy'
 import { setSessionStatus } from './sessions'
+import { runAgentScript } from './script'
 import { ExclusiveBusyError, LeaseLostError, StaleEpochError } from '../exclusive'
 
 export type ToolOutput = (
@@ -87,7 +88,14 @@ Privacy: protected values appear as «redacted:<scope>»; whenever a result cont
 from request_clearance may be time-limited (grants[].expiresAt) — after that, values are redacted again.
 [privacy-action=...] elements, clicks that land in protected areas, and "privacy_pending" errors mean the
 user must approve in a consent window you cannot see — call request_clearance / wait_clearance, then retry.
-Never try to work around a redaction.`
+Never try to work around a redaction.
+Multi-step work ("operate → screenshot → decide → repeat", waiting for a state, batches of commands):
+command_script runs one async function body in an isolated sandbox — only cockpit.command(name,args) /
+cockpit.sleep(ms) / cockpit.log(...) / cockpit.show(ref,label) plus the \`args\` constant, no process /
+require / fetch. Images come back as \`$imageRef\` handles; show() attaches up to 8 of them. Every command
+keeps its privacy and exclusive rules, and limits (maxCalls / cpuMs / wallSec / memoryMB) can only be
+lowered, never raised — a single step is still cheaper with command_run, real-time input with
+ui_input_timeline.`
 
 /**
  * 网关（MCP / Remote）统一的工具执行入口：收集本次调用产生的脱敏，附上 privacy 说明。
@@ -101,6 +109,26 @@ export async function runAgentTool(
   const notice = privacyNotice(redacted)
   return notice ? { ...value, privacy: notice } : value
 }
+
+/**
+ * `command_script` 的说明：写清沙箱里有什么、没有什么、限额与超限行为、适用 / 不适用场景 + 示例。
+ * 限额的默认值不写死（用户在设置里改），只写「只能调小」。
+ */
+const COMMAND_SCRIPT_DESCRIPTION = `Run a multi-step job in ONE call — the same commands as command_run, but with loops, awaits and conditionals, so an "operate → screenshot → decide → repeat" cycle costs a single round-trip instead of one call per step.
+\`code\` is an ASYNC FUNCTION BODY: you may \`await\` and \`return\` a JSON value; the object passed as \`args\` is available inside as the constant \`args\`.
+Inside the sandbox there is ONLY: cockpit.command(name, args) — identical to command_run, so every privacy / exclusive rule still applies and the source stays your session; it throws a CommandError you can try/catch, with e.code such as exclusive_busy / privacy_denied / lease_lost / unknown_command. cockpit.sleep(ms) — host-side wait (max 10s per call), it does not consume the CPU budget. cockpit.log(...) — lines returned with the result. cockpit.show(ref, label) — copies an image into the tool result; only refs that came from a command result (\`$imageRef\`, e.g. from ui.screenshot or any image result), max 8 images.
+NOT available: process, require, fetch, setTimeout, import(). Command results never contain base64 — images arrive as { $imageRef: n } and only cockpit.show copies them out, so a script cannot flood your context with screenshots.
+Limits are set by the user in Settings → AI & remote → AI script; max_calls / wall_sec may only LOWER them, never raise them: maxCalls cockpit.command calls, cpuMs of pure computation (command waits and sleeps are not counted), wallSec overall wall time — the privacy consent window ALSO counts against it, so pass a larger wall_sec when a step may need the user to approve. Exceeding a limit ends the script and returns the logs and images collected so far plus which limit was hit.
+Only one script may run per session at a time; the run shows up as an "AI 脚本" background task the user can stop at any moment.
+Use it for: game or UI loops that need judgement between steps, waiting for some state, batches of commands. Do NOT use it for: a single operation (command_run is enough) or real-time input (ui_input_timeline).
+Example:
+const shot = await cockpit.command('ui.screenshot', {})
+await cockpit.command('gameboy.press', { button: 'A', frames: 3 })
+await cockpit.sleep(200)
+cockpit.log('pressed A')
+cockpit.show(shot.$imageRef, 'after A')
+const st = await cockpit.command('gameboy.status', {})
+return { hp: st.hp }`
 
 export const AGENT_TOOLS: AgentTool[] = [
   {
@@ -444,6 +472,26 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
     run: async (a) =>
       imageOrJson(await runCommand(String(a.name), (a.args as Record<string, unknown>) ?? {}))
+  },
+  {
+    name: 'command_script',
+    title: 'Run script',
+    description: COMMAND_SCRIPT_DESCRIPTION,
+    shape: {
+      code: z.string().describe('async function body; may await and `return` a JSON value'),
+      args: z.record(z.string(), z.unknown()).optional().describe('available inside as `args`'),
+      max_calls: z.number().int().positive().optional().describe('lower the maxCalls limit'),
+      wall_sec: z.number().positive().optional().describe('lower the wall-time limit (seconds)')
+    },
+    readOnly: false,
+    destructive: true,
+    run: async (a) =>
+      runAgentScript({
+        code: String(a.code),
+        args: a.args,
+        maxCalls: typeof a.max_calls === 'number' ? a.max_calls : undefined,
+        wallSec: typeof a.wall_sec === 'number' ? a.wall_sec : undefined
+      })
   },
   {
     name: 'privacy_scopes',

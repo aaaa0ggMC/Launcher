@@ -12,6 +12,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CONFIG_JSON, USER_CONFIG_DIR } from '../paths'
 import { readJson } from '../util'
+import { normalizeScriptConfig, type ScriptConfig } from './script-utils'
 
 export type AgentTransport = 'remote' | 'mcp'
 
@@ -67,6 +68,15 @@ export async function screenshotModeSetting(): Promise<ScreenshotMode> {
 export async function followModeSetting(): Promise<'inplace' | 'window'> {
   const cfg = await readJson<{ agent?: { ui?: { followMode?: unknown } } }>(CONFIG_JSON)
   return cfg?.agent?.ui?.followMode === 'window' ? 'window' : 'inplace'
+}
+
+/**
+ * command_script 的限额（`agent.script`，AI 改不了——它在 `agent.*` 下）。
+ * 每次调用读一次最新配置（和 screenshotModeSetting 一样，文件很小）。
+ */
+export async function scriptConfig(): Promise<ScriptConfig> {
+  const cfg = await readJson<{ agent?: { script?: unknown } }>(CONFIG_JSON)
+  return normalizeScriptConfig(cfg?.agent?.script)
 }
 
 /** 本次运行由启动参数 / 环境变量开启的传输（不写盘）。 */
