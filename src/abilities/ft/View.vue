@@ -577,8 +577,11 @@ defineExpose({ toMarkdown })
 
 <style scoped>
 .ft-root {
+  /* The shell wrapper only carries a `min-height`, so `height: 100%` cannot
+     resolve and the page collapses to `min-height` — clipping the right panel.
+     Pin to the viewport like cli/View.vue: 100vh − appbar 64px − container 32px. */
   position: relative;
-  height: 100%;
+  height: calc(100vh - 96px);
   min-height: 320px;
   width: 100%;
   overflow: hidden;
