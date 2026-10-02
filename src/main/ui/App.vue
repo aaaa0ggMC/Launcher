@@ -36,6 +36,7 @@ import FuseLayer from './components/FuseLayer.vue'
 import AgentBar from './components/AgentBar.vue'
 import { resolveAgentUi } from './composables/agentUi'
 import AgentActivityOverlay from './components/AgentActivityOverlay.vue'
+import ExclusiveBanner from './components/ExclusiveBanner.vue'
 import { fileIconUrl } from './icon'
 import { translate, translateTemplate } from './i18n'
 import { resolveSchemeId } from './color_schemes'
@@ -1317,6 +1318,12 @@ onBeforeUnmount(() => {
     <v-main scrollable class="content-bg">
       <v-container fluid class="pa-4">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px - 32px)">
+          <!-- 独占 SDK：当前页面有被 AI 占用的资源时，App bar 下方显示窄条（可一键接管） -->
+          <ExclusiveBanner
+            :current-id="currentId"
+            :folder="currentAbility?.folder ?? null"
+            :agent-session="agentView?.id ?? null"
+          />
           <!-- keep-alive: only abilities that opted in are cached (by name);
                the rest remount fresh each visit. Wrapped in <transition> for
                the configurable out-in page switch animation. -->

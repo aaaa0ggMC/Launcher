@@ -1,4 +1,4 @@
-import type { CommandSpec } from '../../main/process/commands/types'
+import type { CommandContext, CommandSpec } from '../../main/process/commands/types'
 import { getAgentStatus, disconnectSession, restartForNewToken } from '../../main/process/agent'
 import { getAgentToken, regenerateAgentToken } from '../../main/process/agent/config'
 import { listSessions, setSessionPage } from '../../main/process/agent/sessions'
@@ -6,9 +6,22 @@ import { followAgentView, unfollowAgentView } from '../../main/process/agent/vie
 import { followModeSetting } from '../../main/process/agent/config'
 import { currentOrigin } from '../../main/process/privacy'
 import { listRunGrants, revokeRunGrants } from '../../main/process/privacy'
+import { listLeases, release, takeOver } from '../../main/process/exclusive'
 
 /** 只能由用户本人（设置页 / CLI）调用：token、断开会话、撤销授权。 */
 const USER_ONLY = { agent: 'deny' } as const
+
+/** 读取 --scope / --key；缺失时抛出清楚的中文错误（签名 + 示例）。 */
+function leaseTarget(ctx: CommandContext): { scope: string; key: string } {
+  const scope = String(ctx.named.scope ?? '').trim()
+  const key = String(ctx.named.key ?? '').trim()
+  if (!scope || !key) {
+    throw new Error(
+      '缺少参数：--scope 与 --key 必填，如 exclusive.take-over --scope gameboy.rom --key pokemon-red'
+    )
+  }
+  return { scope, key }
+}
 
 /**
  * agent.* —— Remote / MCP 网关的状态与管理（设置页「AI 与远程」使用）。
@@ -111,6 +124,67 @@ export default [
             cockpit: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } }
           }
         }
+      }
+    }
+  },
+  {
+    name: 'exclusive.list',
+    description:
+      '列出当前所有独占租约（scope、key、能力名、拥有者是人还是哪个 AI、epoch、已持有毫秒数 heldMs、空闲毫秒数 idleMs）。只读：不获取也不释放租约。界面据此显示「该页面的资源正被 AI 占用」窄条',
+    usage: 'exclusive.list',
+    privacy: {},
+    related: ['exclusive.release', 'exclusive.take-over'],
+    ui: ['外壳页面顶部窄条（资源被 AI 占用时）'],
+    run: () => {
+      const now = Date.now()
+      return listLeases().map((l) => ({
+        scope: l.scope,
+        key: l.key,
+        ability: l.ability,
+        label: l.label,
+        owner: l.owner,
+        epoch: l.epoch,
+        acquiredAt: l.acquiredAt,
+        lastActive: l.lastActive,
+        heldMs: now - l.acquiredAt,
+        idleMs: now - l.lastActive,
+        ...(l.host === undefined ? {} : { host: l.host })
+      }))
+    }
+  },
+  {
+    name: 'exclusive.release',
+    description:
+      '释放一份独占资源 (--scope <能力id.名> --key <资源键>)。AI 只能释放自己持有的租约，用户可以释放任意租约；没有该租约或无权释放时返回 { ok: false }。用户被 AI 告知占用时，让 AI 释放即可，不要抢占',
+    usage: 'exclusive.release --scope gameboy.rom --key pokemon-red',
+    privacy: {},
+    related: ['exclusive.list', 'exclusive.take-over'],
+    run: (ctx) => {
+      const { scope, key } = leaseTarget(ctx)
+      return { ok: release(scope, key) }
+    }
+  },
+  {
+    name: 'exclusive.take-over',
+    description:
+      '用户接管一份独占资源 (--scope --key)：占用它的 AI 立即失去占用，它下一次调用会收到 lease_lost。用户永远优先，只能由用户本人调用',
+    usage: 'exclusive.take-over --scope gameboy.rom --key pokemon-red',
+    privacy: USER_ONLY,
+    related: ['exclusive.list', 'exclusive.release'],
+    ui: ['外壳页面顶部窄条「接管」按钮'],
+    run: (ctx) => {
+      const { scope, key } = leaseTarget(ctx)
+      const l = takeOver(scope, key)
+      return {
+        ok: true,
+        scope: l.scope,
+        key: l.key,
+        ability: l.ability,
+        owner: l.owner,
+        epoch: l.epoch,
+        acquiredAt: l.acquiredAt,
+        heldMs: 0,
+        idleMs: 0
       }
     }
   }

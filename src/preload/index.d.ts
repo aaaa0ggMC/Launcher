@@ -74,7 +74,10 @@ export interface CockpitApi {
   applyWallpaper: (path: string) => Promise<boolean>
   outputs: () => Promise<DisplayOutput[]>
   cliExec: (cmd: string) => Promise<string>
-  agentViewControl: (action: 'back' | 'close-app') => Promise<boolean>
+  agentViewControl: (
+    action: 'back' | 'close-app' | 'take-over',
+    payload?: { scope: string; key: string }
+  ) => Promise<boolean>
   setZoom: (factor: number) => void
   windowMinimize: () => Promise<void>
   windowToggleMaximize: () => Promise<boolean>

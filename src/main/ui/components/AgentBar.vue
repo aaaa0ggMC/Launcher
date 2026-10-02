@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { translate, translateTemplate } from '../i18n'
 import AgentAvatar from './AgentAvatar.vue'
 import type { AgentUiConfig } from '../composables/agentUi'
+import { useExclusive } from '../composables/exclusive'
 
 /**
  * 标题栏中间的 AI 图标条：每个在线 agent 会话一个圆形字母图标。
@@ -58,6 +59,9 @@ let ro: ResizeObserver | null = null
 
 const tr = (k: string, f: string): string => translate(props.lang, k, f)
 
+/** 独占租约（模块级单例，与外壳窄条共用一份订阅）；用于悬停提示里的「占用」行。 */
+const { forSession } = useExclusive()
+
 async function refresh(): Promise<void> {
   try {
     const r = (await window.cockpit.command('agent.sessions')) as { sessions: Session[] }
@@ -110,6 +114,24 @@ function tip(s: Session): string[] {
   const st = s.status
   if (st && now.value - st.at < props.ui.statusTtlSec * 1000) {
     lines.push(`${st.text}${st.progress != null ? ` (${st.progress}%)` : ''}`)
+  }
+  const held = forSession(s.id)
+  if (held.length) {
+    lines.push(
+      `${tr('agent.excl.held', '占用')}: ${held
+        .slice(0, 2)
+        .map((l) => `${tr(l.label, l.scope)} · ${l.key}`)
+        .join('、')}${
+        held.length > 2
+          ? translateTemplate(
+              props.lang,
+              'agent.excl.more',
+              { n: String(held.length - 2) },
+              `等 ${held.length - 2} 项`
+            )
+          : ''
+      }`
+    )
   }
   if (l?.tool) lines.push(`${tr('agent.lastTool', '最近操作')}: ${l.tool}`)
   lines.push(

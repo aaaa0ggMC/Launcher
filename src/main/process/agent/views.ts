@@ -26,7 +26,8 @@ import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { makeLogger } from '../logger'
 import { t } from '../i18n'
-import type { CallOrigin } from '../privacy'
+import { withOrigin, type CallOrigin } from '../privacy'
+import { takeOver } from '../exclusive'
 import { getMainWindow } from '../windows'
 import { getSession, onSessionEnded, onSessionsChanged, setSessionView } from './sessions'
 
@@ -311,21 +312,31 @@ export function initAgentViews(): void {
     }
   })
   // 视图里 App 的「返回 / 关闭」按钮。只接受 agent 视图发来的，且这些按钮在 AI 的禁区里（v-agent-forbidden）
-  ipcMain.handle('agent-view:control', (e, action: string) => {
-    const session = bySender.get(e.sender.id)
-    const v = session ? views.get(session) : undefined
-    if (!v) return false
-    if (action === 'back') {
-      toBackground(v)
-      return true
+  ipcMain.handle(
+    'agent-view:control',
+    (e, action: string, payload?: { scope?: unknown; key?: unknown }) => {
+      const session = bySender.get(e.sender.id)
+      const v = session ? views.get(session) : undefined
+      if (!v) return false
+      if (action === 'back') {
+        toBackground(v)
+        return true
+      }
+      if (action === 'take-over') {
+        // 用户跟随 AI 视图时点「接管」：视图里的 IPC 一律算 agent-ui，调不了「只有用户」的命令，
+        // 所以走这条专用通道，以用户身份接管。按钮在 AI 禁区里（v-agent-forbidden），AI 点不到。
+        if (typeof payload?.scope !== 'string' || typeof payload?.key !== 'string') return false
+        withOrigin({ kind: 'ui' }, () => takeOver(payload.scope as string, payload.key as string))
+        return true
+      }
+      if (action === 'close-app') {
+        toBackground(v)
+        getMainWindow()?.close()
+        return true
+      }
+      return false
     }
-    if (action === 'close-app') {
-      toBackground(v)
-      getMainWindow()?.close()
-      return true
-    }
-    return false
-  })
+  )
   sweeper ??= setInterval(() => {
     const now = Date.now()
     for (const v of [...views.values()]) {

@@ -13,13 +13,13 @@
 
 ### 1.2 概念
 
-| 概念 | 说明 |
-| :-- | :-- |
-| 资源范围 scope | `<能力id>.<名>`，如 `gameboy.rom`。能力用 `defineExclusiveScopes` 声明，翻译键放自己的 translations |
-| 资源键 key | 范围内的具体资源，如 ROM id。粒度取「会冲突的最小单位」（存档文件，不是整个模拟器） |
-| 租约 lease | (scope, key) → 拥有者；含 `epoch`（每次拥有者变化 +1）、`acquiredAt`、`lastActive`、可选 `meta` |
-| 拥有者 owner | `{kind:'user'}` 或 `{kind:'agent', session, client}`。来源映射：`ui` / `cli` / `script` → user；`remote` / `mcp` / `script-agent` / `agent-ui` → 该 agent 会话（用户在跟随的 AI 视图里点的是 `agent-ui`，算 AI 的） |
-| 策略 policy | `exclusive`（默认）：一份资源一个拥有者；`fork`：每个 agent 会话派生自己的副本键，不冲突（`forkKey()` 只给键派生，复制数据由能力自己做） |
+| 概念           | 说明                                                                                                                                                                                                                |
+| :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 资源范围 scope | `<能力id>.<名>`，如 `gameboy.rom`。能力用 `defineExclusiveScopes` 声明，翻译键放自己的 translations                                                                                                                 |
+| 资源键 key     | 范围内的具体资源，如 ROM id。粒度取「会冲突的最小单位」（存档文件，不是整个模拟器）                                                                                                                                 |
+| 租约 lease     | (scope, key) → 拥有者；含 `epoch`（每次拥有者变化 +1）、`acquiredAt`、`lastActive`、可选 `meta`                                                                                                                     |
+| 拥有者 owner   | `{kind:'user'}` 或 `{kind:'agent', session, client}`。来源映射：`ui` / `cli` / `script` → user；`remote` / `mcp` / `script-agent` / `agent-ui` → 该 agent 会话（用户在跟随的 AI 视图里点的是 `agent-ui`，算 AI 的） |
+| 策略 policy    | `exclusive`（默认）：一份资源一个拥有者；`fork`：每个 agent 会话派生自己的副本键，不冲突（`forkKey()` 只给键派生，复制数据由能力自己做）                                                                            |
 
 ### 1.3 规则（全部在主进程，渲染端只展示）
 
@@ -103,11 +103,11 @@ AI 本来就能通过 `command_run` 调所有命令。脚本只多了**控制流
 
 ```js
 // 脚本体是一个 async 函数体，可以 await，用 return 返回结果
-const shot = await cockpit.command('gameboy.screen', { scale: 2 })   // 图片结果见下
+const shot = await cockpit.command('gameboy.screen', { scale: 2 }) // 图片结果见下
 await cockpit.command('gameboy.press', { button: 'A', frames: 3 })
-await cockpit.sleep(200)                  // 宿主侧计时，不占 CPU 预算
-cockpit.log('moved', 3)                   // 日志，返回时附上（上限 200 行 / 16KB）
-cockpit.show(shot, '第 3 步')              // 把图片附到最终返回里（最多 8 张）
+await cockpit.sleep(200) // 宿主侧计时，不占 CPU 预算
+cockpit.log('moved', 3) // 日志，返回时附上（上限 200 行 / 16KB）
+cockpit.show(shot, '第 3 步') // 把图片附到最终返回里（最多 8 张）
 return { hp: status.hp }
 ```
 
@@ -117,14 +117,14 @@ return { hp: status.hp }
 
 ### 2.4 限额（`config.json` 的 `agent.script`，AI 无法修改）
 
-| 项 | 默认 | 说明 |
-| :-- | :-- | :-- |
-| `enabled` | `true` | 总开关；关闭后工具不出现在 `tools/list` |
-| `maxCalls` | 300 | 一次脚本里 `cockpit.command` 次数上限 |
-| `cpuMs` | 5000 | VM 内部纯计算时间上限（中断处理器）；宿主调用 / sleep 不计 |
-| `wallSec` | 120 | 整体墙钟上限（含授权等待之外的所有时间；授权窗口等待不计入） |
-| `memoryMB` | 64 | QuickJS 内存上限 |
-| 返回体积 | 256KB | 结果 JSON 超限则截断并标注 |
+| 项         | 默认   | 说明                                                                         |
+| :--------- | :----- | :--------------------------------------------------------------------------- |
+| `enabled`  | `true` | 总开关；关闭后调用返回 `command_script_disabled`（工具仍在 `tools/list` 里） |
+| `maxCalls` | 300    | 一次脚本里 `cockpit.command` 次数上限                                        |
+| `cpuMs`    | 5000   | VM 内部纯计算时间上限（中断处理器）；宿主调用 / sleep 不计                   |
+| `wallSec`  | 120    | 整体墙钟上限（含授权等待之外的所有时间；授权窗口等待不计入）                 |
+| `memoryMB` | 64     | QuickJS 内存上限                                                             |
+| 返回体积   | 256KB  | 结果 JSON 超限则截断并标注                                                   |
 
 超限 → 终止脚本，返回**已完成部分**的日志与图片，并标明哪一项超限。
 
@@ -140,6 +140,7 @@ return { hp: status.hp }
 { "ok": true, "result": <脚本 return 的值>, "logs": ["…"], "calls": 17, "elapsedMs": 4210 }
 { "ok": false, "error": { "name": "CommandError|LimitError|ScriptError", "message": "…", "line": 3, "limit": "maxCalls" }, "logs": [], "calls": 12 }
 ```
+
 图片作为独立的 image 内容块附在后面（带 label）。
 
 ### 2.7 与独占的关系
@@ -150,10 +151,10 @@ return { hp: status.hp }
 
 ## 三、工作包
 
-| 包 | 内容 | 谁 |
-| :-- | :-- | :-- |
-| A1 | `exclusive.ts` 核心 + `CommandSpec.exclusive` + registry 接入 + `ctx.lease` | 副总监 |
-| A2 | `exclusive.*` 命令 + `cockpit:exclusive` 广播 + 外壳窄条 + AI 图标条悬停行 + 设置项 + 翻译 | opencode |
-| A3 | 掌机接入（scope、命令声明；写存档的拒绝靠「按来源获取租约」） | 副总监（已完成） |
-| B1 | `agent/script-sandbox.ts`：QuickJS 沙箱（纯模块：代码 + 宿主函数表 + 限额 → 结果）+ 离线自检 | opencode |
-| B2 | `command_script` 工具胶水：配置、作业任务、图片句柄、限额、设置页、说明文字 | opencode（依赖 B1 的接口，接口由副总监先定） |
+| 包  | 内容                                                                                         | 谁                                           |
+| :-- | :------------------------------------------------------------------------------------------- | :------------------------------------------- |
+| A1  | `exclusive.ts` 核心 + `CommandSpec.exclusive` + registry 接入 + `ctx.lease`                  | 副总监                                       |
+| A2  | `exclusive.*` 命令 + `cockpit:exclusive` 广播 + 外壳窄条 + AI 图标条悬停行 + 设置项 + 翻译   | opencode                                     |
+| A3  | 掌机接入（scope、命令声明；写存档的拒绝靠「按来源获取租约」）                                | 副总监（已完成）                             |
+| B1  | `agent/script-sandbox.ts`：QuickJS 沙箱（纯模块：代码 + 宿主函数表 + 限额 → 结果）+ 离线自检 | opencode                                     |
+| B2  | `command_script` 工具胶水：配置、作业任务、图片句柄、限额、设置页、说明文字                  | opencode（依赖 B1 的接口，接口由副总监先定） |

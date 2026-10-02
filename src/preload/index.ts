@@ -196,8 +196,10 @@ const cockpit = {
   privacyDenyAll: (): Promise<number> => ipcRenderer.invoke('privacy:deny-all'),
 
   /** agent 视图里 App 外壳的「返回我的界面 / 关闭」——只有 agent 视图发来的才会被主进程接受 */
-  agentViewControl: (action: 'back' | 'close-app'): Promise<boolean> =>
-    ipcRenderer.invoke('agent-view:control', action),
+  agentViewControl: (
+    action: 'back' | 'close-app' | 'take-over',
+    payload?: { scope: string; key: string }
+  ): Promise<boolean> => ipcRenderer.invoke('agent-view:control', action, payload),
 
   // events (returns unsubscribe)
   on: (channel: string, cb: (...args: unknown[]) => void): (() => void) => {
