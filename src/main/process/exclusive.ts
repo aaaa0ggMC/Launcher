@@ -257,6 +257,12 @@ export function leaseOf(scope: string, key: string): LeaseInfo | undefined {
   return leases.get(k(scope, key))
 }
 
+/** 当前调用者是否就是该租约的拥有者（只读 rpc 据此决定发给自己的视图还是持有者的视图）。 */
+export function holdsLease(scope: string, key: string): boolean {
+  const cur = leases.get(k(scope, key))
+  return !!cur && sameOwner(cur.owner, ownerOf())
+}
+
 /** 租约持有者的渲染进程（webContents id）。 */
 export function leaseHost(scope: string, key: string): number | undefined {
   return leases.get(k(scope, key))?.host
