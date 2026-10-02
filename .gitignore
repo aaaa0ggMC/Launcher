@@ -35,5 +35,11 @@ src/abilities/claudeadv/
 # 掌机（mGBA wasm，独立私有仓库 aaaa0ggMC/launcher-gameboy）
 src/abilities/gameboy/
 
+# 内核防线（独立公开仓库 aaaa0ggMC/launcher-kerneldef）
+src/abilities/kerneldef/
+
+# 折光航标（独立公开仓库 aaaa0ggMC/launcher-refraction）
+src/abilities/refraction/
+
 # 能力开关（个人文件，见 AGENTS.md「toggle.json」）
 src/abilities/toggle.json

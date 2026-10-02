@@ -210,6 +210,8 @@ importers:
 
   src/abilities/inspector: {}
 
+  src/abilities/kerneldef: {}
+
   src/abilities/logs: {}
 
   src/abilities/mirror: {}
@@ -219,6 +221,8 @@ importers:
   src/abilities/playground: {}
 
   src/abilities/privacy: {}
+
+  src/abilities/refraction: {}
 
   src/abilities/rungame:
     dependencies:
