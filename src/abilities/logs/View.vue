@@ -227,7 +227,7 @@ defineExpose({ toMarkdown })
 
 <template>
   <div class="logs-root">
-    <div class="d-flex align-center ga-3 mb-2 flex-wrap">
+    <div class="d-flex align-center ga-3 mb-3 flex-wrap">
       <div>
         <div class="text-h6 font-weight-medium">{{ t('logs.heading') }}</div>
         <div class="text-caption on-surface-variant mt-1">
@@ -262,7 +262,7 @@ defineExpose({ toMarkdown })
     </div>
 
     <div v-if="hasOlder" class="d-flex justify-center mb-1">
-      <v-btn size="small" variant="tonal" :loading="busy" @click="loadOlder">
+      <v-btn variant="tonal" :loading="busy" @click="loadOlder">
         {{ t('logs.loadOlder') }}
       </v-btn>
     </div>

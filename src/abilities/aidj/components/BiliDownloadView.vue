@@ -231,7 +231,7 @@ onMounted(() => {
         >
           {{ t('aidj.bili.resolve_btn', '解析视频') }}
         </v-btn>
-        <v-btn v-if="rawInput" variant="text" class="clear-input-btn" @click="rawInput = ''">
+        <v-btn v-if="rawInput" variant="text" @click="rawInput = ''">
           {{ t('aidj.clear', '清空输入') }}
         </v-btn>
         <v-spacer />
@@ -306,17 +306,11 @@ onMounted(() => {
       />
 
       <div v-else class="d-flex flex-column ga-2 pb-2">
-        <div class="d-flex align-center justify-space-between px-1 pb-1">
+        <div class="d-flex align-center justify-space-between flex-wrap ga-2 px-1 pb-1">
           <span class="text-caption text-medium-emphasis">
             {{ `已解析 ${resolvedItems.length} 个条目（点击右侧按钮可删除误加项目）` }}
           </span>
-          <v-btn
-            variant="text"
-            color="error"
-            size="small"
-            class="clear-all-btn"
-            @click="handleClearAll"
-          >
+          <v-btn variant="text" color="error" @click="handleClearAll">
             {{ t('aidj.bili.clear_all', '清空全部') }}
           </v-btn>
         </div>
@@ -525,11 +519,6 @@ onMounted(() => {
 .resolve-btn,
 .confirm-btn {
   font-size: 0.85rem;
-}
-
-.clear-input-btn,
-.clear-all-btn {
-  font-size: 0.78rem;
 }
 
 .bili-actions {

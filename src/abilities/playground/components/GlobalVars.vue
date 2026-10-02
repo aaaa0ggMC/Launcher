@@ -57,7 +57,7 @@ defineExpose({ toMarkdown })
       <span class="text-subtitle-2 font-weight-medium">{{ t('pg.globalVars') }}</span>
       <v-chip size="small" variant="tonal">{{ vars.length }}</v-chip>
       <v-spacer />
-      <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click.stop="add">
+      <v-btn variant="text" prepend-icon="mdi-plus" @click.stop="add">
         {{ t('pg.addGlobalVar') }}
       </v-btn>
     </div>

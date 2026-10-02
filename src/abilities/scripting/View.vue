@@ -989,11 +989,10 @@ onUnmounted(() => {
           mandatory
           rounded="lg"
           variant="tonal"
-          density="compact"
           class="ide-lang-toggle"
         >
-          <v-btn value="ts" size="small" class="text-none font-weight-bold px-2">TS</v-btn>
-          <v-btn value="js" size="small" class="text-none font-weight-bold px-2">JS</v-btn>
+          <v-btn value="ts" class="text-none font-weight-bold px-2">TS</v-btn>
+          <v-btn value="js" class="text-none font-weight-bold px-2">JS</v-btn>
         </v-btn-toggle>
       </div>
 
@@ -1784,10 +1783,6 @@ onUnmounted(() => {
 .ide-breadcrumb {
   background: rgba(var(--v-theme-surface), 0.5);
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-.ide-lang-toggle {
-  height: 32px;
 }
 
 /* Main Workspace */

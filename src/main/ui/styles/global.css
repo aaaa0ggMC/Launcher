@@ -478,3 +478,10 @@ html.motion-off *::after {
 body.win-rounded-body .v-overlay__scrim {
   clip-path: inset(0 round var(--win-radius, 12px));
 }
+
+/* DESIGN §3/§4.3: chip label 不贴边——统一 padding-block + min-height。 */
+.v-chip {
+  padding-block: 4px;
+  min-height: 24px;
+  height: auto;
+}

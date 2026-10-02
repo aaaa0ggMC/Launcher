@@ -1233,7 +1233,7 @@ defineExpose({ toMarkdown, onActivate })
 
           <div class="d-flex align-center justify-space-between">
             <div class="text-subtitle-2">{{ translate(uiLang, 'apps.actionsSection') }}</div>
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addActionRow">
+            <v-btn variant="tonal" prepend-icon="mdi-plus" @click="addActionRow">
               {{ translate(uiLang, 'apps.addAction') }}
             </v-btn>
           </div>

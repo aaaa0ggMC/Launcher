@@ -273,13 +273,7 @@ function formatCoords(coords: [number, number] | null): string {
 
         <!-- 滑动加载更多提示与操作 -->
         <div v-if="hasMore" class="d-flex flex-column align-center py-4 ga-2">
-          <v-btn
-            variant="tonal"
-            color="primary"
-            density="comfortable"
-            prepend-icon="mdi-arrow-down"
-            @click="loadMore"
-          >
+          <v-btn variant="tonal" color="primary" prepend-icon="mdi-arrow-down" @click="loadMore">
             {{
               t('yarj.drawer.loadMore', '加载更多照片 ({current}/{total})')
                 .replace('{current}', String(displayedPhotos.length))
@@ -291,7 +285,7 @@ function formatCoords(coords: [number, number] | null): string {
 
       <!-- 抽屉底部多选控制底栏 -->
       <v-divider />
-      <div class="drawer-footer px-4 py-2 d-flex align-center justify-space-between">
+      <div class="drawer-footer px-4 py-2 d-flex align-center justify-space-between ga-2 flex-wrap">
         <!-- 多选开关与选中计数 -->
         <div class="d-flex align-center ga-2">
           <v-switch
@@ -308,12 +302,7 @@ function formatCoords(coords: [number, number] | null): string {
 
         <!-- 多选模式下的操作按钮 -->
         <div v-if="isMultiSelectMode" class="d-flex align-center ga-2">
-          <v-btn
-            variant="text"
-            size="small"
-            :disabled="!filteredPhotos.length"
-            @click="toggleSelectAll"
-          >
+          <v-btn variant="text" :disabled="!filteredPhotos.length" @click="toggleSelectAll">
             {{
               isAllSelected
                 ? t('yarj.drawer.deselectAll', '全不选')

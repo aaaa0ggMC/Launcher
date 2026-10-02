@@ -76,10 +76,10 @@ defineExpose({ toMarkdown })
         {{ vars.length > 0 ? t('pg.fillVars') : t('pg.send') }}
       </span>
       <div v-if="history.length" class="d-flex align-center ga-2">
-        <v-btn size="small" variant="text" @click="showHistory = !showHistory">
+        <v-btn variant="text" @click="showHistory = !showHistory">
           {{ te('pg.history', { n: String(history.length) }) }} {{ showHistory ? '▲' : '▼' }}
         </v-btn>
-        <v-btn size="small" variant="flat" color="error" @click="emit('clearHistory')">
+        <v-btn variant="flat" color="error" @click="emit('clearHistory')">
           {{ t('pg.clearHistory') }}
         </v-btn>
       </div>

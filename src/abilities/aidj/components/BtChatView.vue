@@ -326,7 +326,7 @@ watch(
             </span>
           </div>
           <div v-else-if="it.kind === 'playlist'" class="d-flex flex-column align-start w-100">
-            <div class="d-flex align-start ga-2 w-100">
+            <div class="d-flex align-start ga-2 w-100 flex-wrap">
               <span class="text-caption text-medium-emphasis flex-grow-1">
                 {{
                   it.history
@@ -336,14 +336,11 @@ watch(
               </span>
               <v-btn
                 v-if="!it.history"
-                size="x-small"
                 variant="text"
                 color="primary"
-                class="text-caption"
-                density="compact"
                 @click="resendPlaylist(it.songs ?? [])"
               >
-                <v-icon size="12" start>mdi-refresh</v-icon>
+                <v-icon start>mdi-refresh</v-icon>
                 {{ t('aidj.btchat.resend', '重新发送') }}
               </v-btn>
             </div>

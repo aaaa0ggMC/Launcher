@@ -206,7 +206,6 @@ defineExpose({ onActivate })
         >
           <div class="d-flex align-center ga-3 mb-4">
             <ToolIcon :icon="tool.icon" :size="28" /><v-spacer /><v-btn
-              density="default"
               :icon="favoriteIds.includes(tool.id) ? 'mdi-star' : 'mdi-star-outline'"
               variant="text"
               size="small"

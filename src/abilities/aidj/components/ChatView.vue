@@ -1550,7 +1550,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
             <v-btn
               v-if="inputText.includes('\n')"
               variant="text"
-              size="small"
               class="expand-btn"
               :title="t('aidj.expand')"
               @click="expanded = true"
@@ -1807,9 +1806,9 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 }
 .expand-btn {
   position: absolute;
-  top: 4px;
+  top: 6px;
   right: 8px;
-  min-width: 28px;
+  min-width: 36px;
   opacity: 0.6;
   z-index: 1;
 }

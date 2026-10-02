@@ -262,7 +262,7 @@ function cycleOtherRoutesMode(): void {
       <!-- 3. 底部行：线性动画播放控制 + 时间颗粒度快捷跳转 -->
       <div class="d-flex align-center justify-space-between ga-2 flex-wrap">
         <!-- 左侧：播放/暂停与微调跳转 -->
-        <div class="d-flex align-center ga-2">
+        <div class="d-flex align-center ga-2 flex-wrap">
           <v-btn
             color="primary"
             variant="flat"
@@ -275,11 +275,10 @@ function cycleOtherRoutesMode(): void {
           </v-btn>
 
           <!-- 时间颗粒度跳转按钮组 -->
-          <div class="d-flex align-center ga-1 ml-1">
+          <div class="d-flex align-center ga-2 ml-1 flex-wrap">
             <v-btn
               variant="tonal"
-              size="small"
-              class="px-2 font-mono"
+              class="font-mono"
               title="后退 5 分钟"
               @click="emit('jumpTime', -300)"
             >
@@ -287,8 +286,7 @@ function cycleOtherRoutesMode(): void {
             </v-btn>
             <v-btn
               variant="tonal"
-              size="small"
-              class="px-2 font-mono"
+              class="font-mono"
               title="后退 1 分钟"
               @click="emit('jumpTime', -60)"
             >
@@ -296,8 +294,7 @@ function cycleOtherRoutesMode(): void {
             </v-btn>
             <v-btn
               variant="tonal"
-              size="small"
-              class="px-2 font-mono"
+              class="font-mono"
               title="前进 1 分钟"
               @click="emit('jumpTime', 60)"
             >
@@ -305,8 +302,7 @@ function cycleOtherRoutesMode(): void {
             </v-btn>
             <v-btn
               variant="tonal"
-              size="small"
-              class="px-2 font-mono"
+              class="font-mono"
               title="前进 5 分钟"
               @click="emit('jumpTime', 300)"
             >
@@ -325,7 +321,6 @@ function cycleOtherRoutesMode(): void {
               <v-btn
                 v-bind="menuProps"
                 variant="tonal"
-                size="small"
                 prepend-icon="mdi-map-marker-path"
                 class="ml-1"
               >

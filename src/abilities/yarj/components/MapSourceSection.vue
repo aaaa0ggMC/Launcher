@@ -433,8 +433,6 @@ defineExpose({
           <v-btn
             color="error"
             variant="outlined"
-            size="small"
-            height="36"
             class="px-4"
             prepend-icon="mdi-trash-can-outline"
             :disabled="!cacheStats?.tileCount"

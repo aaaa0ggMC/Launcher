@@ -41,7 +41,7 @@ defineExpose({ toMarkdown })
   <div class="pg-templatelist d-flex flex-column" style="height: 100%">
     <div class="d-flex align-center justify-space-between mb-2">
       <span class="text-subtitle-2 font-weight-medium">Provider Playground</span>
-      <v-btn size="small" color="primary" prepend-icon="mdi-plus" @click="emit('new')">
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">
         {{ t('pg.new') }}
       </v-btn>
     </div>

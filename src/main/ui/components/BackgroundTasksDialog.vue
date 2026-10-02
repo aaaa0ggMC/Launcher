@@ -606,7 +606,6 @@ onBeforeUnmount(() => {
                   v-if="selected.task.kind === 'process'"
                   v-model="activeTab"
                   mandatory
-                  density="compact"
                   color="primary"
                   variant="tonal"
                   rounded="lg"

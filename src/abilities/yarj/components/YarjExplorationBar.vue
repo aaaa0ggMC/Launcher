@@ -190,12 +190,7 @@ function resetToGranularity(): void {
                       :placeholder="String(currentStageIndex + 1)"
                       @keyup.enter="handleJumpStage"
                     />
-                    <v-btn
-                      color="primary"
-                      variant="flat"
-                      density="comfortable"
-                      @click="handleJumpStage"
-                    >
+                    <v-btn color="primary" variant="flat" @click="handleJumpStage">
                       {{ t('yarj.exploration.jumpBtn', '前往') }}
                     </v-btn>
                   </div>
@@ -325,12 +320,7 @@ function resetToGranularity(): void {
                 </v-btn>
                 <v-menu location="top">
                   <template #activator="{ props: menuProps }">
-                    <v-btn
-                      v-bind="menuProps"
-                      variant="tonal"
-                      density="comfortable"
-                      class="text-caption font-weight-medium px-2"
-                    >
+                    <v-btn v-bind="menuProps" variant="tonal" class="font-weight-medium">
                       {{
                         customStageCount != null
                           ? `${customStageCount} 站 (自定义)`
@@ -378,8 +368,7 @@ function resetToGranularity(): void {
               <!-- 跳转至指定站点按钮 -->
               <v-btn
                 variant="tonal"
-                density="comfortable"
-                class="text-caption font-weight-medium px-2"
+                class="font-weight-medium"
                 prepend-icon="mdi-ray-start-arrow"
                 :title="
                   t('yarj.exploration.jumpHint', '输入站点编号直接跳转 (1 ~ {total})').replace(
@@ -424,12 +413,7 @@ function resetToGranularity(): void {
                       :placeholder="String(journeyData.stages.length)"
                       @keyup.enter="applyCustomTargetCount"
                     />
-                    <v-btn
-                      color="primary"
-                      variant="flat"
-                      density="comfortable"
-                      @click="applyCustomTargetCount"
-                    >
+                    <v-btn color="primary" variant="flat" @click="applyCustomTargetCount">
                       {{ t('yarj.exploration.apply', '生成') }}
                     </v-btn>
                   </div>
@@ -501,7 +485,6 @@ function resetToGranularity(): void {
               <v-btn
                 v-if="currentStage?.photos.length"
                 variant="tonal"
-                density="comfortable"
                 prepend-icon="mdi-image-multiple-outline"
                 @click="emit('open-photo-drawer', currentStage.photos, currentStage.center)"
               >
@@ -523,7 +506,6 @@ function resetToGranularity(): void {
               <v-btn
                 :color="isPlaying ? 'secondary' : 'primary'"
                 variant="flat"
-                density="comfortable"
                 :prepend-icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
                 @click="emit('toggle-play')"
               >

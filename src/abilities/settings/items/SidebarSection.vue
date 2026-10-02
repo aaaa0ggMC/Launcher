@@ -290,7 +290,6 @@ defineExpose({
                   icon
                   size="small"
                   variant="text"
-                  density="compact"
                   :disabled="idx === 0"
                   @click.stop="moveItem(idx, idx - 1)"
                 >
@@ -300,7 +299,6 @@ defineExpose({
                   icon
                   size="small"
                   variant="text"
-                  density="compact"
                   :disabled="idx === customList.length - 1"
                   @click.stop="moveItem(idx, idx + 1)"
                 >

@@ -655,7 +655,7 @@ onMounted(() => {
             <v-icon color="primary">mdi-format-list-numbered</v-icon>
             <span>{{ t('yarj.prefs.gpsPriorityTitle', 'GPS 坐标生效优先级') }}</span>
           </div>
-          <v-btn size="small" variant="text" prepend-icon="mdi-restore" @click="resetGpsPriority">
+          <v-btn variant="text" prepend-icon="mdi-restore" @click="resetGpsPriority">
             {{ t('yarj.prefs.restoreDefaultPriority', '恢复默认顺序') }}
           </v-btn>
         </v-card-title>
