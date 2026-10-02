@@ -13,6 +13,8 @@ export interface CommandContext {
   named: Record<string, unknown>
   /** bare positional tokens (CLI). */
   positional: string[]
+  /** 命令声明了 `exclusive` 时由注册表填入当前租约（写盘处把 epoch 传给 `assertFence`）。 */
+  lease?: { scope: string; key: string; epoch: number }
 }
 
 export interface CommandSpec {
@@ -55,6 +57,15 @@ export interface CommandSpec {
    * (remote / mcp / script-agent); UI / CLI dispatch is unaffected.
    */
   privacy?: CommandPrivacy
+  /**
+   * 独占声明（独占 SDK，见 `src/main/process/exclusive.ts`）：执行前自动获取 / 续期 `scope`+`key` 的租约，
+   * 冲突时抛 ExclusiveBusyError / LeaseLostError。`access: 'read'` 的命令不获取租约（截图 / 状态等）。
+   */
+  exclusive?: {
+    scope: string
+    key: (ctx: CommandContext) => string | Promise<string>
+    access?: 'write' | 'read'
+  }
 }
 
 export interface CommandPrivacy {

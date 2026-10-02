@@ -8,6 +8,8 @@ defineOptions({ name: 'cockpit-settings-agent' })
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { translate, translateTemplate } from '@ui/i18n'
+import AgentExclusiveSettings from './AgentExclusiveSettings.vue'
+import AgentScriptSettings from './AgentScriptSettings.vue'
 import { AGENT_UI_LIMITS, resolveAgentUi, type AgentUiConfig } from '@ui/composables/agentUi'
 
 interface TransportStatus {
@@ -32,6 +34,14 @@ interface AgentCfg {
   mcp?: { enabled?: boolean; port?: number }
   privacy?: Record<string, unknown>
   ui?: Partial<AgentUiConfig>
+  exclusive?: { idleMin?: number }
+  script?: {
+    enabled?: boolean
+    maxCalls?: number
+    cpuMs?: number
+    wallSec?: number
+    memoryMB?: number
+  }
 }
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -468,6 +478,10 @@ defineExpose({
         />
       </v-card-text>
     </v-card>
+
+    <!-- 独占（A2）/ AI 脚本（B2）：子组件只管自己的表单，写盘统一走 patchAgent -->
+    <AgentExclusiveSettings :cfg="agentCfg" @patch="patchAgent" />
+    <AgentScriptSettings :cfg="agentCfg" @patch="patchAgent" />
 
     <!-- Sessions -->
     <v-card rounded="lg" variant="tonal">

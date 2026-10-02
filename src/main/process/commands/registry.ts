@@ -1,5 +1,6 @@
 import type { CommandSpec } from './types'
 import { makeLogger } from '../logger'
+import { acquire, touch } from '../exclusive'
 import { registerCommand, commandBlock, commandOwnerOf } from '../ability-runtime'
 import {
   isAgentOrigin,
@@ -92,7 +93,7 @@ async function runWithPrivacy(
   spec: CommandSpec,
   ctx: Parameters<CommandSpec['run']>[0]
 ): Promise<unknown> {
-  if (!isAgentOrigin()) return await spec.run(ctx)
+  if (!isAgentOrigin()) return await withLease(spec, ctx)
   const p = spec.privacy
   if (p?.agent === 'deny') {
     log.warn('agent denied command', { name: spec.name, origin: currentOrigin() })
@@ -100,7 +101,23 @@ async function runWithPrivacy(
   }
   if (p?.requires?.length) await guard(p.requires, spec.name)
   if (!p) log.debug('agent called unclassified command', { name: spec.name })
-  return redactSecretKeys(await spec.run(ctx))
+  return redactSecretKeys(await withLease(spec, ctx))
+}
+
+/** 独占 SDK：声明了 `exclusive`（写类）的命令执行前获取 / 续期租约，执行后续期。 */
+async function withLease(
+  spec: CommandSpec,
+  ctx: Parameters<CommandSpec['run']>[0]
+): Promise<unknown> {
+  const ex = spec.exclusive
+  if (!ex || ex.access === 'read') return await spec.run(ctx)
+  const key = await ex.key(ctx)
+  const lease = acquire(ex.scope, key)
+  try {
+    return await spec.run({ ...ctx, lease: { scope: ex.scope, key, epoch: lease.epoch } })
+  } finally {
+    touch(ex.scope, key)
+  }
 }
 
 /** Parse `--key value` pairs + bare positional tokens. */

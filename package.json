@@ -32,6 +32,7 @@
     "markdown-it": "^15.0.2",
     "markdown-it-anchor": "^10.0.0",
     "pidusage": "^4.0.1",
+    "quickjs-emscripten": "^0.32.0",
     "vuetify": "^3.13.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",

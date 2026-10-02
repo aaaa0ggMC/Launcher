@@ -32,6 +32,7 @@ import {
   GUARD_WAIT_MS
 } from '../privacy'
 import { setSessionStatus } from './sessions'
+import { ExclusiveBusyError, LeaseLostError, StaleEpochError } from '../exclusive'
 
 export type ToolOutput = (
   | { kind: 'json'; value: unknown }
@@ -495,6 +496,20 @@ export const AGENT_TOOLS: AgentTool[] = [
 export function describeError(e: unknown): Record<string, unknown> {
   if (e instanceof PrivacyDeniedError) {
     return { error: e.message, code: e.code, scopes: e.scopes, requestId: e.requestId }
+  }
+  if (e instanceof ExclusiveBusyError) {
+    return {
+      error: e.message,
+      code: e.code,
+      scope: e.scope,
+      key: e.key,
+      holder: e.holder,
+      heldMs: e.sinceMs,
+      idleMs: e.idleMs
+    }
+  }
+  if (e instanceof LeaseLostError || e instanceof StaleEpochError) {
+    return { error: e.message, code: e.code }
   }
   if (e instanceof CommandUnavailableError) {
     return {

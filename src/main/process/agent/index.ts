@@ -15,6 +15,7 @@ import { McpService } from './mcp'
 import { RemoteService } from './remote'
 import { disconnectSession, endTransportSessions } from './sessions'
 import { initAgentViews } from './views'
+import { initExclusive } from '../exclusive'
 
 const log = makeLogger('agent')
 
@@ -102,6 +103,7 @@ export { disconnectSession }
 /** 启动时调用（registerIpc 之后）。 */
 export async function initAgentServices(argv: string[]): Promise<void> {
   initAgentViews()
+  initExclusive()
   const added = applyLaunchFlags(argv, process.env)
   if (added.length) log.info('enabled by launch flags (this run only)', { transports: added })
   await reloadAgentServices()
