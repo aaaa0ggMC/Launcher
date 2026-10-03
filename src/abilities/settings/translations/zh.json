@@ -149,5 +149,10 @@
   "settings.none": "无",
   "settings.group.general": "通用",
   "settings.group.other": "其他",
-  "settings.jumpTo": "设置分类"
+  "settings.jumpTo": "设置分类",
+  "sidebar.modeTitle": "侧栏显示方式",
+  "sidebar.modeCaption": "手机等窄屏上侧栏会占掉太多宽度；弹出式下侧栏隐藏，点左上角的菜单按钮打开，选完自动收起。",
+  "sidebar.modeAuto": "自动（窄屏弹出式，宽屏常驻）",
+  "sidebar.modeAlways": "始终常驻",
+  "sidebar.modeOverlay": "始终弹出式（隐藏侧栏）"
 }

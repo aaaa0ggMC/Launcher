@@ -183,5 +183,6 @@
   "hostpick.cancel": "取消",
   "hostpick.save": "保存",
   "hostpick.selectFolder": "选择此文件夹",
-  "hostpick.select": "选择"
+  "hostpick.select": "选择",
+  "sidebar.open": "打开菜单"
 }

@@ -176,7 +176,8 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
 ```jsonc
 "sidebar": {
   "default": "cli",        // 初始页面
-  "sort": "alpha"          // alpha 字母序（默认）| frequency 使用频次 | recent 最近使用
+  "sort": "alpha",         // alpha 字母序（默认）| frequency 使用频次 | recent 最近使用
+  "mode": "auto"           // 侧栏形态：auto（≤720px 窄屏弹出式、宽屏常驻）| always 常驻 | overlay 始终弹出式
 }
 ```
 
@@ -386,6 +387,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **密钥库**：`master.json` 若由 `safeStorage`（系统钥匙环）包裹，无头宿主解不开。在 Electron 里执行一次 `vault.rewrap-scrypt` 改包成 scrypt（机器指纹派生，**保护强度降低**，原文件备份 `master.json.bak-*`），两边即可共用；`vault.status` 查看。换机器（如手机 Termux 本机跑宿主）解不开，密钥需重填。
 - **Termux 安装**：Electron 没有 android 构建，其 `postinstall` 会让 `pnpm install` 失败。仓库用 `patches/electron.patch`（`pnpm-workspace.yaml` 的 `patchedDependencies`）让 `install.js` 在 `process.platform === 'android'` 时直接跳过下载，锁文件在所有平台一致（`--frozen-lockfile` 可用）。此时只能用无头模式。**不要**用 `.pnpmfile.cjs` 的 `readPackage` 按平台删依赖：会改写锁文件并让 `--frozen-lockfile` 报 `pnpmfileChecksum` 不匹配。升级 electron 版本后要重做补丁（`pnpm patch electron` → 改 `install.js` → `pnpm patch-commit`），并留意锁文件里 git 依赖（hustcore）被顺带重新解析的无关改动。
 - **平台**：Termux 的 `process.platform` 是 `'android'`。`platforms: ['linux']` 的能力（mirror / display / dashboard / systemd / autostart）在 Termux 自动排除；其余没写 `platforms` 的默认可用。要给某个 Linux 专属能力开放 Termux，把 `'android'` 加进它的 `platforms` 之前先在真机验证（`/proc` 在 Android 上受限）。
+- **移动端外壳**：`index.html` 带 viewport meta；`App.vue` 按 `sidebar.mode`（设置 → 侧边栏）决定侧栏形态——弹出式（`temporary` 抽屉，永远展开显示搜索与分组）由 App bar 左上角汉堡按钮打开，选完自动关闭；窄屏（`matchMedia ≤720px`）容器 padding 收成 `pa-2`。**只做了外壳**：各能力页面要按容器宽度自己适配（见 §11.8），尚未逐页检查。
 - **没做 / 已知缺口**：agent 系统（MCP / Remote / ui inspector / 隐私授权窗口 / agent 独立视图）未接入无头入口；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
 
 ### 镜像源 toggle 安全性

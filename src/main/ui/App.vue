@@ -73,8 +73,27 @@ interface SidebarAbility {
 const runtimeConfig = ref<Record<string, unknown>>({})
 const theme = useTheme()
 
-const drawer = ref(true)
 const rail = ref(true)
+/**
+ * 侧栏形态（config.json `sidebar.mode`，设置 → 侧边栏）：
+ *  - auto（默认）：窄屏（≤720px，如手机）收成「弹出式」，宽屏常驻；
+ *  - always：始终常驻；overlay：始终弹出式（点 App bar 左上角按钮打开，选完自动关闭）。
+ */
+const narrow = ref(false)
+const sidebarMode = computed<'auto' | 'always' | 'overlay'>(() => {
+  const m = (runtimeConfig.value.sidebar as { mode?: string } | undefined)?.mode
+  return m === 'always' || m === 'overlay' ? m : 'auto'
+})
+const sidebarOverlay = computed(
+  () => sidebarMode.value === 'overlay' || (sidebarMode.value === 'auto' && narrow.value)
+)
+/** 弹出式永远展开显示（有搜索和分组），只有常驻时才有「窄条」形态 */
+const railMode = computed(() => !sidebarOverlay.value && rail.value)
+const drawerOpen = ref(false)
+let narrowMql: MediaQueryList | null = null
+const onNarrowChange = (e: MediaQueryListEvent): void => {
+  narrow.value = e.matches
+}
 const searchText = ref('')
 const currentId = ref<string | null>(null)
 const isMaximized = ref(false)
@@ -708,6 +727,7 @@ function deliverActivate(
 function openAbility(id: string): void {
   if (id !== currentId.value) recordOpen(id)
   currentId.value = id
+  if (sidebarOverlay.value) drawerOpen.value = false
 }
 
 function activate(abilityId: string, target: Record<string, unknown>): void {
@@ -985,6 +1005,9 @@ watch(
 )
 
 onMounted(async () => {
+  narrowMql = window.matchMedia('(max-width: 720px)')
+  narrow.value = narrowMql.matches
+  narrowMql.addEventListener('change', onNarrowChange)
   const cfg = await window.cockpit.getConfig()
   onConfigChanged(cfg)
   // Default page comes from config.json (sidebar.default); fall back to the
@@ -1058,6 +1081,7 @@ watch(
 watch(rail, () => persistUiState())
 
 onBeforeUnmount(() => {
+  narrowMql?.removeEventListener('change', onNarrowChange)
   unsub?.()
   usageUnsub?.()
   hostUnsub?.()
@@ -1097,23 +1121,25 @@ onBeforeUnmount(() => {
       :idle-ms="agentUi.busyTimeoutSec * 1000"
     />
     <v-navigation-drawer
-      v-model="drawer"
-      :rail="rail"
-      permanent
+      :model-value="sidebarOverlay ? drawerOpen : true"
+      :rail="railMode"
+      :temporary="sidebarOverlay"
+      :permanent="!sidebarOverlay"
       width="264"
       rail-width="64"
       color="surface-variant"
+      @update:model-value="(v: boolean) => sidebarOverlay && (drawerOpen = v)"
     >
       <template #prepend>
         <div
           class="brand-header"
-          :class="rail ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
-          @click="rail = !rail"
+          :class="railMode ? 'brand-header--rail' : 'px-4 py-3 d-flex align-center ga-2'"
+          @click="sidebarOverlay ? (drawerOpen = false) : (rail = !rail)"
         >
           <div class="brand-logo">
             <GameIcon name="boss" :size="30" />
           </div>
-          <div v-if="!rail" class="d-flex flex-column">
+          <div v-if="!railMode" class="d-flex flex-column">
             <span class="text-subtitle-2 font-weight-bold on-surface">Linux Cockpit</span>
             <span class="text-caption on-surface-variant brand-sub">{{ t('app.brandSub') }}</span>
           </div>
@@ -1121,7 +1147,7 @@ onBeforeUnmount(() => {
       </template>
 
       <!-- Top search box (expanded only) -->
-      <div v-if="!rail" class="px-3 pb-2">
+      <div v-if="!railMode" class="px-3 pb-2">
         <v-text-field
           v-model="searchText"
           prepend-inner-icon="mdi-magnify"
@@ -1138,7 +1164,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <v-list v-if="!rail && searchText.trim()" density="compact" class="px-2">
+      <v-list v-if="!railMode && searchText.trim()" density="compact" class="px-2">
         <v-list-subheader>{{ t('search.appsHeader') }}</v-list-subheader>
         <v-list-item
           v-for="qa in searchQuick"
@@ -1180,9 +1206,9 @@ onBeforeUnmount(() => {
         </v-list>
       </v-menu>
 
-      <v-divider v-if="!rail && searchText.trim()" class="my-2 mx-2" />
+      <v-divider v-if="!railMode && searchText.trim()" class="my-2 mx-2" />
 
-      <template v-if="!rail">
+      <template v-if="!railMode">
         <v-list density="compact" nav class="px-2">
           <template v-if="sortMode === 'custom'">
             <v-list-item
@@ -1248,7 +1274,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template #append>
-        <div class="pa-3 d-flex justify-center ga-2" :class="rail ? 'flex-column' : ''">
+        <div class="pa-3 d-flex justify-center ga-2" :class="railMode ? 'flex-column' : ''">
           <v-tooltip :text="t('appbar.btTooltip')" location="end">
             <template #activator="{ props: tp }">
               <v-badge
@@ -1291,6 +1317,7 @@ onBeforeUnmount(() => {
             </template>
           </v-tooltip>
           <v-btn
+            v-if="!sidebarOverlay"
             variant="tonal"
             icon
             :aria-label="rail ? t('sidebar.expand') : t('sidebar.collapse')"
@@ -1308,6 +1335,12 @@ onBeforeUnmount(() => {
       border
       :class="isFrameless && !agentCovered ? 'cockpit-app-bar' : ''"
     >
+      <v-app-bar-nav-icon
+        v-if="sidebarOverlay"
+        :aria-label="t('sidebar.open', '打开菜单')"
+        :title="t('sidebar.open', '打开菜单')"
+        @click="drawerOpen = !drawerOpen"
+      />
       <v-app-bar-title @dblclick="isFrameless ? winToggleMaximize : undefined">
         <span class="text-subtitle-1 font-weight-medium">{{
           currentAbility?.name ?? 'Linux Cockpit'
@@ -1377,7 +1410,7 @@ onBeforeUnmount(() => {
     </v-app-bar>
 
     <v-main scrollable class="content-bg">
-      <v-container fluid class="pa-4">
+      <v-container fluid :class="narrow ? 'pa-2' : 'pa-4'">
         <div class="d-flex flex-column" style="min-height: calc(100vh - 64px - 32px)">
           <!-- 独占 SDK：当前页面有被 AI 占用的资源时，App bar 下方显示窄条（可一键接管） -->
           <ExclusiveBanner

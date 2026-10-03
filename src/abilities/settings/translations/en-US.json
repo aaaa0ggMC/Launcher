@@ -149,5 +149,10 @@
   "settings.none": "None",
   "settings.group.general": "General",
   "settings.group.other": "Other",
-  "settings.jumpTo": "Settings category"
+  "settings.jumpTo": "Settings category",
+  "sidebar.modeTitle": "Sidebar display",
+  "sidebar.modeCaption": "On narrow screens such as phones the sidebar takes too much width. In pop-up mode it is hidden; tap the menu button at the top left to open it, and it closes after you pick a page.",
+  "sidebar.modeAuto": "Auto (pop-up on narrow screens, docked on wide ones)",
+  "sidebar.modeAlways": "Always docked",
+  "sidebar.modeOverlay": "Always pop-up (hide the sidebar)"
 }

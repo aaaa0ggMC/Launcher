@@ -17,6 +17,7 @@ export interface AbilityItem {
   category: string
 }
 
+const mode = ref<'auto' | 'always' | 'overlay'>('auto')
 const sort = ref<'alpha' | 'frequency' | 'recent' | 'custom'>('alpha')
 const clearing = ref(false)
 const customList = ref<AbilityItem[]>([])
@@ -65,6 +66,8 @@ function mergeOrder(savedOrder: string[], all: AbilityItem[]): AbilityItem[] {
 
 async function loadData(): Promise<void> {
   const cfg = await window.cockpit.getConfig()
+  const m = (cfg?.sidebar as { mode?: string } | undefined)?.mode
+  mode.value = m === 'always' || m === 'overlay' ? m : 'auto'
   const s = (cfg?.sidebar as { sort?: string } | undefined)?.sort
   sort.value = s === 'frequency' || s === 'recent' || s === 'custom' ? s : 'alpha'
 
@@ -80,6 +83,14 @@ async function loadData(): Promise<void> {
 onMounted(() => {
   void loadData()
 })
+
+async function setMode(v: string | null): Promise<void> {
+  const m = v === 'always' || v === 'overlay' ? v : 'auto'
+  mode.value = m
+  await window.cockpit.setConfig({
+    sidebar: { ...(config.value.sidebar as Record<string, unknown> | undefined), mode: m }
+  })
+}
 
 async function setSort(v: string | null): Promise<void> {
   const mode = v === 'frequency' || v === 'recent' || v === 'custom' ? v : 'alpha'
@@ -217,6 +228,25 @@ defineExpose({
   <v-card rounded="lg" variant="tonal" class="card-fill">
     <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'sidebar.title') }}</v-card-title>
     <v-card-text>
+      <div class="text-body-2 mb-1">{{ translate(uiLang, 'sidebar.modeTitle') }}</div>
+      <div class="text-caption on-surface-variant mb-2">
+        {{ translate(uiLang, 'sidebar.modeCaption') }}
+      </div>
+      <v-radio-group
+        v-model="mode"
+        color="primary"
+        density="compact"
+        hide-details
+        class="mb-4"
+        @update:model-value="setMode"
+      >
+        <v-radio :label="translate(uiLang, 'sidebar.modeAuto')" value="auto" />
+        <v-radio :label="translate(uiLang, 'sidebar.modeAlways')" value="always" />
+        <v-radio :label="translate(uiLang, 'sidebar.modeOverlay')" value="overlay" />
+      </v-radio-group>
+
+      <v-divider class="mb-4" />
+
       <div class="text-caption on-surface-variant mb-3">
         {{ translate(uiLang, 'sidebar.caption') }}
       </div>
