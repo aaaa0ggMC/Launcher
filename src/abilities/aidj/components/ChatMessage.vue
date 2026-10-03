@@ -5,6 +5,8 @@ import type { ChatMessage, PlaylistEntry } from '../types'
 import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import SongGrid from './SongGrid.vue'
+import WorkflowCard from './WorkflowCard.vue'
+import { buildWorkflows, runningStage, runningWorkflow } from './workflow-view'
 
 defineOptions({ name: 'AidjChatMessage' })
 
@@ -28,6 +30,15 @@ const props = defineProps<{
    *  web-player mode where the `aidj.continuous` job isn't exposed. */
   continuousEnabled?: boolean
 }>()
+
+/** Agent workflow behind this reply (instant chat in agent mode). */
+const workflows = computed(() =>
+  props.message.workflow?.length ? buildWorkflows(props.message.workflow) : []
+)
+const stageText = computed(() => {
+  const w = runningWorkflow(workflows.value)
+  return w ? runningStage(w, (x) => tt(x.key, x.vars, x.fallback)) : ''
+})
 
 const emit = defineEmits<{
   playAll: [songs: PlaylistEntry[]]
@@ -81,6 +92,10 @@ function roleLabel(msg: ChatMessage): string {
       {{ roleLabel(message) }}
     </span>
 
+    <div v-if="workflows.length" class="msg-workflow d-flex flex-column ga-2">
+      <WorkflowCard v-for="wf in workflows" :key="wf.batch" :wf="wf" />
+    </div>
+
     <div
       v-if="message.content"
       class="msg-bubble pa-3"
@@ -104,10 +119,14 @@ function roleLabel(msg: ChatMessage): string {
     >
       <div v-if="isThinking(message)" class="d-flex align-center ga-2 text-body-2">
         <v-progress-circular indeterminate size="16" width="2" />
-        <span class="thinking-text">{{ t('aidj.msg.thinking', '思考中') }}</span>
-        <span class="text-caption text-medium-emphasis">{{
-          tt('aidj.msg.chars', { n: message.chars ?? 0 }, '{n} 字符')
-        }}</span>
+        <!-- Agent mode: the live workflow stage (no character stream to count). -->
+        <span v-if="stageText" class="thinking-text">{{ stageText }}</span>
+        <template v-else>
+          <span class="thinking-text">{{ t('aidj.msg.thinking', '思考中') }}</span>
+          <span class="text-caption text-medium-emphasis">{{
+            tt('aidj.msg.chars', { n: message.chars ?? 0 }, '{n} 字符')
+          }}</span>
+        </template>
       </div>
       <div
         v-else-if="!isUser(message) && !isSystem(message)"
@@ -153,6 +172,10 @@ function roleLabel(msg: ChatMessage): string {
 </template>
 
 <style scoped>
+.msg-workflow {
+  width: 100%;
+  max-width: 680px;
+}
 .role-label {
   padding-block: 2px;
   margin-bottom: 2px;

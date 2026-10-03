@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { makeLogger } from '../../../main/process/logger'
 import { USER_CONFIG_DIR, abilityConfigPath } from '../../../main/process/paths'
+import { decryptSecret, encryptSecret, isEncryptedSecret } from '../../../main/process/encrypt'
 import {
   readOrCreateJson,
   writeJsonAtomic,
@@ -34,8 +35,43 @@ export async function loadSessionsIndex(): Promise<{ sessions: SessionMeta[] }> 
   return readOrCreateJson(SESSIONS_INDEX, () => ({ sessions: [] }))
 }
 
+/** Secret fields of the AIDJ config: stored encrypted (encrypt.ts), plain only in memory. */
+function secretSlots(c: AidjConfig): { get: () => string; set: (v: string) => void }[] {
+  const sec = (c.secrets ??= { api_key: '' })
+  return [
+    { get: () => sec.api_key ?? '', set: (v) => (sec.api_key = v) },
+    {
+      get: () => sec.tavily?.api_key ?? '',
+      set: (v) => {
+        if (v || sec.tavily) sec.tavily = { ...(sec.tavily ?? {}), api_key: v }
+      }
+    }
+  ]
+}
+
+function cloneConfig(c: AidjConfig): AidjConfig {
+  return JSON.parse(JSON.stringify(c)) as AidjConfig
+}
+
 export async function loadAidjConfig(): Promise<AidjConfig | null> {
-  return readOrCreateJson(abilityConfigPath('aidj'), () => DEFAULT_AIDJ_CONFIG)
+  const raw = await readOrCreateJson(abilityConfigPath('aidj'), () => DEFAULT_AIDJ_CONFIG)
+  if (!raw) return raw
+  const cfg = cloneConfig(raw)
+  let plaintextOnDisk = false
+  for (const slot of secretSlots(cfg)) {
+    const v = slot.get()
+    if (!v) continue
+    if (isEncryptedSecret(v)) {
+      // A failed decrypt keeps the ciphertext: the key stops working but is never
+      // replaced by '' (which a later save would persist).
+      slot.set(decryptSecret(v) || v)
+    } else plaintextOnDisk = true
+  }
+  if (plaintextOnDisk) {
+    // One-time migration: encrypt keys that were saved in plain text.
+    void saveAidjConfig(cfg).then((r) => r.ok && log.info('aidj secrets encrypted at rest'))
+  }
+  return cfg
 }
 
 /**
@@ -44,7 +80,18 @@ export async function loadAidjConfig(): Promise<AidjConfig | null> {
  */
 export async function saveAidjConfig(config: AidjConfig): Promise<{ ok: boolean; error?: string }> {
   try {
-    await writeJsonAtomicSerialized(abilityConfigPath('aidj'), config)
+    const onDisk = cloneConfig(config)
+    for (const slot of secretSlots(onDisk)) {
+      const v = slot.get()
+      if (!v) continue
+      try {
+        slot.set(encryptSecret(v))
+      } catch (e) {
+        // Vault unavailable: keep it working (plain) rather than losing the key.
+        log.warn('aidj secret encryption failed; stored as-is', { error: String(e) })
+      }
+    }
+    await writeJsonAtomicSerialized(abilityConfigPath('aidj'), onDisk)
     return { ok: true }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)

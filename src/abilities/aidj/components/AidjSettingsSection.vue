@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, computed, inject } from 'vue'
 import type { Ref } from 'vue'
-import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG } from '../types'
+import { DEFAULT_PERSONA, DEFAULT_LYRICS_CFG, LEGACY_DEFAULT_PERSONAS } from '../types'
+import { DEFAULT_LOOP_POLICY, type LoopPolicy } from '../loop/policy'
+import AgentModelsPanel from './AgentModelsPanel.vue'
 import { translate, translateTemplate } from '../../../main/ui/i18n'
 
 defineOptions({ name: 'cockpit-aidj-settings' })
@@ -44,9 +46,11 @@ function labelFor(k: string): string {
 }
 
 const model = ref('')
-const metadataModel = ref('')
 const baseUrl = ref('')
+// Keys are write-only: the field starts empty; typing replaces the saved key.
 const apiKey = ref('')
+const apiKeySet = ref(false)
+const tavilySet = ref(false)
 const ncmBaseUrl = ref('')
 const ncmMode = ref<'auto' | 'external' | 'builtin'>('auto')
 const ncmApproved = ref(false)
@@ -140,6 +144,13 @@ const modelsLoading = ref(false)
 const modelsError = ref(false)
 const libraryInjects = ref<Record<string, boolean>>({})
 const persona = ref(DEFAULT_PERSONA)
+const loopCfg = ref<LoopPolicy>({ ...DEFAULT_LOOP_POLICY })
+const webSearch = ref<{ enabled: boolean; max_results: number; depth: 'basic' | 'advanced' }>({
+  enabled: false,
+  max_results: 5,
+  depth: 'basic'
+})
+const tavilyKey = ref('')
 const extraRules = ref<string[]>([''])
 const statusBar = ref<Record<string, number>>({
   tokens: 1,
@@ -157,11 +168,11 @@ onMounted(async () => {
   const cfg = r.config as Record<string, unknown>
   const prefs = cfg.preferences as Record<string, unknown>
   const ai = cfg.ai_settings as Record<string, unknown>
-  const sec = cfg.secrets as Record<string, unknown>
   model.value = (prefs.model as string) || ''
-  metadataModel.value = (ai.metadata_model as string) || ''
   baseUrl.value = (ai.base_url as string) || ''
-  apiKey.value = (sec.api_key as string) || ''
+  const secretsSet = (r.secretsSet ?? {}) as { api_key?: boolean; tavily?: boolean }
+  apiKeySet.value = !!secretsSet.api_key
+  tavilySet.value = !!secretsSet.tavily
   ncmBaseUrl.value = (cfg.ncm_base_url as string) || ''
   ncmApproved.value = (prefs.ncm_approved as boolean) ?? false
   bilibiliApproved.value = (prefs.bilibili_approved as boolean) ?? false
@@ -195,7 +206,21 @@ onMounted(async () => {
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
-  persona.value = (prefs.persona as string) || DEFAULT_PERSONA
+  const storedPersona = ((prefs.persona as string) || '').trim()
+  persona.value =
+    storedPersona && !LEGACY_DEFAULT_PERSONAS.some((p) => p.trim() === storedPersona)
+      ? (prefs.persona as string)
+      : DEFAULT_PERSONA
+  webSearch.value = {
+    enabled: false,
+    max_results: 5,
+    depth: 'basic',
+    ...((prefs.web_search as Record<string, unknown>) ?? {})
+  } as typeof webSearch.value
+  loopCfg.value = {
+    ...DEFAULT_LOOP_POLICY,
+    ...((prefs.loop as Partial<LoopPolicy>) ?? {})
+  }
   extraRules.value = ((prefs.extra_rules as string) || '').split('\n').filter((l) => l.trim())
   if (extraRules.value.length === 0) extraRules.value = ['']
   statusBar.value = {
@@ -339,10 +364,17 @@ function moveLyricsFolder(i: number, dir: -1 | 1): void {
 
 watch(lyricsCfg, (v) => update('preferences.lyrics', { ...v }), { deep: true })
 
-watch(model, (v) => update('preferences.model', v))
-watch(metadataModel, (v) => update('ai_settings.metadata_model', v))
 watch(baseUrl, (v) => update('ai_settings.base_url', v))
-watch(apiKey, (v) => update('secrets.api_key', v))
+watch(apiKey, (v) => {
+  if (!v.trim()) return // empty field = keep the saved key
+  update('secrets.api_key', v.trim())
+  apiKeySet.value = true
+})
+function clearApiKey(): void {
+  apiKey.value = ''
+  apiKeySet.value = false
+  update('secrets.api_key', '')
+}
 watch(ncmBaseUrl, (v) => update('ncm_base_url', v))
 watch(ncmMode, (v) => update('preferences.ncm_mode', v))
 watch(dbusTarget, (v) => update('preferences.dbus_target', v))
@@ -573,7 +605,31 @@ watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
 watch(networkRetryMinutes, (v) => update('preferences.network_retry_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
 watch(statusBar, (v) => update('preferences.status_bar', { ...v }), { deep: true })
-watch(persona, (v) => update('preferences.persona', v))
+// Store '' for the built-in persona so future default updates still apply.
+watch(persona, (v) => update('preferences.persona', v.trim() === DEFAULT_PERSONA.trim() ? '' : v))
+watch(webSearch, (v) => update('preferences.web_search', { ...v }), { deep: true })
+watch(tavilyKey, (v) => {
+  if (!v.trim()) return
+  update('secrets.tavily.api_key', v.trim())
+  tavilySet.value = true
+})
+function clearTavilyKey(): void {
+  tavilyKey.value = ''
+  tavilySet.value = false
+  update('secrets.tavily.api_key', '')
+}
+// Only persist values that differ from the defaults (same reason).
+watch(
+  loopCfg,
+  (v) => {
+    const diff: Record<string, unknown> = {}
+    for (const k of Object.keys(DEFAULT_LOOP_POLICY) as (keyof LoopPolicy)[]) {
+      if (JSON.stringify(v[k]) !== JSON.stringify(DEFAULT_LOOP_POLICY[k])) diff[k] = v[k]
+    }
+    update('preferences.loop', diff)
+  },
+  { deep: true }
+)
 watch(
   extraRules,
   (v) =>
@@ -621,8 +677,8 @@ defineExpose({
         : ncmMode.value === 'builtin'
           ? t('aidj.settings.ncm_mode_builtin', '内置')
           : t('aidj.settings.ncm_mode_auto', 'Auto')
-    const keyMasked = apiKey.value
-      ? `****${apiKey.value.slice(-4)}`
+    const keyMasked = apiKeySet.value
+      ? t('aidj.settings.key_set', '已设置（不回显）')
       : t('aidj.settings.none', '未设置')
     return [
       `${t('aidj.settings.backend', '播放后端')}: ${backend}`,
@@ -668,11 +724,31 @@ defineExpose({
               v-model="apiKey"
               v-agent-forbidden
               :label="t('aidj.settings.api_key', 'API 密钥')"
+              :placeholder="
+                apiKeySet
+                  ? t('aidj.settings.key_set_ph', '已设置（加密保存，不回显）— 输入新值即替换')
+                  : ''
+              "
+              persistent-placeholder
               type="password"
+              autocomplete="off"
               hide-details
               density="compact"
               variant="outlined"
-            />
+            >
+              <template v-if="apiKeySet" #append-inner>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.settings.key_clear', '清除已保存的密钥')"
+                  :aria-label="t('aidj.settings.key_clear', '清除已保存的密钥')"
+                  @click="clearApiKey"
+                >
+                  <v-icon size="16">mdi-key-remove</v-icon>
+                </v-btn>
+              </template>
+            </v-text-field>
           </v-col>
         </v-row>
       </div>
@@ -680,43 +756,16 @@ defineExpose({
       <v-divider />
 
       <div>
-        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.ai_models', 'AI 模型') }}</div>
-        <v-row dense>
-          <v-col cols="12" md="6">
-            <v-combobox
-              v-model="model"
-              :items="availableModels"
-              :loading="modelsLoading"
-              :no-data-text="
-                modelsError
-                  ? t('aidj.settings.models_unavailable', 'API 未提供模型列表')
-                  : t('aidj.settings.no_data', '无数据')
-              "
-              :label="t('aidj.settings.chat_model', '对话模型')"
-              hide-details
-              density="compact"
-              variant="outlined"
-              clearable
-            />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-combobox
-              v-model="metadataModel"
-              :items="availableModels"
-              :loading="modelsLoading"
-              :no-data-text="
-                modelsError
-                  ? t('aidj.settings.models_unavailable', 'API 未提供模型列表')
-                  : t('aidj.settings.no_data', '无数据')
-              "
-              :label="t('aidj.settings.metadata_model', '元数据提取模型')"
-              hide-details
-              density="compact"
-              variant="outlined"
-              clearable
-            />
-          </v-col>
-        </v-row>
+        <div class="text-subtitle-2 mb-1">{{ t('aidj.settings.ai_models', 'AI 模型') }}</div>
+        <div class="text-caption text-medium-emphasis mb-3">
+          {{
+            t(
+              'aidj.models.caption',
+              '模型细则：可为每种 Agent 单独指定模型，留空则跟随默认模型。修改即时保存，下一批生效。'
+            )
+          }}
+        </div>
+        <AgentModelsPanel />
       </div>
 
       <v-divider />
@@ -1661,6 +1710,271 @@ defineExpose({
             />
           </v-col>
         </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-2">{{ t('aidj.settings.loop', 'AI 循环') }}</div>
+        <div class="text-caption text-medium-emphasis mb-3">
+          {{
+            t(
+              'aidj.settings.loop_hint',
+              '持续模式每一批的生成方式。修改在下一批生效（循环模式需新开会话）。提示词在 aidj/loop/prompts/*.md，范式在 aidj/loop/playbooks/*.md；也可在 config.json 的 preferences.loop_prompts / loop_playbooks 覆盖或新增，用 aidj.loop-preview 预览。'
+            )
+          }}
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-select
+              v-model="loopCfg.mode"
+              :items="[
+                {
+                  title: t('aidj.settings.loop_mode_agent', 'Agent（工具检索曲库）'),
+                  value: 'agent'
+                },
+                {
+                  title: t('aidj.settings.loop_mode_text', '文本（整库注入提示词）'),
+                  value: 'text'
+                }
+              ]"
+              :label="t('aidj.settings.loop_mode', '循环模式')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-select
+              v-model="loopCfg.library_order"
+              :items="[
+                { title: t('aidj.settings.loop_order_emotion', '按情绪分组'), value: 'emotion' },
+                { title: t('aidj.settings.loop_order_genre', '按风格分组'), value: 'genre' },
+                { title: t('aidj.settings.loop_order_alpha', '字母序（旧）'), value: 'alpha' }
+              ]"
+              :label="t('aidj.settings.loop_order', '曲库排列')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.max_per_artist"
+              :label="t('aidj.settings.loop_max_per_artist', '每批同歌手上限（0 = 不限）')"
+              type="number"
+              min="0"
+              max="50"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.batch_size"
+              :label="t('aidj.settings.loop_batch_size', '每批歌曲数')"
+              type="number"
+              min="1"
+              max="50"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.refill_threshold"
+              :label="t('aidj.settings.loop_refill', '队列少于几首时补货')"
+              type="number"
+              min="1"
+              max="50"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.recent_window"
+              :label="t('aidj.settings.loop_recent', '参考最近几首')"
+              type="number"
+              min="0"
+              max="100"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.max_steps"
+              :disabled="loopCfg.mode !== 'agent'"
+              :label="t('aidj.settings.loop_max_steps', 'Agent 每批最多工具轮数')"
+              type="number"
+              min="1"
+              max="40"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="8" class="switch-col">
+            <div class="d-flex align-center h-100 switch-align">
+              <v-switch
+                v-model="loopCfg.library_agent"
+                :disabled="loopCfg.mode !== 'agent'"
+                color="primary"
+                :label="
+                  t(
+                    'aidj.settings.loop_library_agent',
+                    '允许委派曲库子 Agent（由主 Agent 决定曲库范围）'
+                  )
+                "
+                hide-details
+              />
+            </div>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-select
+              v-model="loopCfg.filter_strength"
+              :disabled="loopCfg.mode !== 'agent'"
+              :items="[
+                {
+                  title: t('aidj.settings.loop_filter_light', '轻：只剔除明显矛盾的标签'),
+                  value: 'light'
+                },
+                {
+                  title: t('aidj.settings.loop_filter_medium', '中：剔除不合适的情绪/能量/语言'),
+                  value: 'medium'
+                },
+                {
+                  title: t('aidj.settings.loop_filter_strong', '强：只保留核心标签'),
+                  value: 'strong'
+                }
+              ]"
+              :label="t('aidj.settings.loop_filter_strength', '标签过滤力度')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model.number="loopCfg.candidate_factor"
+              :disabled="loopCfg.mode !== 'agent' || !loopCfg.rank_agent"
+              :label="t('aidj.settings.loop_candidate_factor', '候选倍数（候选数 = 每批 × 倍数）')"
+              type="number"
+              min="1"
+              max="4"
+              step="0.5"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="12" md="4" class="switch-col">
+            <div class="d-flex align-center h-100 switch-align">
+              <v-switch
+                v-model="loopCfg.rank_agent"
+                :disabled="loopCfg.mode !== 'agent'"
+                color="primary"
+                :label="t('aidj.settings.loop_rank_agent', 'RankAgent 排序并写 DJ 词')"
+                hide-details
+              />
+            </div>
+          </v-col>
+        </v-row>
+      </div>
+
+      <v-divider />
+
+      <div>
+        <div class="text-subtitle-2 mb-1">
+          {{ t('aidj.settings.web_search', '联网搜索（Tavily）') }}
+        </div>
+        <div class="text-caption text-medium-emphasis mb-3">
+          {{
+            t(
+              'aidj.settings.web_search_hint',
+              '开启后 AI 可以用 web_search 查歌手、歌曲、场景等资料（只用于理解请求，歌曲仍从曲库里选）。搜索词会发送到 Tavily。'
+            )
+          }}
+        </div>
+        <v-row dense>
+          <v-col cols="12" md="4" class="switch-col">
+            <div class="d-flex align-center h-100 switch-align">
+              <v-switch
+                v-model="webSearch.enabled"
+                color="primary"
+                :label="t('aidj.settings.web_search_enable', '允许 AI 联网搜索')"
+                hide-details
+              />
+            </div>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field
+              v-model="tavilyKey"
+              v-agent-forbidden
+              :label="t('aidj.settings.tavily_key', 'Tavily API Key')"
+              :placeholder="
+                tavilySet
+                  ? t('aidj.settings.key_set_ph', '已设置（加密保存，不回显）— 输入新值即替换')
+                  : ''
+              "
+              persistent-placeholder
+              type="password"
+              autocomplete="off"
+              hide-details
+              density="compact"
+              variant="outlined"
+            >
+              <template v-if="tavilySet" #append-inner>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.settings.key_clear', '清除已保存的密钥')"
+                  :aria-label="t('aidj.settings.key_clear', '清除已保存的密钥')"
+                  @click="clearTavilyKey"
+                >
+                  <v-icon size="16">mdi-key-remove</v-icon>
+                </v-btn>
+              </template>
+            </v-text-field>
+          </v-col>
+          <v-col cols="6" md="2">
+            <v-text-field
+              v-model.number="webSearch.max_results"
+              type="number"
+              min="1"
+              max="10"
+              :label="t('aidj.settings.web_search_max', '结果数')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+          <v-col cols="6" md="2">
+            <v-select
+              v-model="webSearch.depth"
+              :items="[
+                { title: t('aidj.settings.web_search_basic', '基础'), value: 'basic' },
+                { title: t('aidj.settings.web_search_advanced', '深入'), value: 'advanced' }
+              ]"
+              :label="t('aidj.settings.web_search_depth', '搜索深度')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
+          </v-col>
+        </v-row>
+        <div
+          v-if="webSearch.enabled && !tavilySet && !tavilyKey.trim()"
+          class="text-caption text-warning mt-2"
+        >
+          {{ t('aidj.settings.web_search_need_key', '还没有填 Tavily API Key，联网搜索不会启用') }}
+        </div>
       </div>
 
       <v-divider />

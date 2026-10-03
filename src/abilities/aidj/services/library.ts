@@ -1,4 +1,6 @@
 import { readFile, readdir, appendFile } from 'fs/promises'
+import { loadActiveVocab } from '../sanitize/store'
+import { applyVocab } from '../sanitize/vocab'
 import { join, extname } from 'path'
 import { makeLogger } from '../../../main/process/logger'
 import type { SongMeta } from '../types'
@@ -265,7 +267,11 @@ export async function appendMetadata(
   const filePath = targetSlotOrPath?.includes('/')
     ? targetSlotOrPath
     : await getActiveWriteSlotPath(targetSlotOrPath)
-  const line = JSON.stringify({ name, metadata: meta }) + '\n'
+  // Forward: while sanitized metadata is in use, new songs conform to its
+  // vocabulary (mapped in code; tags outside it are dropped, language → unknown).
+  const vocab = await loadActiveVocab()
+  const clean = vocab ? applyVocab(meta, vocab).meta : meta
+  const line = JSON.stringify({ name, metadata: clean }) + '\n'
   await appendFile(filePath, line, 'utf-8')
   invalidateSlotCache(filePath)
 }

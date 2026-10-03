@@ -19,7 +19,7 @@ import {
 } from '../service'
 import { getActiveBackend, getPlayerMode, WebPlayerBackend } from '../player-backend'
 import { DEFAULT_AIDJ_CONFIG } from '../types'
-import type { AidjLyricsPageConfig } from '../types'
+import type { AidjConfig, AidjLyricsPageConfig } from '../types'
 import { loadTimeStats, queryTimeRange } from '../listening-stats'
 import {
   state,
@@ -38,7 +38,15 @@ export const configLyricsCommands: CommandSpec[] = [
       if (!state.config) {
         state.config = await loadAidjConfig()
       }
-      return { ok: true, config: state.config }
+      if (!state.config) return { ok: true, config: null }
+      // Keys are write-only: the UI only learns whether each one is set.
+      const view = JSON.parse(JSON.stringify(state.config)) as AidjConfig
+      const secretsSet = {
+        api_key: !!state.config.secrets?.api_key,
+        tavily: !!state.config.secrets?.tavily?.api_key
+      }
+      view.secrets = { api_key: '', ...(secretsSet.tavily ? { tavily: { api_key: '' } } : {}) }
+      return { ok: true, config: view, secretsSet }
     }
   },
   {

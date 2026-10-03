@@ -1,5 +1,5 @@
 import type { CommandSpec } from '../../../main/process/commands/types'
-import { saveAidjConfig } from '../service'
+import { saveAidjConfig, loadAidjConfig, DJSession } from '../service'
 import {
   getContinuousTasks,
   getContinuousTask,
@@ -17,6 +17,13 @@ import {
   chatResendPlaylist
 } from '../jobs'
 import { state, DBUS_ONLY } from './shared'
+import { resolveLoopPolicy } from '../loop/policy'
+import { resolveLoopPrompts } from '../loop/prompts'
+import { activeDjTools } from '../loop/agent/tools'
+import { resolvePlaybooks } from '../loop/agent/playbooks'
+import { AGENT_ROLES, agentModel } from '../loop/models'
+import '../loop/agent/builtin-tools'
+import '../loop/agent/web-search'
 
 export const chatContinuousCommands: CommandSpec[] = [
   {
@@ -102,6 +109,69 @@ export const chatContinuousCommands: CommandSpec[] = [
         return { ok: false, error: '--songs 不是合法 JSON' }
       }
       return await chatResendPlaylist(taskId, songs as { name: string; path: string }[])
+    }
+  },
+  {
+    name: 'aidj.loop-preview',
+    description:
+      '预览持续会话下一批将发给 AI 的内容（不调用 AI）：循环模式、阶段、批次指令、系统提示、可用工具与生效的 loop 参数。调 preferences.loop / loop_prompts 时用它核对效果',
+    usage: 'aidj.loop-preview [--task <持续会话任务 id>] [--system true]',
+    ui: ['AIDJ 设置 · AI 循环'],
+    related: ['job:aidj.chat', 'aidj.chat', 'aidj.update-config'],
+    run: async (ctx) => {
+      const taskId = ctx.named.task as string | undefined
+      const withSystem = String(ctx.named.system ?? '') === 'true'
+      const config = await loadAidjConfig()
+      if (!config) return { ok: false, error: 'AIDJ 配置未找到' }
+      const policy = resolveLoopPolicy(config)
+      const tools = activeDjTools(policy, config).map((t) => t.name)
+      const playbooks = resolvePlaybooks(config, policy)
+      const playbookIds = playbooks.map((p) => p.id)
+      if (!taskId) {
+        return {
+          ok: true,
+          running: false,
+          policy,
+          tools,
+          playbooks: playbookIds,
+          prompts: resolveLoopPrompts(config)
+        }
+      }
+      const st = getChatTask(taskId)
+      if (!st) return { ok: false, error: '持续会话未运行' }
+      const session = st.session
+      // Preview with the latest on-disk tunables, like the next real fetch.
+      session.config.preferences.loop = config.preferences.loop
+      session.config.preferences.loop_prompts = config.preferences.loop_prompts
+      const plan = session.planNextBatch()
+      let system: string | undefined
+      if (withSystem) {
+        const helper = new DJSession(
+          {} as never,
+          session.metadata,
+          session.musicPaths,
+          session.config
+        )
+        const full =
+          session.mode === 'agent'
+            ? helper.buildAgentSystemPrompt(playbooks)
+            : helper.buildSystemPrompt()
+        system = full.length > 20_000 ? `${full.slice(0, 20_000)}\n…(${full.length} chars)` : full
+      }
+      return {
+        ok: true,
+        running: true,
+        mode: session.mode,
+        phase: plan.phase,
+        batch: session.fetchCount + 1,
+        capArtists: plan.capArtists,
+        policy,
+        tools: session.mode === 'agent' ? tools : [],
+        models: Object.fromEntries(AGENT_ROLES.map((r) => [r, agentModel(session.config, r)])),
+        playbooks: session.mode === 'agent' ? playbookIds : [],
+        prompt: plan.prompt,
+        system
+      }
     }
   },
   {

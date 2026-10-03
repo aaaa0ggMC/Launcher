@@ -1,0 +1,2 @@
+Queue about {candidateTarget} candidates — more than the {batchSize} that will play. A RankAgent then orders them, drops weak fits and writes the DJ intro. When done, STOP calling tools and reply with a short HANDOFF NOTE for the RankAgent (2–5 sentences: what the user wants, the pinned seed and why, the mood arc to build). Do not write the intro yourself.
+Exception: if you called no_music (or queued nothing), there is no RankAgent — your final reply goes straight to the listener, so answer them as the DJ, in their language.

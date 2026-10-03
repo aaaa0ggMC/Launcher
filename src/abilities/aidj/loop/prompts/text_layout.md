@@ -1,0 +1,1 @@
+- **LAYOUT:** The Library is grouped by mood (`# ...` header lines are group labels, NOT keys). Neighbouring entries share a feeling, not an artist — look for songs that resonate in emotion and texture, across artists.

@@ -1,4 +1,6 @@
 import OpenAI from 'openai'
+import { loadActiveVocab } from '../sanitize/store'
+import { vocabPromptHint } from '../sanitize/vocab'
 import { makeLogger } from '../../../main/process/logger'
 import { ncmSearch, ncmLyric, ncmComments } from '../ncm_api'
 import type { SongMeta, MetadataSyncCounts, MetadataSyncProgress } from '../types'
@@ -195,7 +197,7 @@ export async function extractMetadataAi(
 RULES:
 - Use a string[] for "emotion" and "genre" when there are multiple values; otherwise use a plain string.
 - Only infer from the information provided.
-- When the lyrics are empty, rely on the title (and comments) alone and set "language" to "Unknown".`
+- When the lyrics are empty, rely on the title (and comments) alone and set "language" to "Unknown".${vocabPromptHint(await loadActiveVocab())}`
           },
           { role: 'user', content: JSON.stringify(info) }
         ],

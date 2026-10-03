@@ -1,4 +1,5 @@
 import type { CommandSpec } from '../../../main/process/commands/types'
+import { emptyUsage } from '../loop/usage'
 import { getBroadcast } from '../../../main/process/broadcast'
 import { listTasks, startJobByName } from '../../../main/process/background-tasks'
 import { CHAT_COMMANDS } from '../components/chat-commands'
@@ -20,7 +21,8 @@ import {
   computeRawKeep,
   rawToChatHistory,
   rawToRollingHistory,
-  abortCurrentRequest
+  abortCurrentRequest,
+  restoreUsage
 } from './shared'
 
 export const sessionsCommands: CommandSpec[] = [
@@ -53,8 +55,7 @@ export const sessionsCommands: CommandSpec[] = [
       st.session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       st.session.rollingHistory = rawToRollingHistory(kept)
       st.session.fetchCount = sysPrompt ? Math.max(1, bothCount) : 0
-      st.session.promptTokens = 0
-      st.session.completionTokens = 0
+      restoreUsage(st.session, kept)
       st.session.pendingUserPrompt = null
       st.session.buffer = []
       st.session.currentQueue = []
@@ -111,9 +112,8 @@ export const sessionsCommands: CommandSpec[] = [
       state.session.chatHistory = sysPrompt ? [sysPrompt, ...rebuilt] : rebuilt
       state.session.playedSongs = new Set(rawToRollingHistory(kept))
       state.session.turnCount = sysPrompt ? Math.max(1, bothCount) : 0
-      state.session.promptTokens = 0
-      state.session.completionTokens = 0
-      return { ok: true, kept }
+      const restored = restoreUsage(state.session, kept)
+      return { ok: true, kept, ...restored }
     }
   },
   {
@@ -162,7 +162,8 @@ export const sessionsCommands: CommandSpec[] = [
           // load — stream progress to the renderer so it can animate instead
           // of appearing frozen.
           getBroadcast()('cockpit:aidj-session-progress', { id, done, total })
-        }
+        },
+        { withWorkflow: true }
       )
       // AI context keeps EVERY persisted line: raw assistant text (separator
       // included), user requests, and `updated` system markers (compact/drop
@@ -178,15 +179,23 @@ export const sessionsCommands: CommandSpec[] = [
       ]
       session.playedSongs = new Set(rawToRollingHistory(raw))
       session.turnCount = Math.max(1, bothCount)
-      session.promptTokens = 0
-      session.completionTokens = 0
-      session.lastPromptTokens = 0
-      session.lastCompletionTokens = 0
+      const restored = restoreUsage(session, raw)
       state.session = session
       state.sessionId = id
       abortCurrentRequest()
-      log.info('Session loaded', { id, messages: uiMessages.length, bothCount })
-      return { ok: true, messages: uiMessages, sessionId: id, memory: session.playedSongs.size }
+      log.info('Session loaded', {
+        id,
+        messages: uiMessages.length,
+        bothCount,
+        tokens: restored.tokens.prompt + restored.tokens.completion
+      })
+      return {
+        ok: true,
+        messages: uiMessages,
+        sessionId: id,
+        memory: session.playedSongs.size,
+        ...restored
+      }
     }
   },
   {
@@ -221,12 +230,11 @@ export const sessionsCommands: CommandSpec[] = [
       ]
       session.playedSongs = new Set(rawToRollingHistory(raw))
       session.turnCount = Math.max(1, raw.filter((m) => m.type === 'both').length)
-      session.promptTokens = 0
-      session.completionTokens = 0
+      const restored = restoreUsage(session, raw)
       state.session = session
       state.sessionId = newId
       abortCurrentRequest()
-      return { ...base, messages: uiMessages }
+      return { ...base, messages: uiMessages, ...restored }
     }
   },
   {
@@ -243,6 +251,7 @@ export const sessionsCommands: CommandSpec[] = [
         if (s) {
           s.refresh(true)
           s.promptTokens = 0
+          s.usage = emptyUsage()
           s.completionTokens = 0
           s.lastPromptTokens = 0
           s.lastCompletionTokens = 0
@@ -364,6 +373,7 @@ export const sessionsCommands: CommandSpec[] = [
         // 否则新会话会继承上一个会话的已播曲目、历史与 token 计数。
         session.refresh(true)
         session.promptTokens = 0
+        session.usage = emptyUsage()
         session.completionTokens = 0
         session.lastPromptTokens = 0
         session.lastCompletionTokens = 0
@@ -398,11 +408,16 @@ export const sessionsCommands: CommandSpec[] = [
   },
   {
     name: 'aidj.stream-status',
-    description: '获取当前流式生成的字符数',
-    ui: ['AIDJ 聊天框 /pr'],
-    run: async () => {
+    description:
+      '获取当前即时生成的进度：流式字符数、重试状态，以及 Agent 模式的 workflow 事件（--since N 只取第 N 条之后的增量）',
+    usage: 'aidj.stream-status [--since <n>]',
+    ui: ['AIDJ 聊天框 /pr', 'AIDJ 聊天框 workflow 卡片'],
+    run: async (ctx) => {
+      const since = Math.max(0, Number(ctx.named.since) || 0)
       return {
         ok: true,
+        workflow: state.workflow.slice(since),
+        workflowTotal: state.workflow.length,
         chars: state.streamingChars,
         retrying: state.retrying,
         retryAttempt: state.retryAttempt,

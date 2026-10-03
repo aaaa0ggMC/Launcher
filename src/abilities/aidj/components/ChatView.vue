@@ -13,8 +13,9 @@ import {
 import { translate, translateTemplate } from '../../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
+import { usageOfEvents } from './workflow-view'
+import { emptyUsage, mergeUsage, type UsageBreakdown } from '../loop/usage'
 import ContextMenu from './ContextMenu.vue'
-import ModelSelect from './ModelSelect.vue'
 import ChatSlashPopup from './ChatSlashPopup.vue'
 import ChatStatusBar from './ChatStatusBar.vue'
 import { filterChatCommands, applyChatCommand } from './chat-commands'
@@ -423,7 +424,23 @@ async function runFilterCommand(query: string, userText: string): Promise<void> 
 }
 
 const playerStatus = ref<PlayerStatus>({ status: 'Unknown', track: '', volume: null, player: '' })
-const lastTokens = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
+const lastTokens = ref<UsageBreakdown>(emptyUsage())
+/** Usage of the request in flight (agent workflow), shown on top of lastTokens live. */
+const liveUsage = ref<UsageBreakdown | null>(null)
+/** Apply the token counters a session command restored from history. */
+function applyRestored(r: {
+  tokens?: UsageBreakdown
+  context?: { prompt: number; completion: number }
+}): void {
+  liveUsage.value = null
+  lastTokens.value = r.tokens
+    ? { ...emptyUsage(), ...r.tokens, byAgent: r.tokens.byAgent ?? {} }
+    : emptyUsage()
+  lastContext.value = r.context ?? { prompt: 0, completion: 0 }
+}
+const shownTokens = computed<UsageBreakdown>(() =>
+  liveUsage.value ? mergeUsage(lastTokens.value, liveUsage.value) : lastTokens.value
+)
 const lastContext = ref<{ prompt: number; completion: number }>({ prompt: 0, completion: 0 })
 const sbTracks = ref<number | null>(null)
 const sbMemory = ref(0)
@@ -827,6 +844,19 @@ async function sendMessage(): Promise<void> {
   scrollToBottom()
 
   sending.value = true
+  // Agent workflow events of this request, pulled incrementally with the
+  // stream status and shown as a live card above the reply.
+  const wfEvents: Record<string, unknown>[] = []
+  const takeWorkflow = (r: Record<string, unknown> | null): void => {
+    if (!r?.ok || !Array.isArray(r.workflow) || !r.workflow.length) return
+    wfEvents.push(...(r.workflow as Record<string, unknown>[]))
+    const m = messages.value[placeholderIdx]
+    if (m) m.workflow = [...wfEvents]
+    // Live tokens: every finished LLM call of this request; context = latest LoopAgent call.
+    const { total, lastLoop } = usageOfEvents(wfEvents)
+    liveUsage.value = total
+    if (lastLoop) lastContext.value = { prompt: lastLoop.prompt, completion: lastLoop.completion }
+  }
   let charTimer: ReturnType<typeof setInterval> | null = null
   charTimer = setInterval(async () => {
     if (!sending.value) {
@@ -834,7 +864,10 @@ async function sendMessage(): Promise<void> {
       return
     }
     try {
-      const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
+      const r = (await window.cockpit.command('aidj.stream-status', {
+        since: wfEvents.length
+      })) as Record<string, unknown>
+      takeWorkflow(r)
       if (r?.ok) {
         const msg = messages.value[placeholderIdx]
         if (!msg) return
@@ -854,8 +887,24 @@ async function sendMessage(): Promise<void> {
       prompt: text
     })) as Record<string, unknown>
     if (messages.value[placeholderIdx] == null) return
+    // Final events (the poll may have missed the last few).
+    takeWorkflow(
+      (await window.cockpit
+        .command('aidj.stream-status', { since: wfEvents.length })
+        .catch(() => null)) as Record<string, unknown> | null
+    )
+    const workflow = wfEvents.length ? [...wfEvents] : undefined
     if (result?.ok) {
-      if (result.tokens) lastTokens.value = result.tokens as { prompt: number; completion: number }
+      liveUsage.value = null
+      if (result.tokens) {
+        const tk = result.tokens as Partial<UsageBreakdown>
+        lastTokens.value = {
+          prompt: tk.prompt ?? 0,
+          completion: tk.completion ?? 0,
+          cached: tk.cached ?? 0,
+          byAgent: tk.byAgent ?? {}
+        }
+      }
       if (result.context)
         lastContext.value = result.context as { prompt: number; completion: number }
       const pl = result.playlist as { name: string; path: string }[] | undefined
@@ -866,14 +915,16 @@ async function sendMessage(): Promise<void> {
           content: (result.intro as string) || t('aidj.chat.playlist_recommended', '推荐歌单'),
           playlist: pl as ChatMessage['playlist'],
           timestamp: Date.now(),
-          uid: placeholderUid ?? makeUid()
+          uid: placeholderUid ?? makeUid(),
+          workflow
         }
       } else if (result.intro) {
         messages.value[placeholderIdx] = {
           role: 'assistant',
           content: result.intro as string,
           timestamp: Date.now(),
-          uid: placeholderUid ?? makeUid()
+          uid: placeholderUid ?? makeUid(),
+          workflow
         }
         messages.value.push({
           role: 'system',
@@ -886,7 +937,8 @@ async function sendMessage(): Promise<void> {
           role: 'assistant',
           content: t('aidj.chat.no_output', '（AI 无输出）'),
           timestamp: Date.now(),
-          uid: placeholderUid ?? makeUid()
+          uid: placeholderUid ?? makeUid(),
+          workflow
         }
       }
     } else {
@@ -894,7 +946,8 @@ async function sendMessage(): Promise<void> {
         role: 'assistant',
         content: `错误: ${(result?.error as string) || t('aidj.chat.request_failed', '请求失败')}`,
         timestamp: Date.now(),
-        uid: messages.value[placeholderIdx]?.uid ?? makeUid()
+        uid: messages.value[placeholderIdx]?.uid ?? makeUid(),
+        workflow
       }
     }
   } catch (e: unknown) {
@@ -909,6 +962,11 @@ async function sendMessage(): Promise<void> {
   } finally {
     if (charTimer) clearInterval(charTimer)
     sending.value = false
+    // Failed / aborted request: what was already spent still counts.
+    if (liveUsage.value) {
+      lastTokens.value = mergeUsage(lastTokens.value, liveUsage.value)
+      liveUsage.value = null
+    }
     scrollToBottom()
   }
 }
@@ -1095,6 +1153,8 @@ async function runPersistCommand(prompt: string): Promise<void> {
         role: m.role,
         content: m.content,
         playlist: m.playlist ? JSON.parse(JSON.stringify(m.playlist)) : undefined,
+        // UI-only workflow cards travel along for the background view's replay.
+        workflow: m.workflow ? JSON.parse(JSON.stringify(m.workflow)) : undefined,
         timestamp: m.timestamp
       })),
       { role: 'user', content: prompt, timestamp: Date.now() }
@@ -1218,7 +1278,12 @@ async function doRevert(): Promise<void> {
   }
   const removed = messages.value.splice(idx)
   try {
-    await window.cockpit.command('aidj.revert', { keep })
+    const rv = (await window.cockpit.command('aidj.revert', { keep })) as {
+      tokens?: UsageBreakdown
+      context?: { prompt: number; completion: number }
+    }
+    // Counters now cover only the kept turns.
+    if (rv) applyRestored(rv)
   } catch (e) {
     messages.value.splice(idx, 0, ...removed)
     showSnack(`回退失败: ${e instanceof Error ? e.message : String(e)}`, 'error')
@@ -1261,6 +1326,8 @@ async function doFork(): Promise<void> {
     title?: string
     messages?: ChatMessage[]
     error?: string
+    tokens?: UsageBreakdown
+    context?: { prompt: number; completion: number }
   }
   if (!r?.ok) {
     showSnack(r?.error || t('aidj.chat.fork_failed', '分支失败'), 'error')
@@ -1270,9 +1337,8 @@ async function doFork(): Promise<void> {
   windowSize.value = 60
   inputText.value = ''
   sending.value = false
-  // 分支后成为新会话：token 计数归零，memory 由 pollStatus 拉取。
-  lastTokens.value = { prompt: 0, completion: 0 }
-  lastContext.value = { prompt: 0, completion: 0 }
+  // 分支后成为新会话：token 计数 = 保留下来的那几轮（从会话记录恢复），memory 由 pollStatus 拉取。
+  applyRestored(r)
   scrollToBottom()
   showSnack(`已分支为「${r.title || 'Copy'}」，从此处继续`)
 }
@@ -1319,7 +1385,14 @@ async function loadSession(sessionId: string): Promise<boolean> {
   try {
     const result = (await window.cockpit.command('aidj.sessions.open', {
       id: sessionId
-    })) as { ok?: boolean; error?: string; messages?: ChatMessage[]; memory?: number }
+    })) as {
+      ok?: boolean
+      error?: string
+      messages?: ChatMessage[]
+      memory?: number
+      tokens?: UsageBreakdown
+      context?: { prompt: number; completion: number }
+    }
     if (!result?.ok) {
       showSnack(result?.error || t('aidj.chat.session_load_failed', '会话加载失败'), 'error')
       return false
@@ -1332,10 +1405,9 @@ async function loadSession(sessionId: string): Promise<boolean> {
     sending.value = false
     inputText.value = ''
     expanded.value = false
-    // 载入另一个会话：token 计数归零（后端已重置），memory 立即反映
-    // 新会话已播记忆（最近 100 首），不再残留上一个会话的计数。
-    lastTokens.value = { prompt: 0, completion: 0 }
-    lastContext.value = { prompt: 0, completion: 0 }
+    // 载入另一个会话：token 计数从会话记录恢复（后端已同步），memory 立即反映
+    // 新会话已播记忆，不再残留上一个会话的计数。
+    applyRestored(result)
     if (typeof result.memory === 'number') sbMemory.value = result.memory
     scrollToBottom()
     showSnack(t('aidj.chat.session_loaded', '已载入会话'))
@@ -1372,7 +1444,7 @@ async function newChat(): Promise<void> {
   thinking.value = false
   // 换 session 后状态栏立即归零：memory 与 token 计数不能残留上一个会话的值。
   sbMemory.value = 0
-  lastTokens.value = { prompt: 0, completion: 0 }
+  lastTokens.value = emptyUsage()
   lastContext.value = { prompt: 0, completion: 0 }
   scrollToBottom()
   showSnack(t('aidj.chat_new', '已新建会话'))
@@ -1516,7 +1588,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
       <div ref="contentRef" class="overlay-content">
         <ChatStatusBar
           :visible-status="visibleStatus"
-          :last-tokens="lastTokens"
+          :last-tokens="shownTokens"
           :last-context="lastContext"
           :tracks="sbTracks"
           :memory="sbMemory"
@@ -1531,8 +1603,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
         />
 
         <div v-if="!expanded" class="input-bar d-flex ga-2 align-center px-4 pb-3">
-          <ModelSelect class="model-select-inline flex-shrink-0" />
-
           <div class="textarea-wrap flex-grow-1">
             <v-textarea
               v-model="inputText"
@@ -1582,8 +1652,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 
         <div v-else class="expanded-panel d-flex flex-column flex-grow-1">
           <div class="d-flex align-center ga-2 px-4 pt-1">
-            <ModelSelect class="model-select-inline flex-shrink-0" />
-
             <v-spacer />
 
             <v-btn
@@ -1751,9 +1819,6 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 .expanded-textarea-wrap :deep(.v-textarea) textarea {
   height: 100% !important;
   max-height: none !important;
-}
-.model-select-inline {
-  width: 180px;
 }
 .session-loading {
   position: absolute;

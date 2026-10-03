@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { ref, inject, type Ref } from 'vue'
 import { translate } from '../../../main/ui/i18n'
+import UsageBreakdownView from './UsageBreakdown.vue'
+import type { UsageBreakdown } from '../loop/usage'
 
 defineProps<{
   visibleStatus: string[]
-  lastTokens: { prompt: number; completion: number }
+  lastTokens: {
+    prompt: number
+    completion: number
+    cached?: number
+    byAgent?: UsageBreakdown['byAgent']
+  }
   lastContext: { prompt: number; completion: number }
   tracks: number | null
   memory: number
@@ -43,17 +50,30 @@ function onClearMemoryConfirm(): void {
   <div class="aidj-status-bar">
     <template v-for="key in visibleStatus" :key="key">
       <template v-if="key === 'tokens'">
-        <v-chip
-          variant="flat"
-          size="small"
-          class="status-chip is-on"
-          :title="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
-        >
-          <span class="status-label">Tokens</span
-          ><span class="status-value">{{
-            formatTokens(lastTokens.prompt + lastTokens.completion)
-          }}</span>
-        </v-chip>
+        <v-tooltip location="top" :open-delay="150">
+          <template #activator="{ props: tip }">
+            <v-chip
+              v-bind="tip"
+              variant="flat"
+              size="small"
+              class="status-chip is-on"
+              :aria-label="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
+            >
+              <span class="status-label">Tokens</span
+              ><span class="status-value">{{
+                formatTokens(lastTokens.prompt + lastTokens.completion)
+              }}</span>
+            </v-chip>
+          </template>
+          <UsageBreakdownView
+            :usage="{
+              prompt: lastTokens.prompt,
+              completion: lastTokens.completion,
+              cached: lastTokens.cached ?? 0,
+              byAgent: lastTokens.byAgent ?? {}
+            }"
+          />
+        </v-tooltip>
       </template>
 
       <template v-else-if="key === 'context'">

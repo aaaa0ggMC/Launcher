@@ -3,7 +3,11 @@ export interface AidjConfig {
   /** Folders scanned (recursively) for `.lrc` lyric files, shown in the desktop-lyrics window. */
   lyrics_folders?: string[]
   ncm_base_url: string
-  secrets: { api_key: string }
+  secrets: {
+    api_key: string
+    /** Tavily web search (key named `api_key` so agent reads are always redacted). */
+    tavily?: { api_key?: string }
+  }
   ai_settings: {
     base_url: string
     metadata_model: string
@@ -92,6 +96,16 @@ export interface AidjConfig {
     start_from_now_template?: string
     /** 自定义 Bilibili 凭据文件路径（可选，未指定时优先读取 Cockpit 配置目录，后回退 ~/Apps/bili_info.json）。 */
     bili_credential_path?: string
+    /** Web search tool for the DJ agent (Tavily; key in `secrets.tavily.api_key`). */
+    web_search?: { enabled?: boolean; max_results?: number; depth?: 'basic' | 'advanced' }
+    /** Model per agent (loop / lib / dream / rank); empty = follow `model`. See `loop/models.ts`. */
+    agent_models?: Partial<Record<import('./loop/models').AgentRole, string>>
+    /** Persistent DJ loop knobs (refill, batch size, artist cap, library order…) — see `loop/policy.ts`. */
+    loop?: Partial<import('./loop/policy').LoopPolicy>
+    /** Persistent DJ loop prompt template overrides — see `loop/prompts.ts`. */
+    loop_prompts?: Partial<import('./loop/prompts').LoopPrompts>
+    /** Extra / overriding playbooks (范式) of the agent loop — see `loop/agent/playbooks.ts`. */
+    loop_playbooks?: import('./loop/agent/playbooks').DjPlaybook[]
   }
 }
 
@@ -328,11 +342,33 @@ export const DEFAULT_LYRICS_PAGE_CFG: AidjLyricsPageConfig = {
 }
 
 /** Built-in DJ persona. Users can override it via `preferences.persona`. */
-export const DEFAULT_PERSONA = `You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
+export const DEFAULT_PERSONA = `You are the host of the listener's personal radio station — a friend with deep, wide music knowledge, not a showman.
+
+VOICE
+- Warm, natural and precise. Talk like a person, not an advert: no slogans, no invented show names or catchphrases, no hype.
+- Concrete over decorative: say what you actually hear (tempo, instruments, voice, production, era, mood) and why the tracks sit well together. At most one image or metaphor per paragraph.
+- Brief by default: a batch intro is 2–4 sentences (about 120 words / 200 Chinese characters). Go longer only when the listener asks.
+- Mention a few tracks that define the batch, not every one — the track list is shown separately.
+- Formatting: plain prose. Bold at most one short phrase, no headings, no emoji unless the listener uses them.
+
+HONESTY
+- Never invent facts about artists, songs, releases, charts or news. If unsure, say so or leave it out; separate confirmed facts from rumours.
+
+CONVERSATION
+- Match the listener's language and register. Answer questions directly first; offer music afterwards, never push it.`
+
+export const LEGACY_DEFAULT_PERSONAS = [
+  `You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
+Your goal is not just to list songs, but to **curate an experience**.
+- **Personality:** Passionate, poetic, slightly "hyped" or "deep" (depending on the mood), and vibe-focused.
+- **Rule:** BE EXPRESSIVE. Do NOT give short, robotic responses like "Here is your list."
+- **Method:** Weave a narrative. Talk about the *texture* of the sound, the *emotion* each song carries, and *why* these songs resonate with each other and with the moment.`,
+  `You are a **charismatic, knowledgeable, and expressive AI Radio Host**.
 Your goal is not just to list songs, but to **curate an experience**.
 - **Personality:** Passionate, poetic, slightly "hyped" or "deep" (depending on the mood), and vibe-focused.
 - **Rule:** BE EXPRESSIVE. Do NOT give short, robotic responses like "Here is your list."
 - **Method:** Weave a narrative. Talk about the *texture* of the sound, the *emotion* of the artists, and *why* these songs fit the moment.`
+]
 
 export interface SongMeta {
   language?: string
@@ -385,15 +421,24 @@ export interface ChatMessage {
   chars?: number
   /** Monotonic unique id for Vue key stability (timestamps can collide). */
   uid?: number
+  /** Agent workflow events behind this reply (shown as a workflow card; not persisted). */
+  workflow?: Record<string, unknown>[]
 }
 
-/** Raw history.jsonl entry. type: user=UI only, model=AI only, both=display+AI, updated=compact/drop marker. */
+/** Raw history.jsonl entry. type: user=UI only, model=AI only, both=display+AI, updated=compact/drop marker,
+ *  workflow=agent workflow events of the NEXT assistant line (UI replay only — never sent to the AI). */
 export interface RawHistoryMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   ts: number
-  type?: 'user' | 'model' | 'both' | 'updated'
+  type?: 'user' | 'model' | 'both' | 'updated' | 'workflow'
   playlist?: PlaylistEntry[]
+  /** type === 'workflow': the batch's events (tool results truncated). */
+  workflow?: Record<string, unknown>[]
+  /** Assistant lines: tokens spent on this turn (kernel + sub-agents), incl. cached. */
+  usage?: import('./loop/usage').UsageBreakdown
+  /** Assistant lines: input / output tokens of the turn's last request (Context / Completion). */
+  context?: { prompt: number; completion: number }
 }
 
 export interface SessionMeta {

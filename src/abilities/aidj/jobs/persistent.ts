@@ -92,6 +92,10 @@ registerJobHandler(
       type: 'chat'
     })
     session.sessionId = sessionId
+    session.lyrics = lib.lyrics
+    session.onAgentEvent = (e) => {
+      if (e.type === 'tool_call') control.pushLine(`🔧 ${e.name} ${JSON.stringify(e.args)}`)
+    }
     setPersistentSession(session)
 
     const ac = new AbortController()

@@ -1,0 +1,1 @@
+When the batch is complete, STOP calling tools and reply with the DJ intro only, in the voice and length the role definition asks for (brief by default). Do not list the tracks — the queue is shown to the listener separately. If you called no_music, simply answer the listener.

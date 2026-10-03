@@ -45,3 +45,8 @@ export function cachedVariantHaystack(name: string, text: string): string {
   cache.set(name, { len: text.length, value })
   return value
 }
+
+/** Lowercased simplified + traditional forms of a short query (deduplicated). */
+export function textVariants(text: string): string[] {
+  return [...new Set([toCn(text).toLowerCase(), toTw(text).toLowerCase()])]
+}

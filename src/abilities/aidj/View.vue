@@ -12,6 +12,8 @@ import {
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
+import AgentModelsPanel from './components/AgentModelsPanel.vue'
+import SanitizeView from './components/SanitizeView.vue'
 import FreqList from './components/FreqList.vue'
 import ListeningStatsView from './components/ListeningStatsView.vue'
 import MetadataSlotsView from './components/MetadataSlotsView.vue'
@@ -25,8 +27,13 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 const openBt = inject('cockpit:open-bt', null) as (() => void) | null
 
 const menuOpen = ref(false)
-const menuStep = ref<'main' | 'sessions' | 'freq' | 'slots' | 'bili'>('main')
+const menuStep = ref<'main' | 'sessions' | 'freq' | 'slots' | 'bili' | 'models'>('main')
 const statsOpen = ref(false)
+const sanitizeOpen = ref(false)
+function openSanitize(): void {
+  menuOpen.value = false
+  sanitizeOpen.value = true
+}
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 const mode = ref<'dbus' | 'web'>('dbus')
 let modeUnsub: (() => void) | null = null
@@ -544,6 +551,7 @@ defineExpose({ toMarkdown })
 <template>
   <div class="aidj-shell">
     <ListeningStatsView v-if="statsOpen" @close="statsOpen = false" />
+    <SanitizeView v-else-if="sanitizeOpen" @close="sanitizeOpen = false" />
     <template v-else>
       <ChatView ref="chatRef" />
 
@@ -557,7 +565,7 @@ defineExpose({ toMarkdown })
             v-if="menuOpen"
             class="page-menu-pop"
             :class="{
-              'is-wide': menuStep === 'freq',
+              'is-wide': menuStep === 'freq' || menuStep === 'models',
               'is-extra-wide': menuStep === 'slots' || menuStep === 'bili'
             }"
           >
@@ -573,6 +581,11 @@ defineExpose({ toMarkdown })
               <div class="menu-item" @click="enterSessions">
                 <v-icon size="18">mdi-history</v-icon>
                 <span>{{ t('aidj.subpage.sessions', '会话记录') }}</span>
+                <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
+              </div>
+              <div class="menu-item" @click="menuStep = 'models'">
+                <v-icon size="18">mdi-robot-outline</v-icon>
+                <span>{{ t('aidj.subpage.models', '模型细则') }}</span>
                 <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
               </div>
               <div class="menu-item" @click="menuStep = 'freq'">
@@ -593,6 +606,10 @@ defineExpose({ toMarkdown })
               <div class="menu-item" @click="statsOpen = true">
                 <v-icon size="18">mdi-calendar-month</v-icon>
                 <span>{{ t('aidj.subpage.listening_stats', '听歌时长统计') }}</span>
+              </div>
+              <div class="menu-item" @click="openSanitize">
+                <v-icon size="18">mdi-tag-multiple-outline</v-icon>
+                <span>{{ t('aidj.subpage.sanitize', '标签整理') }}</span>
               </div>
               <div class="menu-item" @click="updateMetadata">
                 <v-icon size="18">mdi-database-sync-outline</v-icon>
@@ -690,6 +707,26 @@ defineExpose({ toMarkdown })
                     </div>
                   </template>
                 </div>
+              </div>
+            </template>
+
+            <template v-else-if="menuStep === 'models'">
+              <div class="sessions-head d-flex align-center ga-2">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  :title="t('aidj.sessions.back', '返回')"
+                  @click="menuStep = 'main'"
+                >
+                  <v-icon size="18">mdi-arrow-left</v-icon>
+                </v-btn>
+                <span class="text-body-2 font-weight-medium">{{
+                  t('aidj.subpage.models', '模型细则')
+                }}</span>
+              </div>
+              <div class="models-scroll px-2 pt-2 pb-2">
+                <AgentModelsPanel compact />
               </div>
             </template>
 
@@ -853,6 +890,11 @@ defineExpose({ toMarkdown })
 }
 .page-menu-pop.is-wide {
   width: 460px;
+  max-width: 90vw;
+}
+.models-scroll {
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
 }
 .page-menu-pop.is-extra-wide {
   width: 520px;

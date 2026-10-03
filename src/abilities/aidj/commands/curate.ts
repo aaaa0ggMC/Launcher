@@ -29,8 +29,12 @@ import {
   pushPlaylistToSession,
   log,
   MAX_VARIANT_CACHE_BYTES,
-  AVG_VARIANT_ENTRY_BYTES
+  AVG_VARIANT_ENTRY_BYTES,
+  runInstantAgent
 } from './shared'
+import { resolveLoopPolicy } from '../loop/policy'
+import { diffUsage, emptyUsage, mergeUsage } from '../loop/usage'
+import { workflowHistoryLine } from '../loop/agent/workflow'
 
 export const curateCommands: CommandSpec[] = [
   {
@@ -40,7 +44,11 @@ export const curateCommands: CommandSpec[] = [
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
       const { session, config } = await ensureInit()
-      state.currentAbort = new AbortController()
+      const usageBefore = mergeUsage(emptyUsage(), session.usage)
+      // Keep our own controller: aidj.abort resets state.currentAbort, so checking
+      // the global afterwards would mistake an aborted request for a finished one.
+      const abort = new AbortController()
+      state.currentAbort = abort
       state.streamingChars = 0
       state.retrying = false
       state.retryAttempt = 0
@@ -48,26 +56,32 @@ export const curateCommands: CommandSpec[] = [
       state.retryStart = 0
       state.retryLastError = ''
       try {
-        const { playlist, intro, raw, updated } = await session.nextStep(
-          prompt,
-          (full: string) => {
-            if (state.retrying) {
-              state.retrying = false
-              state.retryLastError = ''
-            }
-            state.streamingChars = full.length
-          },
-          state.currentAbort.signal,
-          (attempt, waitMs, err) => {
-            state.retrying = true
-            state.retryAttempt = attempt
-            state.retryWaitMs = waitMs
-            state.retryStart = state.retryStart || Date.now()
-            state.retryLastError = err ? String(err instanceof Error ? err.message : err) : ''
-            state.streamingChars = 0
-          }
-        )
-        if (!state.currentAbort?.signal.aborted) {
+        const onRetry = (attempt: number, waitMs: number, err?: unknown): void => {
+          state.retrying = true
+          state.retryAttempt = attempt
+          state.retryWaitMs = waitMs
+          state.retryStart = state.retryStart || Date.now()
+          state.retryLastError = err ? String(err instanceof Error ? err.message : err) : ''
+          state.streamingChars = 0
+        }
+        // Agent mode: LoopAgent → RankAgent workflow (events polled by the chat view).
+        const agent = resolveLoopPolicy(config).mode === 'agent'
+        state.workflow = []
+        const { playlist, intro, raw, updated } = agent
+          ? await runInstantAgent(session, config, prompt, abort.signal, onRetry)
+          : await session.nextStep(
+              prompt,
+              (full: string) => {
+                if (state.retrying) {
+                  state.retrying = false
+                  state.retryLastError = ''
+                }
+                state.streamingChars = full.length
+              },
+              abort.signal,
+              onRetry
+            )
+        if (!abort.signal.aborted) {
           let wasNewSession = false
           if (!state.sessionId) {
             state.sessionId = await SessionManager.createSession({
@@ -78,16 +92,20 @@ export const curateCommands: CommandSpec[] = [
           }
           const rawMsgs: RawHistoryMessage[] = []
           if (updated) rawMsgs.push(updated)
-          rawMsgs.push(
-            { role: 'user', content: prompt, ts: Date.now(), type: 'user' },
-            {
-              role: 'assistant',
-              content: raw || intro || '',
-              ts: Date.now(),
-              type: 'both',
-              playlist
-            }
-          )
+          // UI-only: the agent workflow behind the reply (never sent to the AI).
+          const wfLine = agent ? workflowHistoryLine(state.workflow) : null
+          rawMsgs.push({ role: 'user', content: prompt, ts: Date.now(), type: 'user' })
+          if (wfLine) rawMsgs.push(wfLine)
+          rawMsgs.push({
+            role: 'assistant',
+            content: raw || intro || '',
+            ts: Date.now(),
+            type: 'both',
+            playlist,
+            // This turn's tokens + context, so reopening the session restores them.
+            usage: diffUsage(session.usage, usageBefore),
+            context: { prompt: session.lastPromptTokens, completion: session.lastCompletionTokens }
+          })
           await SessionManager.appendMessages(state.sessionId, rawMsgs)
           // Auto title: after the first AI output of a new session, fire the
           // background title job (if enabled). Otherwise the raw prompt slice stays.
@@ -119,11 +137,16 @@ export const curateCommands: CommandSpec[] = [
           ok: true,
           intro,
           playlist: enriched,
-          tokens: { prompt: session.promptTokens, completion: session.completionTokens },
+          tokens: {
+            prompt: session.promptTokens,
+            completion: session.completionTokens,
+            cached: session.usage.cached,
+            byAgent: session.usage.byAgent
+          },
           context: { prompt: session.lastPromptTokens, completion: session.lastCompletionTokens }
         }
       } finally {
-        state.currentAbort = null
+        if (state.currentAbort === abort) state.currentAbort = null
         state.streamingChars = 0
         state.retrying = false
         state.retryAttempt = 0
@@ -142,6 +165,7 @@ export const curateCommands: CommandSpec[] = [
       const count = Number(ctx.named.count)
       if (!Number.isFinite(count) || count <= 0) return { ok: false, error: '需要 --count 正整数' }
       const { session } = await ensureInit()
+      const usageBefore = mergeUsage(emptyUsage(), session.usage)
       const keys = [...session.musicPaths.keys()]
       if (!keys.length) return { ok: false, error: '曲库为空' }
       const n = Math.min(count, keys.length, 50)
@@ -149,7 +173,10 @@ export const curateCommands: CommandSpec[] = [
       if (pool.length < n) pool = keys
       const candidates = sampleNames(pool, n)
 
-      state.currentAbort = new AbortController()
+      // Keep our own controller: aidj.abort resets state.currentAbort, so checking
+      // the global afterwards would mistake an aborted request for a finished one.
+      const abort = new AbortController()
+      state.currentAbort = abort
       state.streamingChars = 0
       state.retrying = false
       state.retryAttempt = 0
@@ -170,7 +197,7 @@ export const curateCommands: CommandSpec[] = [
             }
             state.streamingChars = full.length
           },
-          state.currentAbort.signal,
+          abort.signal,
           (attempt, waitMs, err) => {
             state.retrying = true
             state.retryAttempt = attempt
@@ -180,7 +207,7 @@ export const curateCommands: CommandSpec[] = [
             state.streamingChars = 0
           }
         )
-        if (!state.currentAbort?.signal.aborted) {
+        if (!abort.signal.aborted) {
           if (!state.sessionId) {
             state.sessionId = await SessionManager.createSession({
               title: `/pr ${candidates.length}`,
@@ -196,7 +223,12 @@ export const curateCommands: CommandSpec[] = [
               content: raw || intro || '',
               ts: Date.now(),
               type: 'both',
-              playlist
+              playlist,
+              usage: diffUsage(session.usage, usageBefore),
+              context: {
+                prompt: session.lastPromptTokens,
+                completion: session.lastCompletionTokens
+              }
             }
           )
           await SessionManager.appendMessages(state.sessionId, rawMsgs)
@@ -210,7 +242,7 @@ export const curateCommands: CommandSpec[] = [
         }
         return { ok: true, intro, playlist: enriched }
       } finally {
-        state.currentAbort = null
+        if (state.currentAbort === abort) state.currentAbort = null
         state.streamingChars = 0
         state.retrying = false
         state.retryAttempt = 0

@@ -1,6 +1,8 @@
 import type OpenAI from 'openai'
 import type { SongMeta } from '../types'
 import { makeLogger } from '../../../main/process/logger'
+import { loadActiveVocab } from '../sanitize/store'
+import { vocabPromptHint } from '../sanitize/vocab'
 
 const log = makeLogger('bili-metadata-ai')
 
@@ -50,7 +52,7 @@ export async function extractBiliMetadataAi(
 RULES:
 - Always respond in valid JSON format.
 - "song_title" must never be empty (fallback to a cleaned video title).
-- "artist" must never be empty. If the exact singer/artist is not identified, replace it with clues from the title/description such as anime/animation/franchise name; if completely unknown, fallback to "Unknown". Do NOT fallback to reposter/curator uploaders.`
+- "artist" must never be empty. If the exact singer/artist is not identified, replace it with clues from the title/description such as anime/animation/franchise name; if completely unknown, fallback to "Unknown". Do NOT fallback to reposter/curator uploaders.${vocabPromptHint(await loadActiveVocab())}`
 
   const resp = await client.chat.completions.create(
     {

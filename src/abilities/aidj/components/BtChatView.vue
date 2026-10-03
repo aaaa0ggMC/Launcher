@@ -2,10 +2,19 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import type { BtTaskInfo, BtOutputMessage } from '@shared/types'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
-import ModelSelect from './ModelSelect.vue'
+import WorkflowCard from './WorkflowCard.vue'
+import {
+  buildWorkflows,
+  isWorkflowEvent,
+  runningWorkflow,
+  usageOfEvents,
+  type WfView
+} from './workflow-view'
+import UsageBreakdownView from './UsageBreakdown.vue'
+import { mergeUsage, type UsageBreakdown } from '../loop/usage'
 
 defineOptions({ name: 'AidjBtChatView' })
 
@@ -18,11 +27,35 @@ const props = defineProps<{
 }>()
 
 interface ChatItem {
-  kind: 'user' | 'assistant' | 'system' | 'playlist' | 'retry'
+  kind: 'user' | 'assistant' | 'system' | 'playlist' | 'retry' | 'workflow'
   content?: string
   songs?: { name: string; path: string }[]
   history?: boolean
+  /** Agent workflow batch id (kind === 'workflow'). */
+  batch?: string
 }
+
+// -- agent workflow cards ---------------------------------------------------
+/** Every batch's workflow, built from all workflow events of this task. */
+const workflows = computed(() => {
+  const evs: Record<string, unknown>[] = []
+  for (const m of props.messages ?? []) {
+    if (isWorkflowEvent(m.data)) evs.push(m.data as Record<string, unknown>)
+  }
+  const map = new Map<string, WfView>()
+  for (const w of buildWorkflows(evs)) map.set(w.batch, w)
+  return map
+})
+
+/** Kernel step of the running batch (agent mode), e.g. 3/11. */
+const agentStep = computed(() => {
+  const w = runningWorkflow([...workflows.value.values()])
+  if (!w) return ''
+  if (w.stage === 'rank') return 'RankAgent'
+  return w.step
+    ? translateTemplate(uiLang.value, 'aidj.wf.round', { n: String(w.step) }, '第 {n} 轮')
+    : 'LoopAgent'
+})
 
 const inputText = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
@@ -37,6 +70,40 @@ const chatStatus = ref({
   memory: 0
 })
 const memoryConfirm = ref(false)
+
+/** Tokens: last chat_status (cumulative) + usage events after it (the batch in flight, live). */
+const liveStatus = computed(() => {
+  const msgs = props.messages ?? []
+  let base: Record<string, unknown> | null = null
+  let at = -1
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const d = msgs[i].data as Record<string, unknown> | undefined
+    if (d && typeof d === 'object' && d.type === 'chat_status') {
+      base = d
+      at = i
+      break
+    }
+  }
+  const after = msgs
+    .slice(at + 1)
+    .map((m) => m.data as Record<string, unknown>)
+    .filter((d) => isWorkflowEvent(d))
+  const { total, lastLoop } = usageOfEvents(after)
+  const usage = mergeUsage(
+    {
+      prompt: Number(base?.promptTokens) || 0,
+      completion: Number(base?.completionTokens) || 0,
+      cached: Number(base?.cached) || 0,
+      byAgent: (base?.byAgent as UsageBreakdown['byAgent']) ?? {}
+    },
+    total
+  )
+  return {
+    usage,
+    context: lastLoop?.prompt ?? chatStatus.value.context,
+    completion: lastLoop?.completion ?? chatStatus.value.contextCompletion
+  }
+})
 
 function formatTokens(n: number): string {
   if (n >= 1000) return (n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + 'k'
@@ -164,6 +231,7 @@ const thinking = computed(() => {
 
 const items = computed<ChatItem[]>(() => {
   const out: ChatItem[] = []
+  const seenBatches = new Set<string>()
   for (const m of props.messages ?? []) {
     const d = m.data
     if (!d || typeof d !== 'object') continue
@@ -178,6 +246,19 @@ const items = computed<ChatItem[]>(() => {
     }
     if (t === 'clear_history') {
       out.length = 0
+      seenBatches.clear()
+      continue
+    }
+    if (isWorkflowEvent(d)) {
+      // One card per batch, placed where its first event arrived.
+      const b =
+        typeof (d as Record<string, unknown>).batch === 'string'
+          ? String((d as Record<string, unknown>).batch)
+          : '_'
+      if (!seenBatches.has(b)) {
+        seenBatches.add(b)
+        out.push({ kind: 'workflow', batch: b })
+      }
       continue
     }
     if (t === 'user' || t === 'assistant' || t === 'system') {
@@ -268,7 +349,6 @@ watch(
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
       <span class="text-body-2 font-weight-medium">{{ t('aidj.btchat.title', '持续模式') }}</span>
       <v-spacer />
-      <ModelSelect class="chat-model-select" />
       <v-select
         v-if="mode === 'dbus'"
         :model-value="targetPlayer"
@@ -290,6 +370,7 @@ watch(
       <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
         <v-progress-circular indeterminate size="12" width="2" />
         <span class="ml-1">{{ t('aidj.heading', 'AI DJ') }}</span>
+        <span v-if="agentStep" class="ml-1">· {{ agentStep }}</span>
       </v-chip>
     </div>
 
@@ -318,6 +399,12 @@ watch(
           </div>
           <div v-else-if="it.kind === 'system'" class="d-flex justify-center">
             <span class="text-caption text-medium-emphasis">{{ it.content }}</span>
+          </div>
+          <div
+            v-else-if="it.kind === 'workflow' && it.batch && workflows.get(it.batch)"
+            class="d-flex flex-column align-start w-100"
+          >
+            <WorkflowCard :wf="workflows.get(it.batch)!" />
           </div>
           <div v-else-if="it.kind === 'retry'" class="d-flex justify-center">
             <span class="text-caption text-warning">
@@ -372,15 +459,23 @@ watch(
     </div>
 
     <div class="aidj-status-bar">
-      <v-chip
-        variant="flat"
-        size="small"
-        class="status-chip"
-        :title="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
-      >
-        <span class="status-label">Tokens</span
-        ><span class="status-value">{{ formatTokens(chatStatus.tokens) }}</span>
-      </v-chip>
+      <v-tooltip location="top" :open-delay="150">
+        <template #activator="{ props: tip }">
+          <v-chip
+            v-bind="tip"
+            variant="flat"
+            size="small"
+            class="status-chip"
+            :aria-label="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
+          >
+            <span class="status-label">Tokens</span
+            ><span class="status-value">{{
+              formatTokens(liveStatus.usage.prompt + liveStatus.usage.completion)
+            }}</span>
+          </v-chip>
+        </template>
+        <UsageBreakdownView :usage="liveStatus.usage" />
+      </v-tooltip>
       <v-chip
         variant="flat"
         size="small"
@@ -388,7 +483,7 @@ watch(
         :title="t('aidj.chat.title_context', '单次请求的上下文输入 tokens')"
       >
         <span class="status-label">Context</span
-        ><span class="status-value">{{ formatTokens(chatStatus.context) }}</span>
+        ><span class="status-value">{{ formatTokens(liveStatus.context) }}</span>
       </v-chip>
       <v-chip
         variant="flat"
@@ -397,7 +492,7 @@ watch(
         :title="t('aidj.chat.title_output_tokens', '单次请求的输出 tokens')"
       >
         <span class="status-label">Completion</span
-        ><span class="status-value">{{ formatTokens(chatStatus.contextCompletion) }}</span>
+        ><span class="status-value">{{ formatTokens(liveStatus.completion) }}</span>
       </v-chip>
       <v-chip
         variant="flat"
@@ -481,22 +576,6 @@ watch(
   /* No smooth scroll: programmatic scroll-to-bottom on a long history would
      animate the whole distance and take seconds. Instant jump instead. */
   scroll-behavior: auto;
-}
-.chat-model-select {
-  width: 150px;
-  max-width: 180px;
-  flex-shrink: 0;
-}
-.chat-model-select :deep(.v-field) {
-  font-size: 0.78rem;
-  min-height: 28px;
-  background: rgba(var(--v-theme-surface), 0.2);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
-}
-.chat-model-select :deep(.v-select__selection) {
-  font-size: 0.78rem;
 }
 .chat-player-select {
   width: 160px;

@@ -16,9 +16,11 @@ import {
   getCurrentPlayerKey
 } from '../service'
 import OpenAI from 'openai'
-import type { PlaylistEntry, ChatMessage } from '../types'
+import type { PlaylistEntry, ChatMessage, RawHistoryMessage } from '../types'
 import { getPlayerMode, getWebPlayerBackend } from '../player-backend'
 import { sleep, cancellableWait, samePlayer } from './shared'
+import { resolveLoopPolicy } from '../loop/policy'
+import { usageFromHistory } from '../loop/usage'
 import {
   queueRemainingFor,
   ensureContinuousPlayer,
@@ -173,6 +175,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
     initialPrompt
   )
   session.sessionId = sessionId
+  session.lyrics = lib.lyrics
   if (Array.isArray(history) && history.length) {
     session.chatHistory = history.map((m) => ({ ...m }))
     // When the session was pre-forked (/persist), its history lines are ALREADY
@@ -193,19 +196,37 @@ registerJobHandler('aidj.chat', async (control, args) => {
         sessionId,
         history
           .filter((m) => m.role === 'user' || m.role === 'assistant')
-          .map((m) => ({
-            role: m.role,
-            content: m.content,
-            ts: m.timestamp,
-            type: m.role === 'assistant' ? 'both' : 'user',
-            playlist: m.playlist
-          }))
+          .flatMap((m): RawHistoryMessage[] => {
+            const line: RawHistoryMessage = {
+              role: m.role,
+              content: m.content,
+              ts: m.timestamp,
+              type: m.role === 'assistant' ? 'both' : 'user',
+              playlist: m.playlist
+            }
+            // Keep the UI-only workflow line in front of the reply it produced.
+            return m.role === 'assistant' && m.workflow?.length
+              ? [
+                  {
+                    role: 'system',
+                    content: '',
+                    ts: m.timestamp,
+                    type: 'workflow',
+                    workflow: m.workflow
+                  },
+                  line
+                ]
+              : [line]
+          })
       )
     }
   }
   if (Array.isArray(rollingHistoryArg) && rollingHistoryArg.length) {
-    session.rollingHistory = rollingHistoryArg.slice(0, 100)
+    session.rollingHistory = rollingHistoryArg.slice(-resolveLoopPolicy(config).memory_size)
   }
+
+  // Agent mode: surface every kernel step / tool call in the chat view.
+  session.onAgentEvent = (e) => control.push({ data: e })
 
   const ac = new AbortController()
   const st: ChatTaskState = { session, player, control }
@@ -219,6 +240,8 @@ registerJobHandler('aidj.chat', async (control, args) => {
   // Replay seeded history into the view.
   for (const m of session.chatHistory) {
     const t = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant'
+    // The workflow card goes above the reply it produced (UI only).
+    for (const e of m.workflow ?? []) control.push({ data: { ...e, history: true } })
     control.push({
       data: {
         type: t,
@@ -233,20 +256,31 @@ registerJobHandler('aidj.chat', async (control, args) => {
 
   control.push({ data: { type: 'state', message: 'started', player, prompt: initialPrompt } })
   control.pushLine(`持续会话已启动 → ${player}`)
+  // Token counters continue from the (forked) session's history.
+  {
+    const { usage, context } = usageFromHistory(await SessionManager.readRawHistory(sessionId))
+    session.usage = usage
+    session.promptTokens = usage.prompt
+    session.completionTokens = usage.completion
+    session.lastPromptTokens = context.prompt
+    session.lastCompletionTokens = context.completion
+  }
   control.push({
     data: {
       type: 'chat_status',
-      promptTokens: 0,
-      completionTokens: 0,
-      tokens: 0,
-      context: 0,
-      contextCompletion: 0,
-      memory: session.rollingHistory.length
+      promptTokens: session.promptTokens,
+      completionTokens: session.completionTokens,
+      tokens: session.promptTokens + session.completionTokens,
+      context: session.lastPromptTokens,
+      contextCompletion: session.lastCompletionTokens,
+      memory: session.rollingHistory.length,
+      cached: session.usage.cached,
+      byAgent: session.usage.byAgent
     }
   })
 
-  const REFILL = 8
-  const FETCH_TIMEOUT = 180_000
+  // Re-read every cycle so tuning `preferences.loop` takes effect without a restart.
+  const policyNow = (): ReturnType<typeof resolveLoopPolicy> => resolveLoopPolicy(session.config)
   let fetchAc = new AbortController()
   st.abortFetch = () => fetchAc.abort()
   let lastErrorShown = ''
@@ -256,7 +290,7 @@ registerJobHandler('aidj.chat', async (control, args) => {
   const fetchWithTimeout = async (): Promise<void> => {
     fetchAc.abort()
     fetchAc = new AbortController()
-    const t = setTimeout(() => fetchAc.abort(), FETCH_TIMEOUT)
+    const t = setTimeout(() => fetchAc.abort(), policyNow().fetch_timeout_sec * 1000)
     let retryStart = 0
     try {
       await session.fetchBatch(
@@ -287,8 +321,12 @@ registerJobHandler('aidj.chat', async (control, args) => {
 
         // Refill when the queue is low — or immediately when the user sent a
         // new message (/discard_follows), regardless of the batch threshold.
-        if ((queueLen < REFILL || st.forceFetch) && !session.working) {
+        // A conversation-only turn (no_music) pauses auto-refill; a new user message
+        // (forceFetch) always gets an answer.
+        const wantRefill = queueLen < policyNow().refill_threshold && !session.radioPaused
+        if ((wantRefill || st.forceFetch) && !session.working) {
           st.forceFetch = false
+          const wasPaused = session.radioPaused
           control.push({ data: { type: 'thinking' } })
           try {
             await fetchWithTimeout()
@@ -303,11 +341,23 @@ registerJobHandler('aidj.chat', async (control, args) => {
                 tokens: session.promptTokens + session.completionTokens,
                 context: session.lastPromptTokens,
                 contextCompletion: session.lastCompletionTokens,
-                memory: session.rollingHistory.length
+                memory: session.rollingHistory.length,
+                cached: session.usage.cached,
+                byAgent: session.usage.byAgent
               }
             })
           }
 
+          if (session.radioPaused !== wasPaused) {
+            control.push({
+              data: {
+                type: 'system',
+                content: session.radioPaused
+                  ? t('aidj.chat.radio_paused')
+                  : t('aidj.chat.radio_resumed')
+              }
+            })
+          }
           const batch = session.buffer.shift()
           if (batch && batch.length) {
             if (session.lastIntro) {

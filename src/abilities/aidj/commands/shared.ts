@@ -34,6 +34,13 @@ import {
   resolveLyricForTrackPath
 } from '../service'
 import { getPlayerMode, getWebPlayerBackend } from '../player-backend'
+import type { AgentEvent } from '../loop/agent/runner'
+import { runAgentWorkflow } from '../loop/agent/workflow'
+import { mergeUsage, usageFromHistory, type TurnContext, type UsageBreakdown } from '../loop/usage'
+import { resolveLoopPolicy } from '../loop/policy'
+import { resolveLoopPrompts } from '../loop/prompts'
+import { planBatch } from '../loop/planner'
+import { agentHistory, rememberAgentTurn, withNetworkRetry } from '../services/session'
 
 export const log = makeLogger('aidj')
 
@@ -51,6 +58,8 @@ export interface CommandRuntimeState {
   retryStart: number
   retryLastError: string
   sessionId: string
+  /** Agent workflow events of the running / last instant request (`aidj.stream-status --since`). */
+  workflow: AgentEvent[]
 }
 
 export const state: CommandRuntimeState = {
@@ -66,7 +75,8 @@ export const state: CommandRuntimeState = {
   retryWaitMs: 0,
   retryStart: 0,
   retryLastError: '',
-  sessionId: ''
+  sessionId: '',
+  workflow: []
 }
 
 export async function getCachedConfig(): Promise<AidjConfig | null> {
@@ -155,15 +165,17 @@ export async function ensureInit(): Promise<{
     log.info(`metadata loaded: ${metadata.size} songs`)
     const missing = await findMissingSongs(paths, metadata)
     if (missing.size > 0) {
-      log.info(`Found ${missing.size} new songs, syncing metadata...`)
-      const synced = await syncMetadata(
+      // In the background: opening a session / the first request must not wait
+      // for NCM + AI extraction (seconds per song). syncMetadata fills this same
+      // map, so the session sees new tags as soon as they land.
+      log.info(`Found ${missing.size} new songs, syncing metadata in the background...`)
+      void syncMetadata(
         client,
         missing,
         metadata,
         config.ai_settings.metadata_model,
         config.preferences.metadata_concurrency
-      )
-      state.metadata = synced.metadata
+      ).catch((e) => log.warn('background metadata sync failed', { error: String(e) }))
     }
     session = new DJSession(client, state.metadata, paths, config)
     state.session = session
@@ -172,15 +184,33 @@ export async function ensureInit(): Promise<{
   return { client, config, session, dbus }
 }
 
+/**
+ * history.jsonl → chat messages. `withWorkflow` (UI replay only) attaches each
+ * `workflow` line to the next assistant message; without it — e.g. when building
+ * the AI context — workflow lines are dropped like every non-chat line.
+ */
 export function rawToChatHistory(
   raw: RawHistoryMessage[],
   parse?: (rawText: string) => { intro: string; playlist: PlaylistEntry[] },
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  opts: { withWorkflow?: boolean } = {}
 ): ChatMessage[] {
   const out: ChatMessage[] = []
+  let pendingWorkflow: Record<string, unknown>[] | undefined
+  const take = (): { workflow?: Record<string, unknown>[] } => {
+    const w = pendingWorkflow
+    pendingWorkflow = undefined
+    return w?.length ? { workflow: w } : {}
+  }
   for (let i = 0; i < raw.length; i++) {
     if (onProgress) onProgress(i + 1, raw.length)
     const m = raw[i]
+    if (m.type === 'workflow') {
+      if (opts.withWorkflow && Array.isArray(m.workflow)) {
+        pendingWorkflow = [...(pendingWorkflow ?? []), ...m.workflow]
+      }
+      continue
+    }
     const keep =
       m.type === 'user' || m.type === 'both' || (m.type === 'updated' && m.content !== '')
     if (!keep) continue
@@ -193,7 +223,8 @@ export function rawToChatHistory(
         role,
         content: parsed.intro || m.content,
         playlist: parsed.playlist,
-        timestamp: m.ts
+        timestamp: m.ts,
+        ...take()
       })
       if (parsed.intro.trim() !== '' && parsed.playlist.length === 0) {
         const next = raw[i + 1]
@@ -213,10 +244,35 @@ export function rawToChatHistory(
       role,
       content: m.content,
       playlist: m.playlist,
-      timestamp: m.ts
+      timestamp: m.ts,
+      ...(role === 'assistant' ? take() : {})
     })
   }
   return out
+}
+
+/**
+ * Rebuild a session's token counters from its history (open / revert / fork).
+ * Returns what the chat view shows: totals (+ per agent, cached) and the last
+ * turn's Context / Completion.
+ */
+export function restoreUsage(
+  s: {
+    usage: UsageBreakdown
+    promptTokens: number
+    completionTokens: number
+    lastPromptTokens: number
+    lastCompletionTokens: number
+  },
+  raw: RawHistoryMessage[]
+): { tokens: UsageBreakdown; context: TurnContext } {
+  const { usage, context } = usageFromHistory(raw)
+  s.usage = usage
+  s.promptTokens = usage.prompt
+  s.completionTokens = usage.completion
+  s.lastPromptTokens = context.prompt
+  s.lastCompletionTokens = context.completion
+  return { tokens: usage, context }
 }
 
 export function rawToRollingHistory(raw: RawHistoryMessage[]): string[] {
@@ -437,4 +493,78 @@ export async function lyricWindowSpec(): Promise<{ id: string; key: string; spec
       osd: true
     }
   }
+}
+
+/** Workflow events kept for one instant request (the view polls them incrementally). */
+const MAX_WORKFLOW_EVENTS = 400
+
+/**
+ * Instant chat (`aidj.generate`) in agent mode: the same LoopAgent → RankAgent
+ * workflow as the persistent chat, on the instant DJSession's history. Events
+ * go to `state.workflow` for the chat view (polled via `aidj.stream-status`).
+ */
+export async function runInstantAgent(
+  session: DJSession,
+  config: AidjConfig,
+  prompt: string,
+  signal: AbortSignal,
+  onRetry: (attempt: number, waitMs: number, error?: unknown) => void
+): Promise<{
+  playlist: PlaylistEntry[]
+  intro: string
+  raw: string
+  updated?: RawHistoryMessage | null
+}> {
+  const policy = resolveLoopPolicy(config)
+  const lib = await loadLibrary()
+  const played = [...session.playedSongs]
+  const plan = planBatch({
+    policy,
+    prompts: resolveLoopPrompts(config),
+    mode: 'agent',
+    metadata: session.metadata,
+    initialPrompt: prompt,
+    // First message = initial request; later ones = a new user direction.
+    userDirection: session.turnCount > 0 ? prompt : null,
+    fetchCount: 0,
+    rollingHistory: played
+  })
+  const max = Math.max(2, config.preferences.max_history_length || 10)
+  state.workflow = []
+  const r = await runAgentWorkflow({
+    client: session.client,
+    config,
+    policy,
+    plan,
+    helper: session,
+    metadata: session.metadata,
+    musicPaths: session.musicPaths,
+    lyrics: lib.lyrics,
+    played,
+    history: agentHistory(session.chatHistory, max),
+    goal: prompt,
+    retry: (fn) =>
+      withNetworkRetry(fn, {
+        retryMinutes: config.preferences.network_retry_minutes ?? 0,
+        signal,
+        onRetry
+      }),
+    signal,
+    emit: (e) => {
+      if (state.workflow.length < MAX_WORKFLOW_EVENTS) state.workflow.push(e)
+    },
+    log
+  })
+  session.turnCount++
+  session.lastPromptTokens = r.lastPromptTokens
+  session.lastCompletionTokens = r.lastCompletionTokens
+  session.promptTokens += r.promptTokens
+  session.completionTokens += r.completionTokens
+  session.usage = mergeUsage(session.usage, r.usage)
+  if (signal.aborted) return { playlist: [], intro: '', raw: '' }
+  if (!r.failed) {
+    rememberAgentTurn(session.chatHistory, plan.prompt, r.intro, r.playlist, max)
+    for (const s of r.playlist) session.playedSongs.add(s.name)
+  }
+  return { playlist: r.playlist, intro: r.intro, raw: r.failed ? '' : r.intro, updated: null }
 }

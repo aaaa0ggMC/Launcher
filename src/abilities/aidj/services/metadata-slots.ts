@@ -100,7 +100,10 @@ async function readSlotEntries(filePath: string): Promise<Map<string, SongMeta>>
       if (!trimmed) continue
       try {
         const item = JSON.parse(trimmed)
-        const name = (item.name || '').trim()
+        // Exact key, no trim: song keys are file names and may end in odd
+        // whitespace (e.g. NBSP) — a trimmed key never matches the library again,
+        // so the song was re-synced (and re-appended) on every start.
+        const name = typeof item.name === 'string' && item.name.trim() ? item.name : ''
         const meta = (item.metadata || item.meta) as SongMeta
         if (name && meta) {
           map.set(name, meta)

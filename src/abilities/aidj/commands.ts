@@ -11,6 +11,7 @@ import { chatContinuousCommands } from './commands/chat-continuous'
 import { configLyricsCommands } from './commands/config-lyrics'
 import { approveCommands } from './commands/approve'
 import { metadataSlotsCommands } from './commands/metadata-slots'
+import { sanitizeCommands } from './commands/sanitize'
 import { withPrivacy } from './privacy'
 
 export { getCurrentAbortSignal, abortCurrentRequest } from './commands/shared'
@@ -27,7 +28,8 @@ const commands: CommandSpec[] = withPrivacy([
   ...webPlayerCommands,
   ...chatContinuousCommands,
   ...approveCommands,
-  ...metadataSlotsCommands
+  ...metadataSlotsCommands,
+  ...sanitizeCommands
 ])
 
 export default commands
