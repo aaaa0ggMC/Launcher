@@ -592,8 +592,12 @@ function applyTheme(): void {
     // Reveal origin: 'corner' (top-left, default) or 'cursor' (last pointer).
     const a = (runtimeConfig.value.animations as Record<string, unknown>) ?? {}
     const origin = a.themeTransition === 'cursor' ? lastPointer : { x: 0, y: 0 }
-    document.documentElement.style.setProperty('--vt-origin-x', `${origin.x}px`)
-    document.documentElement.style.setProperty('--vt-origin-y', `${origin.y}px`)
+    // 网页模式的缩放是根元素 CSS zoom：::view-transition 遮罩里写的像素会被再乘一次倍数
+    // （实测 zoom 1.5 时写 600,400 渲染在 900,600），所以要除掉。Electron 的 webFrame 缩放是真缩放，
+    // getComputedStyle().zoom 仍为 1，不受影响。
+    const z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    document.documentElement.style.setProperty('--vt-origin-x', `${origin.x / z}px`)
+    document.documentElement.style.setProperty('--vt-origin-y', `${origin.y / z}px`)
     const vt = document.startViewTransition(async () => {
       theme.change(resolved)
       await nextTick()
@@ -1061,6 +1065,8 @@ onMounted(async () => {
   // Track the last pointer position so the theme reveal can originate from
   // the cursor (`animations.themeTransition = 'cursor'`).
   window.addEventListener('pointermove', onPointerMove, { passive: true })
+  // 触屏点按不会产生 pointermove，起点要在按下时记录（capture：先于控件自己的处理）
+  window.addEventListener('pointerdown', onPointerMove, { passive: true, capture: true })
 })
 
 let lastPointer = { x: 0, y: 0 }
@@ -1096,6 +1102,7 @@ onBeforeUnmount(() => {
   btUnsub?.()
   quitUnsub?.()
   window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerdown', onPointerMove, { capture: true })
   if (searchDebounce) {
     clearTimeout(searchDebounce)
     searchDebounce = null
