@@ -403,3 +403,99 @@ export function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 })}k`
   return n.toLocaleString()
 }
+
+export type ExportDetail = 'basic' | 'detailed' | 'advanced'
+
+function fence(text: string): string {
+  let body = text
+  try {
+    body = JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    /* keep raw (e.g. a truncated result) */
+  }
+  // The fence must be longer than any backtick run inside, or the content would close it.
+  const longest = Math.max(0, ...(body.match(/`+/g) ?? []).map((r) => r.length))
+  const f = '`'.repeat(Math.max(3, longest + 1))
+  return `${f}json\n${body}\n${f}`
+}
+
+/**
+ * Markdown of one batch for "copy / export as Markdown".
+ * - detailed: header (playbook, rounds, calls, candidates → chosen, tokens, time) + one line per step
+ * - advanced: + goal, per-agent tokens, and every step's arguments / result as JSON
+ *   (RankAgent's result carries the drop reasons — review data, not shown elsewhere)
+ * `tr` renders a WfText in the UI language.
+ */
+export function workflowToMarkdown(
+  w: WfView,
+  level: Exclude<ExportDetail, 'basic'>,
+  tr: (x: WfText) => string
+): string {
+  const parts: string[] = []
+  if (w.playbook) parts.push(w.playbook)
+  if (w.end?.noMusic) {
+    parts.push(
+      tr({
+        key: 'aidj.wf.result_chat',
+        vars: { rounds: w.end.steps, tools: w.steps.length },
+        fallback: '仅对话 · {rounds} 轮 · {tools} 次调用'
+      })
+    )
+  } else if (w.end) {
+    parts.push(
+      tr({
+        key: 'aidj.wf.result',
+        vars: {
+          rounds: w.end.steps,
+          tools: w.steps.length,
+          c: w.end.candidates,
+          q: w.end.queued,
+          d: w.end.dropped
+        },
+        fallback: '{rounds} 轮 · {tools} 次调用 · 候选 {c} → 入选 {q} · 剔除 {d}'
+      })
+    )
+    if (w.end.error) parts.push(`⚠ ${w.end.error}`)
+  }
+  const tokens = w.usage.prompt + w.usage.completion
+  if (tokens) parts.push(`${formatTokens(tokens)} tokens`)
+  if (w.end) parts.push(formatMs(w.end.ms))
+
+  const out: string[] = []
+  out.push(`> **Workflow** · ${parts.join(' · ')}`)
+  if (level === 'advanced' && w.goal) out.push(`> ${w.goal.replace(/\n+/g, ' ')}`)
+  out.push('>')
+  w.steps.forEach((s, i) => {
+    const agent = AGENT_LABEL[s.agent]
+    const summary = s.summary ? `：${tr(s.summary)}` : ''
+    const ms = s.ms != null ? ` (${formatMs(s.ms)})` : ''
+    const mark = s.status === 'error' ? ' ✗' : ''
+    out.push(`> ${i + 1}. ${agent} · ${tr(s.label)}${summary}${ms}${mark}`)
+  })
+  if (level === 'advanced') {
+    const agents = Object.entries(w.usage.byAgent)
+    if (agents.length) {
+      out.push('>')
+      out.push(
+        `> Tokens: ${agents
+          .map(
+            ([a, u]) =>
+              `${a} ${formatTokens(u.prompt)} in (${formatTokens(u.cached)} cached) / ${formatTokens(u.completion)} out`
+          )
+          .join(' · ')}`
+      )
+    }
+    out.push('')
+    w.steps.forEach((s, i) => {
+      out.push(`**${i + 1}. ${AGENT_LABEL[s.agent]} · ${s.name}**`)
+      out.push('')
+      out.push(fence(JSON.stringify(s.args ?? null)))
+      if (s.result != null) {
+        out.push('')
+        out.push(fence(s.result))
+      }
+      out.push('')
+    })
+  }
+  return out.join('\n').trim()
+}

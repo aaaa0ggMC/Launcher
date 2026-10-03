@@ -13,7 +13,13 @@ import {
 import { translate, translateTemplate } from '../../../main/ui/i18n'
 import type { ChatMessage, PlayerStatus } from '../types'
 import ChatMessageVue from './ChatMessage.vue'
-import { usageOfEvents } from './workflow-view'
+import {
+  buildWorkflows,
+  usageOfEvents,
+  workflowToMarkdown,
+  type ExportDetail,
+  type WfText
+} from './workflow-view'
 import { emptyUsage, mergeUsage, type UsageBreakdown } from '../loop/usage'
 import ContextMenu from './ContextMenu.vue'
 import ChatSlashPopup from './ChatSlashPopup.vue'
@@ -727,6 +733,13 @@ async function pollStatus(): Promise<void> {
       if (typeof result.recordFreq === 'boolean') sbRecordFreq.value = result.recordFreq
       if (typeof result.listeningStats === 'boolean') sbListening.value = result.listeningStats
       if (result.mode === 'dbus' || result.mode === 'web') mode.value = result.mode
+      if (
+        result.exportDetail === 'basic' ||
+        result.exportDetail === 'detailed' ||
+        result.exportDetail === 'advanced'
+      ) {
+        exportDetail.value = result.exportDetail
+      }
       if (result.statusBar) {
         sbOrder.value = {
           tokens: 1,
@@ -1347,8 +1360,19 @@ async function doFork(): Promise<void> {
 // Markdown export — dump the current conversation (messages + playlists).
 // App.vue's copyCurrentView calls toMarkdown() for the copy-view shortcut.
 // ---------------------------------------------------------------------------
+/** Settings → 复制 / 导出 Markdown 的详细程度 (refreshed with the status poll). */
+const exportDetail = ref<ExportDetail>('basic')
+
 function toMarkdown(): string {
   const lines: string[] = []
+  const level = exportDetail.value
+  const tr = (x: WfText): string =>
+    translateTemplate(
+      uiLang.value,
+      x.key,
+      Object.fromEntries(Object.entries(x.vars).map(([k, v]) => [k, String(v)])),
+      x.fallback
+    )
   for (const m of messages.value) {
     if (m.role === 'user') {
       lines.push(`**You**:\n\n${m.content}\n`)
@@ -1358,7 +1382,12 @@ function toMarkdown(): string {
         lines.push(`> ${m.content}\n`)
         continue
       }
-      lines.push(`**AI DJ**:\n\n${m.content}\n`)
+      lines.push(`**AI DJ**:\n`)
+      // Detailed / advanced: the batch's workflow in front of the reply it produced.
+      if (level !== 'basic' && m.workflow?.length) {
+        for (const w of buildWorkflows(m.workflow)) lines.push(workflowToMarkdown(w, level, tr), '')
+      }
+      lines.push(`${m.content}\n`)
       if (m.playlist && m.playlist.length > 0) {
         m.playlist.forEach((s, i) => lines.push(`${i + 1}. ${s.name}`))
         lines.push('')

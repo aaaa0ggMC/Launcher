@@ -99,6 +99,7 @@ export const playbackCommands: CommandSpec[] = [
         recordFreq: state.config?.preferences.record_freq ?? false,
         listeningStats: state.config?.preferences.listening_stats ?? true,
         statusBar: state.config?.preferences.status_bar,
+        exportDetail: state.config?.preferences.export_detail ?? 'basic',
         mode: await getPlayerMode()
       }
       // Web backend: bypass the DBus path entirely — the built-in player fills

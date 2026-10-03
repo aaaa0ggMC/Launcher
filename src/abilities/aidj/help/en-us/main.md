@@ -119,6 +119,11 @@ workflow is described in [AI Loop: How It Works](AILoop/HowItWorks.md).
 
 To interrupt a generation, click the red **Stop**; your text is restored into the input box.
 
+How much a copy / Markdown export contains is set in **Settings → AI DJ → Detail of copy / export as
+Markdown**: **Basic** (default — conversation and playlists only), **Detailed** (each reply is preceded
+by its batch's workflow summary and one line per step) or **Advanced** (plus every step's arguments /
+result JSON and per-agent tokens, including RankAgent's drop reasons).
+
 ### Slash commands
 
 Typing `/` in the input box opens a command hint popup: **↑ / ↓** to select, **Tab** to complete,

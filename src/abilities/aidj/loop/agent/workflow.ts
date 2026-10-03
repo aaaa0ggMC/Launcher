@@ -192,9 +192,13 @@ export async function runAgentWorkflow(o: WorkflowOptions): Promise<WorkflowResu
           id,
           name: 'rank_agent',
           ok: true,
+          // Drop reasons live here only — for review, never rendered as text.
           result: JSON.stringify({
             order: ranked.playlist.map((p) => `${ids.idOf(p.name)} ${p.name}`),
-            dropped: ranked.dropped
+            dropped: ranked.dropped.map((k) => ({
+              track: `${ids.idOf(k)} ${k}`,
+              reason: ranked.dropReasons[k] ?? ''
+            }))
           }),
           stats: {
             candidates: staged.length,
@@ -271,8 +275,10 @@ const SAVED_RESULT_LIMIT = 1500
  */
 export function compactWorkflow(events: AgentEvent[]): Record<string, unknown>[] {
   return events.map((e) => {
-    if (e.type === 'tool_result' && e.result.length > SAVED_RESULT_LIMIT) {
-      return { ...e, result: `${e.result.slice(0, SAVED_RESULT_LIMIT)}…` }
+    // RankAgent's result (order + drop reasons) is kept whole for later review.
+    const limit = e.type === 'tool_result' && e.name === 'rank_agent' ? 20_000 : SAVED_RESULT_LIMIT
+    if (e.type === 'tool_result' && e.result.length > limit) {
+      return { ...e, result: `${e.result.slice(0, limit)}…` }
     }
     return { ...e }
   })

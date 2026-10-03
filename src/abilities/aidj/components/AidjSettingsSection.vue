@@ -137,6 +137,7 @@ const metadataCommentCount = ref(10)
 const maxHistoryLength = ref(10)
 const contextMode = ref<'discard' | 'compact'>('discard')
 const autoTitle = ref(false)
+const exportDetail = ref<'basic' | 'detailed' | 'advanced'>('basic')
 const reconnectMinutes = ref(0)
 const networkRetryMinutes = ref(0)
 const availableModels = ref<string[]>([])
@@ -203,6 +204,8 @@ onMounted(async () => {
   maxHistoryLength.value = (prefs.max_history_length as number) ?? 10
   contextMode.value = (prefs.context_mode as 'discard' | 'compact') || 'discard'
   autoTitle.value = (prefs.auto_title as boolean) ?? false
+  exportDetail.value =
+    (prefs.export_detail as 'basic' | 'detailed' | 'advanced' | undefined) ?? 'basic'
   reconnectMinutes.value = (prefs.reconnect_minutes as number) ?? 0
   networkRetryMinutes.value = (prefs.network_retry_minutes as number) ?? 0
   libraryInjects.value = { ...((prefs.library_injects as Record<string, boolean>) || {}) }
@@ -601,6 +604,7 @@ watch(metadataCommentCount, (v) => update('preferences.metadata_comment_count', 
 watch(maxHistoryLength, (v) => update('preferences.max_history_length', v))
 watch(contextMode, (v) => update('preferences.context_mode', v))
 watch(autoTitle, (v) => update('preferences.auto_title', v))
+watch(exportDetail, (v) => update('preferences.export_detail', v))
 watch(reconnectMinutes, (v) => update('preferences.reconnect_minutes', v))
 watch(networkRetryMinutes, (v) => update('preferences.network_retry_minutes', v))
 watch(libraryInjects, (v) => update('preferences.library_injects', { ...v }), { deep: true })
@@ -2025,6 +2029,37 @@ defineExpose({
                 hide-details
               />
             </div>
+          </v-col>
+        </v-row>
+        <v-row dense class="mt-2">
+          <v-col cols="12" md="8">
+            <v-select
+              v-model="exportDetail"
+              :items="[
+                {
+                  title: t('aidj.settings.export_basic', '简洁：只有对话与歌单（默认）'),
+                  value: 'basic'
+                },
+                {
+                  title: t(
+                    'aidj.settings.export_detailed',
+                    '详细：附每批 workflow 摘要与每一步的一句话说明'
+                  ),
+                  value: 'detailed'
+                },
+                {
+                  title: t(
+                    'aidj.settings.export_advanced',
+                    '完整：再附每一步的参数与结果 JSON、按 Agent 的 tokens'
+                  ),
+                  value: 'advanced'
+                }
+              ]"
+              :label="t('aidj.settings.export_detail', '复制 / 导出 Markdown 的详细程度')"
+              hide-details
+              density="compact"
+              variant="outlined"
+            />
           </v-col>
         </v-row>
       </div>

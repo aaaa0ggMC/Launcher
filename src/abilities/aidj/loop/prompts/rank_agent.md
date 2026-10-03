@@ -8,4 +8,5 @@ Then write the DJ intro for this batch.
 
 ### OUTPUT PROTOCOL (STRICT)
 Part 1 — the DJ intro, in the voice and length the role definition asks for (brief by default). It must describe THIS final selection — mention only tracks you keep. Follow the language rule in the batch instruction.
-Part 2 — {separator} on its own line, then the chosen track IDs (#xxxx), one per line, in play order. Nothing after the list.
+Part 2 — {separator} on its own line, then the chosen track IDs (#xxxx), one per line, in play order.
+Part 3 — [---DROPPED---] on its own line, then one line per candidate you did NOT keep: `#xxxx — short reason` (a few words, same language as the intro). These reasons are logged for review only — the listener never sees them. Nothing after this part.

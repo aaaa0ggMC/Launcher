@@ -53,6 +53,10 @@ says so; in the normal case at most 1.5× the tracks per batch are kept. Candida
 **tracks per batch × candidate factor** — by default 8 × 2 = 16 candidates, about 8 of which make
 the final batch.
 
+RankAgent also writes a short reason for every dropped track. The reasons are **not shown** in the
+chat — they are only kept in the raw result JSON of the **RankAgent order** step on the workflow card
+(`dropped: [{track, reason}]`) for review, and in the **Advanced** Markdown export.
+
 ### Tools
 
 LoopAgent can call these tools (each song carries a short id like `#k3f9`, stable for your library,

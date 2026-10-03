@@ -5,7 +5,8 @@ import {
   summarize,
   formatMs,
   isWorkflowEvent,
-  runningWorkflow
+  runningWorkflow,
+  workflowToMarkdown
 } from './workflow-view'
 
 const render = (x: { fallback: string; vars: Record<string, string | number> } | null): string =>
@@ -180,5 +181,79 @@ describe('AIDJ workflow view', () => {
     assert.equal(formatMs(125000), '2m5s')
     assert.equal(isWorkflowEvent({ type: 'tool_call' }), true)
     assert.equal(isWorkflowEvent({ type: 'playlist' }), false)
+  })
+})
+
+describe('AIDJ workflow export', () => {
+  const ev = [
+    {
+      type: 'workflow_start',
+      batch: 'b',
+      phase: 'initial',
+      goal: '从辽阔的森林开始',
+      startedAt: 1
+    },
+    { type: 'usage', batch: 'b', agent: 'loop', prompt: 1000, completion: 100, cached: 800 },
+    {
+      type: 'tool_call',
+      batch: 'b',
+      id: '1',
+      name: 'search_lyrics',
+      args: { phrases: ['辽阔的森林'] }
+    },
+    {
+      type: 'tool_result',
+      batch: 'b',
+      id: '1',
+      name: 'search_lyrics',
+      ok: true,
+      result: '{"x":"a ``` b"}',
+      stats: { total_matches: 2 },
+      ms: 9
+    },
+    { type: 'tool_call', batch: 'b', id: '2', name: 'rank_agent', args: {} },
+    {
+      type: 'tool_result',
+      batch: 'b',
+      id: '2',
+      name: 'rank_agent',
+      ok: true,
+      result: JSON.stringify({ order: ['#a A'], dropped: [{ track: '#b B', reason: '太吵' }] }),
+      stats: { candidates: 2, order: 1, dropped: 1 },
+      ms: 5
+    },
+    {
+      type: 'workflow_end',
+      batch: 'b',
+      ok: true,
+      candidates: 2,
+      queued: 1,
+      dropped: 1,
+      steps: 2,
+      ms: 1500
+    }
+  ]
+  const tr = (x: { fallback: string; vars: Record<string, string | number> }): string =>
+    x.fallback.replace(/\{(\w+)\}/g, (m, k: string) => (k in x.vars ? String(x.vars[k]) : m))
+
+  it('detailed: header + one line per step, no JSON, no drop reasons', () => {
+    const [w] = buildWorkflows(ev)
+    const md = workflowToMarkdown(w, 'detailed', tr)
+    assert.match(
+      md,
+      /^> \*\*Workflow\*\* · 2 轮 · 2 次调用 · 候选 2 → 入选 1 · 剔除 1 · 1.1k tokens · 1.5s/
+    )
+    assert.match(md, /> 1\. LoopAgent · 歌词检索：“辽阔的森林” → 2 首 \(9ms\)/)
+    assert.doesNotMatch(md, /```/)
+    assert.doesNotMatch(md, /太吵/)
+  })
+
+  it('advanced: goal, per-agent tokens and every result as JSON (drop reasons included, fences safe)', () => {
+    const [w] = buildWorkflows(ev)
+    const md = workflowToMarkdown(w, 'advanced', tr)
+    assert.match(md, /> 从辽阔的森林开始/)
+    assert.match(md, /Tokens: loop 1k in \(800 cached\) \/ 100 out/)
+    assert.match(md, /"reason": "太吵"/)
+    assert.match(md, /````json\n\{\n {2}"x": "a ``` b"\n\}\n````/)
   })
 })

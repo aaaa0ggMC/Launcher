@@ -696,6 +696,34 @@ describe('AIDJ loop — RankAgent', () => {
     assert.deepEqual(v3.order, ['C418 - Sweden', 'toe - Goodbye'])
   })
 
+  it('drop reasons: parsed from Part 3, never counted as the order, filled in for cap / missing', async () => {
+    const c = ctx()
+    const a = ids.idOf('toe - Goodbye')
+    const b = ids.idOf('C418 - Sweden')
+    const d = ids.idOf('陈粒 - 易燃易爆炸')
+    const reply = `Intro\n${SEPARATOR}\n${a}\n[---DROPPED---]\n${b} — 太安静，接不上\n- ${d}: 能量过高`
+    const p = parseRankOutput(reply, c, [...meta.keys()].map(cand))
+    assert.deepEqual(p.order, ['toe - Goodbye'])
+    assert.equal(p.reasons['C418 - Sweden'], '太安静，接不上')
+    assert.equal(p.reasons['陈粒 - 易燃易爆炸'], '能量过高')
+
+    c.client = fakeClient(() => reply).client
+    const r = await runRankAgent({
+      ctx: c,
+      model: 'm',
+      system: 's',
+      instruction: 'i',
+      note: 'n',
+      candidates: ['toe - Goodbye', 'C418 - Sweden', 'C418 - Wet Hands'].map(cand),
+      batchSize: 8,
+      timeoutMs: 1000,
+      retry: (fn) => fn()
+    })
+    assert.equal(r.dropReasons['C418 - Sweden'], '太安静，接不上')
+    assert.equal(r.dropReasons['C418 - Wet Hands'], '(no reason given)')
+    assert.equal(r.intro, 'Intro')
+  })
+
   it('fallback keeps only one batch; a long reply is capped at 1.5×', async () => {
     const many = [...meta.keys()].map(cand) // 7 candidates
     const c = ctx({ client: fakeClient(() => 'no list at all').client })

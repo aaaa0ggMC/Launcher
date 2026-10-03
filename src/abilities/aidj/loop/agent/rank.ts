@@ -38,10 +38,13 @@ export interface RankResult {
   usage: UsageTotals
   /** The reply had no usable order — the kernel's order was kept (capped). */
   fallback: boolean
+  /** Why each dropped candidate was dropped (review only, never shown to the listener). */
+  dropReasons: Record<string, string>
 }
 
 /** The separator, tolerating the usual model variations (`--- SONG LIST ---`, no brackets…). */
 const SEPARATOR_RE = /\[?\s*-{2,}\s*SONG[_ ]?LIST\s*-{2,}\s*\]?/i
+const DROPPED_RE = /\[?\s*-{2,}\s*DROPPED\s*-{2,}\s*\]?/i
 const HASH_ID = /#([0-9a-z]{4})\b/gi
 const BARE_ID = /(?:^|[^0-9a-z#])([0-9a-z]{4})(?![0-9a-z])/gi
 
@@ -62,8 +65,12 @@ export function parseRankOutput(
   text: string,
   ctx: DjToolContext,
   candidates: PlaylistEntry[]
-): { intro: string; order: string[] } {
-  const clean = stripThink(text).replace(SEPARATOR, '[---SONG_LIST---]')
+): { intro: string; order: string[]; reasons: Record<string, string> } {
+  // Part 3 (drop reasons) is cut off first so its IDs never count as the order.
+  const full = stripThink(text).replace(SEPARATOR, '[---SONG_LIST---]')
+  const dm = DROPPED_RE.exec(full)
+  const clean = dm ? full.slice(0, dm.index) : full
+  const reasons: Record<string, string> = {}
   const allowed = new Set(candidates.map((c) => c.name))
   const keysIn = (line: string): string[] => {
     const out: string[] = []
@@ -108,7 +115,19 @@ export function parseRankOutput(
     if (!line.trim()) continue
     for (const k of keysIn(line)) if (!order.includes(k)) order.push(k)
   }
-  return { intro, order }
+  if (dm) {
+    for (const line of full.slice(dm.index + dm[0].length).split('\n')) {
+      const k = keysIn(line)[0]
+      if (!k) continue
+      const reason = line
+        .replace(/^[\s\-*\d.)]+/, '')
+        .replace(HASH_ID, '')
+        .replace(/^[\s|:：—–-]+/, '')
+        .trim()
+      if (reason) reasons[k] = reason.slice(0, 200)
+    }
+  }
+  return { intro, order, reasons }
 }
 
 export async function runRankAgent(o: RankInput): Promise<RankResult> {
@@ -133,7 +152,7 @@ export async function runRankAgent(o: RankInput): Promise<RankResult> {
     )
   )
   const reply = res.choices?.[0]?.message?.content ?? ''
-  const { intro, order } = parseRankOutput(reply, ctx, o.candidates)
+  const { intro, order, reasons } = parseRankOutput(reply, ctx, o.candidates)
   const fallback = order.length === 0
   if (fallback) {
     log.warn('rank agent: no usable order, keeping the kernel order', {
@@ -157,6 +176,20 @@ export async function runRankAgent(o: RankInput): Promise<RankResult> {
     promptTokens: res.usage?.prompt_tokens ?? 0,
     completionTokens: res.usage?.completion_tokens ?? 0,
     usage: readUsage(res.usage),
-    fallback
+    fallback,
+    dropReasons: Object.fromEntries(
+      o.candidates
+        .map((c) => c.name)
+        .filter((k) => !final.includes(k))
+        .map((k) => [
+          k,
+          reasons[k] ??
+            (fallback
+              ? '(RankAgent gave no usable order — not kept)'
+              : order.includes(k)
+                ? '(cut by the batch-size cap)'
+                : '(no reason given)')
+        ])
+    )
   }
 }

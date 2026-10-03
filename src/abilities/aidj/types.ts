@@ -96,6 +96,8 @@ export interface AidjConfig {
     start_from_now_template?: string
     /** 自定义 Bilibili 凭据文件路径（可选，未指定时优先读取 Cockpit 配置目录，后回退 ~/Apps/bili_info.json）。 */
     bili_credential_path?: string
+    /** Detail of "copy / export as Markdown": basic (messages only) / detailed / advanced (workflow). */
+    export_detail?: 'basic' | 'detailed' | 'advanced'
     /** Web search tool for the DJ agent (Tavily; key in `secrets.tavily.api_key`). */
     web_search?: { enabled?: boolean; max_results?: number; depth?: 'basic' | 'advanced' }
     /** Model per agent (loop / lib / dream / rank); empty = follow `model`. See `loop/models.ts`. */
