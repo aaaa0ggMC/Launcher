@@ -40,6 +40,7 @@
 - **A4 替身不静默** —— `electron-stub` 对**未显式实现**的成员，首次被调用时 `log.warn('electron stub: <path> is a no-op in headless')`（每个路径一次），把「悄悄没反应」变成可见日志。
 - **A5 caps 审计** —— 逐个梳理渲染端对非命令 `window.cockpit.*` 的调用（`pickFile` 31 处、窗口类、`autoFitWindow` 等），确认每个都有 caps 守卫或可接受的 nop；补 `window.child`（子窗口）的网页降级方案（页内浮层 or 新标签）。
 - **A6 agent / 隐私在网页** —— 先定方案再动手：授权请求推到**用户本人的网页页面**确认（不能做成命令，沿用 `privacy:decide` 的 sender 校验思路）；agent 视图在网页下明确禁用。依赖 A1（同一宿主才有意义）。
+- **A8 上传目录清理** —— `uploads/` 里的文件只增不减：设置里加「清理上传文件」/ 超过 N 天自动清理（注意：已被配置引用的路径，如背景图，不能误删，需先按引用扫描）。
 - **A7 缩略图** —— 用 ffmpeg / sharp 替代 `nativeImage`（先量一下 yarj 页面的实际代价再决定）。
 
 ### B. 移动端适配

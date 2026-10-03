@@ -21,6 +21,7 @@ import { runStartupHooks } from '../main/process/startup'
 import { loadExternalAbilities } from '../main/process/ability-loader'
 import { registerHostCommands } from './commands'
 import { pushEvent, startServer } from './server'
+import { setStubBroadcast } from './electron-stub'
 
 function arg(name: string, dflt: string): string {
   const i = process.argv.indexOf(`--${name}`)
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   const token = loadToken()
 
   setBroadcast(pushEvent)
+  setStubBroadcast(pushEvent)
   setLogBroadcast((entry) => pushEvent('cockpit:log', entry))
   setBackgroundBroadcast((event) => pushEvent('cockpit:bt', event))
   setWindowBroadcast((event) => pushEvent('cockpit:windows', event))

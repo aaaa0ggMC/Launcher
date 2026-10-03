@@ -159,7 +159,14 @@ const cockpit = createCockpit({
   wayland: false,
   windowDebug: false,
   yarjDebug: false,
-  setZoom: () => {}
+  // Electron 用 webFrame.setZoomFactor；浏览器没有等价 API，用 CSS zoom（Chromium 已标准化）
+  setZoom: (factor) => {
+    const root = document.documentElement.style
+    root.zoom = factor === 1 ? '' : String(factor)
+    // CSS zoom 不改变视口的 CSS 尺寸（Electron 的真缩放会），按视口高度算的 calc() 要自己除掉倍数
+    if (factor === 1) root.removeProperty('--app-vh')
+    else root.setProperty('--app-vh', `calc(100dvh / ${factor})`)
+  }
 })
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

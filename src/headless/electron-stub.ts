@@ -46,8 +46,30 @@ export const app = new Proxy(
   { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
 )
 
+/**
+ * 「虚拟窗口」：代表所有已连接的网页客户端。大量代码用 `for (const win of BrowserWindow.getAllWindows())
+ * win.webContents.send(channel, …)` 广播（config-changed、sidebar-order-changed、command-error…），
+ * 返回空数组会让这些广播在网页里全部丢失（主题 / 字体 / 缩放要刷新才生效）。
+ */
+let broadcastSink: (channel: string, ...args: unknown[]) => void = () => {}
+export function setStubBroadcast(fn: (channel: string, ...args: unknown[]) => void): void {
+  broadcastSink = fn
+}
+const virtualWebContents = new Proxy(
+  {
+    id: 0,
+    send: (channel: string, ...args: unknown[]) => broadcastSink(channel, ...args),
+    isDestroyed: () => false
+  } as Record<string, unknown>,
+  { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
+)
+const virtualWindow = new Proxy(
+  { webContents: virtualWebContents, isDestroyed: () => false } as Record<string, unknown>,
+  { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
+)
+
 export const BrowserWindow = Object.assign(function BrowserWindow() {}, {
-  getAllWindows: () => [],
+  getAllWindows: () => [virtualWindow],
   fromWebContents: () => null,
   fromId: () => null,
   getFocusedWindow: () => null

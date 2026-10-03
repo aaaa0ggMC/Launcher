@@ -42,6 +42,14 @@ const filename = ref('')
 const showAll = ref(false)
 const showHidden = ref(false)
 
+// 「从此设备选择」：浏览器的文件选择 API 只给文件内容、不给宿主路径，所以把文件上传到宿主，
+// 再把宿主上的路径当作选择结果返回。只在「选文件」时可用（文件夹 / 保存不适用）。
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadPct = ref(0)
+const uploadError = ref(false)
+let uploadXhr: XMLHttpRequest | null = null
+
 const mode = computed(() => req.value?.mode ?? 'open')
 const opts = computed(() => req.value?.opts ?? {})
 const wantsDir = computed(() => mode.value === 'open' && !!opts.value.directory)
@@ -50,6 +58,56 @@ const sep = computed(() =>
     ? '\\'
     : '/'
 )
+
+const canUpload = computed(() => mode.value === 'open' && !wantsDir.value)
+const acceptAttr = computed(() =>
+  filterable.value ? extensions.value.map((e) => `.${e}`).join(',') : ''
+)
+
+function pickFromDevice(): void {
+  uploadError.value = false
+  fileInput.value?.click()
+}
+
+function onDeviceFile(ev: Event): void {
+  const input = ev.target as HTMLInputElement
+  const f = input.files?.[0]
+  input.value = '' // 允许再次选同一个文件
+  if (!f) return
+  uploading.value = true
+  uploadPct.value = 0
+  uploadError.value = false
+  const xhr = new XMLHttpRequest()
+  uploadXhr = xhr
+  // 同源请求自动带 cockpit_token Cookie 鉴权
+  xhr.open('POST', `/api/upload?name=${encodeURIComponent(f.name)}`)
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) uploadPct.value = Math.round((e.loaded / e.total) * 100)
+  }
+  xhr.onload = () => {
+    uploading.value = false
+    uploadXhr = null
+    try {
+      const r = JSON.parse(xhr.responseText) as { ok?: boolean; path?: string }
+      if (xhr.status === 200 && r.ok && r.path) return finish(r.path)
+    } catch {
+      /* fallthrough */
+    }
+    uploadError.value = true
+  }
+  xhr.onerror = () => {
+    uploading.value = false
+    uploadXhr = null
+    uploadError.value = true
+  }
+  xhr.send(f)
+}
+
+function cancelUpload(): void {
+  uploadXhr?.abort()
+  uploadXhr = null
+  uploading.value = false
+}
 
 const title = computed(
   () =>
@@ -127,6 +185,7 @@ onMounted(() => window.addEventListener('cockpit:host-pick', onRequest))
 onBeforeUnmount(() => window.removeEventListener('cockpit:host-pick', onRequest))
 
 function finish(path: string | null): void {
+  cancelUpload()
   const r = req.value
   req.value = null
   open.value = false
@@ -203,6 +262,42 @@ function size(n?: number): string {
         >
           {{ t('hostpick.root.' + r.label, r.label) }}
         </v-chip>
+        <v-chip
+          v-if="canUpload"
+          class="py-1"
+          style="min-height: 24px"
+          label
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-upload"
+          :disabled="uploading"
+          @click="pickFromDevice"
+        >
+          {{ t('hostpick.fromDevice', '从此设备选择') }}
+        </v-chip>
+        <input
+          ref="fileInput"
+          type="file"
+          class="d-none"
+          :accept="acceptAttr"
+          @change="onDeviceFile"
+        />
+      </div>
+
+      <div v-if="uploading || uploadError" class="px-6 pb-3">
+        <template v-if="uploading">
+          <div class="d-flex align-center ga-2 mb-1">
+            <span class="text-body-2"
+              >{{ t('hostpick.uploading', '正在上传…') }} {{ uploadPct }}%</span
+            >
+            <v-spacer />
+            <v-btn variant="text" @click="cancelUpload">{{ t('hostpick.cancel', '取消') }}</v-btn>
+          </div>
+          <v-progress-linear :model-value="uploadPct" color="primary" height="6" rounded />
+        </template>
+        <div v-else class="text-error text-body-2">
+          {{ t('hostpick.uploadFailed', '上传失败，请重试') }}
+        </div>
       </div>
 
       <v-divider />

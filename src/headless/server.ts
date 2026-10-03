@@ -10,15 +10,17 @@
  * 默认只监听 127.0.0.1；`--host 0.0.0.0` 才对局域网开放。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createReadStream, existsSync, statSync } from 'node:fs'
-import { extname, join, normalize, resolve } from 'node:path'
-import { timingSafeEqual } from 'node:crypto'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from 'node:fs'
+import { basename, extname, join, normalize, resolve } from 'node:path'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { getProtocolHandler } from './electron-stub'
 import { runCommand, listCommands, UnknownCommandError } from '../main/process/commands/registry'
 import { withOrigin } from '../main/process/privacy'
 import { cliExec } from '../main/process/cli'
 import { makeLogger } from '../main/process/logger'
+import { USER_CONFIG_DIR } from '../main/process/paths'
 
 const log = makeLogger('headless')
 
@@ -36,6 +38,39 @@ const MIME: Record<string, string> = {
 }
 
 const clients = new Set<ServerResponse>()
+
+/** 网页端「从此设备选择」上传到宿主的位置（文件选择器把这里的路径当作选择结果返回） */
+export const UPLOAD_DIR = join(USER_CONFIG_DIR, 'uploads')
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
+
+/** 只保留文件名部分、去掉控制字符 / 路径分隔，前缀随机串避免重名，扩展名原样保留（过滤器按它判断） */
+function uploadName(raw: string): string {
+  const base = basename(raw.replace(/\\/g, '/'))
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f<>:"|?*]/g, '_')
+    .slice(-120)
+  return `${randomBytes(4).toString('hex')}-${base || 'file'}`
+}
+
+async function receiveUpload(req: IncomingMessage, url: URL, res: ServerResponse): Promise<void> {
+  const len = Number(req.headers['content-length'] ?? 0)
+  if (len > MAX_UPLOAD_BYTES) return json(res, 413, { ok: false, error: 'file too large' })
+  mkdirSync(UPLOAD_DIR, { recursive: true, mode: 0o700 })
+  const file = join(UPLOAD_DIR, uploadName(url.searchParams.get('name') ?? 'file'))
+  let size = 0
+  req.on('data', (c: Buffer) => {
+    size += c.length
+    if (size > MAX_UPLOAD_BYTES) req.destroy(new Error('file too large'))
+  })
+  try {
+    await pipeline(req, createWriteStream(file, { mode: 0o600 }))
+  } catch (e) {
+    log.warn('upload failed', String(e))
+    return json(res, 400, { ok: false, error: 'upload failed' })
+  }
+  log.info('upload saved', { file, size })
+  json(res, 200, { ok: true, path: file, size })
+}
 
 const SCHEME_RE = /^cockpit-(icon|audio|tile):\/\/(.*)$/s
 
@@ -163,6 +198,12 @@ export function startServer(opts: {
           privacy
         }))
       )
+    }
+    if (url.pathname === '/api/upload' && req.method === 'POST') {
+      receiveUpload(req, url, res).catch(() =>
+        json(res, 500, { ok: false, error: 'internal error' })
+      )
+      return
     }
     if (url.pathname === '/api/cli' && req.method === 'POST') {
       readJson(req)

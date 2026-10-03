@@ -184,5 +184,8 @@
   "hostpick.save": "保存",
   "hostpick.selectFolder": "选择此文件夹",
   "hostpick.select": "选择",
-  "sidebar.open": "打开菜单"
+  "sidebar.open": "打开菜单",
+  "hostpick.fromDevice": "从此设备选择",
+  "hostpick.uploading": "正在上传…",
+  "hostpick.uploadFailed": "上传失败，请重试"
 }

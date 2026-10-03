@@ -184,5 +184,8 @@
   "hostpick.save": "Save",
   "hostpick.selectFolder": "Choose this folder",
   "hostpick.select": "Choose",
-  "sidebar.open": "Open menu"
+  "sidebar.open": "Open menu",
+  "hostpick.fromDevice": "Choose from this device",
+  "hostpick.uploading": "Uploading…",
+  "hostpick.uploadFailed": "Upload failed, please retry"
 }
