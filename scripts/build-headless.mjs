@@ -6,6 +6,30 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { build, loadConfigFromFile } from 'vite'
 
+// 选项：
+//   --only a,b,c    只构建这些能力（其余不进任何 bundle）。框架级能力（settings / background /
+//                   help / privacy / agent / inspector / cli / logs）总会保留，否则依赖
+//                   background-tasks 的能力会被加载器判定为缺少能力而禁用
+//   --pack          额外生成 out/cockpit-headless.tgz
+const argv = process.argv.slice(2)
+const BASE_ABILITIES = [
+  'settings',
+  'background',
+  'help',
+  'privacy',
+  'agent',
+  'inspector',
+  'cli',
+  'logs'
+]
+const onlyIdx = argv.indexOf('--only')
+if (onlyIdx >= 0 && argv[onlyIdx + 1]) {
+  const toggle = { '*': false }
+  for (const id of [...BASE_ABILITIES, ...argv[onlyIdx + 1].split(',').filter(Boolean)])
+    toggle[id] = true
+  process.env.COCKPIT_ABILITY_TOGGLE = JSON.stringify(toggle)
+}
+
 const root = resolve(import.meta.dirname, '..')
 const loaded = await loadConfigFromFile(
   { command: 'build', mode: 'production' },
@@ -44,6 +68,7 @@ await build({
     emptyOutDir: true,
     target: 'node22',
     minify: false,
+    reportCompressedSize: false,
     rollupOptions: {
       external,
       output: { format: 'cjs', entryFileNames: 'index.js', dynamicImportInCjs: false }
@@ -73,6 +98,7 @@ await build({
     outDir: resolve(root, 'out/web'),
     emptyOutDir: true,
     target: 'esnext',
+    reportCompressedSize: false,
     rollupOptions: { input: resolve(root, 'src/main/ui/index.html') }
   }
 })

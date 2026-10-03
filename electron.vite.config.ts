@@ -41,11 +41,13 @@ try {
 // `settings` 是外壳必需的，不允许关。个人文件，已 gitignore（见 AGENTS.md「toggle.json」）。
 const ABILITIES_DIR = resolve('src/abilities')
 function disabledAbilityIds(): string[] {
+  // COCKPIT_ABILITY_TOGGLE（JSON，同 toggle.json 的格式）优先于文件——`pnpm build:headless --only a,b` 用它
+  const envToggle = process.env.COCKPIT_ABILITY_TOGGLE
   const file = resolve(ABILITIES_DIR, 'toggle.json')
-  if (!existsSync(file)) return []
+  if (!envToggle && !existsSync(file)) return []
   let toggle: Record<string, unknown>
   try {
-    toggle = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    toggle = JSON.parse(envToggle ?? readFileSync(file, 'utf8')) as Record<string, unknown>
   } catch (e) {
     console.warn(`[toggle.json] 解析失败，按全部启用处理: ${(e as Error).message}`)
     return []
