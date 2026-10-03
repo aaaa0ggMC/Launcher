@@ -21,6 +21,8 @@ export interface AgentUiConfig {
   statusTtlSec: number
   /** 空闲超过 N 分钟就从图标条隐藏；0 = 不隐藏（直到会话断开） */
   hideIdleAfterMin: number
+  /** 无响应超过 N 分钟直接断开会话（主进程定时清理，客户端已死时的残留）；0 = 一直保留 */
+  kickIdleAfterMin: number
   /** 悬停提示里显示页面 / 状态 / 最近工具（关 = 只显示名称） */
   tooltipDetail: boolean
   /** 接受 agent 自带头像；关 = 一律用默认图标 */
@@ -38,6 +40,7 @@ export const AGENT_UI_DEFAULTS: AgentUiConfig = {
   busyTimeoutSec: 60,
   statusTtlSec: 120,
   hideIdleAfterMin: 0,
+  kickIdleAfterMin: 0,
   tooltipDetail: true,
   allowAvatar: true,
   defaultIcon: 'icon'
@@ -47,7 +50,8 @@ export const AGENT_UI_DEFAULTS: AgentUiConfig = {
 export const AGENT_UI_LIMITS = {
   busyTimeoutSec: { min: 3, max: 600 },
   statusTtlSec: { min: 10, max: 3600 },
-  hideIdleAfterMin: { min: 0, max: 1440 }
+  hideIdleAfterMin: { min: 0, max: 1440 },
+  kickIdleAfterMin: { min: 0, max: 10080 }
 } as const
 
 function num(v: unknown, key: keyof typeof AGENT_UI_LIMITS): number {
@@ -70,6 +74,7 @@ export function resolveAgentUi(raw: unknown): AgentUiConfig {
     busyTimeoutSec: num(r.busyTimeoutSec, 'busyTimeoutSec'),
     statusTtlSec: num(r.statusTtlSec, 'statusTtlSec'),
     hideIdleAfterMin: num(r.hideIdleAfterMin, 'hideIdleAfterMin'),
+    kickIdleAfterMin: num(r.kickIdleAfterMin, 'kickIdleAfterMin'),
     tooltipDetail: bool('tooltipDetail'),
     allowAvatar: bool('allowAvatar'),
     defaultIcon: r.defaultIcon === 'initial' ? 'initial' : 'icon'

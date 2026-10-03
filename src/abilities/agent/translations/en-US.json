@@ -53,6 +53,8 @@
   "agent.ui_status_ttl_hint": "How long a set_status message stays visible",
   "agent.ui_hide_idle": "Hide idle avatars after",
   "agent.ui_hide_idle_hint": "Remove an idle AI from the bar after this long; 0 = never",
+  "agent.ui_kick_idle": "Kick unresponsive sessions after",
+  "agent.ui_kick_idle_hint": "Disconnect a session with no calls for this long (cleans up dead clients); 0 = keep forever",
   "agent.ui_default_icon": "When there is no avatar",
   "agent.ui_icon_animal": "Random animal icon",
   "agent.ui_icon_initial": "Name initial",

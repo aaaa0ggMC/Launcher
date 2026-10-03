@@ -53,6 +53,8 @@
   "agent.ui_status_ttl_hint": "AI 用 set_status 写的「在忙什么」多久后消失",
   "agent.ui_hide_idle": "空闲后隐藏图标",
   "agent.ui_hide_idle_hint": "空闲超过多久从图标条消失；0 = 不隐藏",
+  "agent.ui_kick_idle": "无响应后断开会话",
+  "agent.ui_kick_idle_hint": "超过多久没有任何调用就直接踢掉（清理已死的会话）；0 = 一直保留",
   "agent.ui_default_icon": "没有头像时",
   "agent.ui_icon_animal": "随机动物图标",
   "agent.ui_icon_initial": "名字首字母",

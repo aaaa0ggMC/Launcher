@@ -4,6 +4,11 @@
  */
 import { getBroadcast } from '../broadcast'
 import { revokeSessionGrants } from '../privacy'
+import { makeLogger } from '../logger'
+import { CONFIG_JSON } from '../paths'
+import { readJson } from '../util'
+
+const log = makeLogger('agent')
 
 export interface AgentSession {
   id: string
@@ -169,6 +174,7 @@ export function touchSession(
     s.icon = pickIcon(client, id)
     rememberedIcons.set(client, s.icon)
     sessions.set(id, s)
+    startIdleSweep()
     if (close) closers.set(id, close)
     changed()
   }
@@ -212,4 +218,40 @@ export function endTransportSessions(transport: AgentSession['transport']): void
 
 export function listSessions(): AgentSession[] {
   return [...sessions.values()].sort((a, b) => b.lastSeen - a.lastSeen)
+}
+
+/**
+ * 清理已死的会话：客户端被 kill / 崩溃时不会发 DELETE，会话会一直挂着。
+ * `agent.ui.kickIdleAfterMin`（默认 0 = 不清理）分钟内没有任何调用就断开；
+ * 若客户端其实还活着，它下次请求收到 404 后会重新 initialize。每分钟读一次最新配置。
+ */
+let sweepTimer: ReturnType<typeof setInterval> | null = null
+function startIdleSweep(): void {
+  if (sweepTimer) return
+  sweepTimer = setInterval(() => {
+    void sweepIdle().catch(() => {})
+  }, 60_000)
+  sweepTimer.unref?.()
+}
+
+async function sweepIdle(): Promise<void> {
+  if (sessions.size === 0) {
+    if (sweepTimer) clearInterval(sweepTimer)
+    sweepTimer = null
+    return
+  }
+  const cfg = await readJson<{ agent?: { ui?: { kickIdleAfterMin?: unknown } } }>(CONFIG_JSON)
+  const min = Number(cfg?.agent?.ui?.kickIdleAfterMin)
+  if (!Number.isFinite(min) || min <= 0) return
+  const limit = Math.min(min, 10080) * 60_000
+  const now = Date.now()
+  for (const s of [...sessions.values()]) {
+    if (now - s.lastSeen < limit) continue
+    log.info('kicking idle agent session', {
+      id: s.id,
+      client: s.client,
+      idleMin: Math.round((now - s.lastSeen) / 60000)
+    })
+    disconnectSession(s.id)
+  }
 }

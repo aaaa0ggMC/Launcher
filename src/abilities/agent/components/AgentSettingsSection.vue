@@ -64,7 +64,8 @@ type UiNumKey = keyof typeof AGENT_UI_LIMITS
 const uiNums = ref<Record<UiNumKey, string>>({
   busyTimeoutSec: '',
   statusTtlSec: '',
-  hideIdleAfterMin: ''
+  hideIdleAfterMin: '',
+  kickIdleAfterMin: ''
 })
 function syncUiNums(): void {
   for (const k of Object.keys(AGENT_UI_LIMITS) as UiNumKey[]) uiNums.value[k] = String(ui.value[k])
@@ -422,6 +423,23 @@ defineExpose({
             class="agent-field"
             @blur="saveUiNum('hideIdleAfterMin')"
             @keydown.enter="saveUiNum('hideIdleAfterMin')"
+          />
+          <v-text-field
+            v-model="uiNums.kickIdleAfterMin"
+            :label="t('agent.ui_kick_idle', '无响应后断开会话')"
+            :hint="
+              t(
+                'agent.ui_kick_idle_hint',
+                '超过多久没有任何调用就直接踢掉（清理已死的会话）；0 = 一直保留'
+              )
+            "
+            persistent-hint
+            suffix="min"
+            type="number"
+            variant="outlined"
+            class="agent-field"
+            @blur="saveUiNum('kickIdleAfterMin')"
+            @keydown.enter="saveUiNum('kickIdleAfterMin')"
           />
         </div>
         <v-select
