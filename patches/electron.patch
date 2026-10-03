@@ -1,0 +1,18 @@
+diff --git a/install.js b/install.js
+index 9d7ecaf55d29b67de146f8359083fe4b4548a2bf..45fa4142fbd6537d20702da167fdda7e28964a15 100644
+--- a/install.js
++++ b/install.js
+@@ -15,6 +15,13 @@ if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD) {
+   process.exit(0);
+ }
+ 
++// cockpit: Electron 没有 android（Termux）构建，下载必然失败并让整个 pnpm install 报错。
++// 在不支持的平台上跳过二进制下载——此时只能用无头模式（pnpm build:headless），不能启动 Electron。
++if (process.platform === 'android') {
++  console.warn('[cockpit] electron: android 无官方构建，跳过二进制下载（仅可用无头模式）');
++  process.exit(0);
++}
++
+ const platformPath = getPlatformPath();
+ 
+ if (isInstalled()) {

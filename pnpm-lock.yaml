@@ -7,16 +7,19 @@ settings:
 overrides:
   hustcore: github:aaaa0ggMC/husthelper#path:hustcore
 
+patchedDependencies:
+  electron: 9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc
+
 importers:
 
   .:
     dependencies:
       '@electron-toolkit/preload':
         specifier: ^3.0.2
-        version: 3.0.2(electron@39.8.10(supports-color@7.2.0))
+        version: 3.0.2(electron@39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0))
       '@electron-toolkit/utils':
         specifier: ^4.0.0
-        version: 4.0.0(electron@39.8.10(supports-color@7.2.0))
+        version: 4.0.0(electron@39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0))
       '@mdi/font':
         specifier: ^7.4.47
         version: 7.4.47
@@ -74,7 +77,7 @@ importers:
         version: 6.0.8(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))(vue@3.5.40(typescript@5.9.3))
       electron:
         specifier: ^39.2.6
-        version: 39.8.10(supports-color@7.2.0)
+        version: 39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0)
       electron-builder:
         specifier: ^26.0.12
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@7.2.0)
@@ -4397,17 +4400,17 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@electron-toolkit/preload@3.0.2(electron@39.8.10(supports-color@7.2.0))':
+  '@electron-toolkit/preload@3.0.2(electron@39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0))':
     dependencies:
-      electron: 39.8.10(supports-color@7.2.0)
+      electron: 39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0)
 
   '@electron-toolkit/tsconfig@2.0.0(@types/node@22.20.1)':
     dependencies:
       '@types/node': 22.20.1
 
-  '@electron-toolkit/utils@4.0.0(electron@39.8.10(supports-color@7.2.0))':
+  '@electron-toolkit/utils@4.0.0(electron@39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0))':
     dependencies:
-      electron: 39.8.10(supports-color@7.2.0)
+      electron: 39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0)
 
   '@electron/asar@3.4.1':
     dependencies:
@@ -6156,7 +6159,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@39.8.10(supports-color@7.2.0):
+  electron@39.8.10(patch_hash=9ff48a037f525f0ce50b0e9f446467f19ce43deb00475a9b37f01ebb336cf8cc)(supports-color@7.2.0):
     dependencies:
       '@electron/get': 2.0.3(supports-color@7.2.0)
       '@types/node': 22.20.1

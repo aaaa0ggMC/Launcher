@@ -15,3 +15,5 @@ onlyBuiltDependencies:
   - electron
   - esbuild
   - electron-winstaller
+patchedDependencies:
+  electron: patches/electron.patch

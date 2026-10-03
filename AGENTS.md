@@ -287,7 +287,7 @@ scripts/               # pkexec helper 脚本 + polkit 规则
 
 - 渲染端: `src/abilities/index.ts` 的 Vite `import.meta.glob` → `loadAbilityModules()` 拍平成 `Record<id, Ability>`；首次显示时 async `import()` 页面组件 (code-split)
 - **自注入排序**：侧栏直接由能力元数据驱动，**不再读 yaml 顺序**——按 `category` 字母序分组、组内按 `name` 字母序排序（`App.vue` 用翻译后文本排序，`resolveSidebarAbilities` 也有 raw 兜底排序）
-- **平台过滤**：`Ability` 可声明 `platforms?: string[]`（`process.platform` 值），未给/空 = 全平台可用；给了且不包含当前平台 → 侧栏过滤掉，并在日志中报告。`resolveSidebarAbilities(platform)` 返回 `{ loaded, ignoredPlatform, ignoredDependency, backendOnly }`，通过 `logs.post`（scope `abilities`）输出「加载了哪些 / 平台不符忽略了哪些 / 依赖缺失忽略了哪些 / 纯后端不进侧栏哪些」
+- **平台过滤**：`Ability` 可声明 `platforms?: string[]`（`process.platform` 值；**Termux / nodejs-mobile 里的值是 `'android'`**，无需另造 `android-termux`），未给/空 = 全平台可用；给了且不包含当前平台 → 侧栏过滤掉，并在日志中报告。`resolveSidebarAbilities(platform)` 返回 `{ loaded, ignoredPlatform, ignoredDependency, backendOnly }`，通过 `logs.post`（scope `abilities`）输出「加载了哪些 / 平台不符忽略了哪些 / 依赖缺失忽略了哪些 / 纯后端不进侧栏哪些」
 - **能力依赖（能力辞典）**：`meta.ts` 可声明 `provides?: string[]`（本能力向系统提供的能力，如 `background` 提供 `['background-tasks']`）与 `dependencies?: string[]`（要求的能力，AIDJ/playground/apps 都 `dependencies: ['background-tasks']`）。依赖的是**能力名**而非 ability id——提供者改名/替换不影响依赖方。前后端加载器（`resolveSidebarAbilities` + `registerAbilityCommands`）按路径式可满足判定解析：要求的能力必须由某个平台合格且自身也可满足的能力提供。**环直接忽略**——这只是 cmd 依赖（命令注册顺序无关）不是初始化依赖，A↔B 互赖也照样注册。能力缺失/提供者被平台过滤/被移除 → 该能力命令不注册、侧栏不显示，并在日志中警告「missing capabilities」，删除提供者（如 `background`）会自动禁用所有建立在它上面的能力。主进程按**依赖序**注册（提供者先于依赖方，环成员兜底排最后）
 - **一文件夹多 Ability**：`index.ts` 可 default-export `Ability | Ability[]`——一个能力注册多个侧栏条目（如 AIDJ 注册 `aidj` 主页面 + `aidj-lyrics` 歌词页），`id` 必须唯一
 - 主进程: `src/main/process/abilities-loader.ts` 的 `import.meta.glob` 收集 `src/abilities/*/commands.ts` → `registerAll`，启动时按文件夹记录加载/失败清单
@@ -372,6 +372,21 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
   - UI 流程（斜杠命令、按钮）若组合调用多条命令 / 作业，在相关 `CommandSpec` 上写 `ui`（UI 入口）与 `related`（相关命令，作业写 `job:<name>`），让 agent 能从界面叫法找到命令，反之亦然。同名的命令和作业（如 `aidj.chat`）尤其要在 description 里讲清区别。
   - 命令结果里出现 `«redacted:…»` 时，网关自动附上结构化 `privacy` 说明（MCP 为首段文本、Remote 为 `_privacy`）：被脱敏的 scope、其中**授权已过期**的、可申请的。`request_clearance` 的结果带 `grants[].expiresAt`，`privacy_scopes` 带 `expires_in_s`。产生占位符的新代码要走 `shield` / `shieldFields` / `secret`，或手动 `noteRedaction(scope)`，否则这份说明会漏。
   - `ability.describe --id <能力>`（`--format md` 出 Markdown）由注册表自动生成能力清单：命令（含可用性）、后台作业、UI 入口、help 页面。
+
+### 无头宿主 / 网页模式 / Termux（`src/headless/`）
+
+不依赖 Electron 的运行形态：纯 Node 宿主 + 浏览器当客户端（桌面浏览器、手机浏览器均可）。核心（命令注册表、后台任务、日志、能力加载）与 Electron 版是**同一份代码**。
+
+- **构建 / 运行**：`pnpm dev:web`（构建并启动，打印带 token 的网址，默认 `127.0.0.1:47810`；`node out/headless/index.js --host 0.0.0.0 --port N --web <dir>`）。`pnpm pack:headless` 生成 `out/cockpit-headless.tgz`（headless + web + 只含运行时依赖的 package.json，`dbus-next` / `esbuild` 为可选依赖），手机上 `tar xzf … && npm install --omit=dev && node headless/index.js`，不需要装 electron / vite 整套工具链。构建脚本 `scripts/build-headless.mjs` 复用 `electron.vite.config.ts` 的插件 / alias / define。
+- **`electron` 替身**（`electron-stub.ts`，构建期 alias）：不支持的窗口 / 对话框 / 全局快捷键等一律 nop（属性访问返回 nop，调用返回 undefined），27 个 `import 'electron'` 的文件无需改动；会被消费返回值的成员（`BrowserWindow.getAllWindows` → `[]`、`net.fetch` 含 `file://`、`safeStorage` 不可用、`app.getPath` 等）显式实现。`protocol.handle` 的回调被记下。
+- **传输**（`server.ts`）：`POST /api/command`、`POST /api/cli`、`GET /api/commands`、`GET /api/info`、SSE `GET /api/events`（= `broadcast`）、`/_p/<cockpit-icon|audio|tile>/…`（把替身记下的协议处理器暴露成 HTTP，支持 Range）。除静态页面外一律要 token（`Authorization: Bearer` / `?token=` / `cockpit_token` Cookie），token 在 `~/.config/LinuxCockpit/headless-token`；命令结果里的 `cockpit-*://` 自动改写成 `/_p/`。**默认只监听 127.0.0.1**，明文 HTTP，不要暴露到公网。
+- **共用 `window.cockpit`**：`src/preload/api.ts` 的 `createCockpit(transport)` 同时被 Electron preload（ipcRenderer）和网页 shim（`src/headless/web-shim.ts`，fetch + SSE）使用。渲染端手拼自定义协议 URL 必须包 `window.cockpit.hostUrl(...)`（Electron 下原样返回）。
+- **宿主能力档位（caps）**：shim 声明 `native | web | none`；`window.cockpit.hasCap(id)` / `cap(id)`，未声明视为 `native`。现有 id：`window.frame` / `window.child` / `file.pick` / `file.save` / `clipboard` / `external` / `shortcut.global` / `screenshot` / `privacy.consent` / `host.wallpaper`。**UI 里凡是依赖宿主窗口 / 桌面的控件，用 `hasCap` 隐藏或降级，不要自己判断是不是 Electron**；背景预设用 `BackgroundDef.requires`。`none` 的通道由 shim nop（返回 null / false），不抛错。后端命令级的可用性仍走 `platforms` / `provides` / `dependencies`。
+- **文件选择**：网页里 `pickFile` / `pickSaveFile` 弹 `HostFilePicker.vue`，经 `host.fs.list`（仅无头注册，`agent: 'deny'`）浏览**宿主**文件系统，因为浏览器拿不到宿主绝对路径。
+- **密钥库**：`master.json` 若由 `safeStorage`（系统钥匙环）包裹，无头宿主解不开。在 Electron 里执行一次 `vault.rewrap-scrypt` 改包成 scrypt（机器指纹派生，**保护强度降低**，原文件备份 `master.json.bak-*`），两边即可共用；`vault.status` 查看。换机器（如手机 Termux 本机跑宿主）解不开，密钥需重填。
+- **Termux 安装**：Electron 没有 android 构建，其 `postinstall` 会让 `pnpm install` 失败。仓库用 `patches/electron.patch`（`pnpm-workspace.yaml` 的 `patchedDependencies`）让 `install.js` 在 `process.platform === 'android'` 时直接跳过下载，锁文件在所有平台一致（`--frozen-lockfile` 可用）。此时只能用无头模式。**不要**用 `.pnpmfile.cjs` 的 `readPackage` 按平台删依赖：会改写锁文件并让 `--frozen-lockfile` 报 `pnpmfileChecksum` 不匹配。升级 electron 版本后要重做补丁（`pnpm patch electron` → 改 `install.js` → `pnpm patch-commit`），并留意锁文件里 git 依赖（hustcore）被顺带重新解析的无关改动。
+- **平台**：Termux 的 `process.platform` 是 `'android'`。`platforms: ['linux']` 的能力（mirror / display / dashboard / systemd / autostart）在 Termux 自动排除；其余没写 `platforms` 的默认可用。要给某个 Linux 专属能力开放 Termux，把 `'android'` 加进它的 `platforms` 之前先在真机验证（`/proc` 在 Android 上受限）。
+- **没做 / 已知缺口**：agent 系统（MCP / Remote / ui inspector / 隐私授权窗口 / agent 独立视图）未接入无头入口；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
 
 ### 镜像源 toggle 安全性
 
