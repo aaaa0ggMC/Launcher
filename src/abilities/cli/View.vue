@@ -116,10 +116,7 @@ const outputEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLInputElement | null>(null)
 
 function scrollToBottom(): void {
-  // The ref is bound to a <v-card> (Vuetify component), so outputEl.value is
-  // the component instance — resolve the native element via $el when present.
-  const inst = outputEl.value as (HTMLElement & { $el?: HTMLElement }) | null
-  const el = inst?.$el ?? inst
+  const el = outputEl.value
   el?.scrollTo({ top: el.scrollHeight })
 }
 
@@ -164,49 +161,51 @@ defineExpose({ toMarkdown })
       v-html="translate(uiLang, 'cli.subtitle')"
     ></div>
 
-    <v-card
-      ref="outputEl"
-      rounded="lg"
-      variant="tonal"
-      flat
-      class="cli-output pa-4 overflow-y-auto"
-    >
-      <div
-        v-for="(l, i) in history"
-        :key="i"
-        :class="[
-          'font-family-mono text-body-2 mb-1',
-          l.kind === 'in' ? 'text-primary font-weight-medium' : l.kind === 'err' ? 'text-error' : ''
-        ]"
-      >
-        <template v-if="l.kind === 'in'"><span class="cli-prompt">❯</span> {{ l.text }}</template>
-        <template v-else>{{ l.text }}</template>
-      </div>
-      <div v-if="busy" class="text-caption on-surface-variant mb-1">
-        {{ translate(uiLang, 'cli.busy') }}
-      </div>
-
-      <div v-if="suggestions.length" class="mb-1 d-flex flex-wrap gap-1">
-        <v-chip
-          v-for="s in suggestions"
-          :key="s"
-          size="x-small"
-          variant="tonal"
-          @click="pickSuggestion(s)"
+    <!-- tonal 卡片的底色是绝对定位的 underlay（inset:0）：若卡片自己滚动，底色会随内容滚走、
+         只盖住第一屏。所以卡片不滚动（overflow hidden），滚动放在内层 div 上 -->
+    <v-card rounded="lg" variant="tonal" flat class="cli-output">
+      <div ref="outputEl" class="cli-scroll pa-4">
+        <div
+          v-for="(l, i) in history"
+          :key="i"
+          :class="[
+            'font-family-mono text-body-2 mb-1',
+            l.kind === 'in'
+              ? 'text-primary font-weight-medium'
+              : l.kind === 'err'
+                ? 'text-error'
+                : ''
+          ]"
         >
-          {{ s }}
-        </v-chip>
-      </div>
+          <template v-if="l.kind === 'in'"><span class="cli-prompt">❯</span> {{ l.text }}</template>
+          <template v-else>{{ l.text }}</template>
+        </div>
+        <div v-if="busy" class="text-caption on-surface-variant mb-1">
+          {{ translate(uiLang, 'cli.busy') }}
+        </div>
 
-      <div class="cli-input-line">
-        <span class="cli-prompt">❯</span>
-        <input
-          ref="inputEl"
-          v-model="input"
-          class="cli-input"
-          :placeholder="translate(uiLang, 'cli.placeholder')"
-          @keydown="onKey"
-        />
+        <div v-if="suggestions.length" class="mb-1 d-flex flex-wrap gap-1">
+          <v-chip
+            v-for="s in suggestions"
+            :key="s"
+            size="x-small"
+            variant="tonal"
+            @click="pickSuggestion(s)"
+          >
+            {{ s }}
+          </v-chip>
+        </div>
+
+        <div class="cli-input-line">
+          <span class="cli-prompt">❯</span>
+          <input
+            ref="inputEl"
+            v-model="input"
+            class="cli-input"
+            :placeholder="translate(uiLang, 'cli.placeholder')"
+            @keydown="onKey"
+          />
+        </div>
       </div>
     </v-card>
   </div>
@@ -225,7 +224,15 @@ defineExpose({ toMarkdown })
 .cli-output {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: rgba(var(--v-theme-background), 0.6);
+}
+.cli-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .cli-input-line {
   display: flex;

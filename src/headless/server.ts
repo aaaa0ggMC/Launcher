@@ -17,6 +17,7 @@ import { Readable } from 'node:stream'
 import { getProtocolHandler } from './electron-stub'
 import { runCommand, listCommands, UnknownCommandError } from '../main/process/commands/registry'
 import { withOrigin } from '../main/process/privacy'
+import { cliExec } from '../main/process/cli'
 import { makeLogger } from '../main/process/logger'
 
 const log = makeLogger('headless')
@@ -162,6 +163,24 @@ export function startServer(opts: {
           privacy
         }))
       )
+    }
+    if (url.pathname === '/api/cli' && req.method === 'POST') {
+      readJson(req)
+        .then(async (body) => {
+          const meta = body.meta as { agentSession?: unknown } | undefined
+          const origin =
+            typeof meta?.agentSession === 'string' && meta.agentSession
+              ? ({ kind: 'agent-ui', session: meta.agentSession } as const)
+              : ({ kind: 'cli' } as const)
+          json(res, 200, {
+            ok: true,
+            result: await withOrigin(origin, () => cliExec(String(body.cmd ?? '')))
+          })
+        })
+        .catch((e) =>
+          json(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) })
+        )
+      return
     }
     if (url.pathname === '/api/command' && req.method === 'POST') {
       readJson(req)

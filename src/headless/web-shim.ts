@@ -77,8 +77,7 @@ const NOP_RESULT: Record<string, unknown> = {
   'screenshot:save': null,
   'privacy:pending': [],
   'privacy:deny-all': 0,
-  'agent-view:control': false,
-  'cli:exec': ''
+  'agent-view:control': false
 }
 
 const cockpit = createCockpit({
@@ -96,6 +95,14 @@ const cockpit = createCockpit({
         if (r.ok) return r.result
         if (r.unknown && !r.silent) emit('cockpit:command-error', name)
         throw new Error(r.error ?? 'command failed')
+      }
+      case 'cli:exec': {
+        const r = await api<{ ok: boolean; result?: string; error?: string }>('/api/cli', {
+          cmd: args[0],
+          meta: args[1]
+        })
+        if (r.ok) return r.result ?? ''
+        throw new Error(r.error ?? 'cli failed')
       }
       case 'command:list':
         return api('/api/commands')
