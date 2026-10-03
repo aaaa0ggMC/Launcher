@@ -1,10 +1,14 @@
 # AI DJ
 
-> Last updated: 2026-10-01
+> Last updated: 2026-10-03
 
 AI DJ hands your local music library to an AI that behaves like a radio host: you ask in plain
 language, it picks and orders songs from **your** library, writes the intro, and pushes the playlist
-to a player. One folder registers three sidebar pages that share this help:
+to a player. Picking runs as an **agent loop**: the AI works in rounds with a toolbox over your
+library (title and lyric search, tag clouds and filters, sub-agents that curate or dream up
+continuations), and each batch shows up as a **workflow card** in the chat — the details are in
+[AI Loop: How It Works](AILoop/HowItWorks.md). One folder registers three sidebar pages that share
+this help:
 
 - **AI DJ** (this page): chat to pick songs + background auto-rotation.
 - **Lyrics**: a full-page lyrics view with karaoke word fill and scroll-follow.
@@ -20,8 +24,22 @@ Metadata, sessions, play frequency and listening stats all live on this machine 
 
 ## What it does
 
-- Ask in natural language: mood, scene, language — the AI picks from **your library** and never
-  hallucinates songs that don't exist.
+- Ask in natural language: mood, scene, language, a lyric line, "some Jay Chou" — the AI picks from
+  **your library** and never hallucinates songs that don't exist.
+- Agent picking with playbooks: the loop follows playbooks like "seed start" (begin from one song /
+  lyric line) or "artist pick" (a named artist), narrows the pool by tags, can hand picking to
+  library and dream sub-agents, and a ranking agent orders the batch and writes the DJ intro — see
+  [AI Loop: How It Works](AILoop/HowItWorks.md).
+- Chat-only turns: say you don't feel like music and the AI just answers; in persistent mode
+  auto-refill pauses until you ask for songs again.
+- Web search (optional, Tavily): the AI can look up artists, songs, releases and news to understand
+  a request — songs still come only from your library.
+- Tag cleanup: a guided pass that merges redundant mood / genre / language / loudness tags into one
+  clean vocabulary and rewrites song metadata into a new slot — see
+  [Tag cleanup](Library/TagCleanup.md).
+- Token breakdown: hover the **Tokens** chip for input / cached / output totals, the cache hit rate,
+  and the same split per agent — see
+  [AI Loop: Models & Usage](AILoop/ModelsAndUsage.md).
 - Slash commands that hit the library directly: `/random`, `/pr`, `/explore`, `/ftop`, `/analyse`,
   `/filter`, `/persist` — no AI round-trip needed.
 - Persistent mode: fork the current conversation into a background task that keeps generating and
@@ -34,20 +52,22 @@ Metadata, sessions, play frequency and listening stats all live on this machine 
 
 ## UI at a glance
 
-| Area          | Where                | Description                                                                                                                                             |
-| ------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Top bar       | Very top of the page | Current track (truncated), playback status chip, AI API status chip, player dropdown                                                                    |
-| Conversation  | Middle               | Message stream (You / AI DJ / System); AI replies render as Markdown; scroll up to load older messages                                                  |
-| Playlist card | Under an AI reply    | **Play all**, **Push to background**, plus a song grid with covers and drag-to-reorder                                                                  |
-| Input area    | Bottom               | Status chips, model dropdown, multi-line input, **Send** / **Stop**, **Expand** / **Collapse**                                                          |
-| Page menu     | Handle at top center | New Chat, Start from Now, Chat Sessions, Song Frequency, Metadata Slots, Bilibili Video Download, Listening Time Stats, Update MetaData, Desktop Lyrics |
+| Area          | Where                | Description                                                                                                                                                                  |
+| ------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Top bar       | Very top of the page | Current track (truncated), playback status chip, AI API status chip, player dropdown                                                                                         |
+| Conversation  | Middle               | Message stream (You / AI DJ / System); AI replies render as Markdown, with a workflow card above each batch; scroll up to load older messages                                |
+| Playlist card | Under an AI reply    | **Play all**, **Push to background**, plus a song grid with covers and drag-to-reorder                                                                                       |
+| Input area    | Bottom               | Status chips, multi-line input, **Send** / **Stop**, **Expand** / **Collapse**                                                                                               |
+| Page menu     | Handle at top center | New Chat, Start from Now, Chat Sessions, Models, Song Frequency, Metadata Slots, Bilibili Video Download, Listening Time Stats, Tag cleanup, Update MetaData, Desktop Lyrics |
 
 The player dropdown on the right of the top bar only appears in **external player (MPRIS / DBus)**
 mode. Its default entry is **Current Active** (follow whichever player is active); you can also pin a
 specific player. It disappears when you switch to the built-in player backend.
 
-The row of small chips above the input box is live status: **Tokens** (cumulative), **Context** /
-**Completion** (this request's input / output), **Tracks** (library size, `…` while loading),
+The row of small chips above the input box is live status: **Tokens** (cumulative, counting every LLM
+call including sub-agents — hover it for a breakdown of input, cached with hit rate, output and
+total, plus the same split per agent), **Context** / **Completion** (the latest LoopAgent call's
+input / output), **Tracks** (library size, `…` while loading),
 **Memory** (played memory — click to clear), **Volbal** (loudness balance — click to cycle
 off → lufs → linear), **RecordFreq** (frequency recording toggle), **Listen** (listening stats
 toggle) and **Backgrounds** (running background tasks). Which chips show, and in what order, is
@@ -60,25 +80,42 @@ configured in **Settings → AI DJ → AI DJ Settings → Status bar indicators*
 
 1. Open the **Settings** page in the sidebar, category **AI DJ** → item **AI DJ Settings**.
 2. **API Configuration**: **API URL** (an OpenAI-compatible endpoint, e.g.
-   `http://localhost:1145/v1`) and **API Key**.
-3. **AI Models**: **Chat model** and **Metadata extraction model** can be picked from the dropdown
-   (listed from the endpoint's `/models`) or typed by hand.
+   `http://localhost:1145/v1`) and **API Key**. The key is write-only and stored encrypted — settings
+   never show it again; type a new value to replace it, or use the button beside it to clear the
+   saved key.
+3. **AI Models** (the same panel as page menu → **Models**): the **Default model** covers text mode,
+   title generation and every agent without its own setting; LoopAgent, LibAgent, DreamAgent,
+   RankAgent, VocabAgent, SanitizeAgent and the metadata model can each follow the default or pin
+   their own model, and names not in the list can be typed by hand. Changes save as you make them
+   and apply from the next batch; the chat page and the persistent panel no longer have model
+   dropdowns of their own.
 4. **Music Library & Player**: add music folders under **Search folders** (scanned recursively) with
    **Add**; add **Lyrics search folders** (`.lrc`) if you want the desktop lyrics window.
 5. Lyrics come from Netease: by default an external service (**NCM API URL**, default
    `http://localhost:3000`, i.e. [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)).
    For the in-process direct connection, click **Sign Disclaimer & Enable** under
    **NCM Built-in Direct Connection Auth** first.
+6. Optional — **Web search (Tavily)**: turn on **Allow web search** and paste a Tavily API key if the
+   AI may look facts up online (see
+   [AI Loop: Models & Usage](AILoop/ModelsAndUsage.md)).
 
 Changes apply immediately and are written to `~/.config/LinuxCockpit/aidj/config.json`.
 
 ### Chat with the AI DJ
 
-Type a request in the bottom input box (e.g. "something chill in Chinese", "instrumentals for
-coding") and click **Send** (or press **Shift+Enter**). The reply starts as a "Thinking…" bubble with
-a live character counter, then turns into an intro plus a playlist card. If only an intro comes back,
-a system line "AI found no songs to match your request" appears underneath — usually the library has
-nothing that matches.
+Type a request in the bottom input box and click **Send** (or press **Shift+Enter**). The reply
+starts as a "Thinking…" bubble, which in agent mode shows the current stage of the workflow — which
+agent is working and roughly what it is doing — instead of a character counter (text mode still
+counts characters). Above the finished reply sits a **workflow card**: one per batch, listing the
+playbook used, the status, token usage and elapsed time, and — expanded — every agent step and tool
+call with a one-line summary. Then comes the intro plus the playlist card. If only an intro comes
+back, a system line "AI found no songs to match your request" appears underneath — usually the
+library has nothing that matches.
+
+Requests can be anything: a mood ("something chill in Chinese", "instrumentals for coding"), a
+starting point (a song or a lyric line, "start from 辽阔的森林"), an artist ("some Jay Chou"), or no
+music at all ("no music, let's talk") — then the AI answers directly without a playlist. The full
+workflow is described in [AI Loop: How It Works](AILoop/HowItWorks.md).
 
 To interrupt a generation, click the red **Stop**; your text is restored into the input box.
 
@@ -141,13 +178,28 @@ session and switches to it).
    playlists and pushing them to the player; the **AI DJ page's chat stays untouched**.
 4. Open the **Background tasks** panel from the sidebar bottom. The task has two custom views:
    `chat` lets you keep sending messages, switch the send-target player, and right-click to revert or
-   copy; `continuous` shows now playing / next / the pending queue, and supports drag-to-reorder,
-   player switching, volume and resetting played memory.
+   copy — each batch shows its workflow card and the token counters update live; `continuous` shows
+   now playing / next / the pending queue, and supports drag-to-reorder, player switching, volume
+   and resetting played memory.
 5. Type `/persist-stop` or stop the task in the panel to finish.
+
+A chat-only turn in a persistent session (the AI answered without picking songs, e.g. after "no
+music, let's talk") **pauses auto-refill**: the chat notes that this round was chat-only and that
+sending another message continues. The next message that asks for songs resumes auto-refill, and the
+chat says so.
 
 Persistent sessions also work in built-in-player mode (pushing into the built-in player's queue), but
 **continuous-playback tasks** (the **Push to background** button on a playlist card) are only offered
 in external-player mode — the button doesn't show otherwise.
+
+### Models and tag cleanup
+
+- Page menu → **Models** (same content as **Settings → AI DJ → AI Models**): pin a model per agent
+  or leave them on **Follow default**; details in
+  [AI Loop: Models & Usage](AILoop/ModelsAndUsage.md).
+- Page menu → **Tag cleanup**: merge redundant mood / genre / language / loudness tags into one
+  clean vocabulary and rewrite metadata into a new slot; details in
+  [Tag cleanup](Library/TagCleanup.md).
 
 ### Update MetaData and library housekeeping
 
@@ -188,8 +240,14 @@ Font, size, colors and window position live in
 - [Built-in Player](Player/BuiltInPlayer.md): the player page and playback backend, crossfade, EQ,
   speed, AB loop, sleep timer, LAN remote.
 - [Lyrics Page](Lyrics/LyricsPage.md): karaoke word fill, scroll-follow, immersive mode and typography.
-- [Library & Metadata](Library/MetadataAndStats.md): scanning, metadata sync and slots, frequency and
-  listening stats, Bilibili import.
+- [Library & Metadata](Library/MetadataAndStats.md): scanning, metadata sync and slots, tag cleanup,
+  frequency and listening stats, Bilibili import.
+- [AI Loop: How It Works](AILoop/HowItWorks.md): the agent workflow — agents, tools, playbooks,
+  loop settings and the workflow card.
+- [AI Loop: Models & Usage](AILoop/ModelsAndUsage.md): per-agent models, token counting and cache hit
+  rates, web search, key storage.
+- [Tag cleanup](Library/TagCleanup.md): merge redundant tags into a clean vocabulary and rewrite
+  metadata into a new slot.
 
 ## Platforms and dependencies
 
@@ -212,8 +270,16 @@ The core of AI DJ (chat, library, metadata, stats) is cross-platform; playback d
 
 ## Privacy and security
 
-- The **API key** is a credential: write-only, masked in settings, unreadable by the AI, and agents
-  cannot rewrite `secrets.*` through commands.
+- The **API key** and the Tavily key are credentials stored **encrypted** in `config.json` (decrypted
+  only in memory; plain keys left by older versions are migrated to ciphertext on first read). They
+  are write-only in settings, unreadable by the AI, and agents cannot rewrite `secrets.*` through
+  commands.
+- With web search enabled, the AI's search queries are sent to **Tavily**. Songs are still picked
+  only from your local library, and web page content is treated as untrusted material the AI won't
+  follow instructions from.
+- Workflow records (agent steps, tool calls and their results) are saved with the session as their
+  own record type, but they **never enter the AI's memory** — they are a log for you, not context for
+  the next turn.
 - **Bilibili account profile** (uid / nickname / avatar) and **listening stats** are personal privacy
   scopes — AI snapshots and screenshots redact them.
 - QR login, importing credentials and signing / revoking disclaimers can only be done by you in the
@@ -237,6 +303,8 @@ aidj.next | aidj.prev | aidj.toggle | aidj.stop     # playback control
 aidj.volume --set 0.6                               # set volume (0-1)
 aidj.start-persistent --prompt "start from now"     # start persistent mode (external player only)
 aidj.chat --task <id> --text "more rock"            # message a running persistent session
+aidj.loop-preview --task <id>                       # preview the next batch's prompt / tools / models (no AI call)
+aidj.vocab-draft | aidj.sanitize-estimate           # tag cleanup: read the vocabulary draft / estimate a run
 aidj.metadata-sync                                  # background task: sync missing metadata
 aidj.sessions.list                                  # list sessions
 aidj.freq                                           # play frequency list
@@ -257,8 +325,9 @@ player in **Settings → AI DJ → Playback backend**.
 **Where did the "Player" page go?** It only exists while the playback backend is the built-in player;
 Linux defaults to external-player mode, so it's hidden.
 
-**The model dropdown is greyed out?** When the endpoint returns no model list the dropdown locks
-("Model unavailable"); you can still type a model name in settings.
+**Where is the model dropdown that used to sit in the input bar?** It's gone — models are set per
+agent now: open page menu → **Models** (or **Settings → AI DJ → AI Models**), pick a model on any
+agent or leave it on **Follow default**, and the change applies from the next batch.
 
 **Loudness balance is on but volume never changes?** It needs `ffprobe` (ffmpeg) to measure loudness,
 and the anchor is calibrated the moment you release a volume drag — everything else is balanced

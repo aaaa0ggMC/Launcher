@@ -1,6 +1,6 @@
 # Library & Metadata
 
-> Last updated: 2026-10-01
+> Last updated: 2026-10-03
 
 This page covers AI DJ's back office: how the library is scanned, where the metadata (language / mood /
 genre / loudness / review) comes from, where play frequency and listening time are stored, and how a
@@ -41,7 +41,9 @@ never moves or renames them (Bilibili downloads land in `Bilibili/<BV id>/` unde
 
 The first conversation triggers a scan and metadata load; with a big library the **Tracks** chip shows
 `…` first. If counts look stale after changing the library, run `aidj.reload` (or
-`aidj.invalidate-library` in the CLI) to force a rescan.
+`aidj.invalidate-library` in the CLI) to force a rescan. Opening the first session no longer waits
+for new-song metadata sync — the sync now runs in the background — and songs whose titles end in
+stray whitespace characters are no longer re-synced on every startup.
 
 ## Metadata sync (Update MetaData)
 
@@ -91,6 +93,16 @@ AI DJ page menu → **Metadata Slots**:
 Slot files live in `~/.config/LinuxCockpit/aidj/metadata/`; naming one is all the create dialog asks
 (e.g. `AnimeOST`, `JPop-2024`).
 
+## Tag cleanup
+
+When a field's tags have drifted into synonyms and near-duplicates, page menu → **Tag cleanup**
+merges them into one clean vocabulary and rewrites the songs. The results are always written to a
+**new slot** (`Sanitized-<date>.metadata`, or `Bilibili-Sanitized-<date>.metadata` for the Bilibili
+slot) which starts out disabled — the original data is untouched, and **Use cleaned metadata** in the
+cleanup runs list makes the switch. While a cleaned vocabulary is in use, later syncs are normalized
+to it, and songs whose language can't be determined stay `unknown` instead of being guessed. Full
+walkthrough: [Tag cleanup](TagCleanup.md).
+
 ## Play frequency and listening stats
 
 - **Song Frequency** (AI DJ page menu): every library song ranked by play count — click a cover to
@@ -130,6 +142,9 @@ turn on **Audio Only Mode** in settings to just listen.
 ## Read more
 
 - Back to [AI DJ](../main.md).
+- [Tag cleanup](TagCleanup.md): merge redundant tags into a clean vocabulary, rewrite metadata into a
+  new slot.
+- [AI Loop: How It Works](../AILoop/HowItWorks.md): how the picking agents use these tags.
 - [Built-in Player](../Player/BuiltInPlayer.md): playback backend, EQ, speed and the LAN remote.
 - [Lyrics Page](../Lyrics/LyricsPage.md): lyrics and the MV view.
 
