@@ -10,6 +10,7 @@ import App from './App.vue'
 import { resolveWindowView } from './windows'
 import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 import { vPrivacy, vPrivacyAction, vAgentForbidden } from './privacy'
+import { installViewportVar } from './viewport'
 
 const vuetify = createVuetify({
   components,
@@ -105,6 +106,7 @@ async function mountRoot(): Promise<void> {
     .directive('privacy-action', vPrivacyAction)
     .directive('agent-forbidden', vAgentForbidden)
     .mount('#app')
+  installViewportVar()
 }
 
 void mountRoot()

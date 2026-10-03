@@ -23,6 +23,16 @@ body,
   overflow: hidden;
 }
 
+/* 网页模式（viewport.ts 加 .vh-js）：外壳高度取 JS 量出的可见高度，见 viewport.ts 的说明 */
+html.vh-js,
+html.vh-js body,
+html.vh-js #app {
+  height: var(--app-vh);
+}
+html.vh-js .v-application__wrap {
+  min-height: var(--app-vh);
+}
+
 /* Font family: `--cockpit-font` is injected on <html> by App.vue's applyFont()
  * (default = unset, i.e. the CJK stack below; system / custom come from
  * 设置 → 外观 → 字体). */
