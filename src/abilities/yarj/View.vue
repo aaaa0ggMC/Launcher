@@ -351,7 +351,7 @@ function buildMbtilesStyle(
   m: MapFileInfo,
   projection: 'globe' | 'mercator'
 ): maplibregl.StyleSpecification {
-  const tiles = [`cockpit-tile://${m.id}/{z}/{x}/{y}`]
+  const tiles = [window.cockpit.hostUrl(`cockpit-tile://${m.id}/{z}/{x}/{y}`)]
   const base = {
     version: 8 as const,
     projection: { type: projection } as maplibregl.StyleSpecification['projection'],
@@ -449,7 +449,7 @@ function buildStyleForProvider(
   const p = providers.value.find((x) => x.id === providerId)
   const maxz = p?.maxZoom ?? 20
   const minz = p?.minZoom ?? 0
-  const tiles = [`cockpit-tile://online/${providerId}/{z}/{x}/{y}`]
+  const tiles = [window.cockpit.hostUrl(`cockpit-tile://online/${providerId}/{z}/{x}/{y}`)]
 
   return {
     version: 8,

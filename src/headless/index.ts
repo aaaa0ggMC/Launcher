@@ -15,6 +15,8 @@ import { setLogBroadcast, log } from '../main/process/logger'
 import { setBackgroundBroadcast, shutdownBackgroundTasks } from '../main/process/background-tasks'
 import { setWindowBroadcast } from '../main/process/windows'
 import { registerAbilityCommands } from '../main/process/abilities-loader'
+import { registerIconProtocol } from '../main/process/icon-protocol'
+import { registerAudioProtocol } from '../main/process/audio-protocol'
 import { runStartupHooks } from '../main/process/startup'
 import { loadExternalAbilities } from '../main/process/ability-loader'
 import { pushEvent, startServer } from './server'
@@ -46,6 +48,9 @@ async function main(): Promise<void> {
 
   const { ensureVault } = await import('../main/process/encrypt')
   ensureVault()
+  // 处理器由替身记下，server.ts 经 /_p/<scheme>/… 路由过去
+  registerIconProtocol()
+  registerAudioProtocol()
   registerAbilityCommands()
   await runStartupHooks()
   loadExternalAbilities().catch((e) => console.error('[cockpit] external abilities:', e))

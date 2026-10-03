@@ -7,7 +7,10 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-function, @typescript-eslint/explicit-function-return-type */
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { extname, join } from 'node:path'
+import { Readable } from 'node:stream'
 
 function makeNop(): any {
   const fn = function () {}
@@ -67,8 +70,51 @@ export const screen = {
   getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1280, height: 800 } }),
   on: noop
 }
-export const net = { fetch: (...a: Parameters<typeof fetch>) => fetch(...a) }
-export const protocol = makeNop()
+const FILE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+  '.ico': 'image/x-icon',
+  '.mbtiles': 'application/octet-stream'
+}
+/** Electron 的 net.fetch 能读 file://，Node 的 fetch 不能——这里补上（其余 URL 走全局 fetch） */
+export const net = {
+  fetch: async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const u = String(input instanceof Request ? input.url : input)
+    if (!u.startsWith('file://')) return fetch(input, init)
+    try {
+      const path = decodeURIComponent(u.slice('file://'.length))
+      const st = await stat(path)
+      if (!st.isFile()) return new Response(null, { status: 404 })
+      return new Response(Readable.toWeb(createReadStream(path)) as never, {
+        headers: {
+          'Content-Type': FILE_MIME[extname(path).toLowerCase()] ?? 'application/octet-stream',
+          'Content-Length': String(st.size),
+          'Access-Control-Allow-Origin': '*'
+        }
+      })
+    } catch {
+      return new Response(null, { status: 404 })
+    }
+  }
+}
+/** protocol.handle 注册的处理器——标准 (Request) => Response，网页宿主经 /_p/<scheme>/... 路由过去 */
+type ProtocolHandler = (req: Request) => Response | Promise<Response>
+const protocolHandlers = new Map<string, ProtocolHandler>()
+export function getProtocolHandler(scheme: string): ProtocolHandler | undefined {
+  return protocolHandlers.get(scheme)
+}
+export const protocol = {
+  handle: (scheme: string, fn: ProtocolHandler): void => void protocolHandlers.set(scheme, fn),
+  registerSchemesAsPrivileged: noop,
+  registerFileProtocol: noop,
+  unhandle: (scheme: string): void => void protocolHandlers.delete(scheme)
+}
 export const session = makeNop()
 export const shell = makeNop()
 export const nativeImage = makeNop()

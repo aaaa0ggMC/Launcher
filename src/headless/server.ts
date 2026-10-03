@@ -13,6 +13,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
+import { Readable } from 'node:stream'
+import { getProtocolHandler } from './electron-stub'
 import { runCommand, listCommands, UnknownCommandError } from '../main/process/commands/registry'
 import { withOrigin } from '../main/process/privacy'
 import { makeLogger } from '../main/process/logger'
@@ -34,6 +36,41 @@ const MIME: Record<string, string> = {
 
 const clients = new Set<ServerResponse>()
 
+const SCHEME_RE = /^cockpit-(icon|audio|tile):\/\/(.*)$/s
+
+/** 命令结果里的自定义协议 URL → /_p/ 路由（<img> 等拿到的就是浏览器可加载的地址） */
+function rewriteUrls(v: unknown): unknown {
+  if (typeof v === 'string') {
+    const m = SCHEME_RE.exec(v)
+    return m ? `/_p/cockpit-${m[1]}/${m[2]}` : v
+  }
+  if (Array.isArray(v)) return v.map(rewriteUrls)
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, x] of Object.entries(v)) out[k] = rewriteUrls(x)
+    return out
+  }
+  return v
+}
+
+/** `/_p/cockpit-icon/<编码后的路径>?x` → 调用 Electron 版注册的协议处理器，把 Response 管回去 */
+async function serveProtocol(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const m = /^\/_p\/(cockpit-(?:icon|audio|tile))\/(.*)$/s.exec(req.url ?? '')
+  const handler = m && getProtocolHandler(m[1])
+  if (!m || !handler) return json(res, 404, { error: 'unknown protocol' })
+  const headers = new Headers()
+  if (req.headers.range) headers.set('Range', String(req.headers.range))
+  const r = await handler(new Request(`${m[1]}://${m[2]}`, { headers }))
+  const out: Record<string, string> = {}
+  r.headers.forEach((val, key) => (out[key] = val))
+  res.writeHead(r.status, out)
+  if (!r.body) return void res.end()
+  const body = Readable.fromWeb(r.body as never)
+  req.on('close', () => body.destroy())
+  body.on('error', () => res.destroy())
+  body.pipe(res)
+}
+
 /** broadcast(channel, ...args) → 所有 SSE 客户端 */
 export function pushEvent(channel: string, ...args: unknown[]): void {
   if (!clients.size) return
@@ -42,8 +79,9 @@ export function pushEvent(channel: string, ...args: unknown[]): void {
 }
 
 function authorized(req: IncomingMessage, url: URL, token: string): boolean {
+  const cookie = /(?:^|;\s*)cockpit_token=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
   const h = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
-  const given = Buffer.from(h || (url.searchParams.get('token') ?? ''))
+  const given = Buffer.from(h || (url.searchParams.get('token') ?? '') || cookie)
   const want = Buffer.from(token)
   return given.length === want.length && timingSafeEqual(given, want)
 }
@@ -83,6 +121,15 @@ export function startServer(opts: {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const api = url.pathname.startsWith('/api/')
+    if (url.pathname.startsWith('/_p/')) {
+      if (!authorized(req, url, token)) return json(res, 401, { ok: false, error: 'unauthorized' })
+      serveProtocol(req, res).catch((e) => {
+        log.warn('protocol failed', String(e))
+        if (!res.headersSent) json(res, 500, { error: 'protocol error' })
+        else res.destroy()
+      })
+      return
+    }
     // 静态页面不要求 token（页面本身不含数据）；所有 /api/* 都要
     if (!api) return serveStatic(webRoot, url.pathname, res)
     if (!authorized(req, url, token)) return json(res, 401, { ok: false, error: 'unauthorized' })
@@ -130,7 +177,7 @@ export function startServer(opts: {
                 ? ({ kind: 'agent-ui', session: meta.agentSession } as const)
                 : ({ kind: 'ui' } as const)
             const result = await withOrigin(origin, () => runCommand(name, args))
-            json(res, 200, { ok: true, result: result === undefined ? null : result })
+            json(res, 200, { ok: true, result: result === undefined ? null : rewriteUrls(result) })
           } catch (err) {
             const unknown = err instanceof UnknownCommandError
             json(res, 200, {

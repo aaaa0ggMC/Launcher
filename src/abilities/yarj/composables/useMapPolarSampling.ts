@@ -38,7 +38,9 @@ export async function samplePolarCapColors(
   const bitmaps = await Promise.all(
     Array.from({ length: numTiles }, async (_, x) => {
       try {
-        const res = await fetch(`cockpit-tile://online/${providerId}/${z}/${x}/${y}`)
+        const res = await fetch(
+          window.cockpit.hostUrl(`cockpit-tile://online/${providerId}/${z}/${x}/${y}`)
+        )
         if (!res.ok) return null
         const blob = await res.blob()
         return await createImageBitmap(blob)

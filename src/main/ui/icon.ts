@@ -41,5 +41,5 @@ export function parseIcon(icon: string | null | undefined): ParsedIcon {
 
 /** Build a cockpit-icon:// URL for a local file icon. */
 export function fileIconUrl(path: string): string {
-  return `cockpit-icon://${encodeURIComponent(path)}`
+  return window.cockpit.hostUrl(`cockpit-icon://${encodeURIComponent(path)}`)
 }

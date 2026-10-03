@@ -19,7 +19,9 @@ export function isVideoFile(pathOrExt: string): boolean {
 /** 获取图片/视频在 <img> 渲染时所用的缩略图 URL。 */
 export function photoThumbUrl(filePath: string): string {
   if (!filePath) return ''
-  return `cockpit-icon://${encodeURIComponent(filePath)}?thumb=1`
+  const url = `cockpit-icon://${encodeURIComponent(filePath)}?thumb=1`
+  // 网页宿主下映射到 /_p/ 路由（本文件 node / web 两个 tsconfig 都编，故走 globalThis）
+  return (globalThis as { cockpit?: { hostUrl(u: string): string } }).cockpit?.hostUrl(url) ?? url
 }
 
 /** 一个 MBTiles 地图文件配置。 */

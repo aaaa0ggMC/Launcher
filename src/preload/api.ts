@@ -5,7 +5,19 @@
  */
 type CommandArgs = Record<string, unknown>
 
+/**
+ * 宿主能力档位：`native` 宿主原生支持 / `web` 浏览器等价或降级实现 / `none` 没有（对应通道被 nop）。
+ * 未在表里声明的 id 视为 `native`（Electron 全部原生，不需要声明）。
+ * 现有 id：window.frame（最小化/最大化/关闭）、window.child（子窗口）、file.pick、file.save、
+ * clipboard、external（打开外部链接）、shortcut.global、screenshot、privacy.consent。
+ */
+export type HostCap = 'native' | 'web' | 'none'
+
 export interface CockpitTransport {
+  /** 能力档位表（缺省 = 全部 native） */
+  caps?: Record<string, HostCap>
+  /** 自定义协议 URL → 宿主可访问的 URL（网页模式映射到 /_p/...；缺省原样） */
+  hostUrl?(url: string): string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   invoke(channel: string, ...args: unknown[]): Promise<any>
   on(channel: string, cb: (...args: unknown[]) => void): () => void
@@ -40,6 +52,12 @@ export function createCockpit(t: CockpitTransport) {
   }
 
   const cockpit = {
+    /** 该宿主能力的档位 */
+    cap: (id: string): HostCap => t.caps?.[id] ?? 'native',
+    /** 宿主能否做这件事（`web` 降级也算能）；UI 用它决定显示 / 隐藏 */
+    hasCap: (id: string): boolean => (t.caps?.[id] ?? 'native') !== 'none',
+    /** cockpit-icon:// / cockpit-audio:// / cockpit-tile:// → 当前宿主可加载的 URL */
+    hostUrl: (url: string): string => t.hostUrl?.(url) ?? url,
     // -- command dispatcher (CLI-first core) ----------------------------------
     command: (name: string, args: CommandArgs = {}): Promise<unknown> =>
       t.invoke('command:run', name, args, agentMeta()),

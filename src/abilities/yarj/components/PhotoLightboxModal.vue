@@ -1,4 +1,7 @@
 <script setup lang="ts">
+const originalUrl = (path: string): string =>
+  window.cockpit.hostUrl(`cockpit-icon://${encodeURIComponent(path)}`)
+
 defineOptions({ name: 'cockpit-yarj-photo-lightbox' })
 
 import { ref, computed, watch, onBeforeUnmount, inject } from 'vue'
@@ -384,7 +387,7 @@ onBeforeUnmount(() => {
             <video
               v-show="!videoPlayError"
               :key="currentPhoto.path"
-              :src="`cockpit-icon://${encodeURIComponent(currentPhoto.path)}`"
+              :src="originalUrl(currentPhoto.path)"
               :poster="photoThumbUrl(currentPhoto.path)"
               controls
               autoplay
@@ -440,7 +443,7 @@ onBeforeUnmount(() => {
           </div>
           <img
             v-else
-            :src="`cockpit-icon://${encodeURIComponent(currentPhoto.path)}`"
+            :src="originalUrl(currentPhoto.path)"
             :alt="currentPhoto.path"
             class="lightbox-img"
             :style="{

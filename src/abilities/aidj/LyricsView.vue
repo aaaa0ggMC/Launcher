@@ -66,7 +66,7 @@ const isMvActive = computed(() => {
 })
 const videoSrc = computed(() => {
   if (!state.value.path) return ''
-  return `cockpit-audio://${encodeURIComponent(state.value.path)}`
+  return window.cockpit.hostUrl(`cockpit-audio://${encodeURIComponent(state.value.path)}`)
 })
 
 function resetMvControlsTimer(): void {

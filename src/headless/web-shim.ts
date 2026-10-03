@@ -17,6 +17,13 @@ try {
   /* 隐私模式：只在内存里保留 */
 }
 
+try {
+  // <img> / <audio> / MapLibre 发的 /_p/ 请求带不了 Authorization 头，用 Cookie 鉴权（SameSite=Strict）
+  if (token) document.cookie = `cockpit_token=${token}; path=/; SameSite=Strict`
+} catch {
+  /* ignore */
+}
+
 const authHeaders = { authorization: `Bearer ${token}` }
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
@@ -110,6 +117,21 @@ const cockpit = createCockpit({
     set.add(cb)
     return () => set!.delete(cb)
   },
+  caps: {
+    // 浏览器本身就是窗口：不画最小化 / 最大化 / 关闭
+    'window.frame': 'none',
+    'window.child': 'none',
+    // 浏览器拿不到宿主机的绝对路径；需要宿主端文件选择器后再支持
+    'file.pick': 'none',
+    'file.save': 'none',
+    'shortcut.global': 'none',
+    screenshot: 'none',
+    'privacy.consent': 'none',
+    // 浏览器有等价实现
+    clipboard: 'web',
+    external: 'web'
+  },
+  hostUrl: (u) => u.replace(/^cockpit-(icon|audio|tile):\/\//, '/_p/cockpit-$1/'),
   platform: info.platform,
   wayland: false,
   windowDebug: false,

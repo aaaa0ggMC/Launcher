@@ -114,7 +114,8 @@ const isFrameless = computed(
   () =>
     // agent 视图的宿主始终无边框，外壳（窗口按钮）由 App 自己画
     !!agentView ||
-    (runtimeConfig.value.window as { frameless?: boolean } | undefined)?.frameless !== false
+    (window.cockpit.hasCap('window.frame') &&
+      (runtimeConfig.value.window as { frameless?: boolean } | undefined)?.frameless !== false)
 )
 const windowRounded = computed(
   () =>

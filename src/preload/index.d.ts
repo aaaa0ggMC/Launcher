@@ -17,7 +17,12 @@ export interface AppsConfig {
   confirmBeforeLaunch: boolean
 }
 
+export type HostCap = 'native' | 'web' | 'none'
+
 export interface CockpitApi {
+  cap: (id: string) => HostCap
+  hasCap: (id: string) => boolean
+  hostUrl: (url: string) => string
   /** CLI-first dispatcher: run any registered ability command. */
   command: (name: string, args?: Record<string, unknown>) => Promise<unknown>
   listCommands: () => Promise<{ name: string; description: string; usage?: string }[]>
