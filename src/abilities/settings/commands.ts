@@ -21,6 +21,7 @@ import {
 import { isAgentOrigin, PrivacyDeniedError } from '../../main/process/privacy'
 import { reloadPrivacyPolicy } from '../../main/process/privacy-consent'
 import { reloadAgentServices } from '../../main/process/agent'
+import { rewrapMasterToScrypt, vaultStatus } from '../../main/process/encrypt'
 
 const log = makeLogger('settings')
 
@@ -253,5 +254,19 @@ export default [
       }
       return { ok: true, ability: described }
     }
+  },
+  {
+    name: 'vault.status',
+    description: '密钥库状态：主密钥的包裹方式（safeStorage / scrypt）、是否就绪',
+    privacy: { agent: 'deny' },
+    run: () => vaultStatus()
+  },
+  {
+    name: 'vault.rewrap-scrypt',
+    description:
+      '把主密钥从系统钥匙环（safeStorage）改包成机器指纹派生（scrypt），让无头 / 网页宿主也能解开加密配置。保护强度降低，需在 Electron 里运行；原文件备份为 master.json.bak-*',
+    usage: 'vault.rewrap-scrypt',
+    privacy: { agent: 'deny' },
+    run: () => ({ ...rewrapMasterToScrypt(), status: vaultStatus() })
   }
 ] satisfies CommandSpec[]

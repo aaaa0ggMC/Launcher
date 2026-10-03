@@ -21,7 +21,15 @@ import {
   timingSafeEqual
 } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  chmodSync,
+  copyFileSync,
+  renameSync
+} from 'node:fs'
 import { homedir, hostname, userInfo, cpus, platform, arch } from 'node:os'
 import { join } from 'node:path'
 import { app, safeStorage } from 'electron'
@@ -252,6 +260,54 @@ function loadMasterKey(): Buffer {
   }
   throw new Error(`unknown master wrap method: ${String((raw as { method?: string }).method)}`)
 }
+
+/** 用 scrypt（机器指纹）包住主密钥并**原子**落盘（先写临时文件再 rename）。 */
+function writeScryptMaster(key: Buffer): void {
+  const salt = randomBytes(SCRYPT_SALT_BYTES)
+  const data: MasterFileV2 = {
+    v: 2,
+    method: 'scrypt',
+    salt: salt.toString('hex'),
+    wrapped: wrapWithAes(deriveScryptWrapKey(salt), key)
+  }
+  ensureSecretsDir()
+  const tmp = `${MASTER_FILE}.tmp`
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 })
+  renameSync(tmp, MASTER_FILE)
+}
+
+/**
+ * 把主密钥从 `safeStorage`（系统钥匙环，只有 Electron 读得到）改包成 `scrypt`（机器指纹派生），
+ * 这样无头宿主（纯 Node，没有钥匙环）也能解开同一份密文。**保护强度降低**：同一台机器上的同用户进程
+ * 都能解开，换来 Electron / 网页模式共享同一份加密配置；调用方需要用户明确同意。
+ *
+ * 主密钥本身不变，已有的 enc:v2 密文无需重写。改写前备份为 `master.json.bak-<时间戳>`，
+ * 改写后重新解包校验，不一致则回滚。
+ */
+export function rewrapMasterToScrypt(): { changed: boolean; backup?: string } {
+  ensureVault()
+  if (!masterKey)
+    throw new Error('encrypt vault unavailable（先在能解开主密钥的环境里运行，如 Electron）')
+  const cur = JSON.parse(readFileSync(MASTER_FILE, 'utf8')) as MasterFileV2
+  if (cur.method === 'scrypt') return { changed: false }
+  const backup = `${MASTER_FILE}.bak-${Date.now()}`
+  copyFileSync(MASTER_FILE, backup)
+  try {
+    writeScryptMaster(masterKey)
+    const check = loadMasterKey()
+    if (check.length !== masterKey.length || !timingSafeEqual(check, masterKey)) {
+      throw new Error('rewrapped key mismatch')
+    }
+  } catch (e) {
+    copyFileSync(backup, MASTER_FILE)
+    throw e
+  }
+  log.warn('vault master key rewrapped: safeStorage → scrypt', { backup })
+  return { changed: true, backup }
+}
+
+/** 仅测试用：把给定主密钥以 scrypt 方式落盘 / 读回。 */
+export const __testing = { writeScryptMaster, loadMasterKey }
 
 /**
  * 启动时调用一次（`app.whenReady` 之后）：确保主密钥存在并载入内存。
