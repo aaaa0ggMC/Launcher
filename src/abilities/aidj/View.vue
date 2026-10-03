@@ -12,6 +12,7 @@ import {
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
+import { vLongPress, type LongPressPoint } from './components/long-press'
 import AgentModelsPanel from './components/AgentModelsPanel.vue'
 import SanitizeView from './components/SanitizeView.vue'
 import FreqList from './components/FreqList.vue'
@@ -294,6 +295,24 @@ function openSessionCtx(e: MouseEvent, s: SessionItem): void {
   e.stopPropagation()
   ctxTarget.value = s
   ctxPos.value = { x: e.clientX + 8, y: e.clientY + 8 }
+  ctxMenuOpen.value = true
+}
+
+/** Long-press (touch) → the same session menu right-click opens. */
+function openSessionCtxPoint(point: LongPressPoint, s: SessionItem): void {
+  ctxTarget.value = s
+  ctxPos.value = { x: point.clientX + 8, y: point.clientY + 8 }
+  ctxMenuOpen.value = true
+}
+
+/** The persistent 「⋯」button — opens the session menu anchored to it. */
+function openSessionCtxAt(e: Event, s: SessionItem): void {
+  e.preventDefault()
+  e.stopPropagation()
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  ctxTarget.value = s
+  // Menu grows down-right; keep its right edge near the button's.
+  ctxPos.value = { x: Math.max(8, r.right - 140), y: r.bottom + 4 }
   ctxMenuOpen.value = true
 }
 
@@ -685,6 +704,7 @@ defineExpose({ toMarkdown })
                     <div
                       v-for="s in g.sessions"
                       :key="s.id"
+                      v-long-press="(p) => openSessionCtxPoint(p, s)"
                       class="session-item"
                       :class="{ 'is-active': s.id === currentId }"
                       @click="openSession(s.id)"
@@ -692,6 +712,7 @@ defineExpose({ toMarkdown })
                     >
                       <v-icon
                         size="18"
+                        class="flex-shrink-0"
                         :icon="
                           s.pinned
                             ? 'mdi-pin'
@@ -704,6 +725,17 @@ defineExpose({ toMarkdown })
                         <div class="session-title text-truncate">{{ s.title }}</div>
                         <div class="session-meta">{{ s.messageCount ?? 0 }} 条</div>
                       </div>
+                      <v-btn
+                        icon
+                        size="small"
+                        variant="text"
+                        class="session-more-btn flex-shrink-0"
+                        :aria-label="t('aidj.sessions.more', '会话操作')"
+                        :title="t('aidj.sessions.more', '会话操作')"
+                        @click.stop="openSessionCtxAt($event, s)"
+                      >
+                        <v-icon size="18">mdi-dots-vertical</v-icon>
+                      </v-btn>
                     </div>
                   </template>
                 </div>
@@ -956,6 +988,26 @@ defineExpose({ toMarkdown })
 }
 .session-item.is-active {
   background: rgba(var(--v-theme-primary), 0.14);
+}
+/* Session 「⋯」button — the touch/desktop substitute for right-click.
+   desktop (fine pointer): transparent until the row is hovered, so the row
+   looks exactly as before; touch: always visible with a 40px hit area. */
+.session-more-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .session-item:hover .session-more-btn,
+  .session-item.is-active .session-more-btn {
+    opacity: 1;
+  }
+}
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+  .session-more-btn {
+    opacity: 1;
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
 .session-title {
   font-size: 0.85rem;

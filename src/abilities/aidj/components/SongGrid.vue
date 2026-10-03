@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { inject, ref, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { translate } from '../../../main/ui/i18n'
 import type { PlaylistEntry } from '../types'
 
 /**
@@ -11,11 +12,17 @@ import type { PlaylistEntry } from '../types'
  *    edge, so you can reach songs that are off-screen;
  *  - the mouse wheel scrolls the same container during a drag.
  *
+ * Touch has no HTML5 drag, so under `(pointer: coarse)` every row also carries
+ * 上移/下移 buttons (they reuse the same splice-and-emit path as the drop).
+ *
  * FUTURE: per-song right-click menu — attach a `contextmenu` handler on the
  * cell (and emit `contextMenu(e, song, index)`) without touching this file;
  * the cell markup is already a stable hook for it.
  */
 defineOptions({ name: 'AidjSongGrid' })
+
+const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const props = withDefaults(
   defineProps<{
@@ -135,6 +142,16 @@ function onDrop(e: DragEvent, idx: number): void {
   performDrop(idx)
 }
 
+/** Move one entry up/down — the touch substitute for drag, sharing the exact
+ *  splice-and-emit path `performDrop` uses (no second ordering code). */
+function move(from: number, to: number): void {
+  if (from < 0 || to < 0 || to >= props.songs.length || from === to) return
+  const copy = [...props.songs]
+  const [moved] = copy.splice(from, 1)
+  copy.splice(to, 0, moved)
+  emit('reorder', copy)
+}
+
 /** Drop on the grid's empty space — insert at the cell whose mid-line the
  *  pointer is above, otherwise append at the end. */
 function onGridDrop(e: DragEvent): void {
@@ -252,6 +269,32 @@ onBeforeUnmount(() => {
       </div>
 
       <v-icon size="14" class="drag-handle text-medium-emphasis flex-shrink-0"> mdi-drag </v-icon>
+
+      <!-- Touch-only reorder buttons (no HTML5 drag on a phone); ≥36px hit area. -->
+      <div class="song-move-btns">
+        <v-btn
+          icon
+          size="small"
+          variant="text"
+          :disabled="idx === 0"
+          :aria-label="t('aidj.settings.move_up', '上移')"
+          :title="t('aidj.settings.move_up', '上移')"
+          @click.stop="move(idx, idx - 1)"
+        >
+          <v-icon size="16">mdi-chevron-up</v-icon>
+        </v-btn>
+        <v-btn
+          icon
+          size="small"
+          variant="text"
+          :disabled="idx === songs.length - 1"
+          :aria-label="t('aidj.settings.move_down', '下移')"
+          :title="t('aidj.settings.move_down', '下移')"
+          @click.stop="move(idx, idx + 1)"
+        >
+          <v-icon size="16">mdi-chevron-down</v-icon>
+        </v-btn>
+      </div>
     </div>
   </TransitionGroup>
 </template>
@@ -329,6 +372,25 @@ onBeforeUnmount(() => {
 }
 .drag-handle {
   cursor: grab;
+}
+/* Touch has no HTML5 drag — swap the handle for 上移/下移 buttons. Desktop
+   (fine pointer) keeps the drag handle as the only affordance, unchanged. */
+.song-move-btns {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+}
+@media (pointer: coarse) {
+  .song-move-btns {
+    display: flex;
+  }
+  .song-move-btns :deep(.v-btn) {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .drag-handle {
+    display: none;
+  }
 }
 .song-move {
   transition: transform 0.25s ease;

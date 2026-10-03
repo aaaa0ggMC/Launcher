@@ -135,6 +135,7 @@
   "aidj.sessions.pin": "置顶",
   "aidj.sessions.unpin": "取消置顶",
   "aidj.sessions.delete": "删除",
+  "aidj.sessions.more": "会话操作",
   "aidj.sessions.auto_title": "自动生成标题",
   "aidj.sessions.set_title": "设置标题",
   "aidj.sessions.set_title_dialog_title": "设置标题",

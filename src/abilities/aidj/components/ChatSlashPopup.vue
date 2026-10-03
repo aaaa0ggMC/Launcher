@@ -11,7 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', index: number): void
-  (e: 'apply'): void
+  (e: 'apply', index: number): void
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -26,7 +26,7 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
         :key="c.name"
         class="cmd-item"
         :class="{ 'is-active': i === active }"
-        @mousedown.prevent="emit('apply')"
+        @pointerdown.prevent="emit('apply', i)"
         @mouseenter="emit('select', i)"
       >
         <span class="cmd-name"

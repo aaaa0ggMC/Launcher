@@ -110,8 +110,8 @@ watch(inputText, () => {
   cmdDismissed.value = false
 })
 
-function cmdApply(): void {
-  const c = cmdFiltered.value[cmdActive.value]
+function cmdApply(index?: number): void {
+  const c = cmdFiltered.value[index ?? cmdActive.value]
   if (!c) return
   inputText.value = applyChatCommand(inputText.value, c)
 }
@@ -1484,35 +1484,35 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 
 <template>
   <div class="aidj-root d-flex flex-column h-100">
-    <div class="px-4 py-3">
-      <v-row dense align="center">
-        <v-col cols="auto">
-          <v-icon start>mdi-disc-player</v-icon>
-          <span class="text-body-2 font-weight-medium ml-1">{{ t('aidj.now_playing') }}</span>
-        </v-col>
-        <v-col class="min-w-0 d-flex align-center">
-          <span class="text-body-2 track-name text-truncate" :title="playerStatus.track || ''">{{
-            trackText
-          }}</span>
-          <v-chip
-            size="small"
-            variant="flat"
-            :color="
-              playerStatus.status === 'Playing'
-                ? 'success'
-                : playerStatus.status === 'Paused'
-                  ? 'warning'
-                  : 'secondary'
-            "
-            class="ml-2 status-chip flex-shrink-0"
-          >
-            {{ playerStatus.status }}
-          </v-chip>
+    <div class="chat-topbar px-4 py-3">
+      <div class="chat-topbar-row">
+        <v-icon start class="flex-shrink-0">mdi-disc-player</v-icon>
+        <span class="text-body-2 font-weight-medium ml-1 flex-shrink-0">{{
+          t('aidj.now_playing')
+        }}</span>
+        <span class="text-body-2 track-name text-truncate ml-2" :title="playerStatus.track || ''">{{
+          trackText
+        }}</span>
+        <v-chip
+          size="small"
+          variant="flat"
+          :color="
+            playerStatus.status === 'Playing'
+              ? 'success'
+              : playerStatus.status === 'Paused'
+                ? 'warning'
+                : 'secondary'
+          "
+          class="ml-2 status-chip flex-shrink-0"
+        >
+          {{ playerStatus.status }}
+        </v-chip>
+        <div class="chat-topbar-extra">
           <v-chip
             size="small"
             variant="flat"
             :color="netState === 'ok' ? 'success' : netState === 'checking' ? 'secondary' : 'error'"
-            class="ml-2 status-chip flex-shrink-0"
+            class="status-chip flex-shrink-0 chat-topbar-net"
             :title="
               netState === 'ok'
                 ? t('aidj.chat.api_ok', 'AI API 已连接')
@@ -1538,24 +1538,24 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
               }}</span>
             </span>
           </v-chip>
-        </v-col>
-        <v-col v-if="mode === 'dbus'" cols="auto" class="player-select-col">
-          <v-select
-            v-model="selectedPlayer"
-            :items="[
-              { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
-              ...availablePlayers.map((p) => ({ title: shortPlayer(p), value: p }))
-            ]"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="player-select"
-            :placeholder="t('aidj.select_player', '选择播放器')"
-            @update:model-value="selectPlayer"
-          >
-          </v-select>
-        </v-col>
-      </v-row>
+          <div v-if="mode === 'dbus'" class="player-select-col">
+            <v-select
+              v-model="selectedPlayer"
+              :items="[
+                { title: t('aidj.current_active', '当前激活'), value: '__auto__' },
+                ...availablePlayers.map((p) => ({ title: shortPlayer(p), value: p }))
+              ]"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="player-select"
+              :placeholder="t('aidj.select_player', '选择播放器')"
+              @update:model-value="selectPlayer"
+            >
+            </v-select>
+          </div>
+        </div>
+      </div>
     </div>
 
     <v-divider />
@@ -1739,7 +1739,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
       :active="cmdActive"
       :bottom="overlayH + 8"
       @select="cmdActive = $event"
-      @apply="cmdApply"
+      @apply="cmdApply($event)"
     />
 
     <v-dialog v-model="playAllConfirm" width="440">
@@ -1930,6 +1930,44 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 .player-select-col {
   min-width: 200px;
   max-width: 280px;
+}
+/* Now-playing bar: one flex row on the desktop (identical layout to before),
+   two rows on a phone — (icon + 正在播放 + track + status) then (net chip +
+   player select), so nothing overlaps at ~360–430px. */
+.chat-topbar-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.chat-topbar-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-inline-start: auto;
+}
+.chat-topbar-net {
+  margin-inline-start: 8px;
+}
+@media (max-width: 720px) {
+  .chat-topbar-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .chat-topbar-net {
+    margin-inline-start: 0;
+  }
+  .chat-topbar-extra {
+    flex: 1 1 100%;
+  }
+  .player-select-col {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .player-select {
+    min-width: 0;
+  }
 }
 .track-name {
   flex: 1 1 auto;

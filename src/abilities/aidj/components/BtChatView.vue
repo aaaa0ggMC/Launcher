@@ -6,6 +6,7 @@ import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
 import WorkflowCard from './WorkflowCard.vue'
+import { vLongPress, type LongPressPoint } from './long-press'
 import {
   buildWorkflows,
   isWorkflowEvent,
@@ -216,6 +217,21 @@ function openCtx(e: MouseEvent, content: string, isAi: boolean, index: number): 
   }
 }
 
+/** Long-press (touch) → the same menu right-click opens. */
+function openCtxPoint(point: LongPressPoint, content: string, isAi: boolean, index: number): void {
+  openCtx(
+    {
+      clientX: point.clientX,
+      clientY: point.clientY,
+      preventDefault: () => {},
+      stopPropagation: () => {}
+    } as unknown as MouseEvent,
+    content,
+    isAi,
+    index
+  )
+}
+
 const thinking = computed(() => {
   const msgs = props.messages ?? []
   for (let i = msgs.length - 1; i >= 0; i--) {
@@ -382,6 +398,7 @@ watch(
           <div v-if="it.kind === 'user'" class="d-flex flex-column align-end">
             <span class="text-caption text-medium-emphasis">You</span>
             <div
+              v-long-press="(p) => it.content && openCtxPoint(p, it.content, false, i)"
               class="chat-bubble chat-bubble-user pa-3 text-body-2"
               @contextmenu="it.content && openCtx($event, it.content, false, i)"
             >
@@ -391,6 +408,7 @@ watch(
           <div v-else-if="it.kind === 'assistant'" class="d-flex flex-column align-start">
             <span class="text-caption text-medium-emphasis">AI DJ</span>
             <div
+              v-long-press="(p) => it.content && openCtxPoint(p, it.content, true, i)"
               class="chat-bubble chat-bubble-ai pa-3 text-body-2 msg-markdown"
               @contextmenu="it.content && openCtx($event, it.content, true, i)"
             >

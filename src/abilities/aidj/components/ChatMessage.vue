@@ -6,6 +6,7 @@ import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import SongGrid from './SongGrid.vue'
 import WorkflowCard from './WorkflowCard.vue'
+import { vLongPress, type LongPressPoint } from './long-press'
 import { buildWorkflows, runningStage, runningWorkflow } from './workflow-view'
 
 defineOptions({ name: 'AidjChatMessage' })
@@ -80,6 +81,27 @@ function roleLabel(msg: ChatMessage): string {
   if (isSystem(msg)) return 'System'
   return 'AI DJ'
 }
+
+/**
+ * Long-press (touch) opens the SAME context menu as a right-click — phones have
+ * no `contextmenu` event. The synthetic MouseEvent only needs the touch point;
+ * the handlers just read clientX/clientY and no-op the prevent* calls.
+ */
+function onBubbleLongPress(point: LongPressPoint): void {
+  emit(
+    'contextMenu',
+    {
+      clientX: point.clientX,
+      clientY: point.clientY,
+      preventDefault: () => {},
+      stopPropagation: () => {}
+    } as unknown as MouseEvent,
+    props.message.content,
+    !isUser(props.message) && !isSystem(props.message),
+    props.message.playlist || [],
+    props.index ?? 0
+  )
+}
 </script>
 
 <template>
@@ -98,6 +120,7 @@ function roleLabel(msg: ChatMessage): string {
 
     <div
       v-if="message.content"
+      v-long-press="onBubbleLongPress"
       class="msg-bubble pa-3"
       :class="
         isUser(message)
