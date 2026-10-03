@@ -427,7 +427,7 @@ onBeforeUnmount(() => {
 <template>
   <v-dialog v-model="visible" content-class="bt-overlay" scrim="rgba(13, 17, 23, 0.45)">
     <v-card class="bt-dialog" rounded="xl">
-      <v-card-title class="d-flex align-center ga-3 text-subtitle-1 px-5 pt-4 pb-3">
+      <v-card-title class="d-flex align-center flex-wrap ga-3 text-subtitle-1 px-5 pt-4 pb-3">
         <v-icon color="primary">mdi-tray-full</v-icon>
         <span class="text-body-1 font-weight-medium">{{ t('bt.dialogTitle') }}</span>
         <v-chip v-if="runningCount" variant="tonal" color="primary" class="bt-title-chip">
@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
 
       <v-divider />
 
-      <div class="bt-body">
+      <div class="bt-body" :class="{ 'bt-body--detail': !!selected }">
         <!-- Task list -->
         <div class="bt-list">
           <div class="px-3 pt-3 d-flex align-center ga-2">
@@ -589,10 +589,16 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <v-divider vertical />
+        <v-divider vertical class="bt-vdivider" />
 
         <!-- Detail: console + interaction -->
         <div class="bt-detail">
+          <!-- 窄屏主从布局：选中后只显示详情，这里是回列表的入口（宽屏隐藏） -->
+          <div v-if="selected" class="bt-back px-2 pt-2">
+            <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="selectedId = null">
+              {{ t('bt.back', '返回列表') }}
+            </v-btn>
+          </div>
           <template v-if="selected">
             <template v-if="selected.type === 'task'">
               <div class="d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
@@ -783,6 +789,34 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
+.bt-back {
+  display: none;
+}
+/* 窄屏（手机 / 缩小的窗口）：主从布局——没选任务时只显示列表，选中后只显示详情 + 「返回列表」 */
+@media (max-width: 720px) {
+  .bt-body {
+    flex-direction: column;
+  }
+  .bt-list {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    border-right: 0;
+  }
+  .bt-vdivider {
+    display: none;
+  }
+  .bt-body--detail .bt-list {
+    display: none;
+  }
+  .bt-body:not(.bt-body--detail) .bt-detail {
+    display: none;
+  }
+  .bt-back {
+    display: block;
+    flex-shrink: 0;
+  }
+}
 /* The view container hands the task's view component a definite, bounded area:
    flex:1 fills the remaining detail height, min-height:0 lets it shrink, and
    overflow:hidden guarantees no view can ever push the whole dialog/page to
@@ -896,10 +930,18 @@ onBeforeUnmount(() => {
      must be sized outside the scoped scope. The panel fills ~92% of the page.
      !important beats Vuetify's `.v-dialog > .v-overlay__content` max-height. -->
 <style>
+/* 高度用 --app-vh（手机上 100vh 比可见区域高，面板顶部会被顶出屏幕） */
 .v-dialog > .bt-overlay {
   width: 90% !important;
   max-width: 1600px !important;
-  height: 92vh !important;
-  max-height: 92vh !important;
+  height: calc(var(--app-vh, 100vh) * 0.92) !important;
+  max-height: calc(var(--app-vh, 100vh) * 0.92) !important;
+}
+@media (max-width: 720px) {
+  .v-dialog > .bt-overlay {
+    width: calc(100% - 16px) !important;
+    height: calc(var(--app-vh, 100vh) - 24px) !important;
+    max-height: calc(var(--app-vh, 100vh) - 24px) !important;
+  }
 }
 </style>

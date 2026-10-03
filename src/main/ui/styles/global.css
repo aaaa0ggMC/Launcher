@@ -484,6 +484,15 @@ html.motion-off *::after {
 }
 
 /* ---------------------------------------------------------------------------
+ * 对话框宽度夹取：Vuetify 把 <v-dialog width="640"> 的 640px 作为内联样式落在 .v-overlay__content 上，
+ * 没有任何视口夹取；而外壳是 overflow:hidden，窄屏（手机 / 缩小的窗口）里超出的部分直接被裁掉，
+ * 保存 / 删除按钮点不到。统一限制为「视口宽 − 24px」（全屏对话框不受影响）。
+ * ------------------------------------------------------------------------- */
+.v-dialog:not(.v-dialog--fullscreen) > .v-overlay__content {
+  max-width: calc(100% - 24px) !important;
+}
+
+/* ---------------------------------------------------------------------------
  * 「模糊效果」关闭（设置 → 窗口；App.vue 给 <html> 加 .no-blur）
  * 毛玻璃（backdrop-filter）要对身后内容逐帧取样模糊，手机 GPU 上开销很大——比如弹出式侧栏滑入时
  * 对整块背景模糊会掉帧。散落在各处的 backdrop-filter 统一在这里关掉；没有了模糊，半透明底会
@@ -500,6 +509,13 @@ html.no-blur .v-application .v-app-bar {
 }
 html.no-blur .v-application .v-navigation-drawer {
   background: rgba(var(--v-theme-surface-variant), 0.98) !important;
+}
+/* 通用叠层（对话框 / 菜单 / 底部弹层）原本靠模糊把自己和背景区分开；没了模糊就统一用不透明底色，
+   不需要逐个组件改。自定义的玻璃面板（不是 Vuetify 叠层的那些）见各自的 .glass 处理。 */
+html.no-blur .v-overlay__content > .v-card,
+html.no-blur .v-overlay__content > .v-sheet,
+html.no-blur .v-overlay__content > .v-list {
+  background-color: rgb(var(--v-theme-surface)) !important;
 }
 /* 歌词沉浸页的封面底图（大半径静态模糊） */
 html.no-blur .lyrics-immerse-bg-img {

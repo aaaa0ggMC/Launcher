@@ -187,5 +187,6 @@
   "sidebar.open": "打开菜单",
   "hostpick.fromDevice": "从此设备选择",
   "hostpick.uploading": "正在上传…",
-  "hostpick.uploadFailed": "上传失败，请重试"
+  "hostpick.uploadFailed": "上传失败，请重试",
+  "bt.back": "返回列表"
 }

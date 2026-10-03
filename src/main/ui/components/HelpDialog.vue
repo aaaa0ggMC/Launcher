@@ -316,7 +316,7 @@ function onContentClick(e: MouseEvent): void {
 .help-body {
   display: flex;
   align-items: stretch;
-  height: min(74vh, 720px);
+  height: min(calc(var(--app-vh, 100vh) * 0.74), 720px);
 }
 .help-nav {
   width: 248px;
@@ -333,6 +333,23 @@ function onContentClick(e: MouseEvent): void {
   min-width: 0;
   overflow-y: auto;
   padding: 24px 32px 40px;
+}
+/* 窄屏：左侧导航树 248px + 正文放不下（正文会被挤成一列竖排字），改成上下堆叠 */
+@media (max-width: 720px) {
+  .help-body {
+    flex-direction: column;
+    height: calc(var(--app-vh, 100vh) - 160px);
+  }
+  .help-nav {
+    width: 100%;
+    max-height: 30%;
+    flex-shrink: 0;
+    border-inline-end: 0;
+    border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  }
+  .help-content {
+    padding: 16px 16px 32px;
+  }
 }
 .help-center {
   display: flex;

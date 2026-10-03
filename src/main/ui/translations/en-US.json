@@ -187,5 +187,6 @@
   "sidebar.open": "Open menu",
   "hostpick.fromDevice": "Choose from this device",
   "hostpick.uploading": "Uploading…",
-  "hostpick.uploadFailed": "Upload failed, please retry"
+  "hostpick.uploadFailed": "Upload failed, please retry",
+  "bt.back": "Back to list"
 }
