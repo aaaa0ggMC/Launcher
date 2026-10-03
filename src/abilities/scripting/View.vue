@@ -230,6 +230,9 @@ watch(matches, (newMatches) => {
 // Config & Parameters State
 // ---------------------------------------------------------------------------
 const showConfigDrawer = ref(true)
+// 窄屏（弹出式侧栏 ≈ ≤720px）默认收起：320px 检查器会把编辑器挤成一条缝，
+// 桌面宽度下行为不变。用户仍可用顶栏「配置」按钮随时展开。
+if (typeof window !== 'undefined' && window.innerWidth <= 720) showConfigDrawer.value = false
 const configSchema = ref<ScriptConfigSchema>({})
 const userConfigValues = ref<Record<string, unknown>>({})
 const showSecretMap = ref<Record<string, boolean>>({})
@@ -997,7 +1000,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Center: Clean Action Buttons Group -->
-      <div class="d-flex align-center ga-2 flex-wrap justify-center">
+      <div class="d-flex align-center ga-2 flex-wrap justify-center ide-tool-group">
         <!-- New Script (Icon-only allowed size="small") -->
         <v-tooltip :text="translate(uiLang, 'scripting.toolbar.newScript')" location="bottom">
           <template #activator="{ props }">
@@ -2011,7 +2014,8 @@ onUnmounted(() => {
   top: 8px;
   right: 18px;
   z-index: 20;
-  min-width: 320px;
+  /* keep 12px breathing room on the narrowest phones instead of hugging the edge */
+  min-width: min(320px, calc(100vw - 24px));
   max-width: 440px;
   background: rgba(var(--v-theme-surface), 0.95);
   border: 1px solid rgba(var(--v-theme-on-surface), 0.14);
@@ -2060,5 +2064,61 @@ onUnmounted(() => {
 
 .rotate-180 {
   transform: rotate(180deg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Narrow screens (≤720px): the single-row toolbar squeezes its three groups
+ * into nothing — let it wrap and give the middle button group its own
+ * scrollable row. Declared last on purpose: same specificity as the base rules
+ * above, so the narrow overrides only win on source order.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 720px) {
+  /* 注意：Vuetify 的 .flex-nowrap / .flex-wrap / .justify-center 等工具类都带 !important，
+     这里要覆盖它们就必须同样 !important（靠选择器特异性：scoped 属性选择器更高）。 */
+  .ide-top-bar {
+    flex-wrap: wrap !important;
+    row-gap: 8px;
+  }
+
+  /* 第 1 行：文件名 + TS/JS 单独占一行 */
+  .ide-top-bar > :first-child {
+    flex: 1 1 100% !important;
+    min-width: 0;
+  }
+
+  /* 第 2 行：左边工具按钮（放不下时横向滑动）+ 右边「运行」 */
+  .ide-tool-group {
+    order: 2;
+    flex: 1 1 0 !important;
+    min-width: 0;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    overflow-x: auto;
+  }
+
+  .ide-top-bar > :last-child {
+    order: 3;
+    flex: 0 0 auto !important;
+  }
+
+  /* buttons keep their intrinsic width while the group scrolls */
+  .ide-tool-group > * {
+    flex-shrink: 0;
+  }
+
+  /* the parameter inspector overlays the editor instead of squeezing it */
+  .ide-workspace-wrapper {
+    position: relative;
+  }
+
+  .ide-config-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    flex: 0 0 auto;
+    width: min(320px, calc(100% - 8px));
+  }
 }
 </style>

@@ -656,4 +656,22 @@ defineExpose({
   gap: 12px;
   padding: 8px 0;
 }
+
+/* Narrow screens (≤720px): capped columns / rows have no room to shrink inside
+   a phone-width settings page — let them fill the width and wrap. */
+@media (max-width: 720px) {
+  .agent-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .agent-port {
+    max-width: 100%;
+  }
+
+  .agent-session {
+    flex-wrap: wrap;
+  }
+}
 </style>

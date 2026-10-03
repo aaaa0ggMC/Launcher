@@ -169,4 +169,12 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 .ft-slider :deep(.v-slider) {
   margin: 0;
 }
+
+/* Narrow screens (≤720px): two columns of text buttons do not fit a phone,
+   and the panel itself is a bottom sheet by then — stack to one column. */
+@media (max-width: 720px) {
+  .ctrl-actions {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

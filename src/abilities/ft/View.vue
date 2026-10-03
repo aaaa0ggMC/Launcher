@@ -695,4 +695,44 @@ defineExpose({ toMarkdown })
 .ft-panel__body :deep(.v-expansion-panel-text__wrapper) {
   padding-top: 4px;
 }
+
+/* ---------------------------------------------------------------------------
+ * Narrow screens (≤720px): the docked right panel would eat ~80% of the width,
+ * so it becomes a bottom sheet overlaying the canvas instead. The canvas keeps
+ * its min-height and spans the full width below/above the sheet.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 720px) {
+  .ft-root {
+    min-height: 220px;
+  }
+
+  /* canvas reclaims the width the panel used to reserve */
+  .ft-host,
+  .ft-root--collapsed .ft-host {
+    right: 0;
+    min-height: 220px;
+  }
+
+  .ft-panel {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 45%;
+    overflow-y: auto;
+  }
+
+  /* collapsed state must stay a small corner button, not inherit the sheet */
+  .ft-panel--collapsed {
+    top: 12px;
+    left: auto;
+    right: 12px;
+    bottom: auto;
+    width: 48px;
+    height: 48px;
+    max-height: none;
+    overflow: visible;
+  }
+}
 </style>

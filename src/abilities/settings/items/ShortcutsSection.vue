@@ -315,4 +315,13 @@ defineExpose({
 .sc-off {
   opacity: 0.45;
 }
+
+/* Narrow screens (≤720px): the 160px key column plus three actions push the
+   buttons out of a phone — let the row take two lines with the actions
+   wrapping under the name. */
+@media (max-width: 720px) {
+  .sc-key {
+    min-width: 0;
+  }
+}
 </style>

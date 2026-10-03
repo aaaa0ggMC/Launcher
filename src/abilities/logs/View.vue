@@ -437,4 +437,26 @@ defineExpose({ toMarkdown })
   font-weight: 600;
   margin-left: 4px;
 }
+
+/* Narrow screens (≤720px): the 88+52+96px fixed tracks leave the message
+   column a sliver, so the row becomes two lines — time/level/scope on the first
+   row, the message takes the full width below it. Declared last on purpose:
+   same specificity as the base rules above, winning only on source order. */
+@media (max-width: 720px) {
+  .log-row {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    height: auto;
+    min-height: 44px;
+    align-items: center;
+    gap: 2px 8px;
+    padding-block: 6px;
+  }
+
+  .log-row__msg {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
 </style>

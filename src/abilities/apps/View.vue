@@ -677,7 +677,7 @@ defineExpose({ toMarkdown, onActivate })
 
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-3">
+    <div class="d-flex align-center justify-space-between mb-3 apps-head">
       <div>
         <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'apps.heading') }}</div>
         <div class="text-caption on-surface-variant mt-1">
@@ -1486,5 +1486,15 @@ defineExpose({ toMarkdown, onActivate })
 }
 .action-editor {
   border-style: dashed;
+}
+
+/* Narrow screens (≤720px): the heading and its two text buttons share one
+   unbounded row — wrap so the buttons drop below the title instead of
+   squashing it to a couple of characters. */
+@media (max-width: 720px) {
+  .apps-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
 }
 </style>

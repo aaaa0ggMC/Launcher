@@ -554,18 +554,26 @@ onBeforeUnmount(() => {
 <template>
   <div class="pg-root">
     <!-- header -->
-    <div class="d-flex align-center ga-2 mb-3 flex-wrap">
-      <div>
+    <div class="d-flex align-center ga-2 mb-3 flex-wrap pg-header">
+      <div class="pg-header__title">
         <div class="text-h6 font-weight-medium">{{ t('pg.title') }}</div>
         <div class="text-caption on-surface-variant mt-1">{{ t('pg.pgSubtitle') }}</div>
       </div>
-      <v-spacer />
-      <v-btn variant="tonal" prepend-icon="mdi-export" @click="handleExport">{{
-        t('pg.export')
-      }}</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-import" @click="handleImport">{{
-        t('pg.import')
-      }}</v-btn>
+      <v-spacer class="pg-header__spacer" />
+      <v-btn
+        class="pg-header__btn"
+        variant="tonal"
+        prepend-icon="mdi-export"
+        @click="handleExport"
+        >{{ t('pg.export') }}</v-btn
+      >
+      <v-btn
+        class="pg-header__btn"
+        variant="tonal"
+        prepend-icon="mdi-import"
+        @click="handleImport"
+        >{{ t('pg.import') }}</v-btn
+      >
     </div>
 
     <!-- main area: editor + form + response fills the page -->
@@ -745,5 +753,44 @@ onBeforeUnmount(() => {
 .pg-panel--collapsed .pg-panel__body {
   opacity: 0;
   pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Narrow screens (≤720px): the 320px right panel would cover ~80% of a phone,
+ * so it becomes a bottom overlaying sheet instead. The collapsed FAB moves to
+ * the bottom-right so it stays out of the (now two-line) page header.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 720px) {
+  .pg-header__spacer {
+    /* let the action buttons wrap onto their own, right-aligned row */
+    display: none;
+  }
+
+  .pg-header__title {
+    min-width: 0;
+  }
+
+  .pg-header .v-btn {
+    margin-left: auto;
+  }
+
+  .pg-panel {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 45%;
+    overflow-y: auto;
+  }
+
+  .pg-panel--collapsed {
+    top: auto;
+    left: auto;
+    right: 0;
+    bottom: 16px;
+    width: 56px;
+    height: 56px;
+  }
 }
 </style>
