@@ -94,6 +94,15 @@ let narrowMql: MediaQueryList | null = null
 const onNarrowChange = (e: MediaQueryListEvent): void => {
   narrow.value = e.matches
 }
+// 网页里根画布默认是白色：应用本身的背景层是透明的 + 固定定位，任何露出画布的地方（过度滚动、
+// 浏览器工具栏收放时的缝隙）都会闪白。Electron 的透明窗口必须保持透明，所以只在没有自有窗口时设置。
+watch(
+  () => theme.current.value.colors.background,
+  (c) => {
+    if (!window.cockpit.hasCap('window.frame')) document.documentElement.style.backgroundColor = c
+  },
+  { immediate: true }
+)
 const searchText = ref('')
 const currentId = ref<string | null>(null)
 const isMaximized = ref(false)
