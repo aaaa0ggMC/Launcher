@@ -5,6 +5,9 @@ packages:
 # blockExoticSubdeps:false 允许子依赖走 git（pnpm 11 默认禁止）。
 overrides:
   hustcore: github:aaaa0ggMC/husthelper#path:hustcore
+  # extract-zip@2（electron 的 postinstall 用它解压）依赖的 yauzl@2 在 Node 26 上会静默失败：
+  # Promise 永不 resolve、进程以 0 退出，dist 只解出一个文件 → 启动报 "Electron uninstall"。yauzl@3 正常。
+  yauzl: ^3.0.0
 blockExoticSubdeps: false
 allowBuilds:
   electron: true
