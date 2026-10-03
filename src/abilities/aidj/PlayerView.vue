@@ -599,7 +599,7 @@ const hasTrack = computed(() => track.value !== '')
     />
 
     <!-- main player body: cover/track up top, progress + controls pinned low -->
-    <div class="player-body d-flex flex-column align-center flex-grow-1 min-h-0 px-8 pt-10 pb-6">
+    <div class="player-body d-flex flex-column align-center flex-grow-1 min-h-0 pb-6">
       <div class="cover-wrap d-flex align-center justify-center mb-4">
         <img v-if="coverUrl" :src="coverUrl" class="cover-img" :alt="track" />
         <div v-else class="cover-img cover-placeholder d-flex align-center justify-center">
@@ -775,6 +775,11 @@ const hasTrack = computed(() => track.value !== '')
 }
 
 /* main player body */
+.player-body {
+  /* 桌面：px-8 / pt-10（窄屏在下方媒体查询里收窄，见 §11.8） */
+  padding-inline: 32px;
+  padding-top: 40px;
+}
 .cover-img {
   width: 200px;
   height: 200px;
@@ -861,5 +866,30 @@ const hasTrack = computed(() => track.value !== '')
 .volbal-chip:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   窄屏（≤720px：弹出式侧栏下的页面容器宽度 ≈ 手机 360–430px）。
+   桌面宽度下这些规则不生效，外观与行为与改动前完全一致。
+   --------------------------------------------------------------------------- */
+@media (max-width: 720px) {
+  .player-body {
+    padding-inline: 16px;
+    padding-top: 24px;
+  }
+  .cover-img {
+    /* 容器窄于封面时不要溢出（object-fit: cover 裁切，画面不变形） */
+    width: min(200px, 100%);
+  }
+  /* 底栏一行塞不下「两枚 chip + A / B / 音量」：换行而不是把按钮挤出屏幕 */
+  .volume-footer {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ab-loop-fab,
+  .volume-fab {
+    width: 40px;
+    height: 40px;
+  }
 }
 </style>

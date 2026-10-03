@@ -110,6 +110,12 @@ onMounted(async () => {
 .freq-cover:hover .freq-cover-overlay {
   opacity: 1;
 }
+/* 触屏没有 hover：让「点封面播放」的遮罩常显（低不透明度），不失暗示也不遮封面 */
+@media (hover: none) {
+  .freq-cover-overlay {
+    opacity: 0.55;
+  }
+}
 .freq-cover-play {
   color: #fff;
 }

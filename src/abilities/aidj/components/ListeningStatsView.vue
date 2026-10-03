@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { translate, translateTemplate } from '../../../main/ui/i18n'
 
@@ -52,6 +52,8 @@ const periods = ref<Period[]>([]) // 升序：最旧在上、最新在下
 const loading = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
 const hover = ref<{ x: number; y: number; period: string; cell: HeatCell } | null>(null)
+/** 点按选中的格子：触屏没有 hover，点一下把该格详情固定到图表下方的一行。 */
+const selected = ref<{ period: string; cell: HeatCell } | null>(null)
 const jumpInput = ref('')
 const anchorLabel = ref('')
 /** 卡片 DOM 引用（key → 元素）。定位/时间起点全部用 DOM 几何，不手算排布。 */
@@ -374,6 +376,19 @@ function onCellMove(e: MouseEvent, period: Period, cell: HeatCell): void {
   hover.value = { x: e.clientX + 12, y: e.clientY + 12, period: period.label, cell }
 }
 
+/** 触屏点按格子（`hover: none` 才有意义：桌面继续只用 hover tooltip，行为不变）。 */
+function onCellTap(period: Period, cell: HeatCell): void {
+  if (window.matchMedia?.('(hover: none)').matches !== true) return
+  hover.value = null
+  const same = selected.value?.period === period.label && selected.value?.cell.label === cell.label
+  selected.value = same ? null : { period: period.label, cell }
+}
+
+/** 该格子是否为点按选中的那个（描边提示，便于知道看的是哪一格）。 */
+function isCellSelected(period: Period, cell: HeatCell): boolean {
+  return selected.value?.period === period.label && selected.value?.cell.label === cell.label
+}
+
 function coveragePct(cell: HeatCell): number {
   if (cell.max <= 0) return 0
   return Math.min(100, Math.round((cell.minutes / cell.max) * 100))
@@ -453,6 +468,13 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   hover.value = null
+  selected.value = null
+})
+
+// 数据窗口一变（切粒度 / 跳转 / 上滑下滑懒加载），格子对象全部重建 → 丢掉点按选择，
+// 避免底部详情行显示上一批数据的旧数值。
+watch(periods, () => {
+  selected.value = null
 })
 </script>
 
@@ -538,10 +560,12 @@ onBeforeUnmount(() => {
               <div
                 v-if="cell"
                 class="heat-cell"
+                :class="{ 'is-selected': isCellSelected(p, cell) }"
                 :title="`${p.label} ${cell.label} · ${fmt(cell.minutes)} · ${coveragePct(cell)}%`"
                 :style="{ background: cellBg(cell) }"
                 @mousemove="onCellMove($event, p, cell)"
                 @mouseleave="hover = null"
+                @click="onCellTap(p, cell)"
               >
                 <span class="cell-label">{{ cell.label }}</span>
               </div>
@@ -560,6 +584,13 @@ onBeforeUnmount(() => {
       <div v-else-if="atLatest" class="stats-end-hint text-caption text-medium-emphasis pa-3">
         {{ t('aidj.stats.at_latest', '已到当前') }}
       </div>
+    </div>
+
+    <!-- 点按详情行：触屏没有 hover，点格子后把「时长 / 覆盖率」固定显示在这里（再次点同一格取消） -->
+    <div v-if="selected" class="stats-detail text-caption">
+      <span class="stats-detail-head">{{ selected.period }} · {{ selected.cell.label }}</span>
+      <span>{{ t('aidj.stats.duration', '时长') }}: {{ fmt(selected.cell.minutes) }}</span>
+      <span>{{ t('aidj.stats.coverage', '覆盖') }}: {{ coveragePct(selected.cell) }}%</span>
     </div>
 
     <!-- 悬停提示 -->
@@ -668,6 +699,24 @@ onBeforeUnmount(() => {
 .heat-cell:hover {
   outline: 1.5px solid rgba(var(--v-theme-primary), 0.9);
   outline-offset: 1px;
+}
+.heat-cell.is-selected {
+  outline: 1.5px solid rgba(var(--v-theme-primary), 0.9);
+  outline-offset: 1px;
+}
+/* 点按详情行（触屏 hover tooltip 的常驻替代） */
+.stats-detail {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
+  background: rgba(var(--v-theme-surface-variant), 0.35);
+}
+.stats-detail-head {
+  font-weight: 600;
 }
 .cell-label {
   font-size: 10px;

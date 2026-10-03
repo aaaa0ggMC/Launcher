@@ -236,6 +236,14 @@ function pretty(v: unknown): string {
 .wf-head-summary {
   min-width: 0;
 }
+/* 窄屏：头部一行元素（状态点 + 标题 + playbook + 摘要 + tokens + 耗时 + 箭头）放不下，
+   让「摘要」单独占一整行，避免被 flex-shrink 挤成一条缝。 */
+@media (max-width: 720px) {
+  .wf-head-summary {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
 .wf-goal {
   word-break: break-word;
 }

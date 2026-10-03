@@ -103,12 +103,12 @@ onBeforeUnmount(() => {
     <div class="d-flex align-center ga-2 px-1 pt-1 pb-1">
       <v-btn
         icon
-        size="x-small"
+        size="small"
         variant="text"
         :title="t('aidj.freq.sort', '切换排序')"
         @click="sortDesc = !sortDesc"
       >
-        <v-icon size="16">{{ sortDesc ? 'mdi-sort-descending' : 'mdi-sort-ascending' }}</v-icon>
+        <v-icon size="18">{{ sortDesc ? 'mdi-sort-descending' : 'mdi-sort-ascending' }}</v-icon>
       </v-btn>
       <span class="text-caption text-medium-emphasis">
         {{ t('aidj.sessions.count', '会话') }} {{ sorted.length }}
@@ -147,13 +147,12 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 .freq-scroll-wrap {
-  height: min(60vh, 400px);
+  /* 视口高度一律用 --app-vh（手机上 100vh 是地址栏收起的大视口，会产生外层空滚动条） */
+  height: min(calc(60 * var(--app-vh)), 400px);
   overflow: hidden;
 }
-.freq-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-primary), 0.45) transparent;
-}
+/* 滚动条样式统一由 global.css 提供：这里不能写 scrollbar-width / scrollbar-color，
+   Chromium 一看到它们就切回系统原生滚动条（见 AGENTS.md）。 */
 .freq-scroll::-webkit-scrollbar {
   width: 6px;
 }

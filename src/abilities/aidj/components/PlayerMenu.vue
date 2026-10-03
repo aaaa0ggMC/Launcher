@@ -572,6 +572,16 @@ function applyCustomRate(): void {
   gap: 6px;
   padding: 4px;
 }
+/* 窄屏每格约 90px 太挤：降为 2 列，缩略图 / 名称可读 */
+@media (max-width: 720px) {
+  .menu-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .eq-thumb {
+    flex: 0 1 84px;
+    min-width: 60px;
+  }
+}
 .menu-grid-item {
   text-transform: none;
 }

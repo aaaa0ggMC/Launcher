@@ -797,6 +797,15 @@ onUnmounted(() => {
   flex: 1;
 }
 
+/* 窄屏 / 矮屏：写死的 320px 会在虚拟滚动之外再叠一层外层滚动（弹层 90vw、矮屏尤其明显）。
+   高度随可见视口收窄（一律用 --app-vh，别写 100vh）；!important 用于覆盖 v-virtual-scroll
+   height="320" 落到行内的 height。桌面宽度下不生效。 */
+@media (max-width: 720px) {
+  .virtual-items-list {
+    height: min(320px, calc(40 * var(--app-vh))) !important;
+  }
+}
+
 .entry-row {
   border-radius: 8px;
   cursor: pointer;
