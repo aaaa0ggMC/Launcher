@@ -9,7 +9,8 @@ type CommandArgs = Record<string, unknown>
  * 宿主能力档位：`native` 宿主原生支持 / `web` 浏览器等价或降级实现 / `none` 没有（对应通道被 nop）。
  * 未在表里声明的 id 视为 `native`（Electron 全部原生，不需要声明）。
  * 现有 id：window.frame（最小化/最大化/关闭）、window.child（子窗口）、file.pick、file.save、
- * clipboard、external（打开外部链接）、shortcut.global、screenshot、privacy.consent。
+ * clipboard、external（打开外部链接）、shortcut.global、screenshot、privacy.consent、
+ * host.wallpaper（读取桌面壁纸）。
  */
 export type HostCap = 'native' | 'web' | 'none'
 

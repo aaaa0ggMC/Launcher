@@ -76,3 +76,50 @@ await build({
     rollupOptions: { input: resolve(root, 'src/main/ui/index.html') }
   }
 })
+
+// ── 分发包：out/pack（headless + web + 只含运行时外置依赖的 package.json）──────────────
+// 手机 / Termux 上不需要装 electron、vite 等整套工具链：桌面机构建后把 tar 拷过去，
+//   tar xzf cockpit-headless.tgz && cd cockpit-headless && npm install --omit=dev && node headless/index.js
+if (process.argv.includes('--pack')) {
+  const { cpSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const bundled = readFileSync(resolve(root, 'out/headless/index.js'), 'utf8')
+  const used = Object.keys(pkg.dependencies ?? {}).filter(
+    (d) => !NOT_EXTERNAL.has(d) && bundled.includes(`require("${d}`)
+  )
+  // 原生 / 平台相关的做成可选依赖：装不上也不影响启动（对应能力自行降级）
+  const OPTIONAL = new Set(['esbuild', 'dbus-next'])
+  const dest = resolve(root, 'out/pack/cockpit-headless')
+  rmSync(resolve(root, 'out/pack'), { recursive: true, force: true })
+  mkdirSync(dest, { recursive: true })
+  cpSync(resolve(root, 'out/headless'), resolve(dest, 'headless'), { recursive: true })
+  cpSync(resolve(root, 'out/web'), resolve(dest, 'web'), { recursive: true })
+  writeFileSync(
+    resolve(dest, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'cockpit-headless',
+        version: pkg.version,
+        private: true,
+        description: 'Linux Cockpit headless host + web client (no Electron)',
+        scripts: { start: 'node headless/index.js' },
+        dependencies: Object.fromEntries(
+          used.filter((d) => !OPTIONAL.has(d)).map((d) => [d, pkg.dependencies[d]])
+        ),
+        optionalDependencies: Object.fromEntries(
+          used.filter((d) => OPTIONAL.has(d)).map((d) => [d, pkg.dependencies[d]])
+        )
+      },
+      null,
+      2
+    ) + '\n'
+  )
+  execFileSync('tar', [
+    'czf',
+    resolve(root, 'out/cockpit-headless.tgz'),
+    '-C',
+    resolve(root, 'out/pack'),
+    'cockpit-headless'
+  ])
+  console.log('packed → out/cockpit-headless.tgz  deps:', used.join(', '))
+}

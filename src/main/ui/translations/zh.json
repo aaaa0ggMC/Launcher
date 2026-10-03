@@ -166,5 +166,22 @@
   "agent.view_hidden": "后台视图",
   "agent.view.back": "返回我的界面",
   "window.minimize": "最小化",
-  "window.close": "关闭"
+  "window.close": "关闭",
+  "hostpick.title.file": "选择文件",
+  "hostpick.title.folder": "选择文件夹",
+  "hostpick.title.save": "保存到…",
+  "hostpick.up": "上一级",
+  "hostpick.path": "路径",
+  "hostpick.root.home": "主目录",
+  "hostpick.root.storage": "手机存储",
+  "hostpick.root.root": "根目录",
+  "hostpick.error": "无法读取该目录",
+  "hostpick.empty": "这里没有可选的内容",
+  "hostpick.filename": "文件名",
+  "hostpick.showAll": "显示所有文件",
+  "hostpick.showHidden": "显示隐藏文件",
+  "hostpick.cancel": "取消",
+  "hostpick.save": "保存",
+  "hostpick.selectFolder": "选择此文件夹",
+  "hostpick.select": "选择"
 }

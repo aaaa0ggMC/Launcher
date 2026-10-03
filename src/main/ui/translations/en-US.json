@@ -166,5 +166,22 @@
   "agent.view_hidden": "Background view",
   "agent.view.back": "Back to my UI",
   "window.minimize": "Minimize",
-  "window.close": "Close"
+  "window.close": "Close",
+  "hostpick.title.file": "Choose a file",
+  "hostpick.title.folder": "Choose a folder",
+  "hostpick.title.save": "Save to…",
+  "hostpick.up": "Up",
+  "hostpick.path": "Path",
+  "hostpick.root.home": "Home",
+  "hostpick.root.storage": "Phone storage",
+  "hostpick.root.root": "Root",
+  "hostpick.error": "Cannot read this directory",
+  "hostpick.empty": "Nothing to pick here",
+  "hostpick.filename": "File name",
+  "hostpick.showAll": "Show all files",
+  "hostpick.showHidden": "Show hidden files",
+  "hostpick.cancel": "Cancel",
+  "hostpick.save": "Save",
+  "hostpick.selectFolder": "Choose this folder",
+  "hostpick.select": "Choose"
 }

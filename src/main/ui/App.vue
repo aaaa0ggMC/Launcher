@@ -30,6 +30,7 @@ import GameIcon from './components/GameIcon.vue'
 import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import HelpDialog from './components/HelpDialog.vue'
+import HostFilePicker from './components/HostFilePicker.vue'
 import { SETTINGS_API, normalizeTarget, type SettingsApi } from './composables/settings'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
@@ -610,6 +611,8 @@ function onConfigChanged(cfg: Record<string, unknown> | null): void {
 const backgroundMode = computed<'transparent' | 'image' | 'wallpaper'>(() => {
   const b =
     (runtimeConfig.value.window as { background?: string } | undefined)?.background ?? 'transparent'
+  // 宿主没有桌面壁纸能力（网页模式）时，已存的 wallpaper 回落 transparent
+  if (b === 'wallpaper' && !window.cockpit.hasCap('host.wallpaper')) return 'transparent'
   return (b === 'image' || b === 'wallpaper' ? b : 'transparent') as
     'transparent' | 'image' | 'wallpaper'
 })
@@ -1408,6 +1411,7 @@ onBeforeUnmount(() => {
       :categories="settingsDialog.categories"
       :highlight="settingsDialog.highlight"
     />
+    <HostFilePicker v-if="!agentView" />
     <HelpDialog v-model="helpOpen" :ability="helpAbility" :tree="helpTree" />
 
     <!-- Quit confirmation when background tasks are still running -->

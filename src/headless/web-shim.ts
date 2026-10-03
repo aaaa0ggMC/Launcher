@@ -99,6 +99,20 @@ const cockpit = createCockpit({
       }
       case 'command:list':
         return api('/api/commands')
+      case 'dialog:pick-file':
+      case 'dialog:save-file':
+        // 浏览器拿不到宿主机路径：交给 HostFilePicker.vue 浏览宿主文件系统
+        return new Promise((resolve) =>
+          window.dispatchEvent(
+            new CustomEvent('cockpit:host-pick', {
+              detail: {
+                mode: channel === 'dialog:save-file' ? 'save' : 'open',
+                opts: args[0],
+                resolve
+              }
+            })
+          )
+        )
       case 'clipboard:write':
         await navigator.clipboard?.writeText(String(args[0] ?? ''))
         return
@@ -121,9 +135,11 @@ const cockpit = createCockpit({
     // 浏览器本身就是窗口：不画最小化 / 最大化 / 关闭
     'window.frame': 'none',
     'window.child': 'none',
-    // 浏览器拿不到宿主机的绝对路径；需要宿主端文件选择器后再支持
-    'file.pick': 'none',
-    'file.save': 'none',
+    // 桌面壁纸来自宿主桌面环境（KDE），网页 / Termux 没有
+    'host.wallpaper': 'none',
+    // 浏览器拿不到宿主机的绝对路径：用宿主文件选择器（HostFilePicker）
+    'file.pick': 'web',
+    'file.save': 'web',
     'shortcut.global': 'none',
     screenshot: 'none',
     'privacy.consent': 'none',

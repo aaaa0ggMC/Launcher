@@ -15,6 +15,11 @@ export const backgrounds: BackgroundDef[] = Object.keys(backgroundModules)
   .map((key) => backgroundModules[key].default)
   .filter((b): b is BackgroundDef => Boolean(b?.id))
 
+/** 当前宿主是否满足该背景的能力要求（网页模式没有桌面壁纸等） */
+export function isBackgroundAvailable(b: BackgroundDef): boolean {
+  return (b.requires ?? []).every((cap) => window.cockpit.hasCap(cap))
+}
+
 export function findBackground(id: string): BackgroundDef | undefined {
   return backgrounds.find((b) => b.id === id)
 }

@@ -19,6 +19,7 @@ import { registerIconProtocol } from '../main/process/icon-protocol'
 import { registerAudioProtocol } from '../main/process/audio-protocol'
 import { runStartupHooks } from '../main/process/startup'
 import { loadExternalAbilities } from '../main/process/ability-loader'
+import { registerHostCommands } from './commands'
 import { pushEvent, startServer } from './server'
 
 function arg(name: string, dflt: string): string {
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
   registerIconProtocol()
   registerAudioProtocol()
   registerAbilityCommands()
+  registerHostCommands()
   await runStartupHooks()
   loadExternalAbilities().catch((e) => console.error('[cockpit] external abilities:', e))
 

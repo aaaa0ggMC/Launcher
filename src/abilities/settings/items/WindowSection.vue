@@ -4,19 +4,21 @@ defineOptions({ name: 'cockpit-settings-window' })
 import { ref, inject, onMounted, computed } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
-import { backgrounds } from '../../../background'
+import { backgrounds, isBackgroundAvailable } from '../../../background'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
 const bgItems = computed(() =>
-  backgrounds.map((b) => ({
+  backgrounds.filter(isBackgroundAvailable).map((b) => ({
     id: b.id,
     name: translate(uiLang.value, `background.${b.id}.name`),
     description: translate(uiLang.value, `background.${b.id}.desc`)
   }))
 )
 
+/** 窗口外壳（无边框 / 圆角）只在宿主有自己的窗口时才有意义；网页里浏览器就是窗口 */
+const hasFrame = window.cockpit.hasCap('window.frame')
 const frameless = ref(true)
 const rounded = ref(true)
 const radius = ref(12)
@@ -34,6 +36,8 @@ onMounted(async () => {
   const r = Number(win.radius)
   radius.value = Number.isFinite(r) && r >= 0 ? r : 12
   background.value = (win.background as string) ?? 'transparent'
+  // 已存的背景在当前宿主不可用（如网页里的 wallpaper）：界面按 transparent 显示，不改动已存配置
+  if (!bgItems.value.some((b) => b.id === background.value)) background.value = 'transparent'
   backgroundImage.value = (win.backgroundImage as string) ?? ''
   const bop = Number(win.backgroundOpacity)
   backgroundOpacity.value = Number.isFinite(bop) ? bop : 1
@@ -127,6 +131,7 @@ defineExpose({
     <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'window.title') }}</v-card-title>
     <v-card-text class="d-flex flex-column">
       <v-switch
+        v-if="hasFrame"
         :model-value="frameless"
         :label="translate(uiLang, 'window.frameless')"
         color="primary"
@@ -135,6 +140,7 @@ defineExpose({
         @update:model-value="setFrameless"
       />
       <v-switch
+        v-if="hasFrame"
         :model-value="rounded"
         :label="translate(uiLang, 'window.rounded')"
         color="primary"
@@ -144,7 +150,7 @@ defineExpose({
         @update:model-value="setRounded"
       />
 
-      <template v-if="rounded">
+      <template v-if="hasFrame && rounded">
         <div class="d-flex align-center justify-space-between mt-3 mb-1">
           <span class="text-body-2">{{ translate(uiLang, 'window.radius') }}</span>
           <span class="text-caption on-surface-variant font-family-mono">{{ radius }}px</span>
@@ -161,7 +167,7 @@ defineExpose({
         />
       </template>
 
-      <v-divider class="my-3" />
+      <v-divider v-if="hasFrame" class="my-3" />
 
       <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.background') }}</div>
       <v-select
