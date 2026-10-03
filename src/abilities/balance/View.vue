@@ -1749,11 +1749,11 @@ onUnmounted(() => {
 <style scoped>
 .balance-shell {
   position: relative;
-  min-height: calc(100vh - 96px);
+  min-height: calc(var(--app-vh) - 96px);
 }
 
 .balance-container {
-  min-height: calc(100vh - 96px);
+  min-height: calc(var(--app-vh) - 96px);
 }
 
 .balance-title-icon {

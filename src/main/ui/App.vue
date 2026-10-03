@@ -1335,12 +1335,19 @@ onBeforeUnmount(() => {
       border
       :class="isFrameless && !agentCovered ? 'cockpit-app-bar' : ''"
     >
-      <v-app-bar-nav-icon
+      <v-btn
         v-if="sidebarOverlay"
+        icon
+        variant="text"
+        class="ml-2"
         :aria-label="t('sidebar.open', '打开菜单')"
         :title="t('sidebar.open', '打开菜单')"
         @click="drawerOpen = !drawerOpen"
-      />
+      >
+        <div class="brand-logo">
+          <GameIcon name="boss" :size="30" />
+        </div>
+      </v-btn>
       <v-app-bar-title @dblclick="isFrameless ? winToggleMaximize : undefined">
         <span class="text-subtitle-1 font-weight-medium">{{
           currentAbility?.name ?? 'Linux Cockpit'
@@ -1410,8 +1417,8 @@ onBeforeUnmount(() => {
     </v-app-bar>
 
     <v-main scrollable class="content-bg">
-      <v-container fluid :class="narrow ? 'pa-2' : 'pa-4'">
-        <div class="d-flex flex-column" style="min-height: calc(100vh - 64px - 32px)">
+      <v-container fluid :class="narrow ? 'px-2 py-4' : 'pa-4'">
+        <div class="d-flex flex-column" style="min-height: calc(var(--app-vh) - 64px - 32px)">
           <!-- 独占 SDK：当前页面有被 AI 占用的资源时，App bar 下方显示窄条（可一键接管） -->
           <ExclusiveBanner
             :current-id="currentId"

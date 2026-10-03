@@ -112,6 +112,37 @@ function pickSuggestion(s: string): void {
   suggestions.value = []
 }
 
+/** 输出里的 http(s) 网址切成可点击的片段（去掉句尾标点 / 右括号） */
+interface Seg {
+  text: string
+  url?: string
+}
+const URL_RE = /https?:\/\/[^\s<>"'`]+/g
+function segments(text: string): Seg[] {
+  const out: Seg[] = []
+  let last = 0
+  for (const m of text.matchAll(URL_RE)) {
+    let url = m[0]
+    const idx = m.index ?? 0
+    // 句尾的标点 / 没有配对的右括号不算网址的一部分
+    for (;;) {
+      const c = url[url.length - 1]
+      const open = c === ')' ? '(' : c === ']' ? '[' : c === '}' ? '{' : null
+      const unbalanced = open !== null && url.split(c).length > url.split(open).length
+      if (/[.,;:!?，。；：！？）】]/.test(c) || unbalanced) url = url.slice(0, -1)
+      else break
+    }
+    if (idx > last) out.push({ text: text.slice(last, idx) })
+    out.push({ text: url, url })
+    last = idx + url.length
+  }
+  if (last < text.length) out.push({ text: text.slice(last) })
+  return out.length ? out : [{ text }]
+}
+function openLink(url: string): void {
+  void window.cockpit.openExternal(url)
+}
+
 const outputEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLInputElement | null>(null)
 
@@ -178,7 +209,21 @@ defineExpose({ toMarkdown })
           ]"
         >
           <template v-if="l.kind === 'in'"><span class="cli-prompt">❯</span> {{ l.text }}</template>
-          <template v-else>{{ l.text }}</template>
+          <template v-else>
+            <template v-for="(seg, j) in segments(l.text)" :key="j">
+              <a
+                v-if="seg.url"
+                class="cli-link"
+                :href="seg.url"
+                :title="seg.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click.prevent="openLink(seg.url)"
+                >{{ seg.text }}</a
+              >
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </template>
         </div>
         <div v-if="busy" class="text-caption on-surface-variant mb-1">
           {{ translate(uiLang, 'cli.busy') }}
@@ -215,7 +260,7 @@ defineExpose({ toMarkdown })
 /* 定高：宿主外壳只有 min-height，fill-height 撑不住，输出区会把整页撑出全局滚动条；
    固定为可视区高度（100vh − appbar 64px − 容器 padding 32px），滚动只发生在输出区内部 */
 .cli-page {
-  height: calc(100vh - 96px);
+  height: calc(var(--app-vh) - 96px);
   overflow: hidden;
 }
 .gap-1 {
@@ -251,6 +296,12 @@ defineExpose({ toMarkdown })
 }
 .cli-input::placeholder {
   color: rgba(var(--v-theme-on-surface-variant), 0.6);
+}
+.cli-link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
 }
 .cli-prompt {
   color: rgb(var(--v-theme-primary));

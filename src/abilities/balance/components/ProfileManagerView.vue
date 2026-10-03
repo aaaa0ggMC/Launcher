@@ -639,7 +639,7 @@ onMounted(() => {
 
 <style scoped>
 .profile-manager-container {
-  min-height: calc(100vh - 96px);
+  min-height: calc(var(--app-vh) - 96px);
 }
 
 .profile-title-icon {
