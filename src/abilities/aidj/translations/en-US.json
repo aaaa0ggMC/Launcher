@@ -761,5 +761,12 @@
   "aidj.bili.skip_existing": "Skip downloaded",
   "aidj.bili.already_downloaded": "Downloaded",
   "aidj.privacy.bili": "Bilibili account overview",
-  "aidj.privacy.listening": "Listening stats"
+  "aidj.privacy.listening": "Listening stats",
+  "aidj.status.title": "Status",
+  "aidj.status.open": "Show all status",
+  "aidj.status.desc_tracks": "Number of songs in the library",
+  "aidj.status.desc_memory": "Played-song memory the AI uses to avoid repeats",
+  "aidj.status.desc_volbal": "Loudness balance: adjusts volume per track loudness",
+  "aidj.status.desc_freq": "Record how often each song is played",
+  "aidj.status.desc_listen": "Track listening time"
 }

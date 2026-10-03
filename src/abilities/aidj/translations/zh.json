@@ -761,5 +761,12 @@
   "aidj.bili.skip_existing": "跳过已下载",
   "aidj.bili.already_downloaded": "已下载",
   "aidj.privacy.bili": "B 站账号概况",
-  "aidj.privacy.listening": "听歌统计"
+  "aidj.privacy.listening": "听歌统计",
+  "aidj.status.title": "状态",
+  "aidj.status.open": "查看全部状态",
+  "aidj.status.desc_tracks": "曲库里的歌曲总数",
+  "aidj.status.desc_memory": "已播放歌曲的记忆条数；AI 会据此避开重复",
+  "aidj.status.desc_volbal": "响度平衡：按曲目响度动态调整音量",
+  "aidj.status.desc_freq": "记录每首歌的播放次数",
+  "aidj.status.desc_listen": "统计听歌时长"
 }
