@@ -89,6 +89,80 @@ function vs(): ViewState {
   return st
 }
 
+/**
+ * 单个 CDP 调用的上限。最长的正常调用是 settle 的 QUIET_JS（≤ SETTLE_MAX_MS）与整页截图；
+ * 渲染进程被同步弹窗 / 长任务卡住时 sendCommand 会永远不返回，必须兜底。
+ */
+const CDP_TIMEOUT_MS = 20_000
+
+/** 操作期间页面弹出的 JS 对话框（alert / confirm / prompt / beforeunload）。 */
+export interface DialogNote {
+  type: string
+  message: string
+  /** agent 视图里自动处理的方式；主窗口的对话框留给用户，不自动处理 */
+  handled?: 'accepted' | 'dismissed'
+}
+
+interface CdpState {
+  /** 当前打开着的对话框 */
+  open: DialogNote | null
+  /** 进行中的 CDP 调用数——只在有调用时自动处理对话框，用户自己触发的不碰 */
+  inflight: number
+  /** 对话框打开时让进行中的调用立刻失败（主窗口） */
+  waiters: Set<(d: DialogNote) => void>
+  /** 自动处理过、还没报告给调用方的对话框 */
+  notes: DialogNote[]
+}
+const cdpStates = new WeakMap<WebContents, CdpState>()
+
+/** agent 自己的独立视图（不是用户主窗口）：里面的对话框没人看得到，由 inspector 代为关闭。 */
+function isAgentView(wc: WebContents): boolean {
+  return getMainWindow()?.webContents !== wc
+}
+
+/** alert 确认即可；confirm / prompt / beforeunload 一律取消（不替用户做肯定的选择）。 */
+function autoHandleDialog(wc: WebContents, st: CdpState): void {
+  const d = st.open
+  if (!d || d.handled) return
+  const accept = d.type === 'alert'
+  d.handled = accept ? 'accepted' : 'dismissed'
+  st.notes.push(d)
+  wc.debugger.sendCommand('Page.handleJavaScriptDialog', { accept }).catch(() => {})
+}
+
+function cdpStateOf(wc: WebContents): CdpState {
+  let st = cdpStates.get(wc)
+  if (st) return st
+  const fresh: CdpState = { open: null, inflight: 0, waiters: new Set(), notes: [] }
+  st = fresh
+  cdpStates.set(wc, fresh)
+  const onMessage = (_e: unknown, method: string, params: unknown): void => {
+    if (method === 'Page.javascriptDialogOpening') {
+      const p = params as { type?: string; message?: string }
+      fresh.open = { type: p.type ?? 'alert', message: String(p.message ?? '').slice(0, 500) }
+      if (fresh.inflight > 0 && isAgentView(wc)) autoHandleDialog(wc, fresh)
+      else for (const w of fresh.waiters) w(fresh.open)
+    } else if (method === 'Page.javascriptDialogClosed') {
+      fresh.open = null
+    }
+  }
+  wc.debugger.on('message', onMessage)
+  wc.debugger.once('detach', () => {
+    wc.debugger.off('message', onMessage)
+    cdpStates.delete(wc)
+  })
+  // 监听对话框需要 Page 域
+  wc.debugger.sendCommand('Page.enable').catch(() => {})
+  return fresh
+}
+
+function dialogError(d: DialogNote): Error {
+  return new Error(
+    `页面弹出了 ${d.type} 对话框「${d.message}」，正在等用户处理；` +
+      '之前的操作可能已经生效，用户关掉对话框后再继续'
+  )
+}
+
 function cdpFor(wc: WebContents): Cdp {
   const dbg = wc.debugger
   if (!dbg.isAttached()) {
@@ -100,7 +174,47 @@ function cdpFor(wc: WebContents): Cdp {
       )
     }
   }
-  return (method, params) => dbg.sendCommand(method, params ?? {})
+  const st = cdpStateOf(wc)
+  return async (method, params) => {
+    if (st.open && !st.open.handled) {
+      if (isAgentView(wc)) autoHandleDialog(wc, st)
+      else throw dialogError(st.open)
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let waiter: ((d: DialogNote) => void) | undefined
+    st.inflight++
+    try {
+      return await Promise.race([
+        dbg.sendCommand(method, params ?? {}),
+        new Promise<never>((_, reject) => {
+          waiter = (d) => reject(dialogError(d))
+          st.waiters.add(waiter)
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `页面没有响应：${method} 超过 ${CDP_TIMEOUT_MS / 1000} 秒未返回（渲染进程可能被长任务或对话框阻塞）`
+                )
+              ),
+            CDP_TIMEOUT_MS
+          )
+        })
+      ])
+    } finally {
+      st.inflight--
+      clearTimeout(timer)
+      if (waiter) st.waiters.delete(waiter)
+    }
+  }
+}
+
+/** 取走操作期间自动处理的对话框，附到操作结果里（没有就不加字段）。 */
+function dialogsOf(wc: WebContents): { dialogs?: DialogNote[] } {
+  const st = cdpStates.get(wc)
+  if (!st?.notes.length) return {}
+  const dialogs = st.notes
+  st.notes = []
+  return { dialogs }
 }
 
 async function evaluate<T>(cdp: Cdp, expression: string): Promise<T> {
@@ -756,7 +870,7 @@ async function finish(cdp: Cdp, opts: ActOptions): Promise<number> {
 export async function clickAt(
   point: Point,
   opts: ActOptions & { button?: MouseButton; double?: boolean } = {}
-): Promise<{ ok: true; target: string; settledMs: number }> {
+): Promise<{ ok: true; target: string; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -764,14 +878,14 @@ export async function clickAt(
   tagAgentInput(wc)
   await showMarker(cdp, p)
   await mouseClick(cdp, p.x, p.y, opts.button ?? 'left', opts.double ? 2 : 1)
-  return { ok: true, target, settledMs: await finish(cdp, opts) }
+  return { ok: true, target, settledMs: await finish(cdp, opts), ...dialogsOf(wc) }
 }
 
 /** 移动鼠标（悬停）；按住键时即拖动中的移动。 */
 export async function moveTo(
   point: Point,
   opts: ActOptions = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -784,7 +898,7 @@ export async function moveTo(
   })
   vs().last = p
   if (vs().held) await showMarker(cdp, p, 'move')
-  return { ok: true, settledMs: await finish(cdp, opts) }
+  return { ok: true, settledMs: await finish(cdp, opts), ...dialogsOf(wc) }
 }
 
 /** 单独按下 / 松开鼠标键（按住不放、配合 moveTo 做复杂拖动）。按下的位置同样做隐私检查。 */
@@ -792,7 +906,7 @@ export async function mouseButton(
   action: 'down' | 'up',
   point: Point,
   opts: ActOptions & { button?: MouseButton } = {}
-): Promise<{ ok: true; target?: string; settledMs: number }> {
+): Promise<{ ok: true; target?: string; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -831,7 +945,8 @@ export async function mouseButton(
   return {
     ok: true,
     ...(target !== undefined ? { target } : {}),
-    settledMs: await finish(cdp, opts)
+    settledMs: await finish(cdp, opts),
+    ...dialogsOf(wc)
   }
 }
 
@@ -840,7 +955,7 @@ export async function drag(
   from: Point,
   to: Point,
   opts: ActOptions & { button?: MouseButton; steps?: number; durationMs?: number } = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const a = await toCss(cdp, from, opts.space)
@@ -887,7 +1002,7 @@ export async function drag(
   }
   vs().last = b
   await showMarker(cdp, b)
-  return { ok: true, settledMs: await finish(cdp, opts) }
+  return { ok: true, settledMs: await finish(cdp, opts), ...dialogsOf(wc) }
 }
 
 /** 注入输入前通知渲染端：接下来的 IPC 归属 agent（只降权）。 */
@@ -933,14 +1048,14 @@ async function mouseClick(
 export async function click(
   ref: string,
   opts: { button?: MouseButton; double?: boolean } = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const info = await prepare(cdp, ref, '点击')
   tagAgentInput(wc)
   await showMarker(cdp, info)
   await mouseClick(cdp, info.x, info.y, opts.button ?? 'left', opts.double ? 2 : 1)
-  return { ok: true, settledMs: await settle(cdp) }
+  return { ok: true, settledMs: await settle(cdp), ...dialogsOf(wc) }
 }
 
 // -- 键盘 ---------------------------------------------------------------------------
@@ -1062,7 +1177,7 @@ export async function type(
   ref: string | undefined,
   text: string,
   opts: { clear?: boolean; submit?: boolean } = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   if (ref) {
@@ -1087,7 +1202,7 @@ export async function type(
   }
   if (text) await cdp('Input.insertText', { text })
   if (opts.submit) await pressKey(cdp, 'Enter')
-  return { ok: true, settledMs: await settle(cdp) }
+  return { ok: true, settledMs: await settle(cdp), ...dialogsOf(wc) }
 }
 
 /**
@@ -1101,19 +1216,19 @@ export async function key(
     holdMs?: number
     action?: 'press' | 'down' | 'up'
   } = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   if (opts.action !== 'up') await guardFocused(cdp)
   tagAgentInput(wc)
   await pressKey(cdp, name, opts)
-  return { ok: true, settledMs: await finish(cdp, opts) }
+  return { ok: true, settledMs: await finish(cdp, opts), ...dialogsOf(wc) }
 }
 
 /** 滚轮：在 ref 上、指定坐标处，或页面中央。 */
 export async function scroll(
   opts: ActOptions & { ref?: string; at?: Point; dy?: number; dx?: number } = {}
-): Promise<{ ok: true; settledMs: number }> {
+): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
   const wc = mainContents()
   const cdp = cdpFor(wc)
   let x: number
@@ -1141,7 +1256,7 @@ export async function scroll(
     deltaX: opts.dx ?? 0,
     deltaY: opts.dy ?? 400
   })
-  return { ok: true, settledMs: await finish(cdp, opts) }
+  return { ok: true, settledMs: await finish(cdp, opts), ...dialogsOf(wc) }
 }
 
 // -- 输入时间轴（键盘 + 鼠标 + 截帧，按相对时间精确派发） -----------------------------
@@ -1785,11 +1900,11 @@ function masksVisible(
   probes: [number, number][],
   origin: { x: number; y: number },
   cssWidth: number
-): boolean {
-  if (!probes.length) return true
+): string | null {
+  if (!probes.length) return null
   const bmp = img.toBitmap()
   const size = img.getSize()
-  if (!bmp.length || !size.width || !size.height) return false
+  if (!bmp.length || !size.width || !size.height) return 'empty bitmap'
   // 位图是设备像素（BGRA），尺寸可能是 DIP 尺寸的倍数：按字节数反推像素宽
   const pxW = Math.round(Math.sqrt(((bmp.length / 4) * size.width) / size.height))
   const pxH = Math.round(bmp.length / 4 / pxW)
@@ -1801,9 +1916,10 @@ function masksVisible(
     const i = (py * pxW + px) * 4
     const near = (v: number | undefined, t: number): boolean =>
       v !== undefined && Math.abs(v - t) <= 12
-    if (!(near(bmp[i], 0x1f) && near(bmp[i + 1], 0x1b) && near(bmp[i + 2], 0x1b))) return false
+    if (!(near(bmp[i], 0x1f) && near(bmp[i + 1], 0x1b) && near(bmp[i + 2], 0x1b)))
+      return `probe (${x.toFixed(0)},${y.toFixed(0)}) got BGR ${bmp[i]},${bmp[i + 1]},${bmp[i + 2]}; ${probes.length} probes, bitmap ${pxW}x${pxH}, css ${cssWidth}`
   }
-  return true
+  return null
 }
 
 /** CDP `Page.captureScreenshot`：按需渲染新帧（不依赖窗口当前是否在出帧）。clip 为 CSS 像素。 */
@@ -1866,11 +1982,13 @@ async function captureMasked(
     const cssWidth = rect ? rect.width / zoom : masked.vw
     const mode = await screenshotModeSetting()
     let img: NativeImage | null = null
+    let miss: string | null = null
     if (mode !== 'cdp') {
       for (let attempt = 0; attempt < MASK_CAPTURE_ATTEMPTS; attempt++) {
         if (attempt) await new Promise((r) => setTimeout(r, MASK_CAPTURE_RETRY_MS))
         const shot = rect ? await wc.capturePage(rect) : await wc.capturePage()
-        if (masksVisible(shot, masked.probes, origin, cssWidth)) {
+        miss = masksVisible(shot, masked.probes, origin, cssWidth)
+        if (!miss) {
           img = shot
           break
         }
@@ -1879,13 +1997,14 @@ async function captureMasked(
     if (!img && mode !== 'capture') {
       // capturePage 拿到的是旧画面（窗口被遮挡 / 降帧）：让 Chromium 按需渲染一帧，DOM 里的遮罩一定在里面
       const shot = await captureViaCdp(cdp, opts.clip)
-      if (masksVisible(shot, masked.probes, origin, cssWidth)) img = shot
+      miss = masksVisible(shot, masked.probes, origin, cssWidth)
+      if (!miss) img = shot
     }
     if (!img) {
       throw new Error(
-        mode === 'capture'
+        (mode === 'capture'
           ? '截图隐私遮罩未能进入画面，已拒绝返回截图（窗口可能被遮挡；可在设置 → AI 与远程 里把截图方式改成「自动」）'
-          : '截图隐私遮罩未能进入画面，已拒绝返回截图（请重试）'
+          : '截图隐私遮罩未能进入画面，已拒绝返回截图（请重试）') + (miss ? ` [${miss}]` : '')
       )
     }
     buf = opts.format === 'jpeg' ? img.toJPEG(opts.quality ?? 80) : img.toPNG()

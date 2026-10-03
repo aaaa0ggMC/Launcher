@@ -300,10 +300,13 @@ async function deleteSession(s: SessionItem): Promise<void> {
       sessions.value = sessions.value.filter((x) => x.id !== s.id)
       if (currentId.value === s.id) currentId.value = ''
     } else {
-      window.alert(r?.error || '删除失败')
+      showSnack(r?.error || t('aidj.sessions.delete_failed', '删除失败'), 'error')
     }
   } catch (e) {
-    window.alert(`删除失败: ${e instanceof Error ? e.message : String(e)}`)
+    showSnack(
+      `${t('aidj.sessions.delete_failed', '删除失败')}: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    )
   }
 }
 

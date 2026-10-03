@@ -123,6 +123,7 @@
   "aidj.metadata_sync_failed": "元数据同步失败",
   "aidj.metadata_sync_done": "元数据同步完成",
   "aidj.metadata_sync_none": "没有写入新的元数据",
+  "aidj.sessions.delete_failed": "删除会话失败",
   "aidj.sessions.back": "返回",
   "aidj.sessions.today": "今天",
   "aidj.sessions.yesterday": "昨天",
