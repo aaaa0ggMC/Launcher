@@ -19,6 +19,7 @@ const bgItems = computed(() =>
 
 /** 窗口外壳（无边框 / 圆角）只在宿主有自己的窗口时才有意义；网页里浏览器就是窗口 */
 const hasFrame = window.cockpit.hasCap('window.frame')
+const blurMode = ref<'on' | 'off' | 'auto'>('on')
 const frameless = ref(true)
 const rounded = ref(true)
 const radius = ref(12)
@@ -31,6 +32,7 @@ const fuseBlur = ref(28)
 onMounted(async () => {
   const cfg = await window.cockpit.getConfig()
   const win = (cfg?.window as Record<string, unknown> | undefined) ?? {}
+  blurMode.value = win.blur === 'off' || win.blur === 'auto' ? win.blur : 'on'
   frameless.value = win.frameless !== false
   rounded.value = win.rounded !== false
   const r = Number(win.radius)
@@ -71,6 +73,12 @@ function saveWindow(patch: Record<string, unknown>): Promise<unknown> {
   return window.cockpit.setConfig({
     window: { ...(config.value.window as Record<string, unknown> | undefined), ...patch }
   })
+}
+
+async function setBlurMode(v: string | null): Promise<void> {
+  const m = v === 'off' || v === 'auto' ? v : 'on'
+  blurMode.value = m
+  await saveWindow({ blur: m })
 }
 
 async function setBackground(v: string | null): Promise<void> {
@@ -258,6 +266,24 @@ defineExpose({
         hide-details
         @end="commitFuseBlur"
       />
+
+      <v-divider class="my-3" />
+
+      <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.blurMode') }}</div>
+      <div class="text-caption on-surface-variant mb-2">
+        {{ translate(uiLang, 'window.blurModeHint') }}
+      </div>
+      <v-radio-group
+        :model-value="blurMode"
+        color="primary"
+        density="compact"
+        hide-details
+        @update:model-value="setBlurMode"
+      >
+        <v-radio :label="translate(uiLang, 'window.blurOn')" value="on" />
+        <v-radio :label="translate(uiLang, 'window.blurAuto')" value="auto" />
+        <v-radio :label="translate(uiLang, 'window.blurOff')" value="off" />
+      </v-radio-group>
 
       <div class="text-caption on-surface-variant mt-2">
         {{ translate(uiLang, 'window.note') }}

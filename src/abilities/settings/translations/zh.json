@@ -154,5 +154,10 @@
   "sidebar.modeCaption": "手机等窄屏上侧栏会占掉太多宽度；弹出式下侧栏隐藏，点左上角的菜单按钮打开，选完自动收起。",
   "sidebar.modeAuto": "自动（窄屏弹出式，宽屏常驻）",
   "sidebar.modeAlways": "始终常驻",
-  "sidebar.modeOverlay": "始终弹出式（隐藏侧栏）"
+  "sidebar.modeOverlay": "始终弹出式（隐藏侧栏）",
+  "window.blurMode": "模糊效果",
+  "window.blurModeHint": "毛玻璃（半透明面板、侧栏、菜单下面的模糊）和背景图模糊在手机上开销很大，弹出式侧栏展开时可能掉帧。",
+  "window.blurOn": "开启",
+  "window.blurAuto": "自动（窄屏关闭，如手机）",
+  "window.blurOff": "关闭（面板底色会更实一些）"
 }

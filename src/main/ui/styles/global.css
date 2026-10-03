@@ -474,6 +474,29 @@ html.motion-off *::after {
 }
 
 /* ---------------------------------------------------------------------------
+ * 「模糊效果」关闭（设置 → 窗口；App.vue 给 <html> 加 .no-blur）
+ * 毛玻璃（backdrop-filter）要对身后内容逐帧取样模糊，手机 GPU 上开销很大——比如弹出式侧栏滑入时
+ * 对整块背景模糊会掉帧。散落在各处的 backdrop-filter 统一在这里关掉；没有了模糊，半透明底会
+ * 让文字难以辨认，所以顶栏 / 侧栏的底色同时调得更实。
+ * ------------------------------------------------------------------------- */
+html.no-blur *,
+html.no-blur *::before,
+html.no-blur *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.no-blur .v-application .v-app-bar {
+  background: rgba(var(--v-theme-surface), 0.92) !important;
+}
+html.no-blur .v-application .v-navigation-drawer {
+  background: rgba(var(--v-theme-surface-variant), 0.98) !important;
+}
+/* 歌词沉浸页的封面底图（大半径静态模糊） */
+html.no-blur .lyrics-immerse-bg-img {
+  filter: none;
+}
+
+/* ---------------------------------------------------------------------------
  * Frameless window — app-bar is the drag region; buttons stay clickable.
  * ------------------------------------------------------------------------- */
 .cockpit-app-bar {

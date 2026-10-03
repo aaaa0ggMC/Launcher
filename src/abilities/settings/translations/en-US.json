@@ -154,5 +154,10 @@
   "sidebar.modeCaption": "On narrow screens such as phones the sidebar takes too much width. In pop-up mode it is hidden; tap the menu button at the top left to open it, and it closes after you pick a page.",
   "sidebar.modeAuto": "Auto (pop-up on narrow screens, docked on wide ones)",
   "sidebar.modeAlways": "Always docked",
-  "sidebar.modeOverlay": "Always pop-up (hide the sidebar)"
+  "sidebar.modeOverlay": "Always pop-up (hide the sidebar)",
+  "window.blurMode": "Blur effects",
+  "window.blurModeHint": "Frosted glass (the blur behind translucent panels, the sidebar and menus) and background-image blur are expensive on phones; the pop-up sidebar may drop frames when it opens.",
+  "window.blurOn": "On",
+  "window.blurAuto": "Auto (off on narrow screens, e.g. phones)",
+  "window.blurOff": "Off (panels get a more solid background)"
 }

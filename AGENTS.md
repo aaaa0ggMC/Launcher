@@ -153,7 +153,8 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
     "backgroundImage": "", // background=image 时的图片路径
     "backgroundOpacity": 1, // 背景图片不透明度
     "fuseAlpha": 0.85, // Fuse 蒙层不透明度 (0–1)
-    "fuseBlur": 28 // 背景模糊 (px)
+    "fuseBlur": 28 // 背景模糊 (px),
+    "blur": "on" // 模糊效果：on（默认）| off | auto（窄屏关闭）。off 时 <html> 加 .no-blur，global.css 统一关掉 backdrop-filter 并让顶栏/侧栏底色更实，背景图模糊当作 0
   },
   "runtime": {
     "terminal": ["konsole", "--hold", "-e"], // terminal:true 的条目用这个

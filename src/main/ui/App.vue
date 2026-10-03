@@ -652,6 +652,21 @@ const fuseAlpha = computed(() => {
   const a = Number((runtimeConfig.value.window as { fuseAlpha?: number } | undefined)?.fuseAlpha)
   return Number.isFinite(a) ? a : 1
 })
+/**
+ * 模糊效果（config.json `window.blur`）：on（默认）| off | auto（窄屏关闭）。
+ * 关闭时给 <html> 加 .no-blur（global.css 统一关掉毛玻璃），背景图的模糊半径也当作 0。
+ */
+const blurMode = computed<'on' | 'off' | 'auto'>(() => {
+  const m = (runtimeConfig.value.window as { blur?: string } | undefined)?.blur
+  return m === 'off' || m === 'auto' ? m : 'on'
+})
+const blurOff = computed(
+  () => blurMode.value === 'off' || (blurMode.value === 'auto' && narrow.value)
+)
+watch(blurOff, (off) => document.documentElement.classList.toggle('no-blur', off), {
+  immediate: true
+})
+
 const fuseBlur = computed(() => {
   const b = Number((runtimeConfig.value.window as { fuseBlur?: number } | undefined)?.fuseBlur)
   return Number.isFinite(b) ? b : 28
@@ -1128,7 +1143,7 @@ onBeforeUnmount(() => {
     <BackgroundLayer
       :mode="backgroundMode"
       :image-url="backgroundImage"
-      :blur="fuseBlur"
+      :blur="blurOff ? 0 : fuseBlur"
       :opacity="backgroundOpacity"
     />
     <FuseLayer :alpha="fuseAlpha" />
