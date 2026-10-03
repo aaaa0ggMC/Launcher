@@ -9,7 +9,7 @@
  * 鉴权：`Authorization: Bearer <token>` 或 `?token=`（EventSource 不能带头）。
  * 默认只监听 127.0.0.1；`--host 0.0.0.0` 才对局域网开放。
  */
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { basename, extname, join, normalize, resolve } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -110,7 +110,9 @@ async function serveProtocol(req: IncomingMessage, res: ServerResponse): Promise
 /** broadcast(channel, ...args) → 所有 SSE 客户端 */
 export function pushEvent(channel: string, ...args: unknown[]): void {
   if (!clients.size) return
-  const frame = `data: ${JSON.stringify({ channel, args })}\n\n`
+  // 广播载荷里同样可能带 cockpit-*:// 地址（如 aidj 的 cockpit:aidj-webplayer 里的 audioUrl），
+  // 和命令返回值一样要改写成 /_p/ 路由，否则浏览器的 <audio> / <img> 加载不了
+  const frame = `data: ${JSON.stringify({ channel, args: rewriteUrls(args) })}\n\n`
   for (const res of clients) res.write(frame)
 }
 
@@ -152,7 +154,7 @@ export function startServer(opts: {
   port: number
   token: string
   webRoot: string
-}): Promise<void> {
+}): Promise<Server> {
   const { host, port, token, webRoot } = opts
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
@@ -257,7 +259,7 @@ export function startServer(opts: {
     server.once('error', reject)
     server.listen(port, host, () => {
       log.info('headless listening', { url: `http://${host}:${port}/` })
-      resolveP()
+      resolveP(server)
     })
   })
 }
