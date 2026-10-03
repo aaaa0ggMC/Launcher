@@ -128,12 +128,38 @@ export default {
           component: defineAsyncComponent(() => import('./items/LaunchSection.vue'))
         },
         {
+          key: 'screenshot',
+          label: '截图模式',
+          icon: 'mdi-camera-outline',
+          description: '标题栏相机按钮：左键截图保存、右键拼接多张',
+          keywords: ['截图', '截屏', '相机', '拼接', '审美', 'screenshot', 'capture', 'camera'],
+          component: defineAsyncComponent(() => import('./items/ScreenshotSection.vue'))
+        },
+        {
           key: 'about',
           label: '关于',
           icon: 'mdi-information-outline',
           description: '版本与技术栈',
           keywords: ['版本', '关于', 'electron', 'vue', 'vuetify'],
           component: defineAsyncComponent(() => import('./items/AboutSection.vue'))
+        }
+      ]
+    },
+    {
+      key: 'shortcuts',
+      label: '快捷键',
+      icon: 'mdi-keyboard-outline',
+      description: '各能力注入的快捷键：逐项改键 / 清除，或整组禁用（类似游戏的「控制」设置）',
+      keywords: ['快捷键', '热键', '按键', '键位', 'shortcut', 'hotkey', 'keybinding', 'controls'],
+      items: [
+        {
+          key: 'shortcut-editor',
+          label: '快捷键',
+          icon: 'mdi-keyboard-outline',
+          description: '按能力分组，点击按键后按下新组合键即可修改',
+          keywords: ['快捷键', '热键', '冲突', '禁用', 'shortcut', 'hotkey'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/ShortcutsSection.vue'))
         }
       ]
     },

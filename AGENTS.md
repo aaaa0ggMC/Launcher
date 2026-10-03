@@ -308,6 +308,10 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 
 > **新增/改动能力图标：一律用单色 SVG（`gi:<name>` 或 `default/<name>/padding`），不要用 emoji。** 侧栏其余图标都是跟随主题色的单色 SVG，彩色 emoji 会在侧栏里格外突兀（曾因此被打回）。先 `find src/main/ui/assets/game-icon-pack/svg/padding -iname '*关键词*'` 确认文件存在，再写进 `icon`；写完看一眼侧栏效果，别只信 typecheck。
 
+### 快捷键（注入式，`src/main/ui/shortcuts.ts`）
+
+与 `settings` 同构：能力在 `index.ts` 里声明 `shortcuts: [{ key, label }]`（完整 id = `<能力id>.<key>`，label 走 `label.<原文>` 翻译），`App.vue` 汇总进注册表；页面里用 `useShortcut('<id>.<key>', handler)`（`@ui/shortcuts`，页面可见才生效）。外壳自己的用 `registerShortcut({ ..., group: 'shell' })`（如截图模式）。设置 → 快捷键（`ShortcutsSection.vue`）按能力分组管理：改键 / 清除 / 冲突标红 / 整组禁用 / 搜索（名称、能力、id、按键）。**所有快捷键默认都不绑定**（防止互相冲突，没有 defaultKey 这回事），用户自己启用。绑定存 `config.json` 的 `shortcuts`（`{ id: 'Ctrl+Shift+S' }`），整组禁用存 `shortcutGroupsOff`（组 id 数组）。默认仅窗口有焦点时生效；每项可单独开「全局」（`config.json` 的 `shortcutGlobal` id 数组，需至少两个修饰键，主进程 `global-shortcuts.ts` 用 `globalShortcut` 注册，Wayland 下启用 `GlobalShortcutsPortal` 走 xdg portal，注册结果显示在设置页；声明里的 `command` 让没有页面处理函数时也能触发），组合键必须带修饰键（F1–F12 除外），AI 视图里不响应。
+
 ### 帮助系统（`help/`）
 
 每个能力可选自带 `help/` 目录；外壳侧栏底部「后台任务 / 复制页面」之后的固定「?」按钮打开**当前能力**的帮助浮窗：

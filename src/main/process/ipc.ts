@@ -1,11 +1,12 @@
-import { ipcMain, BrowserWindow, dialog, clipboard, shell } from 'electron'
+import { ipcMain, BrowserWindow, dialog, clipboard, shell, app, nativeImage } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { cliExec } from './cli'
 import { runCommand, listCommands, commandLogsArgs, UnknownCommandError } from './commands/registry'
 import { withOrigin, type CallOrigin } from './privacy'
 import { originOfSender, windowOfSender } from './agent/views'
+import { syncGlobalShortcuts, type GlobalShortcutEntry } from './global-shortcuts'
 import { isReservedWindowId, isReservedWindowView } from './privacy-consent'
 
 /** Argument keys whose values should never land in the log (config patches,
@@ -226,6 +227,56 @@ export function registerIpc(): void {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       void shell.openExternal(url)
     }
+  })
+
+  // 截图模式：裸截主窗口（不经隐私遮罩）。只接受用户自己的渲染进程——agent 视图一律拒绝，
+  // 且故意不做成命令，agent 无从触发或读取。
+  ipcMain.handle('screenshot:capture', async (e): Promise<string | null> => {
+    if (originOfSender(e.sender.id)) return null
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win || win.isDestroyed()) return null
+    const img = await e.sender.capturePage()
+    return img.isEmpty() ? null : img.toDataURL()
+  })
+  ipcMain.handle(
+    'screenshot:save',
+    async (e, dataUrl: string): Promise<{ file: string; copied: boolean } | null> => {
+      if (originOfSender(e.sender.id)) return null
+      const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl ?? '')
+      if (!m) return null
+      // 系统「图片」目录（Windows: %USERPROFILE%\\Pictures）；取不到时退回 ~/Pictures
+      let pictures: string
+      try {
+        pictures = app.getPath('pictures')
+      } catch {
+        pictures = join(homedir(), 'Pictures')
+      }
+      const dir = join(pictures, 'Cockpit Screenshots')
+      await mkdir(dir, { recursive: true })
+      const d = new Date()
+      const pad = (n: number): string => String(n).padStart(2, '0')
+      const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+      const file = join(dir, `cockpit-${stamp}-${String(d.getMilliseconds()).padStart(3, '0')}.png`)
+      await writeFile(file, Buffer.from(m[1], 'base64'))
+      // 顺手复制到剪贴板（Electron clipboard.writeImage 全平台支持）；失败不影响保存
+      let copied = false
+      try {
+        clipboard.writeImage(nativeImage.createFromDataURL(dataUrl))
+        copied = true
+      } catch (err) {
+        log.warn('screenshot clipboard failed', err instanceof Error ? err.message : String(err))
+      }
+      return { file, copied }
+    }
+  )
+
+  // 全局快捷键（系统级）：只有用户自己的窗口能同步，agent 视图一律拒绝
+  ipcMain.handle('shortcut:sync-global', (e, entries: GlobalShortcutEntry[]) => {
+    if (originOfSender(e.sender.id)) return {}
+    const clean = (Array.isArray(entries) ? entries : []).filter(
+      (x) => typeof x?.id === 'string' && typeof x?.combo === 'string'
+    )
+    return syncGlobalShortcuts(e.sender, clean)
   })
 
   // CLI-first dispatcher: single source of truth for every ability action.

@@ -148,7 +148,11 @@ onMounted(async () => {
     scrollHeight.value = Math.max(120, scrollWrapRef.value.clientHeight)
   }
   ro = new ResizeObserver(() => {
-    if (scrollWrapRef.value) scrollHeight.value = Math.max(120, scrollWrapRef.value.clientHeight)
+    if (!scrollWrapRef.value) return
+    const stick = scrolledToBottom.value
+    scrollHeight.value = Math.max(120, scrollWrapRef.value.clientHeight)
+    // 容器变高 / 变矮后，原本贴底的列表继续贴底，避免首行被截一半、底部留白
+    if (stick) void nextTick(() => scrollToBottom())
   })
   if (scrollWrapRef.value) ro.observe(scrollWrapRef.value)
   await loadInitial()
@@ -308,7 +312,8 @@ defineExpose({ toMarkdown })
 .logs-root {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* 吃满外壳剩余高度：外壳容器只有 min-height（没有确定高度），height:100% 会塌成内容高度 */
+  flex: 1 1 0;
   min-height: 240px;
 }
 
@@ -331,18 +336,21 @@ defineExpose({ toMarkdown })
 }
 
 .logs-scroll-wrap {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
+/* 绝对定位：滚动区不参与 wrap 的高度计算，wrap 高度只由 flex 决定，测量不会和自己形成反馈 */
 .logs-scroll {
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.16);
   border-radius: 12px;
   background: rgba(var(--v-theme-surface), 0.35);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-primary), 0.45) transparent;
 }
 
 .logs-scroll::-webkit-scrollbar {

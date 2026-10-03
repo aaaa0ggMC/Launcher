@@ -39,6 +39,26 @@ export interface Ability {
    * contribute can omit this entirely.
    */
   settings?: AbilitySetting[]
+  /**
+   * 快捷键注入（同 `settings`：能力自己声明，设置 → 快捷键 统一汇总、改键、查冲突）。
+   * 所有快捷键默认都不绑定（避免互相冲突），由用户在设置 → 快捷键 里自行启用。
+   * 完整 id = `${ability.id}.${key}`；页面里用 `useShortcut('<id>.<key>', handler)`（`@ui/shortcuts`）
+   * 绑定处理函数——页面可见时才生效。用户绑定存 config.json 的 `shortcuts`。
+   */
+  shortcuts?: AbilityShortcut[]
+}
+
+/** 能力注入的一个快捷键声明 */
+export interface AbilityShortcut {
+  /** 能力内唯一（如 `'next'`） */
+  key: string
+  /** 显示名（中文原文，走 `label.<原文>` 翻译，同设置项约定） */
+  label: string
+  /**
+   * 页面没处理它（页面没打开 / 全局触发）时改跑这条命令——CLI-first，
+   * 让后端能力的快捷键不依赖页面挂载。
+   */
+  command?: { name: string; args?: Record<string, unknown> }
 }
 
 /**

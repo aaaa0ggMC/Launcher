@@ -186,6 +186,15 @@ const cockpit = {
     filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke('dialog:save-file', opts),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
+  /** 同步系统级全局快捷键（仅用户界面；返回每个 id 的注册结果） */
+  syncGlobalShortcuts: (
+    entries: { id: string; combo: string }[]
+  ): Promise<Record<string, { ok: boolean; error?: 'invalid' | 'taken' | 'unsupported' }>> =>
+    ipcRenderer.invoke('shortcut:sync-global', entries),
+  /** 截图模式（仅用户界面；agent 视图被主进程拒绝） */
+  screenshotCapture: (): Promise<string | null> => ipcRenderer.invoke('screenshot:capture'),
+  screenshotSave: (dataUrl: string): Promise<{ file: string; copied: boolean } | null> =>
+    ipcRenderer.invoke('screenshot:save', dataUrl),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
 
   // privacy consent window ONLY — the main process rejects these from any other

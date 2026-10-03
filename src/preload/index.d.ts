@@ -78,6 +78,11 @@ export interface CockpitApi {
     action: 'back' | 'close-app' | 'take-over',
     payload?: { scope: string; key: string }
   ) => Promise<boolean>
+  syncGlobalShortcuts: (
+    entries: { id: string; combo: string }[]
+  ) => Promise<Record<string, { ok: boolean; error?: 'invalid' | 'taken' | 'unsupported' }>>
+  screenshotCapture: () => Promise<string | null>
+  screenshotSave: (dataUrl: string) => Promise<{ file: string; copied: boolean } | null>
   setZoom: (factor: number) => void
   windowMinimize: () => Promise<void>
   windowToggleMaximize: () => Promise<boolean>

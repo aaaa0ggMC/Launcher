@@ -200,6 +200,8 @@ export interface LogEntry {
    * `*N` for counts > 1; the on-disk file still keeps every raw line.
    */
   count?: number
+  /** 最近一次合并进来的时间（仅合并条目有）；`ts` 始终是首次出现时间，保证列表按时间单调。 */
+  lastTs?: number
 }
 
 export interface LogQueryResult {

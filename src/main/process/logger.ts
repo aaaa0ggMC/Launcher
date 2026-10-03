@@ -70,18 +70,20 @@ export function setLogBroadcast(fn: LogBroadcast): void {
 /**
  * Newest buffer entry with the same level/scope/message within the merge
  * window — data is ignored so a changing payload (poll noise) still counts as
- * the same recurring event. Entries are time-ordered, so scanning backwards
- * until the window boundary is correct and cheap.
+ * the same recurring event. `ts` is the FIRST occurrence (keeps the list
+ * monotonic by time/id); the window is measured from the last merge (`lastTs`),
+ * so only a short tail of the buffer needs scanning.
  */
+const MERGE_SCAN_LIMIT = 64
 function findMergeTarget(
   level: LogLevel,
   scope: string,
   message: string,
   now: number
 ): LogEntry | null {
-  for (let i = buffer.length - 1; i >= 0; i--) {
+  for (let i = buffer.length - 1, n = 0; i >= 0 && n < MERGE_SCAN_LIMIT; i--, n++) {
     const e = buffer[i]
-    if (e.ts < now - MERGE_WINDOW_MS) break
+    if ((e.lastTs ?? e.ts) < now - MERGE_WINDOW_MS) continue
     if (e.level === level && e.scope === scope && e.message === message) return e
   }
   return null
@@ -98,12 +100,12 @@ function emit(level: LogLevel, scope: string, message: string, data?: unknown): 
 
   const merged = findMergeTarget(level, scope, message, now)
   if (merged) {
-    // Repeated within the window: bump the existing entry, refresh ts/data,
+    // Repeated within the window: bump the existing entry, refresh lastTs/data,
     // and only write to the FILE (audit) — not the console, so poll noise
     // doesn't scroll the terminal.
     fileLogger.log(logInfo)
     merged.count = (merged.count ?? 1) + 1
-    merged.ts = now
+    merged.lastTs = now
     merged.data = data
     try {
       broadcast(merged)

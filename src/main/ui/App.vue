@@ -37,6 +37,8 @@ import AgentBar from './components/AgentBar.vue'
 import { resolveAgentUi } from './composables/agentUi'
 import AgentActivityOverlay from './components/AgentActivityOverlay.vue'
 import ExclusiveBanner from './components/ExclusiveBanner.vue'
+import ScreenshotButton from './components/ScreenshotButton.vue'
+import { useShortcutDispatcher, syncAbilityShortcuts } from './shortcuts'
 import { fileIconUrl } from './icon'
 import { translate, translateTemplate } from './i18n'
 import { resolveSchemeId } from './color_schemes'
@@ -867,6 +869,59 @@ const settingsApi: SettingsApi = {
   }
 }
 provide(SETTINGS_API, settingsApi)
+
+// 能力注入的快捷键 → 注册表（能力列表因平台 / 依赖 / 开关变化时同步）
+watch(
+  abilities,
+  (list) => {
+    const mods = getAbilityModules()
+    syncAbilityShortcuts(
+      list.flatMap((a) =>
+        (mods[a.id]?.shortcuts ?? []).map((s) => ({
+          id: `${a.id}.${s.key}`,
+          label: `label.${s.label}`,
+          fallback: s.label,
+          group: a.id,
+          groupLabel: a.name,
+          command: s.command
+        }))
+      )
+    )
+  },
+  { immediate: true }
+)
+// 应用内快捷键：绑定来自 config.json 的 shortcuts；AI 视图里不响应（那是 AI 的工作台）
+useShortcutDispatcher(
+  () => runtimeConfig.value.shortcuts as Record<string, unknown> | undefined,
+  () => runtimeConfig.value.shortcutGroupsOff,
+  () => runtimeConfig.value.shortcutGlobal,
+  () => !agentView
+)
+
+/** 截图模式（设置 → 外观 → 截图模式）：开启后标题栏才有相机按钮，关闭时不占 UI */
+const screenshotMode = computed(
+  () => (runtimeConfig.value.screenshot as { enabled?: boolean } | undefined)?.enabled === true
+)
+
+/** 标题栏齿轮：当前页面注入了设置分类 → 直接跳到它；否则打开设置页 */
+const currentSettingsOwner = computed<string | null>(() => {
+  const a = currentAbility.value
+  if (!a || a.id === 'settings') return null
+  // 同文件夹的多 Ability（如 aidj / aidj-lyrics）自己没有设置时，退到文件夹同名能力
+  for (const id of [a.id, a.folder]) if (settingsApi.has(id)) return id
+  return null
+})
+const gearLabel = computed(() => {
+  const base = t('ability.settings.name', '设置')
+  return currentSettingsOwner.value && currentAbility.value
+    ? `${base} · ${currentAbility.value.name}`
+    : base
+})
+function openCurrentSettings(): void {
+  const owner = currentSettingsOwner.value
+  if (owner && settingsApi.open(owner) !== 'none') return
+  openAbility('settings')
+}
 // Ability 可调用以打开全局面板 (BackgroundTasksDialog)，如后台任务已在运行。
 provide('cockpit:open-bt', (): void => {
   btOpen.value = true
@@ -1283,12 +1338,14 @@ onBeforeUnmount(() => {
       >
         {{ t('agent.view.back', '返回我的界面') }}
       </v-btn>
+      <ScreenshotButton v-if="screenshotMode && !agentView" />
       <v-btn
         v-if="hasSettingsPage"
         icon="mdi-cog-outline"
         variant="text"
-        :aria-label="t('ability.settings.name', '设置')"
-        @click="openAbility('settings')"
+        :aria-label="gearLabel"
+        :title="gearLabel"
+        @click="openCurrentSettings"
       />
       <template v-if="isFrameless">
         <v-btn

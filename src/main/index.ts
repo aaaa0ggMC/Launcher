@@ -3,6 +3,7 @@ import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpc } from './process/ipc'
+import { unregisterAllGlobalShortcuts } from './process/global-shortcuts'
 import { initPrivacyConsent } from './process/privacy-consent'
 import { initAgentServices, handleSecondInstanceArgv } from './process/agent'
 import { allAgentViewContents, destroyAllAgentViews } from './process/agent/views'
@@ -58,7 +59,13 @@ app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
 // SharedArrayBuffer without cross-origin isolation: the gameboy ability's mGBA
 // wasm core runs on pthreads. COOP/COEP headers would also work, but
 // `require-corp` would block other abilities' cross-origin images / protocols.
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
+// Wayland 下全局快捷键只能走 xdg-desktop-portal 的 GlobalShortcuts（KDE Plasma 6 支持）。
+app.commandLine.appendSwitch(
+  'enable-features',
+  process.platform === 'linux' && process.env.WAYLAND_DISPLAY
+    ? 'SharedArrayBuffer,GlobalShortcutsPortal'
+    : 'SharedArrayBuffer'
+)
 
 let mainWindow: BrowserWindow | null = null
 // Once the user has confirmed quitting (or confirmed via the renderer), the
@@ -239,6 +246,7 @@ if (!gotLock) {
 // Ensure running background task children are killed when the app exits
 // (tasks are attached to this program, not left orphaned).
 app.on('will-quit', () => {
+  unregisterAllGlobalShortcuts()
   shutdownBackgroundTasks()
   closeAllChildren()
   destroyAllAgentViews()
