@@ -393,6 +393,16 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **平台**：Termux 的 `process.platform` 是 `'android'`。`platforms: ['linux']` 的能力（mirror / display / dashboard / systemd / autostart）在 Termux 自动排除；其余没写 `platforms` 的默认可用。要给某个 Linux 专属能力开放 Termux，把 `'android'` 加进它的 `platforms` 之前先在真机验证（`/proc` 在 Android 上受限）。
 - **移动端外壳**：`index.html` 带 viewport meta（**不要加 `viewport-fit=cover`**：它让页面延伸到 Android 手势条下面，而应用没有给底部留安全区，滚动到底的内容会被盖住；本项目没有用 `env(safe-area-inset-*)`）；网页里 `html` 背景色跟随主题（根画布默认白色，Electron 透明窗口除外）；`App.vue` 按 `sidebar.mode`（设置 → 侧边栏）决定侧栏形态——弹出式（`temporary` 抽屉，永远展开显示搜索与分组）由 App bar 左上角汉堡按钮打开，选完自动关闭；窄屏（`matchMedia ≤720px`）容器 padding 收成 `pa-2`。**只做了外壳**：各能力页面要按容器宽度自己适配（见 §11.8），尚未逐页检查。
 - **计划与优先级**：`docs/headless-web-plan.md`（当前：移动端适配 + Web / GUI 稳定）。
+- **窄屏 / 触屏样式约定**（手机浏览器是一等公民，改 UI 时对照）：
+  - 窄屏断点用 `@media (max-width: 720px)`（≈ 弹出式侧栏切换点，页面容器宽度 ≈ 窗口宽度）；**桌面外观与行为必须不变**，新样式只在窄屏 / 触屏生效。触屏专属用 `(pointer: coarse)` / `(hover: none)`。
+  - 视口尺寸一律 `var(--app-vh)` / `var(--app-vw)`，不要写 `100vh` / `100vw`（手机上不可信；网页版 CSS zoom 下 vw/vh 也不会除以倍数）。
+  - **Vuetify 工具类（`.flex-wrap` / `.flex-nowrap` / `.justify-center` …）都带 `!important`**：窄屏要覆盖它们，规则也必须 `!important`（靠 scoped 属性选择器的特异性取胜），否则「看起来写了、实际没生效」。
+  - 居中列里「宽度由内容决定」的盒子，子元素别写 `width: 100%` / `min(…, 100%)`（循环依赖，会被解成很小的值——播放器封面曾因此变成细长药丸）；先让父盒子 `width: 100%`。
+  - 触屏没有悬停 / 右键 / HTML5 拖拽：关键信息别只放 tooltip；右键菜单补长按（`aidj/components/long-press.ts`，只在粗指针设备上写 `user-select:none`）；拖拽排序补上下移按钮。点按之后浏览器会补发合成的 `mousemove` / `click`，手势逻辑要在 `pointerdown` 那一刻记录状态，并忽略触屏产生的合成 click。
+  - 自定义玻璃面板（半透明底 + `backdrop-filter`）的背景透明度写 `rgba(var(--v-theme-…), var(--glass-a, 原值))`；「模糊效果」关闭时 `html.no-blur` 把 `--glass-a` 拉到 0.94，并统一关掉 `backdrop-filter`。Vuetify 叠层（对话框 / 菜单 / 底部弹层）由 `global.css` 的通用规则处理。
+  - `.page-menu-pop`（aidj 页面菜单 / 播放器菜单 / yarj 菜单共用类名）、`.v-dialog` 的宽度 / 高度夹取都在 `global.css` 里统一处理，别在组件里各写各的。
+  - 网页静态资源带 `COOP: same-origin` + `COEP: credentialless`（掌机 mGBA 要 `SharedArrayBuffer`；需要安全上下文：https 或 localhost）。
+  - 验证别只信静态检查：下游（opencode）看不到真实界面，它写的窄屏覆盖有过「没带 !important 实际没生效」「把封面挤成药丸」这类缺陷，合并后必须在 400px / 650px 宽度下截图看。
 - **没做 / 已知缺口**：agent 系统（MCP / Remote / ui inspector / 隐私授权窗口 / agent 独立视图）未接入无头入口；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
 
 ### 镜像源 toggle 安全性
