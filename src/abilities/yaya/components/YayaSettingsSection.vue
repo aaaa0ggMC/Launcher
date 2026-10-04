@@ -5,11 +5,11 @@ import type { Ref } from 'vue'
 import type { ProviderConfig, YayaConfig } from '../types'
 import AssistantSection from './settings/AssistantSection.vue'
 import ModelSection from './settings/ModelSection.vue'
+import PluginsSection from './settings/PluginsSection.vue'
 import PolicySection from './settings/PolicySection.vue'
 import ProviderDetail from './settings/ProviderDetail.vue'
 import ProvidersSection from './settings/ProvidersSection.vue'
 import SaveStatusText from './settings/SaveStatusText.vue'
-import ToolsSection from './settings/ToolsSection.vue'
 import { YAYA_SAVE_API_KEY, type YayaSettingsSaveApi } from './settings/shared'
 import type { ProviderDraft } from './settings/shared'
 
@@ -18,7 +18,7 @@ defineOptions({ name: 'cockpit-yaya-settings' })
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t, te } = useI18n(lang)
 
-type SectionId = 'assistant' | 'model' | 'providers' | 'tools' | 'policy'
+type SectionId = 'assistant' | 'model' | 'providers' | 'plugins' | 'policy'
 
 interface SectionDef {
   id: SectionId
@@ -56,12 +56,12 @@ const sections: SectionDef[] = [
     subFallback: '端点与密钥'
   },
   {
-    id: 'tools',
-    icon: 'mdi-wrench-outline',
-    titleKey: 'yaya.settings.title_tools',
-    titleFallback: '工具',
-    subKey: 'yaya.settings.sub_tools',
-    subFallback: '开关与搜索'
+    id: 'plugins',
+    icon: 'mdi-puzzle-outline',
+    titleKey: 'yaya.settings.title_plugins',
+    titleFallback: '插件',
+    subKey: 'yaya.settings.sub_plugins',
+    subFallback: '工具、MCP 与 Skills'
   },
   {
     id: 'policy',
@@ -177,6 +177,11 @@ async function persist(): Promise<void> {
     }
     if (p.apiKey) keyTouched = true
   }
+  for (const server of payload.mcpServers ?? []) {
+    if (server.clearHeaders?.length || Object.values(server.headers ?? {}).some(Boolean)) {
+      keyTouched = true
+    }
+  }
   saving.value = true
   try {
     await window.cockpit.command('yaya.config-save', { config: payload })
@@ -212,6 +217,10 @@ async function refreshKeyFlags(): Promise<void> {
     for (const p of config.value.providers) {
       const hit = fresh.find((f) => f.id === p.id)
       if (hit) p.apiKeySet = Boolean(hit.apiKeySet)
+    }
+    for (const server of config.value.mcpServers ?? []) {
+      const hit = res.mcpServers?.find((s) => s.id === server.id)
+      if (hit) server.headersSet = hit.headersSet
     }
   } catch (err) {
     console.warn('Failed to refresh Yaya key flags', err)
@@ -588,7 +597,7 @@ onBeforeUnmount(() => {
               @undo-clear-key="undoClearApiKey"
               @add-provider="addProvider"
             />
-            <ToolsSection v-else-if="activeSection === 'tools'" :config="config" />
+            <PluginsSection v-else-if="activeSection === 'plugins'" :config="config" />
             <PolicySection v-else-if="activeSection === 'policy'" :config="config" />
           </div>
         </Transition>

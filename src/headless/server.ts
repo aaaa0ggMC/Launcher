@@ -18,6 +18,13 @@ import { Readable } from 'node:stream'
 import { getProtocolHandler } from './electron-stub'
 import { runCommand, listCommands, UnknownCommandError } from '../main/process/commands/registry'
 import { withOrigin } from '../main/process/privacy'
+import {
+  hasBrowserClient,
+  registerBrowserClient,
+  submitBrowserUiReply,
+  unregisterBrowserClient,
+  withBrowserClient
+} from '../main/process/browser-ui'
 import { cliExec } from '../main/process/cli'
 import { makeLogger } from '../main/process/logger'
 import { USER_CONFIG_DIR } from '../main/process/paths'
@@ -38,6 +45,11 @@ const MIME: Record<string, string> = {
 }
 
 const clients = new Set<ServerResponse>()
+
+/** 浏览器 UI 桥 clientId（web-shim 每标签页随机生成；UI 请求按它定向发送） */
+const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** 界面结果回传的体积上限（快照文本可能很大，但不该无限） */
+const MAX_UI_REPLY_BYTES = 512 * 1024
 
 /** 网页端「从此设备选择」上传到宿主的位置（文件选择器把这里的路径当作选择结果返回） */
 export const UPLOAD_DIR = join(USER_CONFIG_DIR, 'uploads')
@@ -124,12 +136,15 @@ function authorized(req: IncomingMessage, url: URL, token: string): boolean {
   return given.length === want.length && timingSafeEqual(given, want)
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+  req: IncomingMessage,
+  maxBytes = 32 * 1024 * 1024
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     size += (c as Buffer).length
-    if (size > 32 * 1024 * 1024) throw new Error('body too large')
+    if (size > maxBytes) throw new Error('body too large')
     chunks.push(c as Buffer)
   }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
@@ -138,6 +153,15 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * 请求体里声明的浏览器 clientId → 只有格式合法且**当前连着**的才采用
+ * （否则当作没有浏览器上下文：界面桥会因「没有目标」而明确失败，不会乱找标签页）。
+ */
+function browserClientOf(body: Record<string, unknown>): string | null {
+  const id = body.clientId
+  return typeof id === 'string' && CLIENT_ID_RE.test(id) && hasBrowserClient(id) ? id : null
 }
 
 function serveStatic(webRoot: string, pathname: string, res: ServerResponse): void {
@@ -222,6 +246,20 @@ export function startServer(opts: {
     if (!authorized(req, url, token)) return json(res, 401, { ok: false, error: 'unauthorized' })
 
     if (url.pathname === '/api/events') {
+      // Old SSE clients still receive broadcasts; only identified pages are UI targets.
+      const bridgeId = url.searchParams.get('clientId') ?? ''
+      if (bridgeId && !CLIENT_ID_RE.test(bridgeId)) {
+        return json(res, 400, { ok: false, error: 'invalid clientId' })
+      }
+      if (bridgeId) {
+        const send = (channel: string, args: unknown[]): void => {
+          if (res.writableEnded || res.destroyed) return
+          res.write(`data: ${JSON.stringify({ channel, args })}\n\n`)
+        }
+        if (!registerBrowserClient(bridgeId, send)) {
+          return json(res, 409, { ok: false, error: 'clientId already connected' })
+        }
+      }
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -233,6 +271,7 @@ export function startServer(opts: {
       req.on('close', () => {
         clearInterval(ping)
         clients.delete(res)
+        if (bridgeId) unregisterBrowserClient(bridgeId)
       })
       return
     }
@@ -256,6 +295,20 @@ export function startServer(opts: {
       )
       return
     }
+    if (url.pathname === '/api/ui-result' && req.method === 'POST') {
+      // 页面回传界面请求结果：必须来自同一个 clientId 且 id 仍在 pending（否则拒绝）
+      readJson(req, MAX_UI_REPLY_BYTES)
+        .then((body) => {
+          const r = submitBrowserUiReply(body)
+          if (!r.ok) {
+            log.warn('browser-ui reply rejected', r.error)
+            return json(res, 400, { ok: false, error: r.error })
+          }
+          json(res, 200, { ok: true })
+        })
+        .catch((e) => json(res, 400, { ok: false, error: String(e) }))
+      return
+    }
     if (url.pathname === '/api/cli' && req.method === 'POST') {
       readJson(req)
         .then(async (body) => {
@@ -264,10 +317,10 @@ export function startServer(opts: {
             typeof meta?.agentSession === 'string' && meta.agentSession
               ? ({ kind: 'agent-ui', session: meta.agentSession } as const)
               : ({ kind: 'cli' } as const)
-          json(res, 200, {
-            ok: true,
-            result: await withOrigin(origin, () => cliExec(String(body.cmd ?? '')))
-          })
+          const result = await withBrowserClient(browserClientOf(body), () =>
+            withOrigin(origin, () => cliExec(String(body.cmd ?? '')))
+          )
+          json(res, 200, { ok: true, result })
         })
         .catch((e) =>
           json(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) })
@@ -287,7 +340,10 @@ export function startServer(opts: {
               typeof meta?.agentSession === 'string' && meta.agentSession
                 ? ({ kind: 'agent-ui', session: meta.agentSession } as const)
                 : ({ kind: 'ui' } as const)
-            const result = await withOrigin(origin, () => runCommand(name, args))
+            // 调用链关联到发起它的浏览器标签页（YAYA 工作流据此继续操作这个页面）
+            const result = await withBrowserClient(browserClientOf(body), () =>
+              withOrigin(origin, () => runCommand(name, args))
+            )
             json(res, 200, { ok: true, result: result === undefined ? null : rewriteUrls(result) })
           } catch (err) {
             const unknown = err instanceof UnknownCommandError

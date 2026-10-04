@@ -38,7 +38,8 @@ const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)
 
 const canSend = computed(
   () =>
-    !props.isRunning && !importing.value && (!!draft.value.trim() || attachments.value.length > 0)
+    // 运行中也能发：= 打断当前运行（已生成的内容和已执行的工具结果都保留）+ 以这条消息继续
+    !importing.value && (!!draft.value.trim() || attachments.value.length > 0)
 )
 
 function onKeyDown(e: KeyboardEvent): void {
@@ -233,16 +234,28 @@ defineExpose({ focus: () => textarea.value?.focus() })
           <span class="btn-text">{{ t('yaya.stop', '停止') }}</span>
         </v-btn>
         <v-btn
-          v-else
+          v-if="!isRunning || canSend"
           color="primary"
           variant="flat"
-          prepend-icon="mdi-arrow-up"
+          :prepend-icon="isRunning ? 'mdi-debug-step-over' : 'mdi-arrow-up'"
           class="send-btn"
           :disabled="!canSend"
-          :aria-label="t('yaya.send', '发送')"
+          :title="
+            isRunning
+              ? t(
+                  'yaya.input.interrupt_send_hint',
+                  '停止当前回答（保留已完成的部分），用这条消息继续'
+                )
+              : undefined
+          "
+          :aria-label="
+            isRunning ? t('yaya.input.interrupt_send', '打断并发送') : t('yaya.send', '发送')
+          "
           @click="send"
         >
-          <span class="btn-text">{{ t('yaya.send', '发送') }}</span>
+          <span class="btn-text">{{
+            isRunning ? t('yaya.input.interrupt_send', '打断并发送') : t('yaya.send', '发送')
+          }}</span>
         </v-btn>
       </div>
     </div>

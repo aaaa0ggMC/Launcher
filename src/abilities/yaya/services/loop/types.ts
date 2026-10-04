@@ -1,7 +1,7 @@
 /**
  * YAYA Loop 核心定义与上下文契约
  */
-import type { ToolCallItem, ToolDefinition, YayaConfig } from '../../types'
+import type { ToolCallItem, YayaConfig } from '../../types'
 import type { AIProvider } from '../providers/types'
 
 export type WorkflowStatus =
@@ -10,6 +10,8 @@ export type WorkflowStatus =
   | 'streaming'
   | 'tool_executing'
   | 'waiting_approval'
+  /** 用户在 AgentBar 上暂停了 */
+  | 'paused'
   | 'completed'
   | 'interrupted'
   | 'error'
@@ -32,7 +34,7 @@ export interface LoopContext {
   userMessageId: string
   config: YayaConfig
   provider: AIProvider
-  tools: ToolDefinition[]
+  tools: unknown[]
   step: number
   maxSteps: number
   signal?: AbortSignal

@@ -33,6 +33,16 @@ import {
   PrivacyDeniedError,
   SCOPE_SECRET
 } from './privacy'
+import {
+  browserUiCall,
+  browserUiGuardedCall,
+  BrowserUiError,
+  type BrowserUiReply
+} from './browser-ui'
+import { t } from './i18n'
+
+/** 无头（网页）宿主：界面在用户的浏览器标签页里，改走 DOM 桥（B5）。 */
+const headless = (): boolean => process.env.COCKPIT_HEADLESS === '1'
 
 /** agent 输入后，渲染端 IPC 被标成 agent-ui 的时长（覆盖 点击 → 处理函数 → IPC）。 */
 const AGENT_INPUT_TAG_MS = 3000
@@ -48,7 +58,10 @@ type Cdp = (method: string, params?: Record<string, unknown>) => Promise<unknown
  */
 function agentTargetSession(): string | null {
   const o = currentOrigin()
-  return isAgentOrigin(o) && o.kind !== 'agent-ui' && o.session ? o.session : null
+  // local-agent（YAYA）运行在用户自己的界面里，直接操作当前界面，不分配独立视图
+  return isAgentOrigin(o) && o.kind !== 'agent-ui' && o.kind !== 'local-agent' && o.session
+    ? o.session
+    : null
 }
 
 /**
@@ -69,9 +82,8 @@ function mainContents(): WebContents {
 
 /** agent 的 `ui.*` 调用前：开启隔离时，确保该会话的独立视图存在且已加载。 */
 async function prepareTarget(): Promise<void> {
-  if (process.env.COCKPIT_HEADLESS === '1') {
-    throw new Error('无头（Headless）模式下已禁用 UI 渲染与检查')
-  }
+  // 无头模式没有独立视图：目标就是发起工作流的浏览器标签页（DOM 桥自行等页面就绪）
+  if (headless()) return
   const s = agentTargetSession()
   if (!s || !(await isolateViewEnabled())) return
   await prepareAgentView(s)
@@ -482,6 +494,127 @@ async function namelessIconHints(cdp: Cdp, nodes: AXNode[]): Promise<Map<number,
   return out
 }
 
+// ---------------------------------------------------------------------------
+// 无头（网页）路径：DOM 桥（B5）
+//
+// Electron 上这些操作走 CDP（可信输入、无障碍树、截图）；无头宿主的界面在用户的浏览器
+// 标签页里，只能由页面自己执行固定方法的 DOM 操作（合成事件，isTrusted=false），隐私规则
+// 完全相同：快照按 DOM 标签脱敏、受保护动作先预检再 guard 后重试。坐标没有截图可比，
+// 一律按 CSS 像素。
+// ---------------------------------------------------------------------------
+
+/** 页面应答 → 结果（非 ok 一律抛错，绝不假成功）。agent 输入标记由页面执行时自己打。 */
+async function bridge<T>(
+  method: string,
+  args?: Record<string, unknown>,
+  timeoutMs?: number
+): Promise<T> {
+  const reply: BrowserUiReply = await browserUiCall({ method, args, timeoutMs })
+  if (!reply.ok) {
+    throw new BrowserUiError(reply.code ?? 'browser_error', reply.error ?? 'browser error')
+  }
+  return reply.result as T
+}
+
+async function snapshotViaBrowser(opts: SnapshotOptions): Promise<SnapshotResult> {
+  const r = await bridge<Partial<SnapshotResult>>('snapshot', { mode: opts.mode ?? 'interactive' })
+  return {
+    ok: true,
+    page: r.page ?? '',
+    url: r.url ?? '',
+    viewport: r.viewport ?? { width: 0, height: 0, zoom: 1 },
+    scale: r.scale ?? 1,
+    settledMs: r.settledMs ?? 0,
+    // 渲染端命令在页面里进行，主进程观测不到：恒 0（页面自行等 DOM 安静）
+    pendingCommands: 0,
+    refs: r.refs ?? 0,
+    text: r.text ?? '',
+    ...(r.truncated ? { truncated: true } : {})
+  }
+}
+
+async function clickViaBrowser(
+  ref: string,
+  opts: { button?: MouseButton; double?: boolean }
+): Promise<{ ok: true; settledMs: number }> {
+  const r = await browserUiGuardedCall({
+    method: 'click',
+    args: { ref, button: opts.button ?? 'left', double: opts.double ?? false },
+    action: t('browserUi.action_click', '点击')
+  })
+  const res = r as { settledMs?: number }
+  return { ok: true, settledMs: res.settledMs ?? 0 }
+}
+
+async function clickAtViaBrowser(
+  point: Point,
+  opts: ActOptions & { button?: MouseButton; double?: boolean }
+): Promise<{ ok: true; target: string; settledMs: number }> {
+  // 无头没有截图：坐标一律按 CSS 像素（--space 忽略）
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('坐标需要是数字')
+  const r = await browserUiGuardedCall({
+    method: 'clickAt',
+    args: {
+      x: point.x,
+      y: point.y,
+      button: opts.button ?? 'left',
+      double: opts.double ?? false
+    },
+    action: t('browserUi.action_click', '点击')
+  })
+  const res = r as { target?: string; settledMs?: number }
+  return { ok: true, target: res.target ?? '', settledMs: res.settledMs ?? 0 }
+}
+
+async function typeViaBrowser(
+  ref: string | undefined,
+  text: string,
+  opts: { clear?: boolean; submit?: boolean }
+): Promise<{ ok: true; settledMs: number }> {
+  const r = await browserUiGuardedCall({
+    method: 'type',
+    args: {
+      ref: ref ?? '',
+      text,
+      clear: opts.clear ?? false,
+      submit: opts.submit ?? false
+    },
+    action: t('browserUi.action_type', '输入')
+  })
+  const res = r as { settledMs?: number }
+  return { ok: true, settledMs: res.settledMs ?? 0 }
+}
+
+async function keyViaBrowser(
+  name: string,
+  opts: ActOptions & { modifiers?: Modifier[]; holdMs?: number; action?: 'press' | 'down' | 'up' }
+): Promise<{ ok: true; settledMs: number }> {
+  const r = await browserUiGuardedCall({
+    method: 'key',
+    args: {
+      key: name,
+      holdMs: opts.holdMs,
+      action: opts.action ?? 'press',
+      modifiers: opts.modifiers ?? []
+    },
+    action: t('browserUi.action_key', '按键')
+  })
+  const res = r as { settledMs?: number }
+  return { ok: true, settledMs: res.settledMs ?? 0 }
+}
+
+async function scrollViaBrowser(
+  opts: ActOptions & { ref?: string; at?: Point; dy?: number; dx?: number }
+): Promise<{ ok: true; settledMs: number }> {
+  const r = await bridge<{ settledMs?: number }>('scroll', {
+    ref: opts.ref ?? '',
+    at: opts.at ? { x: opts.at.x, y: opts.at.y } : undefined,
+    dx: opts.dx ?? 0,
+    dy: opts.dy ?? 400
+  })
+  return { ok: true as const, settledMs: r.settledMs ?? 0 }
+}
+
 export interface SnapshotOptions {
   /** interactive（默认）：可交互元素 + 结构；full：外加全部文本 */
   mode?: 'interactive' | 'full'
@@ -505,6 +638,7 @@ export interface SnapshotResult {
 }
 
 export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResult> {
+  if (headless()) return snapshotViaBrowser(opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const t0 = Date.now()
@@ -876,7 +1010,8 @@ async function finish(cdp: Cdp, opts: ActOptions): Promise<number> {
 export async function clickAt(
   point: Point,
   opts: ActOptions & { button?: MouseButton; double?: boolean } = {}
-): Promise<{ ok: true; target: string; settledMs: number; dialogs?: DialogNote[] }> {
+): Promise<{ ok: true; target: string; settledMs: number }> {
+  if (headless()) return clickAtViaBrowser(point, opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -1054,7 +1189,8 @@ async function mouseClick(
 export async function click(
   ref: string,
   opts: { button?: MouseButton; double?: boolean } = {}
-): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+): Promise<{ ok: true; settledMs: number }> {
+  if (headless()) return clickViaBrowser(ref, opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const info = await prepare(cdp, ref, '点击')
@@ -1183,7 +1319,8 @@ export async function type(
   ref: string | undefined,
   text: string,
   opts: { clear?: boolean; submit?: boolean } = {}
-): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+): Promise<{ ok: true; settledMs: number }> {
+  if (headless()) return typeViaBrowser(ref, text, opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   if (ref) {
@@ -1222,7 +1359,8 @@ export async function key(
     holdMs?: number
     action?: 'press' | 'down' | 'up'
   } = {}
-): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+): Promise<{ ok: true; settledMs: number }> {
+  if (headless()) return keyViaBrowser(name, opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   if (opts.action !== 'up') await guardFocused(cdp)
@@ -1234,7 +1372,8 @@ export async function key(
 /** 滚轮：在 ref 上、指定坐标处，或页面中央。 */
 export async function scroll(
   opts: ActOptions & { ref?: string; at?: Point; dy?: number; dx?: number } = {}
-): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+): Promise<{ ok: true; settledMs: number }> {
+  if (headless()) return scrollViaBrowser(opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   let x: number
@@ -1668,6 +1807,12 @@ export async function inputTimeline(
 export async function navigate(
   ability: string
 ): Promise<{ ok: boolean; page?: string; error?: string; available?: string[] }> {
+  if (headless()) {
+    return bridge<{ ok: boolean; page?: string; error?: string; available?: string[] }>(
+      'navigate',
+      { ability }
+    )
+  }
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const available = await evaluate<string[]>(
@@ -1698,6 +1843,19 @@ export async function navigate(
 export async function waitFor(
   opts: { text?: string; ms?: number; timeoutMs?: number } = {}
 ): Promise<{ ok: boolean; waitedMs: number }> {
+  if (headless()) {
+    const r = await bridge<{ ok: boolean; waitedMs: number }>(
+      'wait',
+      {
+        ...(opts.text !== undefined ? { text: opts.text } : {}),
+        ...(opts.ms !== undefined ? { ms: opts.ms } : {}),
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})
+      },
+      // 页面最多等 30 秒（ms 与 text 超时都封顶 30s），主机多留余量，免得先于页面超时
+      Math.min(30_000, opts.ms ?? 0) + Math.min(30_000, opts.timeoutMs ?? 10_000) + 5000
+    )
+    return { ok: r.ok !== false, waitedMs: r.waitedMs ?? 0 }
+  }
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const start = Date.now()
@@ -2076,6 +2234,11 @@ export async function pageInfo(): Promise<{
   page: string
   abilities: { id: string; name: string }[]
 }> {
+  // 无头：YAYA（local-agent）经 DOM 桥读自己所在的标签页；外部 agent 没有目标 →
+  // 抛错由调用方回落（overview 的能力兜底）。名字同样按隐私标签安全拼接。
+  if (headless()) {
+    return bridge<{ page: string; abilities: { id: string; name: string }[] }>('pageInfo')
+  }
   await prepareTarget()
   const cdp = cdpFor(mainContents())
   return evaluate(

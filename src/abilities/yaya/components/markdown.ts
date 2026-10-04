@@ -95,7 +95,7 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
 export function renderMarkdown(text: string, labels: { copy: string }): string {
   // 依赖 epoch：高亮器加载完后让调用方的 computed 失效重算
   void highlightEpoch.value
-  if (/```/.test(text)) ensureHighlighter()
+  if (/```|~~~/.test(text)) ensureHighlighter()
   return md.render(text || '', { labels })
 }
 
@@ -142,4 +142,47 @@ export function highlightCode(code: string, lang: string): string {
     }
   }
   return md.utils.escapeHtml(code)
+}
+
+export type MarkdownSegment =
+  { kind: 'html'; html: string } | { kind: 'fence'; lang: string; source: string; closed: boolean }
+
+/**
+ * 按「插件接管的代码块」把回答切段：顶层的 ```<lang> 代码块（lang 在 `langs` 里）成为组件段，
+ * 其余照常渲染成 HTML。没有命中时只有一个 html 段（与 renderMarkdown 结果一致）。
+ */
+export function renderSegments(
+  text: string,
+  langs: Set<string>,
+  labels: { copy: string }
+): MarkdownSegment[] {
+  void highlightEpoch.value
+  if (!langs.size || !/```|~~~/.test(text))
+    return [{ kind: 'html', html: renderMarkdown(text, labels) }]
+  ensureHighlighter()
+  const env = { labels }
+  const tokens = md.parse(text || '', env)
+  const out: MarkdownSegment[] = []
+  let buf: typeof tokens = []
+  const flush = (): void => {
+    if (buf.length) out.push({ kind: 'html', html: md.renderer.render(buf, md.options, env) })
+    buf = []
+  }
+  for (const tok of tokens) {
+    const lang = tok.type === 'fence' ? tok.info.trim().split(/\s+/)[0].toLowerCase() : ''
+    if (tok.type === 'fence' && tok.level === 0 && langs.has(lang)) {
+      flush()
+      // 流式输出时最后一个代码块可能还没写完（markdown-it 会把它延伸到文末）：看它的最后一行是不是闭合围栏
+      const lines = text.split('\n')
+      const [from, to] = tok.map ?? [0, 0]
+      const lastLine = (lines[to - 1] ?? '').trim()
+      const closed =
+        to - from >= 2 &&
+        lastLine.length >= tok.markup.length &&
+        [...lastLine].every((char) => char === tok.markup[0])
+      out.push({ kind: 'fence', lang, source: tok.content, closed })
+    } else buf.push(tok)
+  }
+  flush()
+  return out
 }

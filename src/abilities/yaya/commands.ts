@@ -5,7 +5,9 @@
 import { randomUUID } from 'node:crypto'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
-import { SCOPE_EXEC } from '../../main/process/privacy'
+import { currentOrigin, SCOPE_EXEC } from '../../main/process/privacy'
+import { registerPreRunHook } from '../../main/process/commands/registry'
+import { getBroadcast } from '../../main/process/broadcast'
 import {
   listSessions,
   getSession,
@@ -23,6 +25,7 @@ import {
   startWorkflow,
   regenerateWorkflow,
   abortWorkflow,
+  controlWorkflow,
   approveToolCall,
   getWorkflowSnapshot,
   reconcileInterruptedWorkflows,
@@ -36,7 +39,18 @@ import {
   mergeIncomingYayaConfig
 } from './services/config'
 import { saveAsset, importAssetFromPath, assetDataUrl } from './services/assets'
-import { listToolInfo } from './services/tools/registry'
+import {
+  listPluginInfo,
+  refreshPlugins,
+  registerPlugin,
+  restartPlugin
+} from './services/plugins/registry'
+import type { YayaPlugin } from './services/plugins/types'
+// 动态插件来源：导入即注册（registerPluginProvider）
+import './services/plugins/mcp/provider'
+import './services/plugins/skills/provider'
+import { mcpCommands } from './services/plugins/mcp/commands'
+import { skillCommands } from './services/plugins/skills/commands'
 import { ioCommands } from './services/io-commands'
 import type { MessageAttachment, YayaConfig, Session, ProviderConfig, ProviderType } from './types'
 import { fetchModelsFromEndpoint } from './services/models'
@@ -44,9 +58,30 @@ import './jobs'
 import './services/workflow/builtin'
 import { listWorkflowInfo } from './services/workflow/registry'
 
-// 系统启动时恢复异常中断的工作流状态
+// 命令脚本与工具都经过注册表：不要让 YAYA 经脚本递归启动或修改自己。
+registerPreRunHook('yaya.', async () => {
+  if (currentOrigin().kind === 'local-agent') {
+    throw new Error('yaya.* commands are not available to the local agent')
+  }
+})
+
+// 内置插件：plugins/<id>/index.ts 默认导出 YayaPlugin，放进目录即注册
+const builtinPlugins = import.meta.glob<YayaPlugin>('./plugins/*/index.ts', {
+  eager: true,
+  import: 'default'
+})
+for (const [file, plugin] of Object.entries(builtinPlugins)) {
+  try {
+    registerPlugin(plugin)
+  } catch (e) {
+    console.error(`[yaya] failed to register plugin ${file}`, e)
+  }
+}
+
+// 系统启动时恢复异常中断的工作流状态、按配置建立插件表
 registerStartupHook(() => {
   reconcileInterruptedWorkflows()
+  refreshPlugins(loadYayaConfig())
 })
 
 const commands: CommandSpec[] = [
@@ -232,8 +267,37 @@ const commands: CommandSpec[] = [
     description: '列出智能体可用的工具（含提供方默认审批、用户覆盖、是否被禁用）',
     usage: 'yaya.tools-list',
     run: async () => {
+      // 兼容旧设置页：把各插件的工具摊平（name = wire name）
       const cfg = loadYayaConfig()
-      return listToolInfo(cfg.disabledTools, cfg.toolApproval)
+      return listPluginInfo(cfg).flatMap((p) =>
+        p.tools.map((t) => ({
+          name: t.wireName,
+          description: t.description,
+          requiresApproval: t.defaultApproval !== 'auto',
+          defaultApproval: t.defaultApproval,
+          approval: t.approval,
+          source: p.kind === 'builtin' ? 'builtin' : p.kind === 'mcp' ? 'mcp' : 'custom',
+          enabled: t.enabled && p.enabled
+        }))
+      )
+    }
+  },
+
+  {
+    name: 'yaya.plugins-list',
+    description: '列出所有插件（内置 / MCP / Skill）及其工具、启用状态、连接状态',
+    usage: 'yaya.plugins-list',
+    run: async () => listPluginInfo(loadYayaConfig())
+  },
+
+  {
+    name: 'yaya.plugin-restart',
+    description: '重新连接 / 刷新一个插件（MCP 重新拉取工具列表等），返回新的状态',
+    usage: 'yaya.plugin-restart --id <pluginId>',
+    run: async (ctx) => {
+      const status = await restartPlugin(String(ctx.named.id))
+      getBroadcast()('cockpit:yaya-plugins-changed', {})
+      return status
     }
   },
 
@@ -246,6 +310,19 @@ const commands: CommandSpec[] = [
       const sessionId = String(ctx.named.session)
       const ok = abortWorkflow(sessionId)
       return { ok }
+    }
+  },
+
+  {
+    name: 'yaya.workflow-control',
+    description: '暂停或继续指定会话正在进行的工作流（停止用 yaya.workflow-abort）',
+    usage: 'yaya.workflow-control --session <sessionId> --action <pause|resume>',
+    run: async (ctx) => {
+      const sessionId = String(ctx.named.session)
+      const action = String(ctx.named.action)
+      if (action !== 'pause' && action !== 'resume')
+        throw new Error('--action 必须是 pause 或 resume')
+      return { ok: controlWorkflow(sessionId, action) }
     }
   },
 
@@ -311,11 +388,14 @@ const commands: CommandSpec[] = [
   // 14. 保存全局配置
   {
     name: 'yaya.config-save',
+    logArgs: false,
     description: '保存 YAYA 全局配置',
     run: async (ctx) => {
       const config = ctx.named.config as YayaConfig
       if (!config || !Array.isArray(config.providers)) throw new Error('invalid config')
       saveYayaConfig(mergeIncomingYayaConfig(config))
+      refreshPlugins(loadYayaConfig())
+      getBroadcast()('cockpit:yaya-plugins-changed', {})
       return { ok: true }
     }
   },
@@ -357,7 +437,9 @@ const commands: CommandSpec[] = [
     }
   },
 
-  ...ioCommands
+  ...ioCommands,
+  ...mcpCommands,
+  ...skillCommands
 ]
 
 /**
@@ -368,9 +450,11 @@ const PRIVACY: Record<string, CommandSpec['privacy']> = {
   'yaya.workflow-start': { requires: [SCOPE_EXEC] },
   'yaya.workflow-regenerate': { requires: [SCOPE_EXEC] },
   'yaya.workflow-approve': { agent: 'deny' },
+  'yaya.workflow-control': { agent: 'deny' },
   'yaya.config-save': { agent: 'deny' },
   'yaya.asset-import': { requires: [SCOPE_EXEC] },
-  'yaya.provider-fetch-models': { agent: 'deny' }
+  'yaya.provider-fetch-models': { agent: 'deny' },
+  'yaya.plugin-restart': { agent: 'deny' }
 }
 for (const c of commands) {
   if (PRIVACY[c.name] && !c.privacy) c.privacy = PRIVACY[c.name]

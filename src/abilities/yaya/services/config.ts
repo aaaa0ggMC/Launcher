@@ -8,7 +8,7 @@ import { abilityConfigPath } from '../../../main/process/paths'
 import { decryptSecret, encryptSecret, isEncryptedSecret } from '../../../main/process/encrypt'
 import { makeLogger } from '../../../main/process/logger'
 import { getBroadcast } from '../../../main/process/broadcast'
-import type { ProviderConfig, YayaConfig } from '../types'
+import type { McpServerConfig, ProviderConfig, YayaConfig } from '../types'
 
 const log = makeLogger('yaya-config')
 
@@ -93,11 +93,22 @@ export function loadYayaConfig(): YayaConfig {
         Array.isArray(parsed.providers) && parsed.providers.length > 0
           ? parsed.providers
           : DEFAULT_YAYA_CONFIG.providers,
-      mcpServers: Array.isArray(parsed.mcpServers)
-        ? parsed.mcpServers
-        : DEFAULT_YAYA_CONFIG.mcpServers
+      mcpServers: normalizeMcpServers(parsed.mcpServers)
     }
     cfg.assistantName = normalizeAssistantName(cfg.assistantName)
+
+    // 解密 MCP 自定义请求头的值
+    for (const m of cfg.mcpServers) {
+      for (const [k, v] of Object.entries(m.headers ?? {})) {
+        if (!isEncryptedSecret(v)) continue
+        try {
+          m.headers![k] = decryptSecret(v)
+        } catch (e) {
+          log.warn(`Failed to decrypt MCP header ${k} for ${m.id}`, { error: String(e) })
+          // 保留密文，避免下一次保存悄悄丢掉无法解密的凭据。
+        }
+      }
+    }
 
     // 解密 Provider 中的 apiKey
     for (const p of cfg.providers) {
@@ -106,7 +117,7 @@ export function loadYayaConfig(): YayaConfig {
           p.apiKey = decryptSecret(p.apiKey)
         } catch (e) {
           log.warn(`Failed to decrypt API key for provider ${p.id}`, { error: String(e) })
-          p.apiKey = ''
+          // 保留密文供用户恢复 vault 后重试。
         }
       }
     }
@@ -132,6 +143,7 @@ export function saveYayaConfig(config: YayaConfig): void {
         p.apiKey = encryptSecret(p.apiKey)
       } catch (e) {
         log.warn(`Failed to encrypt API key for provider ${p.id}`, { error: String(e) })
+        throw e
       }
     }
   }
@@ -139,6 +151,19 @@ export function saveYayaConfig(config: YayaConfig): void {
   for (const p of toSave.providers) {
     delete p.apiKeySet
     delete p.clearApiKey
+  }
+  for (const m of toSave.mcpServers ?? []) {
+    delete m.headersSet
+    delete m.clearHeaders
+    for (const [k, v] of Object.entries(m.headers ?? {})) {
+      if (!v || isEncryptedSecret(v)) continue
+      try {
+        m.headers![k] = encryptSecret(v)
+      } catch (e) {
+        log.warn(`Failed to encrypt MCP header ${k} for ${m.id}`, { error: String(e) })
+        throw e
+      }
+    }
   }
 
   writeFileSync(file, JSON.stringify(toSave, null, 2), 'utf8')
@@ -165,6 +190,47 @@ export function publicYayaConfig(config: YayaConfig): YayaConfig {
     delete rest.clearApiKey
     return { ...rest, apiKey: '', apiKeySet: Boolean(p.apiKey) }
   })
+  out.mcpServers = (out.mcpServers ?? []).map((m: McpServerConfig) => {
+    const headers = m.headers ?? {}
+    const rest = { ...m }
+    delete rest.clearHeaders
+    return {
+      ...rest,
+      // 头名保留（界面要显示有哪些头），值一律不下发
+      headers: Object.fromEntries(Object.keys(headers).map((k) => [k, ''])),
+      headersSet: Object.keys(headers).filter((k) => Boolean(headers[k]))
+    }
+  })
+  return out
+}
+
+/** 读配置时校验 MCP 服务器条目：只保留已实现的传输方式，补齐缺省字段 */
+export function normalizeMcpServers(raw: unknown): McpServerConfig[] {
+  if (!Array.isArray(raw)) return []
+  const out: McpServerConfig[] = []
+  for (const r of raw as Partial<McpServerConfig>[]) {
+    if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !r.id) continue
+    const transport = r.transport === 'sse' ? 'sse' : 'streamable-http'
+    out.push({
+      id: r.id,
+      name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : r.id,
+      transport,
+      url: typeof r.url === 'string' ? r.url.trim() : '',
+      headers:
+        r.headers && typeof r.headers === 'object'
+          ? Object.fromEntries(
+              Object.entries(r.headers).filter(
+                ([k, v]) => typeof k === 'string' && k.trim() && typeof v === 'string'
+              )
+            )
+          : {},
+      enabled: r.enabled !== false,
+      timeoutMs:
+        typeof r.timeoutMs === 'number' && r.timeoutMs > 0
+          ? Math.min(r.timeoutMs, 600_000)
+          : undefined
+    })
+  }
   return out
 }
 
@@ -186,5 +252,21 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
     delete rest.clearApiKey
     return { ...rest, apiKey }
   })
+  // MCP 请求头：值为空 = 沿用旧值（config-get 不回传值）；clearHeaders 里的头删除；
+  // 渲染端提交里没有的头名 = 用户删掉了
+  next.mcpServers = normalizeMcpServers(
+    (incoming.mcpServers ?? []).map((m) => {
+      const prev = current.mcpServers.find((c) => c.id === m.id)
+      const clear = new Set(m.clearHeaders ?? [])
+      const headers: Record<string, string> = {}
+      for (const [k, v] of Object.entries(m.headers ?? {})) {
+        const name = k.trim()
+        if (!name || clear.has(k)) continue
+        const value = v || prev?.headers?.[k] || ''
+        if (value) headers[name] = value
+      }
+      return { ...m, headers }
+    })
+  )
   return next
 }

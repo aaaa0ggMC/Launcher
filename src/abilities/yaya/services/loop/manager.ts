@@ -193,6 +193,15 @@ export function abortWorkflow(sessionId: string): boolean {
   return true
 }
 
+/** 暂停 / 继续某会话的运行（与 AgentBar 的头像菜单同一个闸门） */
+export function controlWorkflow(sessionId: string, action: 'pause' | 'resume'): boolean {
+  const runner = activeRunners.get(sessionId)
+  if (!runner) return false
+  if (action === 'pause') runner.pause()
+  else runner.resume()
+  return true
+}
+
 export function approveToolCall(sessionId: string, approved: boolean, reason?: string): boolean {
   const runner = activeRunners.get(sessionId)
   if (!runner) return false

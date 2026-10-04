@@ -101,9 +101,51 @@ export function isHeadless(): boolean {
   return process.env.COCKPIT_HEADLESS === '1'
 }
 
+/**
+ * 无头（网页）宿主里**能实现**的界面工具（B5）：页面里的 DOM 桥提供这些。
+ * 截图 / 自由鼠标 / 拖动 / 输入时间轴依赖 Electron 的可信输入与截图，无头下不暴露，
+ * 调用也会被明确拒绝（不假成功）。
+ */
+export const HEADLESS_UI_TOOLS = new Set([
+  'ui_snapshot',
+  'ui_navigate',
+  'ui_click',
+  'ui_click_at',
+  'ui_type',
+  'ui_key',
+  'ui_scroll',
+  'ui_wait'
+])
+
+/** 无头下追加到工具说明里的差异说明（坐标 / 合成事件 / 缺失能力，如实写）。 */
+const HEADLESS_TOOL_NOTES: Record<string, string> = {
+  ui_snapshot:
+    ' Headless: DOM-based snapshot (not the Chromium accessibility tree); password values, [data-agent="forbidden"] regions and data-privacy regions are ALWAYS masked, even when the user revealed them.',
+  ui_navigate: ' Headless: switches pages inside the browser tab that started this run.',
+  ui_click:
+    ' Headless: synthetic JS click (isTrusted=false) — cannot open file pickers or native menus; focus the element first like a real click would.',
+  ui_click_at:
+    ' Headless: coordinates are CSS pixels (there are no screenshots in headless); the click is synthetic (isTrusted=false).',
+  ui_type:
+    ' Headless: sets the value through the native input setter plus input/change events (works with Vue); synthetic events are isTrusted=false.',
+  ui_key: ' Headless: synthetic KeyboardEvents (isTrusted=false).',
+  ui_scroll: ' Headless: adjusts the scroll position of the scrollable container directly.',
+  ui_wait: ' Headless: bounded wait; text search skips protected regions.'
+}
+
+const HEADLESS_USAGE_NOTE =
+  ' Headless browser mode: ui_screenshot / ui_move / ui_mouse / ui_drag / ui_input_timeline are NOT available (no screenshots, no trusted input) — and calling them fails clearly. The page bridge offers DOM snapshot / navigate / click (ref or CSS coordinates) / type / key / scroll / wait with synthetic (isTrusted=false) events; coordinates are CSS pixels, mouse moves and drags cannot be scripted. Only YAYA running in the browser tab that started the workflow may operate that tab.'
+
+function withHeadlessNotes(tool: AgentTool): AgentTool {
+  const note = HEADLESS_TOOL_NOTES[tool.name]
+  return note ? { ...tool, description: tool.description + note } : tool
+}
+
 export function getActiveAgentTools(): AgentTool[] {
   if (isHeadless()) {
-    return AGENT_TOOLS.filter((t) => !t.name.startsWith('ui_'))
+    return AGENT_TOOLS.filter(
+      (t) => !t.name.startsWith('ui_') || HEADLESS_UI_TOOLS.has(t.name)
+    ).map(withHeadlessNotes)
   }
   return AGENT_TOOLS
 }
@@ -116,7 +158,7 @@ export async function runAgentTool(
   tool: AgentTool,
   args: Record<string, unknown>
 ): Promise<ToolOutput> {
-  if (isHeadless() && tool.name.startsWith('ui_')) {
+  if (isHeadless() && tool.name.startsWith('ui_') && !HEADLESS_UI_TOOLS.has(tool.name)) {
     throw new Error(
       `UI tool '${tool.name}' is disabled in headless mode. Use capability commands (via command_run) or command_script instead.`
     )
@@ -155,6 +197,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     shape: {},
     readOnly: true,
     run: async () => {
+      // 无头：local-agent 经 DOM 桥读自己所在的标签页；外部 agent 没有目标 → 能力兜底
       const info = await pageInfo().catch(() => ({ page: '', abilities: [] }))
       return json({
         ...info,
@@ -163,7 +206,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           .map((s) => clearanceInfo(s.id)),
         runGrants: listRunGrants(),
         pendingRequests: listPendingRequests().length,
-        usage: USAGE_HINT
+        usage: isHeadless() ? USAGE_HINT + HEADLESS_USAGE_NOTE : USAGE_HINT
       })
     }
   },

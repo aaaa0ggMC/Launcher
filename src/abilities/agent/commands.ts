@@ -1,7 +1,12 @@
 import type { CommandContext, CommandSpec } from '../../main/process/commands/types'
 import { getAgentStatus, disconnectSession, restartForNewToken } from '../../main/process/agent'
 import { getAgentToken, regenerateAgentToken } from '../../main/process/agent/config'
-import { listSessions, setSessionPage } from '../../main/process/agent/sessions'
+import {
+  controlSession,
+  listSessions,
+  pauseAllSessions,
+  setSessionPage
+} from '../../main/process/agent/sessions'
 import { followAgentView, unfollowAgentView } from '../../main/process/agent/views'
 import { followModeSetting } from '../../main/process/agent/config'
 import { currentOrigin } from '../../main/process/privacy'
@@ -100,6 +105,26 @@ export default [
     usage: 'agent.disconnect --id <sessionId>',
     privacy: USER_ONLY,
     run: (ctx) => ({ ok: disconnectSession(String(ctx.named.id ?? '')) })
+  },
+  {
+    name: 'agent.control',
+    description:
+      '暂停 / 继续 / 停止一个 agent 会话（--id --action pause|resume|stop；只对登记了控制器的会话有效，如 YAYA 的运行）',
+    usage: 'agent.control --id <sessionId> --action pause|resume|stop',
+    privacy: USER_ONLY,
+    run: (ctx) => {
+      const action = String(ctx.named.action ?? '')
+      if (action !== 'pause' && action !== 'resume' && action !== 'stop')
+        throw new Error('action must be pause | resume | stop')
+      return { ok: controlSession(String(ctx.named.id ?? ''), action) }
+    }
+  },
+  {
+    name: 'agent.pause-all',
+    description: '暂停所有可暂停的 AI 操作（人和 AI 共用界面时的紧急叫停）',
+    usage: 'agent.pause-all',
+    privacy: USER_ONLY,
+    run: () => ({ ok: true, paused: pauseAllSessions() })
   },
   {
     name: 'agent.revoke-grants',

@@ -58,3 +58,41 @@ test('网页宿主：鉴权 + SSE 广播载荷里的 cockpit-*:// 会改写成 /
   assert.equal(frame.args[0].queue[0].cover, 'data:image/png;base64,AAAA') // 非自定义协议的原样保留
   assert.equal(frame.args[0].n, 1)
 })
+
+test('SSE client identity cannot replace a connected page; UI replies require auth and correlation', async () => {
+  const { startServer } = await import('./server')
+  const bridge = await import('../main/process/browser-ui')
+  const port = await freePort()
+  const token = 'offline-browser-test'
+  const clientId = '00000000-0000-4000-8000-000000000001'
+  const server = await startServer({ host: '127.0.0.1', port, token, webRoot: home })
+  const base = `http://127.0.0.1:${port}`
+  const ctl = new AbortController()
+  try {
+    const res = await fetch(`${base}/api/events?token=${token}&clientId=${clientId}`, {
+      signal: ctl.signal
+    })
+    assert.equal(res.status, 200)
+    assert.equal(bridge.hasBrowserClient(clientId), true)
+    assert.equal(
+      (await fetch(`${base}/api/events?token=${token}&clientId=${clientId}`)).status,
+      409
+    )
+    assert.equal(bridge.hasBrowserClient(clientId), true)
+    assert.equal((await fetch(`${base}/api/ui-result`, { method: 'POST', body: '{}' })).status, 401)
+    assert.equal(
+      (
+        await fetch(`${base}/api/ui-result`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ id: 'not-pending', clientId, ok: true })
+        })
+      ).status,
+      400
+    )
+  } finally {
+    ctl.abort()
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})

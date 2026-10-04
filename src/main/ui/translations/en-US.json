@@ -199,5 +199,18 @@
   "agent.dialog.viewLogs": "View Logs",
   "agent.dialog.follow": "Follow View",
   "agent.dialog.heldLease": "Held Resources",
-  "agent.dialog.startedAt": "Connected {time}"
+  "agent.dialog.startedAt": "Connected {time}",
+  "agent.local": "Built-in",
+  "agent.paused": "Paused · click to resume",
+  "agent.clickToPause": "Click to pause / stop",
+  "agent.pause": "Pause",
+  "agent.resume": "Resume",
+  "agent.stop": "Stop",
+  "agent.openOwner": "Open conversation",
+  "agent.pauseAll": "Pause all AI operations",
+  "browserUi.disconnected": "The browser tab that started this operation has disconnected. Retry with it online (the workflow needs it).",
+  "browserUi.unsupported": "In the headless (web) host, UI operations are only available to YAYA and must run in the browser tab that started the workflow; CLI and remote agents cannot operate this tab.",
+  "browserUi.no_target": "No browser tab to operate: this call did not come from a browser page (start the YAYA workflow from the web page to operate the UI).",
+  "browserUi.timeout": "The page did not answer the UI request within {sec} s (the tab may be closed or stuck).",
+  "inspector.headless.no_client": "The headless (web) host needs a connected browser tab (the page YAYA runs in) to operate the UI."
 }

@@ -28,10 +28,20 @@ import { randomUUID } from 'node:crypto'
  * - remote / mcp：外部 agent（网关入口打标）
  * - script-agent：agent 发起的脚本（沙箱脚本 RPC 入口打标）
  * - agent-ui：agent 经 inspector 点击 UI 后，渲染端在那段时间里发出的 IPC（渲染端自行降权打标）
+ * - local-agent：进程内的 LLM agent（YAYA 执行工具时打标，session = `yaya:<会话 id>:<运行 id>`）
  * 在 agent 上下文里启动的脚本会继承 agent 来源，不会被「降级」成 script。
  * 渲染端只能把自己的 IPC 标成 agent（降权），不能声明成 ui（见 ipc.ts）。
  */
-export type OriginKind = 'ui' | 'cli' | 'script' | 'remote' | 'mcp' | 'script-agent' | 'agent-ui'
+export type OriginKind =
+  | 'ui'
+  | 'cli'
+  | 'script'
+  | 'remote'
+  | 'mcp'
+  | 'script-agent'
+  | 'agent-ui'
+  /** 进程内的 LLM agent（YAYA 的工具调用）：和外部 agent 一样受隐私 SDK 约束 */
+  | 'local-agent'
 
 export interface CallOrigin {
   kind: OriginKind
@@ -41,7 +51,13 @@ export interface CallOrigin {
   client?: string
 }
 
-const AGENT_KINDS: ReadonlySet<OriginKind> = new Set(['remote', 'mcp', 'script-agent', 'agent-ui'])
+const AGENT_KINDS: ReadonlySet<OriginKind> = new Set([
+  'remote',
+  'mcp',
+  'script-agent',
+  'agent-ui',
+  'local-agent'
+])
 const UI_ORIGIN: CallOrigin = Object.freeze({ kind: 'ui' })
 
 const originStore = new AsyncLocalStorage<CallOrigin>()

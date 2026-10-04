@@ -304,6 +304,23 @@
 | B3 | 设置 → 插件页（插件 / MCP / Skills 三个分页、插件详情含工具开关与审批、MCP 编辑器、Skill 列表） | Step |
 | B4 | Cockpit 插件（包装 agent 工具表、zod → JSON Schema、截图 / 命令表 / 快照视图） | Step（依赖 A2） |
 
-### 5.5 进度
+### 5.5 进度（2026-10-04 Era 2 第一阶段完成）
 
-- [ ] A1　- [ ] A2　- [ ] A3　- [ ] A4　- [ ] B1　- [ ] B2　- [ ] B3　- [ ] B4
+| 包 | 状态 | 说明 |
+| :--- | :---: | :--- |
+| A1 插件 SDK | `[x]` | `services/plugins/types.ts` / `registry.ts`；`plugins/system/`；`yaya.plugins-list` / `yaya.plugin-restart`；`pluginEnabled` / `skillsDir` / MCP 配置（header 加密、`headersSet`） |
+| A2 安全与叫停 | `[x]` | `local-agent` 来源；transport `local` 会话 + `agent.control` / `agent.pause-all`；AgentBar 头像菜单；暂停闸门。agent 会话 id 每次运行独立（`yaya:<会话>:<锚点>`），YAYA 页面用 `yaya.workflow-control` / `yaya.workflow-abort` 控制 |
+| A3 渲染端插件 UI | `[x]` | `plugin-ui.ts` / `plugin-ui-registry.ts`；`renderSegments`；工具结果专门视图与图片放大 |
+| A4 打断不回滚 | `[x]` | `sanitizeHistory`；迟到结果不抢分支；运行中「打断并发送」 |
+| B1 MCP 提供方 | `[x]` | `services/plugins/mcp/*`（Streamable HTTP / SSE、header、状态、失败不重放） |
+| B2 Skill 提供方 | `[x]` | `services/plugins/skills/*`（扫描、`skill_load` / `skill_read_file`、导入、路径边界） |
+| B3 设置 → 插件页 | `[x]` | `components/settings/Plugin*` / `McpServer*` / `SkillsPanel` |
+| B4 Cockpit 插件 | `[x]` | `plugins/cockpit/*`（agent 工具表包装、zod → JSON Schema、截图 / 命令表 / 快照视图） |
+| B5 headless 下的 `ui_*` | `[x]` | `src/main/process/browser-ui.ts` + `src/headless/browser-bridge.ts`：定向 SSE、8 个固定方法、隐私预检 → guard → 带令牌重试；页面串行执行 + 取消帧（排队丢弃、执行中中止、按键必松开）；agent 输入标记只由页面执行时打 |
+
+**验证**（全部隔离 HOME）：`pnpm typecheck`（204 模板 0 错）、`pnpm lint` 0 问题、`pnpm test` 471 pass / 2 skip / 0 fail、`wf-selftest.mts` ALL PASS、Electron 构建 + `build:headless --only yaya` 通过。之前已做过：假服务联调 MCP（HTTP / SSE）、Skills 导入、Cockpit 命令 / 截图，1280 / 400 宽度插件界面无横向溢出，网页快照与 Vue 输入实测。
+
+**待用户实测**：真实模型 + 真实 MCP 服务；AgentBar 暂停 / 继续与 YAYA 页面「继续」按钮；网页模式下 YAYA 操作界面中途点「停止」不再有迟到动作。
+
+**下一步候选**：页面桥目前没有 DOM 环境的单测（无 jsdom），取消逻辑靠代码审查；无头宿主下隐私授权窗口不可用（`privacy.consent: none`），受保护动作（YAYA 系统工具 guard、页面隐私区操作）会挂起到授权请求超时后按拒绝处理——需要网页版授权弹层。
+

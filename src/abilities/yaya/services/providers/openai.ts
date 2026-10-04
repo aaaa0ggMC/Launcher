@@ -2,12 +2,13 @@
  * OpenAI 及其兼容端点（Codex-Proxy, DeepSeek, Ollama, vLLM 等）Provider 实现
  */
 import OpenAI from 'openai'
-import type { ProviderConfig, ToolDefinition, ToolCallItem, MessageAttachment } from '../../types'
+import type { ProviderConfig, ToolCallItem, MessageAttachment } from '../../types'
 import type {
   AIProvider,
   ProviderGenerateOptions,
   ProviderGenerateResult,
-  ProviderMessage
+  ProviderMessage,
+  ProviderTool
 } from './types'
 import { readAssetData, resolveAssetLocalPath, isTextMime } from '../assets'
 import { makeLogger } from '../../../../main/process/logger'
@@ -19,6 +20,9 @@ export class OpenAICompatibleProvider implements AIProvider {
   private client: OpenAI
 
   constructor(public config: ProviderConfig) {
+    if (/^enc:v[12]:/.test(config.apiKey ?? '')) {
+      throw new Error('Provider credentials could not be decrypted')
+    }
     this.id = config.id
     this.client = new OpenAI({
       apiKey: config.apiKey || 'dummy',
@@ -198,8 +202,21 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: ProviderMessage[]
   ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
     const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = []
+    // 工具产出的图片：tool 消息不能带图，且同一步的 tool 结果必须连续，
+    // 所以攒到这一串 tool 消息结束后，作为一条 user 消息交给模型
+    let toolImages: MessageAttachment[] = []
+    const flushToolImages = async (): Promise<void> => {
+      if (!toolImages.length) return
+      const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+        { type: 'text', text: '[Images returned by the tool calls above]' }
+      ]
+      for (const att of toolImages) parts.push(...(await attachmentParts(att)))
+      out.push({ role: 'user', content: parts })
+      toolImages = []
+    }
 
     for (const m of messages) {
+      if (m.role !== 'tool') await flushToolImages()
       if (m.role === 'system') {
         out.push({ role: 'system', content: m.content })
       } else if (m.role === 'assistant') {
@@ -230,6 +247,9 @@ export class OpenAICompatibleProvider implements AIProvider {
           tool_call_id: m.toolCallId || 'call_0',
           content: m.content
         })
+        for (const att of m.attachments ?? []) {
+          if (att.mimeType.startsWith('image/')) toolImages.push(att)
+        }
       } else if (m.role === 'user') {
         // 多模态处理：如果有图片附件，转为 OpenAI Vision 格式
         if (m.attachments && m.attachments.length > 0) {
@@ -248,6 +268,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         }
       }
     }
+    await flushToolImages()
 
     return out
   }
@@ -290,7 +311,7 @@ async function attachmentParts(
   ]
 }
 
-function toOpenAiTool(t: ToolDefinition): OpenAI.Chat.Completions.ChatCompletionTool {
+function toOpenAiTool(t: ProviderTool): OpenAI.Chat.Completions.ChatCompletionTool {
   return {
     type: 'function',
     function: {

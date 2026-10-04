@@ -341,7 +341,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 
 设计见 `docs/agent-access-design.md`。用法和 `encrypt.ts` 一样：**能力在产生数据的地方自己 wrap**。
 
-- **调用来源**：`withOrigin` 经 AsyncLocalStorage 贯穿调用链。IPC = `ui`、CLI = `cli`；agent（`remote` / `mcp` / `script-agent` / `agent-ui`）由各自入口打标。渲染端只能把自己降权成 `agent-ui`，不能提权。**非 agent 来源下所有 API 原样透传**。
+- **调用来源**：`withOrigin` 经 AsyncLocalStorage 贯穿调用链。IPC = `ui`、CLI = `cli`；agent（`remote` / `mcp` / `script-agent` / `agent-ui` / `local-agent`）由各自入口打标。渲染端只能把自己降权成 `agent-ui`，不能提权。**非 agent 来源下所有 API 原样透传**。
 - **声明 scope**：`src/abilities/<id>/privacy.ts` 里 `definePrivacyScopes('<id>', { … })`（loader 自动 glob）。级别：`personal`（不能关联到真人，默认对 AI 可见）/ `sensitive`（能关联到真人、或涉及金钱 / 位置，默认脱敏、可申请）/ `secret`（凭据，永不可读）。翻译键放本能力 translations。
 - **主进程**：`shield(scope, v)` / `shieldFields(obj, resolver)` 脱敏，`secret(v)` 凭据占位，`await guard(scope)` 动作前要求许可（弹授权窗口并等待）。
 - **命令声明** `CommandSpec.privacy`：`reads`（结果含哪些 scope）/ `requires`（agent 调用前需要的许可，如 `SCOPE_EXEC` / `SCOPE_CONTROL`）/ `agent: 'deny'`（凭据登录、修改账号等只能用户本人做）。未声明的命令 agent 也能调，但结果会再过一遍凭据 key 兜底脱敏。
@@ -349,6 +349,17 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **渲染端**：`v-privacy="'<scope>'"` 给子树打标签（AI 快照 / 截图按标签脱敏，**与用户是否点开明文无关**）；`v-agent-forbidden` 标禁区（凭据输入框、授权相关设置）；打码文本用 `@ui/components/PrivacyText.vue`。
 - **授权窗口**（`privacy-consent.ts` + `windows/PrivacyConsent.vue`）：窗口 id / view 保留，渲染端无法创建或替换；决定只走 `privacy:decide` IPC 并校验 sender。**绝不能把「批准」做成命令**。开发模式可用 `privacy.debug-request --scopes <id> --reason ...` 手动弹出测试。
 - 新增 / 改动涉及个人数据的能力：先按上面的标准定级，再在命令和界面两侧同时接入。
+
+### YAYA 插件 SDK
+
+- 后端插件放 `src/abilities/yaya/plugins/<id>/index.ts`，默认导出 `YayaPlugin`（契约在 `services/plugins/types.ts`），构建 glob 自动注册。插件可提供工具、稳定的 instructions、start / stop 与连接状态；MCP / Skill 由动态 provider 扩展同一注册表。
+- system 插件保留旧工具名；其余工具 wire name 为 `<namespace>_<tool>`，超 64 字符附稳定哈希。插件开关 `pluginEnabled`、工具开关 `disabledTools` 与审批 `toolApproval` 都存能力配置。工具表与 instructions 的顺序和内容必须稳定，避免击穿提示词缓存。
+- 工具执行来源是 `local-agent`，受隐私 SDK 的脱敏 / guard / `agent: 'deny'` 约束。直接读写任意文件或运行 Shell 的插件必须自己 `await guard(SCOPE_EXEC)`，审批模式 auto 不能替代隐私授权。工具需响应 `ctx.signal`，无法取消的已执行操作不回滚。
+- 工作流登记 transport `local` 会话，AgentBar 支持暂停 / 继续 / 停止；每步、每次工具执行前（包括审批后）经过暂停闸门。外壳快捷键 `shell.agent-pause-all` 调 `agent.pause-all`，默认不绑定。
+- 渲染端可在 `plugins/<id>/ui.ts` 导出 `definePluginUi`，声明 toolViews / fences。变换只影响显示，数据库和模型历史保留原文；工具图片存会话资产，数据库不存 base64。视图必须遵守 DESIGN.md 与隐私标签规范。
+- MCP 支持 Streamable HTTP / SSE，请求头值加密存储，页面只有头名与 `headersSet`；编辑留空沿用、移除才清空。连接失败不得在未知执行结果下自动重放工具调用。Skill 扫描配置目录的 SKILL.md，系统提示词只列名称 / 描述，`skill_load` / `skill_read_file` 渐进读取，附属路径不得越界。
+- 每次运行登记的 agent 会话 id 是 `yaya:<会话>:<锚点>`（每次运行独立）；YAYA 页面自己的暂停 / 继续 / 停止走 `yaya.workflow-control` / `yaya.workflow-abort`（按会话 id 找运行，用户专属），不要手拼 agent 会话 id。
+- **无头宿主下的 `ui_*`（`src/main/process/browser-ui.ts` + `src/headless/browser-bridge.ts`）**：Electron 走 CDP；无头宿主的界面在浏览器标签页里，`ui.snapshot / navigate / click / click-at / type / key / scroll / wait` 改由**发起本次工作流的那个标签页**执行固定方法的 DOM 操作（无截图、无拖动、无输入时间轴，这些在无头下保持不可用）。每个标签页随机 `clientId`（`/api/command` 请求体与 SSE 连接都带），服务器用 AsyncLocalStorage 关联调用，请求只定向发给该标签页，应答必须同 clientId + 仍在等待的请求 id。只有 `local-agent`（YAYA）能用，CLI / 远程 agent 明确报错，绝不挑「最新」标签页顶包。输入是合成事件（`isTrusted=false`），打不开文件选择器等依赖真实手势的东西。隐私与 CDP 版同规则：快照按 DOM 标签脱敏（含祖先 / 后代、密码框、私密 `<label>`），受保护动作先预检不执行、主机 `guard()` 后带许可与目标令牌重试、页面复核同一目标。页面串行执行请求；停止 / 超时时主机发 `cockpit:browser-ui-cancel`，排队中的直接丢弃，执行中的在等待与动作前中止（按住的键会松开）。agent 输入标记只由页面在执行时打，用户真实手势（`isTrusted` 的 pointerdown / keydown）立即清除。
 
 ### AI 与远程（Remote / MCP / UI inspector）
 
@@ -406,7 +417,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
   - `.page-menu-pop`（aidj 页面菜单 / 播放器菜单 / yarj 菜单共用类名）、`.v-dialog` 的宽度 / 高度夹取都在 `global.css` 里统一处理，别在组件里各写各的。
   - 网页静态资源带 `COOP: same-origin` + `COEP: credentialless`（掌机 mGBA 要 `SharedArrayBuffer`；需要安全上下文：https 或 localhost）。
   - 验证别只信静态检查：下游（opencode）看不到真实界面，它写的窄屏覆盖有过「没带 !important 实际没生效」「把封面挤成药丸」这类缺陷，合并后必须在 400px / 650px 宽度下截图看。
-- **没做 / 已知缺口**：agent 系统（MCP / Remote / ui inspector / 隐私授权窗口 / agent 独立视图）未接入无头入口；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
+- **没做 / 已知缺口**：agent 系统（MCP / Remote / 隐私授权窗口 / agent 独立视图）未接入无头入口，ui inspector 只有 YAYA 经页面桥可用（见「YAYA 插件 SDK」）；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
 
 ### 镜像源 toggle 安全性
 

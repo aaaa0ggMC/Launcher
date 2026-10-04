@@ -1,5 +1,19 @@
+<script lang="ts">
+// 模块级：App 一导入就登记（即使图标条被隐藏），设置 → 快捷键 里随时可见
+import { registerShortcut } from '../shortcuts'
+
+// 人和 AI 共用界面时的紧急叫停：默认不绑定（所有快捷键都由用户自己启用），可设为全局
+registerShortcut({
+  id: 'shell.agent-pause-all',
+  label: 'agent.pauseAll',
+  fallback: '暂停所有 AI 操作',
+  group: 'shell',
+  command: { name: 'agent.pause-all' }
+})
+</script>
+
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { translate, translateTemplate } from '../i18n'
 import AgentAvatar from './AgentAvatar.vue'
 import AgentSessionDialog from './AgentSessionDialog.vue'
@@ -32,6 +46,11 @@ interface Session {
   view?: 'hidden' | 'shown'
   page?: string
   status?: { text: string; progress?: number; at: number }
+  /** 登记了控制器（如 YAYA 的一次运行）：点头像弹出暂停 / 继续 / 停止 */
+  controls?: { pause: boolean; stop: boolean }
+  paused?: boolean
+  openAbility?: string
+  openTarget?: Record<string, unknown>
 }
 interface Live {
   at: number
@@ -109,7 +128,45 @@ function openDialog(): void {
   dialogOpen.value = true
 }
 
-function onAvatarClick(s: Session): void {
+// ---- 可控会话（YAYA 等进程内 agent）：暂停 / 继续 / 停止 ----
+const abilitiesApi = inject<{
+  activate: (id: string, target: Record<string, unknown>) => void
+} | null>('cockpit:abilities', null)
+const controlMenu = ref<{ id: string; x: number; y: number } | null>(null)
+const controlSession = computed(() =>
+  controlMenu.value ? (sessions.value.find((x) => x.id === controlMenu.value!.id) ?? null) : null
+)
+const controlMenuOpen = computed({
+  get: () => controlMenu.value !== null,
+  set: (v: boolean) => {
+    if (!v) controlMenu.value = null
+  }
+})
+function openControls(s: Session, ev?: Event): void {
+  const el = ev?.currentTarget as HTMLElement | undefined
+  const r = el?.getBoundingClientRect()
+  controlMenu.value = {
+    id: s.id,
+    x: r ? r.left + r.width / 2 : window.innerWidth / 2,
+    y: r ? r.bottom + 4 : 48
+  }
+}
+function control(action: 'pause' | 'resume' | 'stop'): void {
+  const s = controlSession.value
+  controlMenu.value = null
+  if (s) void window.cockpit.command('agent.control', { id: s.id, action })
+}
+function openOwner(): void {
+  const s = controlSession.value
+  controlMenu.value = null
+  if (s?.openAbility) abilitiesApi?.activate(s.openAbility, s.openTarget ?? {})
+}
+
+function onAvatarClick(s: Session, ev?: Event): void {
+  if (s.controls) {
+    openControls(s, ev)
+    return
+  }
   // 窄屏 / 移动端或无头 Web 模式（无 Electron 宿主窗口）：弹出会话子窗口；宽屏桌面端：直接触发 follow 跟随视图
   if (isNarrow.value || !window.cockpit.hasCap('window.frame')) {
     openDialog()
@@ -125,7 +182,11 @@ function follow(s: Session): void {
 
 function tip(s: Session): string[] {
   const l = live.value[s.id]
-  const lines = [`${name(s)} · ${s.transport === 'mcp' ? 'MCP' : 'Remote'}`]
+  const kind =
+    s.transport === 'mcp' ? 'MCP' : s.transport === 'local' ? tr('agent.local', '内置') : 'Remote'
+  const lines = [`${name(s)} · ${kind}`]
+  if (s.paused) lines.push(tr('agent.paused', '已暂停 · 点击继续'))
+  else if (s.controls) lines.push(tr('agent.clickToPause', '点击可暂停 / 停止'))
   if (!props.ui.tooltipDetail) return lines
   if (busy(s.id)) {
     lines.push(
@@ -286,23 +347,68 @@ watch(
           <span
             v-bind="tp"
             class="agent-bar__avatar agent-bar__avatar--btn"
-            :class="{ busy: busy(s.id), 'has-view': !!s.view, shown: s.view === 'shown' }"
+            :class="{
+              busy: busy(s.id) && !s.paused,
+              'has-view': !!s.view,
+              shown: s.view === 'shown',
+              paused: s.paused
+            }"
             role="button"
             tabindex="0"
             :aria-label="tip(s).join(' · ')"
-            @click="onAvatarClick(s)"
+            @click="(e: MouseEvent) => onAvatarClick(s, e)"
             @contextmenu.prevent="openDialog"
-            @keydown.enter="onAvatarClick(s)"
-            @keydown.space.prevent="onAvatarClick(s)"
+            @keydown.enter="(e: KeyboardEvent) => onAvatarClick(s, e)"
+            @keydown.space.prevent="(e: KeyboardEvent) => onAvatarClick(s, e)"
             ><AgentAvatar
               :avatar="ui.allowAvatar ? s.avatar : undefined"
               :icon="ui.defaultIcon === 'icon' ? s.icon : undefined"
-              :initial="initial(s)"
-          /></span>
+              :initial="initial(s)" /><span
+              v-if="s.paused"
+              class="agent-bar__paused"
+              aria-hidden="true"
+              ><v-icon icon="mdi-pause" size="12" /></span
+          ></span>
         </template>
         <div v-for="(l, i) in tip(s)" :key="i">{{ l }}</div>
       </v-tooltip>
     </div>
+
+    <!-- 可控会话的操作菜单（暂停 / 继续 / 停止 / 打开） -->
+    <v-menu
+      v-model="controlMenuOpen"
+      :target="[controlMenu?.x ?? 0, controlMenu?.y ?? 0]"
+      location="bottom center"
+    >
+      <v-list v-if="controlSession" density="compact" min-width="180" class="agent-bar__menu">
+        <v-list-subheader>{{ name(controlSession) }}</v-list-subheader>
+        <v-list-item
+          v-if="controlSession.controls?.pause && !controlSession.paused"
+          prepend-icon="mdi-pause"
+          :title="tr('agent.pause', '暂停')"
+          @click="control('pause')"
+        />
+        <v-list-item
+          v-if="controlSession.controls?.pause && controlSession.paused"
+          prepend-icon="mdi-play"
+          :title="tr('agent.resume', '继续')"
+          @click="control('resume')"
+        />
+        <v-list-item
+          v-if="controlSession.controls?.stop"
+          prepend-icon="mdi-stop"
+          base-color="error"
+          :title="tr('agent.stop', '停止')"
+          @click="control('stop')"
+        />
+        <v-list-item
+          v-if="controlSession.openAbility"
+          prepend-icon="mdi-open-in-app"
+          :title="tr('agent.openOwner', '打开对话')"
+          @click="openOwner"
+        />
+      </v-list>
+    </v-menu>
 
     <!-- AI 会话详情与移动端弹窗 -->
     <AgentSessionDialog
@@ -403,5 +509,28 @@ watch(
   50% {
     box-shadow: inset 0 0 0 2px rgba(var(--v-theme-primary), 0.35);
   }
+}
+
+/* 已暂停：头像变灰 + 右下角暂停角标 */
+.agent-bar__avatar.paused {
+  position: relative;
+  filter: grayscale(0.7);
+  opacity: 0.85;
+}
+.agent-bar__paused {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgb(var(--v-theme-warning));
+  color: rgb(var(--v-theme-on-warning));
+  box-shadow: 0 0 0 2px rgb(var(--v-theme-surface));
+}
+.agent-bar__menu :deep(.v-list-item) {
+  min-height: 40px;
 }
 </style>

@@ -1,5 +1,8 @@
 /**
- * Agent 会话登记：每个 MCP 会话 / Remote 客户端一条，供设置页展示与断开。
+ * Agent 会话登记：每个 MCP 会话 / Remote 客户端 / 进程内 agent（YAYA 的一次运行，transport `local`）一条，
+ * 供标题栏 AgentBar、设置页展示与断开。
+ * 会话可以登记控制器（`setSessionControl`）：用户在 AgentBar 上暂停 / 继续 / 停止它——人和 AI 共用界面时
+ * 中途叫停 AI 的统一入口。
  * 会话结束时撤销它的 once 授权（privacy.revokeSessionGrants）。
  */
 import { getBroadcast } from '../broadcast'
@@ -12,7 +15,7 @@ const log = makeLogger('agent')
 
 export interface AgentSession {
   id: string
-  transport: 'mcp' | 'remote'
+  transport: 'mcp' | 'remote' | 'local'
   client: string
   startedAt: number
   lastSeen: number
@@ -27,6 +30,20 @@ export interface AgentSession {
   avatar?: string
   /** agent 自报「我在忙什么」（set_status 工具），过期由渲染端按 `at` 判断 */
   status?: { text: string; progress?: number; at: number }
+  /** 登记了控制器的会话支持哪些动作（AgentBar 据此显示暂停 / 停止） */
+  controls?: { pause: boolean; stop: boolean }
+  /** 已被用户暂停 */
+  paused?: boolean
+  /** 点击「打开」时跳转的能力页（如 yaya） */
+  openAbility?: string
+  /** 能力自行解释的跳转参数（如 YAYA 对话 id）。 */
+  openTarget?: Record<string, unknown>
+}
+
+export interface SessionControl {
+  pause?: () => void
+  resume?: () => void
+  stop?: () => void
 }
 
 const AVATAR_RE = /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/]+=*$/
@@ -123,6 +140,52 @@ function pickIcon(client: string, selfId?: string): string {
 
 const sessions = new Map<string, AgentSession>()
 const closers = new Map<string, () => void>()
+const controllers = new Map<string, SessionControl>()
+
+/** 登记会话控制器（YAYA 运行开始时）；会话结束自动清除 */
+export function setSessionControl(
+  id: string,
+  control: SessionControl,
+  openAbility?: string,
+  openTarget?: Record<string, unknown>
+): void {
+  const s = sessions.get(id)
+  if (!s) return
+  controllers.set(id, control)
+  s.controls = { pause: Boolean(control.pause && control.resume), stop: Boolean(control.stop) }
+  if (openAbility) s.openAbility = openAbility
+  if (openTarget) s.openTarget = openTarget
+  changed()
+}
+
+/** 控制器自己汇报暂停状态（暂停闸门真正停下 / 放行时） */
+export function setSessionPaused(id: string, paused: boolean): void {
+  const s = sessions.get(id)
+  if (!s || Boolean(s.paused) === paused) return
+  s.paused = paused
+  changed()
+}
+
+/** 用户对会话的控制（AgentBar / 快捷键）；返回是否有对应的控制器 */
+export function controlSession(id: string, action: 'pause' | 'resume' | 'stop'): boolean {
+  const c = controllers.get(id)
+  const fn = c?.[action]
+  if (!fn) return false
+  fn()
+  return true
+}
+
+/** 暂停所有可暂停的会话（「暂停所有 AI 操作」快捷键）；返回暂停了几个 */
+export function pauseAllSessions(): number {
+  let n = 0
+  for (const [id, c] of controllers) {
+    if (c.pause && !sessions.get(id)?.paused) {
+      c.pause()
+      n++
+    }
+  }
+  return n
+}
 
 type Hook = () => void
 const changedHooks: Hook[] = []
@@ -195,6 +258,7 @@ export function touchSession(
 export function endSession(id: string): void {
   if (!sessions.delete(id)) return
   closers.delete(id)
+  controllers.delete(id)
   revokeSessionGrants(id)
   for (const h of endedHooks) h(id)
   changed()
@@ -246,6 +310,8 @@ async function sweepIdle(): Promise<void> {
   const limit = Math.min(min, 10080) * 60_000
   const now = Date.now()
   for (const s of [...sessions.values()]) {
+    // 进程内 agent 的会话随运行结束而结束（长时间等模型 / 等审批也不算空闲）
+    if (s.transport === 'local') continue
     if (now - s.lastSeen < limit) continue
     log.info('kicking idle agent session', {
       id: s.id,

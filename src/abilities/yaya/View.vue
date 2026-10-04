@@ -11,6 +11,7 @@ import AssistantTurn from './components/AssistantTurn.vue'
 import ChatInputBox from './components/ChatInputBox.vue'
 import ModelSelectDialog from './components/ModelSelectDialog.vue'
 import MessageMenu from './components/MessageMenu.vue'
+import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
 defineOptions({ name: 'cockpit-yaya-view' })
@@ -70,6 +71,15 @@ const isRunning = computed(
 )
 const turns = computed(() => buildTurns(messages.value))
 const lastTurnKey = computed(() => turns.value[turns.value.length - 1]?.key)
+/** 用户在标题栏头像上暂停了本会话的运行 */
+const isPaused = computed(() => isRunning.value && snapshot.value?.status === 'paused')
+async function controlRun(action: 'pause' | 'resume' | 'stop'): Promise<void> {
+  if (!activeSessionId.value) return
+  const session = activeSessionId.value
+  if (action === 'stop') await window.cockpit.command('yaya.workflow-abort', { session })
+  else await window.cockpit.command('yaya.workflow-control', { session, action })
+}
+
 const pendingApprovalId = computed(() =>
   isRunning.value && snapshot.value?.status === 'waiting_approval'
     ? (snapshot.value.pendingApprovalTool?.id ?? null)
@@ -535,7 +545,18 @@ function applyChunk(p: ChunkEvent, field: 'content' | 'reasoningContent', chunk:
 
 const unsubs: (() => void)[] = []
 
+let pendingActivationSession: string | null = null
+let activationReady = false
+function onActivate(target: unknown): void {
+  const id = (target as { session?: unknown } | null)?.session
+  if (typeof id !== 'string' || !id) return
+  pendingActivationSession = id
+  if (activationReady) void loadSessions().then(() => selectSession(id))
+}
+defineExpose({ onActivate })
+
 onMounted(async () => {
+  ensurePluginMap()
   if (shellEl.value) {
     ro = new ResizeObserver((entries) => {
       shellWidth.value = entries[0].contentRect.width
@@ -574,7 +595,9 @@ onMounted(async () => {
   runningIds.value = ((await window.cockpit.command('yaya.workflow-running').catch(() => [])) ??
     []) as string[]
   // 默认打开最近的会话；没有会话就停在新对话
-  if (sessions.value.length > 0) await selectSession(sessions.value[0].id)
+  activationReady = true
+  if (pendingActivationSession) await selectSession(pendingActivationSession)
+  else if (sessions.value.length > 0) await selectSession(sessions.value[0].id)
 })
 
 onBeforeUnmount(() => {
@@ -788,6 +811,20 @@ watch(isRunning, (now, before) => {
             />
           </div>
         </transition>
+        <div v-if="isPaused" class="paused-bar" role="status">
+          <v-icon icon="mdi-pause-circle-outline" size="20" class="flex-shrink-0" />
+          <span class="paused-text">{{
+            te('yaya.paused_hint', { name: assistantName }, '{name} 已暂停，不会再执行新的步骤')
+          }}</span>
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-play"
+            @click="controlRun('resume')"
+          >
+            {{ t('yaya.resume', '继续') }}
+          </v-btn>
+        </div>
         <ChatInputBox
           ref="inputRef"
           v-model="draft"
@@ -1237,5 +1274,23 @@ watch(isRunning, (now, before) => {
 }
 .yaya-menu :deep(.v-list-item__spacer) {
   width: 14px !important;
+}
+
+.paused-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  max-width: 820px;
+  margin: 0 auto 8px;
+  padding: 8px 8px 8px 14px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-warning), 0.12);
+  border: 1px solid rgba(var(--v-theme-warning), 0.35);
+  font-size: 0.875rem;
+}
+.paused-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 </style>

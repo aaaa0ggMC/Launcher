@@ -199,5 +199,18 @@
   "agent.dialog.viewLogs": "查看日志",
   "agent.dialog.follow": "跟随视图",
   "agent.dialog.heldLease": "占用资源",
-  "agent.dialog.startedAt": "已连接 {time}"
+  "agent.dialog.startedAt": "已连接 {time}",
+  "agent.local": "内置",
+  "agent.paused": "已暂停 · 点击继续",
+  "agent.clickToPause": "点击可暂停 / 停止",
+  "agent.pause": "暂停",
+  "agent.resume": "继续",
+  "agent.stop": "停止",
+  "agent.openOwner": "打开对话",
+  "agent.pauseAll": "暂停所有 AI 操作",
+  "browserUi.disconnected": "发起本次操作的浏览器标签页已断开连接，请重试（工作流需要它在线）",
+  "browserUi.unsupported": "界面操作在无头（网页）宿主里只对 YAYA 开放（且必须由发起该工作流的浏览器标签页执行）；CLI / 远程 Agent 不能操作这个标签页",
+  "browserUi.no_target": "没有可操作的浏览器标签页：本次调用不是由浏览器页面发起的（YAYA 工作流必须在网页里启动才能操作界面）",
+  "browserUi.timeout": "页面没有在 {sec} 秒内响应界面请求（标签页可能已被关闭或卡住）",
+  "inspector.headless.no_client": "无头（网页）宿主里需要已连接的浏览器标签页（YAYA 所在页面）才能操作界面"
 }

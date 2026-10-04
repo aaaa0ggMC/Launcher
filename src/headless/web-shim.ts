@@ -3,6 +3,7 @@
  * 只是传输层换成 HTTP + SSE。宿主不支持的 IPC 通道（窗口、对话框、全局快捷键、截图…）一律 nop。
  */
 import { createCockpit } from '../preload/api'
+import { initBrowserBridge } from './browser-bridge'
 
 const TOKEN_KEY = 'cockpit-headless-token'
 const url = new URL(location.href)
@@ -26,14 +27,35 @@ try {
 
 const authHeaders = { authorization: `Bearer ${token}` }
 
+/**
+ * 本标签页的浏览器 UI 桥 clientId（B5）：宿主用它把 YAYA 的界面请求**定向**发给发起工作流的
+ * 这个标签页（绝不广播、绝不挑「最新」的）。重复 id 会被宿主拒绝，不会顶掉别的标签页。
+ */
+function randomClientId(): string {
+  const c = globalThis.crypto
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+const clientId = randomClientId()
+
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { ...authHeaders, 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body)
+    // clientId 让宿主把本次调用关联到本标签页（YAYA 工作流因此能继续操作这个页面）
+    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), clientId })
   })
   if (res.status === 401) throw new Error('unauthorized: 缺少或错误的 token')
   return (await res.json()) as T
+}
+
+/** 浏览器 UI 桥用：带鉴权的 POST（自动带上本标签页的 clientId）。 */
+export function bridgePost<T>(path: string, body: unknown): Promise<T> {
+  return api<T>(path, body)
 }
 
 type Listener = (...args: unknown[]) => void
@@ -42,7 +64,23 @@ function emit(channel: string, ...args: unknown[]): void {
   listeners.get(channel)?.forEach((cb) => cb(...args))
 }
 
-const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`)
+/** 本页面向本地监听器派发事件（不经过 SSE，不会广播到其他标签页）。 */
+export function emitLocal(channel: string, ...args: unknown[]): void {
+  emit(channel, ...args)
+}
+
+/**
+ * 真实用户操作（isTrusted）立即清除 agent 输入标记：之后的命令 / IPC 按用户来源计。
+ * 只认真实手势——AI 注入的是合成事件（isTrusted=false），不会误清自己的标记。
+ * （与 Electron 的 inspector 不同：那边没有等价信号，只能靠时间窗口。）
+ */
+const clearAgentAttribution = (event: Event): void => {
+  if (event.isTrusted) emitLocal('cockpit:agent-input', null)
+}
+window.addEventListener('pointerdown', clearAgentAttribution, { capture: true })
+window.addEventListener('keydown', clearAgentAttribution, { capture: true })
+
+const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}`)
 es.onmessage = (ev) => {
   try {
     const { channel, args } = JSON.parse(ev.data) as { channel: string; args: unknown[] }
@@ -170,3 +208,6 @@ const cockpit = createCockpit({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(window as any).cockpit = cockpit
+
+// 浏览器 UI 桥（B5）：登记本标签页，等待宿主把固定方法的界面请求定向发过来
+initBrowserBridge(cockpit)

@@ -16,12 +16,12 @@
  * 写进对话的只有 `assistantStep`（每次一个 assistant 节点）与工具结果节点；
  * `subAgent` / `note` 只进过程记录（界面的过程卡片里可展开查看）。
  */
-import type { MessageNode, Session, ToolCallItem, ToolDefinition, YayaConfig } from '../../types'
+import type { MessageNode, Session, ToolCallItem, YayaConfig } from '../../types'
 import type { ProviderMessage } from '../providers/types'
 
 export interface AssistantStepOptions {
-  /** 'enabled' = 配置里启用的全部工具；'none' = 不给工具；或显式列表 */
-  tools?: 'enabled' | 'none' | ToolDefinition[]
+  /** 'enabled' = 本次运行可用的全部工具；'none' = 不给工具；或 wire name 白名单 */
+  tools?: 'enabled' | 'none' | string[]
   /** 追加到系统提示词后面的说明（如规划结果） */
   extraSystem?: string
   /** 过程记录里这一步的显示名（缺省「生成回答」/「思考与调用工具」） */

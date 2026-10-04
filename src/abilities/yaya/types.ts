@@ -33,6 +33,8 @@ export interface ToolCallItem {
   ms?: number
   /** 用户拒绝时给的理由（已作为工具结果回传给模型） */
   rejectReason?: string
+  /** 工具产出的图片（会话资产 URI），界面显示缩略图 */
+  images?: string[]
 }
 
 export interface MessageNode {
@@ -137,15 +139,26 @@ export interface ProviderConfig {
   enabled: boolean
 }
 
+export type McpTransport = 'streamable-http' | 'sse'
+
 export interface McpServerConfig {
+  /** 稳定 id（插件 id = `mcp-<id>`，工具前缀由它派生），创建后不改 */
   id: string
   name: string
-  transport: 'stdio' | 'sse'
-  command?: string
-  args?: string[]
-  env?: Record<string, string>
-  url?: string
+  transport: McpTransport
+  url: string
+  /**
+   * 自定义请求头（如 Authorization / X-Api-Key）。值加密落盘；`yaya.config-get` 不回传值，
+   * 只回传 `headersSet`（已设置的头名）。保存时值为空串 = 保留原值；`clearHeaders` 里的头名删除。
+   */
+  headers?: Record<string, string>
+  /** 仅 config-get 返回 */
+  headersSet?: string[]
+  /** 仅 config-save 入参 */
+  clearHeaders?: string[]
   enabled: boolean
+  /** 单次工具调用超时（缺省 60000） */
+  timeoutMs?: number
 }
 
 export interface YayaConfig {
@@ -157,7 +170,11 @@ export interface YayaConfig {
   autoApproveTools: boolean
   /** 新会话默认使用的工作流 id（缺省 'agent'），见 `yaya.workflows-list` */
   defaultWorkflow?: string
-  /** 被用户禁用的工具名（缺省 = 全部启用） */
+  /** 插件启用覆盖：缺省 = 插件自己的 defaultEnabled（插件 id → 是否启用） */
+  pluginEnabled?: Record<string, boolean>
+  /** Skill 目录（缺省 ~/.config/LinuxCockpit/yaya/skills） */
+  skillsDir?: string
+  /** 被用户禁用的工具（按 wire name 记，缺省 = 全部启用） */
   disabledTools?: string[]
   /**
    * 逐工具审批覆盖：'ask' = 每次都要确认，'auto' = 直接执行；缺省 = 工具提供方的默认值。
@@ -185,22 +202,6 @@ export type LoopEvent =
       usage?: { prompt: number; completion: number; total: number }
     }
   | { type: 'error'; error: string }
-
-export interface ToolDefinition {
-  name: string
-  description: string
-  parameters: Record<string, unknown>
-  handler: (args: Record<string, unknown>, context: ToolExecutionContext) => Promise<unknown>
-  /** true = 每次都要人工确认；函数 = 按本次参数判断 */
-  requiresApproval?: boolean | ((args: Record<string, unknown>) => boolean)
-  source?: 'builtin' | 'mcp' | 'custom'
-}
-
-export interface ToolExecutionContext {
-  sessionId: string
-  signal?: AbortSignal
-  onProgress?: (progress: unknown) => void
-}
 
 export type ToolApprovalMode = 'ask' | 'auto'
 

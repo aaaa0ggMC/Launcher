@@ -5,7 +5,8 @@ import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/lon
 import type { ToolCallItem } from '../types'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnText } from './turns'
-import { renderMarkdown, handleMarkdownClick } from './markdown'
+import { renderSegments, handleMarkdownClick } from './markdown'
+import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import BranchSwitcher from './BranchSwitcher.vue'
@@ -36,8 +37,9 @@ const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
 const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
-const answerHtml = computed(() =>
-  answer.value?.content ? renderMarkdown(answer.value.content, labels.value) : ''
+/** 回答切段：插件接管的代码块（```mermaid 等）渲染成组件，其余是 Markdown HTML */
+const answerSegments = computed(() =>
+  answer.value?.content ? renderSegments(answer.value.content, fenceLangs.value, labels.value) : []
 )
 
 /** 挂起等待确认的工具调用：固定显示在过程卡片外面，避免被折叠藏起来 */
@@ -151,8 +153,19 @@ async function copyTurn(): Promise<void> {
           @approve="(ok: boolean, reason?: string) => emit('approve', ok, reason)"
         />
 
-        <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
-        <div v-if="answerHtml" class="md-body" v-html="answerHtml" />
+        <template v-for="(seg, i) in answerSegments" :key="i">
+          <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+
+          <div v-if="seg.kind === 'html'" class="md-body" v-html="seg.html" />
+
+          <component
+            :is="fenceViewFor(seg.lang)"
+            v-else
+            :lang="seg.lang"
+            :source="seg.source"
+            :streaming="live && !seg.closed"
+          />
+        </template>
 
         <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
           <span /><span /><span />

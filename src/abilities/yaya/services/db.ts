@@ -240,7 +240,11 @@ export function deleteSession(id: string): void {
   deleteSessionAssets(id)
 }
 
-export function insertMessage(msg: MessageNode): void {
+/**
+ * 插入消息。缺省把会话的 activeLeaf 移到新节点；`moveLeaf: false` 用于「运行已被打断后才完成的结果」——
+ * 记下来但不抢走用户刚发的新分支。
+ */
+export function insertMessage(msg: MessageNode, opts: { moveLeaf?: boolean } = {}): void {
   const d = getYayaDb()
   d.prepare(
     `INSERT INTO messages (
@@ -266,7 +270,8 @@ export function insertMessage(msg: MessageNode): void {
   )
 
   // Update session active_leaf_id and updated_at
-  updateSession(msg.sessionId, { activeLeafId: msg.id, updatedAt: msg.createdAt })
+  if (opts.moveLeaf !== false)
+    updateSession(msg.sessionId, { activeLeafId: msg.id, updatedAt: msg.createdAt })
 }
 
 export function updateMessage(id: string, updates: Partial<MessageNode>): void {

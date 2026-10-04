@@ -4,6 +4,7 @@
   "private": true,
   "description": "YAYA (Yet Another Yes Agent) — 综合智能体交互中枢与无头执行引擎",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "katex": "^0.19.0",
     "openai": "^7.4.0"
   }

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { ToolCallItem } from '../types'
 import { summarizeArgs } from './turns'
 import { argFields, resultFields, type FieldView } from './tool-view'
 import { highlightCode } from './markdown'
+import { toolViewFor } from './plugin-ui-registry'
 
 const props = defineProps<{
   call: ToolCallItem
@@ -23,7 +24,34 @@ const { t } = useI18n(lang)
 const open = ref(false)
 const summary = computed(() => summarizeArgs(props.call))
 const args = computed(() => argFields(props.call.args))
-const results = computed(() => resultFields(props.call.result))
+/** 插件为这个工具注册了结果视图时，结果区交给它（参数区仍用默认视图） */
+const pluginView = computed(() => toolViewFor(props.call.name))
+const results = computed(() => (pluginView.value ? [] : resultFields(props.call.result)))
+
+// 工具产出的图片（会话资产）：默认视图显示缩略图，插件视图自己处理
+const imageUrls = ref<string[]>([])
+const imagesLoaded = ref(false)
+async function loadImages(): Promise<void> {
+  if (imagesLoaded.value || !props.call.images?.length) return
+  imagesLoaded.value = true
+  const urls: string[] = []
+  for (const uri of props.call.images) {
+    try {
+      const url = (await window.cockpit.command('yaya.asset-preview', { uri })) as string | null
+      if (url) urls.push(url)
+    } catch {
+      /* 读不到就跳过 */
+    }
+  }
+  imageUrls.value = urls
+}
+watch(
+  () => open.value && !pluginView.value,
+  (show) => {
+    if (show) void loadImages()
+  }
+)
+const zoomed = ref<string | null>(null)
 
 /** 代码 / JSON 字段的高亮 HTML（highlight.js 未加载时是转义纯文本） */
 function codeHtml(f: FieldView): string {
@@ -129,7 +157,38 @@ function onReasonKey(e: KeyboardEvent): void {
       </div>
     </template>
 
-    <div v-if="open && call.error && !results.length" class="tool-section">
+    <div v-if="open && pluginView" class="tool-section">
+      <div class="tool-label">{{ t('yaya.tool.result', '结果') }}</div>
+      <component
+        :is="pluginView.component"
+        :call="call"
+        :plugin-id="pluginView.pluginId"
+        :tool-name="pluginView.toolName"
+      />
+    </div>
+
+    <div v-if="open && !pluginView && imageUrls.length" class="tool-section tool-images">
+      <button
+        v-for="(url, i) in imageUrls"
+        :key="i"
+        type="button"
+        class="tool-image-btn"
+        :title="t('yaya.tool.zoom', '查看大图')"
+        :aria-label="t('yaya.tool.zoom', '查看大图')"
+        @click="zoomed = url"
+      >
+        <img :src="url" alt="" class="tool-image" />
+      </button>
+      <v-dialog
+        :model-value="zoomed !== null"
+        max-width="1200"
+        @update:model-value="(v: boolean) => !v && (zoomed = null)"
+      >
+        <img v-if="zoomed" :src="zoomed" alt="" class="tool-image-zoom" @click="zoomed = null" />
+      </v-dialog>
+    </div>
+
+    <div v-if="open && call.error && !results.length && !pluginView" class="tool-section">
       <div class="tool-label text-error">{{ t('yaya.tool.error', '错误') }}</div>
       <pre class="tool-pre text-error">{{ call.error }}</pre>
     </div>
@@ -362,5 +421,32 @@ function onReasonKey(e: KeyboardEvent): void {
     padding: 8px 10px;
     font-size: 0.78rem;
   }
+}
+.tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tool-image-btn {
+  padding: 0;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 8px;
+  overflow: hidden;
+  background: none;
+  cursor: zoom-in;
+}
+.tool-image {
+  display: block;
+  max-width: 240px;
+  max-height: 180px;
+  object-fit: contain;
+}
+.tool-image-zoom {
+  display: block;
+  max-width: 100%;
+  max-height: calc(var(--app-vh, 100dvh) - 64px);
+  margin: 0 auto;
+  border-radius: 8px;
+  cursor: zoom-out;
 }
 </style>

@@ -1,4 +1,6 @@
 import type { CommandSpec } from '../../main/process/commands/types'
+import { browserClientCount } from '../../main/process/browser-ui'
+import { t } from '../../main/process/i18n'
 import {
   snapshot,
   click,
@@ -71,9 +73,41 @@ const headlessGate = {
 }
 
 /**
+ * 无头（网页）宿主里浏览器桥**能实现**的 ui.* 命令（B5）：快照 / 跳页 / 点击（ref 或 CSS
+ * 坐标）/ 输入 / 按键 / 滚动 / 等待。其余（截图、自由鼠标、拖动、输入时间轴）依赖 Electron
+ * 的可信输入与截图，无头下保持不可用并说明原因——绝不假成功。
+ */
+const HEADLESS_BRIDGE_COMMANDS = new Set([
+  'ui.snapshot',
+  'ui.navigate',
+  'ui.click',
+  'ui.click-at',
+  'ui.type',
+  'ui.key',
+  'ui.scroll',
+  'ui.wait'
+])
+
+/** 有浏览器标签页在线才可用；否则说清缺什么（而不是假装能做）。 */
+function headlessBridgeGate(): Pick<CommandSpec, 'enabled' | 'unavailableReason'> {
+  return {
+    enabled: () => process.env.COCKPIT_HEADLESS !== '1' || browserClientCount() > 0,
+    unavailableReason: t(
+      'inspector.headless.no_client',
+      '无头（网页）宿主里需要已连接的浏览器标签页（YAYA 所在页面）才能操作界面'
+    )
+  }
+}
+
+function gateFor(name: string): Partial<CommandSpec> {
+  return HEADLESS_BRIDGE_COMMANDS.has(name) ? headlessBridgeGate() : headlessGate
+}
+
+/**
  * ui.* —— 像用户一样看和操作主窗口（CLI-first：CLI / 脚本 / AI 共用）。
  * 两种定位方式：快照里的 ref（语义化元素），或截图上的坐标（画布 / 游戏 / 任意位置）。
  * 隐私：快照 / 截图按 DOM 隐私标签脱敏；点击（含按坐标点击）落在隐私区前要许可，禁区拒绝。
+ * 无头（网页）宿主：前一组命令改走页面里的 DOM 桥（合成事件，坐标是 CSS 像素）。
  */
 const specs: CommandSpec[] = [
   {
@@ -240,4 +274,4 @@ const specs: CommandSpec[] = [
   }
 ]
 
-export default specs.map((s) => ({ ...s, ...headlessGate })) satisfies CommandSpec[]
+export default specs.map((s) => ({ ...s, ...gateFor(s.name) })) satisfies CommandSpec[]
