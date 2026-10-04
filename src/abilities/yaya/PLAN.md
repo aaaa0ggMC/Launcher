@@ -404,15 +404,20 @@
 
 ### 6.6 Android Controller 插件（安卓附加能力）
 
-分层：
+分层（**直接做成插件，不走 MCP**；全程进程内通信，无网络）：
 ```
 Android 层（Java / Kotlin）：能力提供者 —— 应用自身权限 / Shizuku（adb 级）/ Termux:API
-   │  实现为一个 MCP server，经 nodejs-mobile 进程内消息通道传输（不另造插件协议）
-Node 层：Android Controller 插件（复用 MCP 提供方：工具发现、动态工具表、开关 / 审批 / 状态 / 失败不重放）
+   │  经 nodejs-mobile 进程内消息通道的薄 RPC：
+   │    describe() → [{ name, description, schema, capability, scopes, deny, group }]
+   │    call(name, args) → 结果（文本 / 图片，走插件结果规范化）
+   │    状态事件 → 分组可用性（如 Shizuku 未运行、权限被收回）
+Node 层：Android Controller —— 普通 YayaPlugin
+   start() 调 describe()，把清单映射成 PluginTool：子分组、审批默认值、执行前 guard(scopes)，deny 的函数不提供
    └─ 子分组：自身权限 / Shizuku / Termux:API（各自状态、开关、配置）
 ```
-- **两种运行形态**：自有 App（nodejs-mobile，Java 桥通道）；纯 Termux（调不到 Java，退化为 `termux-*` 命令 + `rish`）。同一插件两个后端，按 `process.platform === 'android'` 与探测结果选用。
-- **安全**：Shizuku 等于 adb 权限，比桌面 Shell 更危险。每个 Java 函数必须声明能力（`exec` / `control`）与隐私 scope，Node 侧照常 guard + 审批；授予权限、改系统设置这类标 `agent: 'deny'`。走本机端口时要 token，进程内通道天然隔离。
+- **为什么不用 MCP**：MCP 也能走进程内通道，但它的工具定义表达不了能力等级（`exec` / `control`）、隐私 scope、`agent: 'deny'`、子分组这些一等元数据，只能塞自定义注解；直接做插件更轻（不需要 MCP SDK / 握手 / 会话），状态事件也能直接映射到子分组。这些能力只给 YAYA 用且必须受隐私 SDK 约束，MCP 的「通用客户端可用」用不上。
+- **两种运行形态**：自有 App（nodejs-mobile，Java 桥）；纯 Termux（调不到 Java，后端换成 `termux-*` 命令 + `rish`，插件接口不变）。按 `process.platform === 'android'` 与探测结果选用。
+- **安全**：Shizuku 等于 adb 权限，比桌面 Shell 更危险。每个 Java 函数必须声明能力与 scope，Node 侧照常 guard + 审批；授予权限、改系统设置这类标 `deny`（不提供给 AI，只能用户在界面上做）。Java 侧只接受来自内嵌 Node 的通道消息。
 - 依赖 6.4 的子分组与配置界面；先在 Termux 后端验证，再做自有 App。
 
 ### 6.3 其它候选
