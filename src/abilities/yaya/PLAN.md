@@ -390,6 +390,31 @@
   - 宿主统一执行：候选列表来自注册表（`listPluginInfo` 的插件 + 工具两级，按类型分组：插件 / MCP / Skill），提及解析、`session.meta.mentions` 覆盖、附注与内容的拼接位置（只进新消息，不动前缀）、启用后的工具表追加顺序（稳定、只追加）都在 runner / registry 里做一次。新来源（以后的其它 provider）只要实现 `mention` 或沿用默认就自动可被 `@`。
   - 命令：`yaya.mention-candidates [--query]`（候选，给输入框）与 `yaya.session-mentions --id [--remove]`（查看 / 撤销）。
 
+### 6.4 插件 SDK：插件自己的配置界面 + 子分组（以下几项共同需要）
+
+- **配置**：插件声明配置 schema（字段类型、默认值、`secret` 标记），缺省按 schema 自动生成表单；复杂的在 `plugins/<id>/ui.ts` 提供 `settingsView` 组件。值存 `pluginConfig[<插件 id>]`，`secret` 字段与 MCP 请求头同规则（加密落盘、页面只有 `xxxSet`、留空沿用、显式清除）。插件详情页加「配置」入口（窄屏一层层进入）。插件经 `ctx.config` 读取，配置变化触发 `refreshPlugins`。工具表 / instructions 不因配置变化而改变（如 GenericSearch 换引擎不改 `web_search` 的名字与描述）。
+- **子分组**：插件可声明分组（id / 名称 / 状态 / 自己的开关与配置），工具挂在分组下；分组不可用时（如 Shizuku 没运行）整组工具不提供并说明原因。MCP 以后也可以按服务器能力分组。
+
+### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）
+
+- 引擎：Tavily / Bing / Brave / SearXNG / Grok（xAI，带引用的回答引擎）/ Google CSE …，各自密钥与参数在插件配置里（`secret` 加密）。
+- 模式：指定单个引擎，或多引擎联合（并发，按 URL 去重合并，多引擎同时命中的排前，标注来源引擎；单个引擎失败不影响整体）。回答引擎归一成「摘要 + 引用列表」。
+- 对模型固定 `web_search(query, max_results?)`，引擎选择对模型不可见，工具定义稳定。
+- 网络走主进程 `net.fetch`（系统代理）；AIDJ 现有的 Tavily `web_search`（`aidj/agent/web-search.ts`）抽成共用模块，两边复用。
+
+### 6.6 Android Controller 插件（安卓附加能力）
+
+分层：
+```
+Android 层（Java / Kotlin）：能力提供者 —— 应用自身权限 / Shizuku（adb 级）/ Termux:API
+   │  实现为一个 MCP server，经 nodejs-mobile 进程内消息通道传输（不另造插件协议）
+Node 层：Android Controller 插件（复用 MCP 提供方：工具发现、动态工具表、开关 / 审批 / 状态 / 失败不重放）
+   └─ 子分组：自身权限 / Shizuku / Termux:API（各自状态、开关、配置）
+```
+- **两种运行形态**：自有 App（nodejs-mobile，Java 桥通道）；纯 Termux（调不到 Java，退化为 `termux-*` 命令 + `rish`）。同一插件两个后端，按 `process.platform === 'android'` 与探测结果选用。
+- **安全**：Shizuku 等于 adb 权限，比桌面 Shell 更危险。每个 Java 函数必须声明能力（`exec` / `control`）与隐私 scope，Node 侧照常 guard + 审批；授予权限、改系统设置这类标 `agent: 'deny'`。走本机端口时要 token，进程内通道天然隔离。
+- 依赖 6.4 的子分组与配置界面；先在 Termux 后端验证，再做自有 App。
+
 ### 6.3 其它候选
 - 第一个能力悬浮窗（如 AIDJ 迷你播放器），验证 Outsider SDK 的能力注入与设置页权限。
 - 显示类插件做完后，再看工具结果视图（toolViews）：如 Cockpit 截图对比、快照差异高亮。
