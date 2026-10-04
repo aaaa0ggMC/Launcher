@@ -46,11 +46,14 @@ const MIME: Record<string, string> = {
 }
 
 const clients = new Set<ServerResponse>()
+/** 浏览器 UI 桥 clientId → 当前持有它的 SSE 连接（重连时新连接顶替旧连接） */
+const bridgeOwners = new Map<string, ServerResponse>()
 
 /** 浏览器 UI 桥 clientId（web-shim 每标签页随机生成；UI 请求按它定向发送） */
 const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** 界面结果回传的体积上限（快照文本可能很大，但不该无限） */
-const MAX_UI_REPLY_BYTES = 512 * 1024
+/** 页面回传上限：截图（base64 JPEG）可能有几 MB */
+const MAX_UI_REPLY_BYTES = 16 * 1024 * 1024
 
 /** 网页端「从此设备选择」上传到宿主的位置（文件选择器把这里的路径当作选择结果返回） */
 export const UPLOAD_DIR = join(USER_CONFIG_DIR, 'uploads')
@@ -257,15 +260,24 @@ export function startServer(opts: {
           if (res.writableEnded || res.destroyed) return
           res.write(`data: ${JSON.stringify({ channel, args })}\n\n`)
         }
-        if (!registerBrowserClient(bridgeId, send)) {
-          return json(res, 409, { ok: false, error: 'clientId already connected' })
+        // EventSource 断线后会用同一个 clientId 自动重连，此时旧连接的 close 可能还没触发：
+        // 新连接顶替旧连接（同 token 才能走到这里），绝不能回 409——浏览器收到非 200 会永久放弃重连
+        const old = bridgeOwners.get(bridgeId)
+        registerBrowserClient(bridgeId, send, { replace: true })
+        bridgeOwners.set(bridgeId, res)
+        if (old && old !== res) {
+          clients.delete(old)
+          old.end()
         }
       }
       res.writeHead(200, {
         'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        connection: 'keep-alive'
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        // 经反向代理（nginx 等）访问时不要缓冲事件流
+        'x-accel-buffering': 'no'
       })
+      req.socket.setNoDelay(true)
       res.write(': ok\n\n')
       clients.add(res)
       // 新连上的页面补发待处理的授权请求（含一次性 nonce，只走 SSE）
@@ -274,11 +286,17 @@ export function startServer(opts: {
         res.write(
           `data: ${JSON.stringify({ channel: CONSENT_CHANNEL, args: [pendingConsent] })}\n\n`
         )
-      const ping = setInterval(() => res.write(': ping\n\n'), 25000)
+      // 具名 ping 事件（注释行 EventSource 读不到）：页面靠它判断连接是否还活着——
+      // 手机切后台 / 换网络后 TCP 可能半开，readyState 仍是 OPEN 却再也收不到东西
+      const ping = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15000)
       req.on('close', () => {
         clearInterval(ping)
         clients.delete(res)
-        if (bridgeId) unregisterBrowserClient(bridgeId)
+        // 已被新连接顶替的旧连接关闭时，不能注销新连接
+        if (bridgeId && bridgeOwners.get(bridgeId) === res) {
+          bridgeOwners.delete(bridgeId)
+          unregisterBrowserClient(bridgeId)
+        }
       })
       return
     }

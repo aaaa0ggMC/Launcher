@@ -59,7 +59,7 @@ test('网页宿主：鉴权 + SSE 广播载荷里的 cockpit-*:// 会改写成 /
   assert.equal(frame.args[0].n, 1)
 })
 
-test('SSE client identity cannot replace a connected page; UI replies require auth and correlation', async () => {
+test('SSE reconnect with the same clientId takes over; UI replies require auth and correlation', async () => {
   const { startServer } = await import('./server')
   const bridge = await import('../main/process/browser-ui')
   const port = await freePort()
@@ -74,11 +74,20 @@ test('SSE client identity cannot replace a connected page; UI replies require au
     })
     assert.equal(res.status, 200)
     assert.equal(bridge.hasBrowserClient(clientId), true)
-    assert.equal(
-      (await fetch(`${base}/api/events?token=${token}&clientId=${clientId}`)).status,
-      409
-    )
+    // EventSource 自动重连用同一个 clientId：必须 200 并顶替旧连接（409 会让浏览器永久放弃重连）
+    const ctl2 = new AbortController()
+    const res2 = await fetch(`${base}/api/events?token=${token}&clientId=${clientId}`, {
+      signal: ctl2.signal
+    })
+    assert.equal(res2.status, 200)
     assert.equal(bridge.hasBrowserClient(clientId), true)
+    // 旧连接随后关闭，不能把新连接注销掉
+    ctl.abort()
+    await new Promise((r) => setTimeout(r, 50))
+    assert.equal(bridge.hasBrowserClient(clientId), true)
+    ctl2.abort()
+    await new Promise((r) => setTimeout(r, 50))
+    assert.equal(bridge.hasBrowserClient(clientId), false)
     assert.equal((await fetch(`${base}/api/ui-result`, { method: 'POST', body: '{}' })).status, 401)
     assert.equal(
       (

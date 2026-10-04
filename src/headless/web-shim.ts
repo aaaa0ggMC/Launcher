@@ -80,7 +80,71 @@ const clearAgentAttribution = (event: Event): void => {
 window.addEventListener('pointerdown', clearAgentAttribution, { capture: true })
 window.addEventListener('keydown', clearAgentAttribution, { capture: true })
 
-const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}`)
+/**
+ * SSE 连接（宿主 → 页面的全部推送：流式 token、播放器指令、配置变化…）。
+ * 断线必须自己兜底：
+ * - 服务器回非 200 / 网络错误后 EventSource 可能进入 CLOSED，**不会再自动重连**；
+ * - 手机切后台 / 换网络后 TCP 可能半开：readyState 仍是 OPEN，但再也收不到任何东西。
+ * 所以：CLOSED 时按退避重连；宿主每 15s 发一次具名 ping，45s 没收到任何帧就主动重建连接；
+ * 页面回到前台时立即检查。重连成功后本地派发 `cockpit:host-reconnected`，
+ * 各页面据此重新拉取状态（断线期间错过的推送不会补发）。
+ */
+const SSE_STALE_MS = 45_000
+let es: EventSource | null = null
+let lastFrameAt = Date.now()
+let everOpened = false
+let lostSince = 0
+let retryDelay = 1000
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+function openEvents(): void {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  es?.close()
+  const source = new EventSource(
+    `/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}`
+  )
+  es = source
+  lastFrameAt = Date.now()
+  source.onopen = () => {
+    lastFrameAt = Date.now()
+    retryDelay = 1000
+    if (everOpened && lostSince) {
+      console.warn(`[web-shim] event stream reconnected after ${Date.now() - lostSince} ms`)
+      emit('cockpit:host-reconnected', { downMs: Date.now() - lostSince })
+    }
+    everOpened = true
+    lostSince = 0
+  }
+  source.onerror = () => {
+    if (!lostSince) lostSince = Date.now()
+    // CONNECTING = 浏览器自己在重连；CLOSED = 它放弃了，由我们接手
+    if (source.readyState === EventSource.CLOSED) scheduleReconnect()
+  }
+  source.addEventListener('ping', () => {
+    lastFrameAt = Date.now()
+  })
+  source.onmessage = onEventFrame
+}
+
+function scheduleReconnect(): void {
+  if (retryTimer) return
+  retryTimer = setTimeout(openEvents, retryDelay)
+  retryDelay = Math.min(retryDelay * 2, 15_000)
+}
+
+function checkStale(): void {
+  if (Date.now() - lastFrameAt < SSE_STALE_MS) return
+  if (!lostSince) lostSince = lastFrameAt
+  openEvents()
+}
+setInterval(checkStale, 5000)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkStale()
+})
+window.addEventListener('online', () => {
+  if (es?.readyState !== EventSource.OPEN) openEvents()
+})
 /**
  * 隐私授权（网页版）：宿主随每个待处理请求下发一次性 nonce（只走 SSE）。nonce 留在这里，
  * 页面组件拿到的列表不含它；提交决定时由这里附上（见 src/headless/consent.ts）。
@@ -97,7 +161,8 @@ function onConsentFrame(raw: unknown): Record<string, unknown>[] {
   return consentList
 }
 
-es.onmessage = (ev) => {
+function onEventFrame(ev: MessageEvent): void {
+  lastFrameAt = Date.now()
   try {
     const { channel, args } = JSON.parse(ev.data) as { channel: string; args: unknown[] }
     if (channel === 'privacy:pending') {
@@ -109,6 +174,7 @@ es.onmessage = (ev) => {
     /* 忽略坏帧 */
   }
 }
+openEvents()
 
 const info = await api<{ platform: string }>('/api/info').catch(() => ({ platform: 'linux' }))
 
@@ -129,6 +195,7 @@ const NOP_RESULT: Record<string, unknown> = {
   'window:control': false,
   'window:wallpaper': null,
   'dialog:pick-file': null,
+  'dialog:pick-files': [],
   'dialog:save-file': null,
   'shortcut:sync-global': {},
   'screenshot:capture': null,
@@ -177,13 +244,19 @@ const cockpit = createCockpit({
         return r.count ?? 0
       }
       case 'dialog:pick-file':
+      case 'dialog:pick-files':
       case 'dialog:save-file':
         // 浏览器拿不到宿主机路径：交给 HostFilePicker.vue 浏览宿主文件系统
         return new Promise((resolve) =>
           window.dispatchEvent(
             new CustomEvent('cockpit:host-pick', {
               detail: {
-                mode: channel === 'dialog:save-file' ? 'save' : 'open',
+                mode:
+                  channel === 'dialog:save-file'
+                    ? 'save'
+                    : channel === 'dialog:pick-files'
+                      ? 'open-multi'
+                      : 'open',
                 opts: args[0],
                 resolve
               }

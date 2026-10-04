@@ -123,6 +123,18 @@ class WebPlayerEngine {
     // subscription is never torn down (unsubscribe reference intentionally
     // dropped; the instance outlives every page switch).
     window.cockpit?.on('cockpit:aidj-webplayer', (ev) => this.handleCommand(ev as EngineCommand))
+    // 网页版事件流断线重连后，把当前状态重新报给宿主（断线期间的状态上报可能丢了）
+    window.cockpit?.on('cockpit:host-reconnected', () => this.report())
+    // 手机浏览器切后台 / 锁屏后 AudioContext 会被挂起（或进入 interrupted），而 resume() 在没有
+    // 用户手势时可能永远不 resolve——播放指令经宿主绕一圈回来时已经不在手势里了。
+    // 所以在页面上的任何一次真实点按里顺手把它唤醒。
+    const unlock = (ev: Event): void => {
+      if (!ev.isTrusted) return
+      const ctx = this.ctx
+      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => {})
+    }
+    document.addEventListener('pointerdown', unlock, { capture: true })
+    document.addEventListener('keydown', unlock, { capture: true })
   }
 
   // -------------------------------------------------------------------------
@@ -438,10 +450,12 @@ class WebPlayerEngine {
     // a while (long pause / no output). Playback through the graph is silent
     // until the context is running again — so await the resume BEFORE play().
     const ctx = this.ctx
-    if (ctx && ctx.state === 'suspended') {
+    if (ctx && ctx.state !== 'running') {
       try {
-        dbg('resume(): ctx suspended → awaiting resume()')
-        await ctx.resume()
+        dbg('resume(): ctx', ctx.state, '→ awaiting resume()')
+        // 没有用户手势时 resume() 可能一直挂起：最多等 1.5s，之后照样 play()，
+        // 否则播放器会永远卡在「点了播放没反应」（下一次真实点按会再唤醒 ctx）
+        await Promise.race([ctx.resume(), this.wait(1500)])
         dbg('resume(): ctx.resume() done, state=', ctx.state)
       } catch (e) {
         dbg('resume(): ctx.resume() REJECTED', String(e), 'state=', ctx.state)
@@ -714,7 +728,7 @@ class WebPlayerEngine {
       this._lastCtxState = prev
       dbg('ctx.state →', prev, '(playing=', this.status === 'Playing', ')')
     }
-    if (prev === 'suspended' && this.status === 'Playing') {
+    if (prev !== 'running' && prev !== 'closed' && this.status === 'Playing') {
       dbg('ctx suspended while Playing — auto-resuming')
       void ctx.resume().then(
         () => dbg('watchdog resume() resolved, state=', ctx.state),

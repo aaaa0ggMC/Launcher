@@ -36,8 +36,18 @@ export type BrowserUiSender = (channel: string, args: unknown[]) => void
 const clients = new Map<string, BrowserUiSender>()
 
 /** 注册一个浏览器客户端；同一 id 已存在（重复连接）时拒绝，不顶掉另一个标签页。 */
-export function registerBrowserClient(clientId: string, send: BrowserUiSender): boolean {
-  if (clients.has(clientId)) return false
+export function registerBrowserClient(
+  clientId: string,
+  send: BrowserUiSender,
+  opts: { replace?: boolean } = {}
+): boolean {
+  if (clients.has(clientId)) {
+    if (!opts.replace) return false
+    // 同一标签页断线重连（旧连接的 close 可能还没触发）：换成新通道，进行中的请求不失败
+    clients.set(clientId, send)
+    log.info('browser client reconnected', { clientId })
+    return true
+  }
   clients.set(clientId, send)
   log.info('browser client connected', { clientId })
   return true
