@@ -516,6 +516,7 @@ describe('AIDJ loop — prompt files & playbooks', () => {
       'artist_pick',
       'chat',
       'open_request',
+      'personal',
       'radio_flow',
       'seed_start'
     ])
@@ -537,6 +538,7 @@ describe('AIDJ loop — prompt files & playbooks', () => {
       'artist_pick',
       'chat',
       'open_request',
+      'personal',
       'seed_start',
       'sleep'
     ])

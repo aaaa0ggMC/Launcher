@@ -13,8 +13,11 @@ Choose the playbook that fits the request and call use_playbook(id) to get its s
   Language "unknown" means the tag is missing, not a language: language filters can never remove those tracks (the code keeps them), so expect them to remain in the pool.
 - dream_from_seeds — DreamAgent: imagines outward from seed tracks and picks inside the pool.
 - ask_library_agent — LibAgent: picks the best fits for a brief from a scope (pool / all / explicit ids / filters).
-- similar_to / search_library / recent_history — finer tools.
+- similar_to / search_library — finer tools.
+- session_memory — the tracks THIS DJ session already played or queued (its no-repeat memory). It is not what the user really listened to.
 - random_pick — random tracks from the current pool (optionally filtered, artist-capped, queue=true to stage them): serendipity or a quick filler once the pool is right.{optionalTools}
+- current_time — the user's local date, weekday and part of day (late night, evening…). Use it when the moment matters ("适合现在的", "深夜") instead of guessing.
+- recent_listens / listening_habits / play_frequency — the user's REAL listening data across sessions: what they listened to lately, their rhythm by hour of day, play counts (favourites, rarely played, never played). Optional: use them silently to personalise or to bring something new; a specific request always comes first, and never recite their history back unless they ask.
 - no_music — the user does not want music right now (wants to talk, asks a question, says no / stop): call it first, queue nothing, answer them directly.
 - queue_tracks — add tracks by ID; pin_first=true for track(s) the batch must START with. unqueue_tracks removes.
 

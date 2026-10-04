@@ -443,7 +443,6 @@
   "aidj.wf.tool.filter_library": "Tag filter",
   "aidj.wf.tool.search_library": "Library search",
   "aidj.wf.tool.similar_to": "Similar tracks",
-  "aidj.wf.tool.recent_history": "Recent plays",
   "aidj.wf.tool.queue_tracks": "Queue candidates",
   "aidj.wf.tool.unqueue_tracks": "Unqueue",
   "aidj.wf.tool.ask_library_agent": "LibAgent pick",
@@ -769,5 +768,15 @@
   "aidj.status.desc_memory": "Played-song memory the AI uses to avoid repeats",
   "aidj.status.desc_volbal": "Loudness balance: adjusts volume per track loudness",
   "aidj.status.desc_freq": "Record how often each song is played",
-  "aidj.status.desc_listen": "Track listening time"
+  "aidj.status.desc_listen": "Track listening time",
+  "aidj.wf.tool.session_memory": "Session memory",
+  "aidj.wf.tool.current_time": "Current time",
+  "aidj.wf.tool.recent_listens": "Recent listens",
+  "aidj.wf.tool.listening_habits": "Listening habits",
+  "aidj.wf.tool.play_frequency": "Play frequency",
+  "aidj.wf.sum.time": "{local} · {part}",
+  "aidj.wf.sum.listens": "Last {n} plays",
+  "aidj.wf.sum.habits": "Last {days} days · {plays} plays",
+  "aidj.wf.sum.freq": "{order} · {n} tracks",
+  "aidj.wf.sum.freqLookup": "Look up {n} tracks"
 }

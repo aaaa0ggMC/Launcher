@@ -8,6 +8,7 @@ import type OpenAI from 'openai'
 import { activeDjTools, toOpenAiTools, type DjToolContext } from './tools'
 import { addUsage, emptyUsage, readUsage, type UsageBreakdown, type UsageTotals } from '../usage'
 import './builtin-tools'
+import './listening-tools'
 import './web-search'
 
 type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam

@@ -23,6 +23,7 @@ import { activeDjTools } from '../loop/agent/tools'
 import { resolvePlaybooks } from '../loop/agent/playbooks'
 import { AGENT_ROLES, agentModel } from '../loop/models'
 import '../loop/agent/builtin-tools'
+import '../loop/agent/listening-tools'
 import '../loop/agent/web-search'
 
 export const chatContinuousCommands: CommandSpec[] = [

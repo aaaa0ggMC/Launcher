@@ -58,7 +58,7 @@ function anyMatch(tags: string[], queries: string[]): boolean {
   return queries.some((q) => tags.some((t) => tagMatch(t, q)))
 }
 
-function brief(ctx: DjToolContext, name: string): Record<string, unknown> {
+export function brief(ctx: DjToolContext, name: string): Record<string, unknown> {
   const m = ctx.metadata.get(name)
   return {
     id: ctx.ids.idOf(name),
@@ -115,7 +115,7 @@ function diverse(keys: string[], perArtist: number, limit: number): string[] {
   return spreadArtists(out, (k) => k, 2)
 }
 
-function clampInt(v: unknown, def: number, min: number, max: number): number {
+export function clampInt(v: unknown, def: number, min: number, max: number): number {
   const n = Number(v)
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : def
 }
@@ -538,8 +538,10 @@ registerDjTool({
 })
 
 registerDjTool({
-  name: 'recent_history',
-  description: 'Recently played / queued tracks (oldest first) with their tags.',
+  name: 'session_memory',
+  description:
+    'Tracks THIS DJ session already played or queued (oldest first, with tags) — the no-repeat memory. ' +
+    "It is NOT the user's real listening history: use recent_listens for what they actually listened to.",
   parameters: {
     type: 'object',
     properties: { n: { type: 'integer', description: 'How many (default 15, max 100)' } }

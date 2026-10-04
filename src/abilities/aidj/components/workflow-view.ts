@@ -74,7 +74,11 @@ const LABELS: Record<string, string> = {
   filter_library: '标签过滤',
   search_library: '曲库检索',
   similar_to: '相似检索',
-  recent_history: '最近播放',
+  session_memory: '会话记忆',
+  current_time: '当前时间',
+  recent_listens: '最近听的歌',
+  listening_habits: '听歌节律',
+  play_frequency: '播放频次',
   queue_tracks: '加入候选',
   unqueue_tracks: '移出候选',
   ask_library_agent: 'LibAgent 选歌',
@@ -164,8 +168,27 @@ export function summarize(
       return t('searchLib', '{n} 首', { n })
     case 'similar_to':
       return t('similar', '{n} 首', { n })
-    case 'recent_history':
+    case 'session_memory':
       return t('recent', '{n} 首', { n })
+    case 'current_time':
+      return t('time', '{local} · {part}', {
+        local: String(stats?.local ?? '—'),
+        part: String(stats?.part_of_day ?? '—')
+      })
+    case 'recent_listens':
+      return t('listens', '最近 {n} 首', { n: num(stats, 'count') ?? 0 })
+    case 'listening_habits':
+      return t('habits', '近 {days} 天 · {plays} 次播放', {
+        days: num(stats, 'days') ?? '?',
+        plays: num(stats, 'plays') ?? 0
+      })
+    case 'play_frequency':
+      return args.ids
+        ? t('freqLookup', '查询 {n} 首', { n: num(stats, 'count') ?? 0 })
+        : t('freq', '{order} · {n} 首', {
+            order: String(stats?.order ?? args.order ?? 'most'),
+            n: num(stats, 'count') ?? 0
+          })
     case 'queue_tracks':
       return t(args.pin_first === true ? 'queuePin' : 'queue', '+{a} · 拒绝 {r} · 共 {total}', {
         a: num(stats, 'accepted') ?? 0,

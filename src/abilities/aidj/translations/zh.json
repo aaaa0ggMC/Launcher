@@ -443,7 +443,6 @@
   "aidj.wf.tool.filter_library": "标签过滤",
   "aidj.wf.tool.search_library": "曲库检索",
   "aidj.wf.tool.similar_to": "相似检索",
-  "aidj.wf.tool.recent_history": "最近播放",
   "aidj.wf.tool.queue_tracks": "加入候选",
   "aidj.wf.tool.unqueue_tracks": "移出候选",
   "aidj.wf.tool.ask_library_agent": "LibAgent 选歌",
@@ -769,5 +768,15 @@
   "aidj.status.desc_memory": "已播放歌曲的记忆条数；AI 会据此避开重复",
   "aidj.status.desc_volbal": "响度平衡：按曲目响度动态调整音量",
   "aidj.status.desc_freq": "记录每首歌的播放次数",
-  "aidj.status.desc_listen": "统计听歌时长"
+  "aidj.status.desc_listen": "统计听歌时长",
+  "aidj.wf.tool.session_memory": "会话记忆",
+  "aidj.wf.tool.current_time": "当前时间",
+  "aidj.wf.tool.recent_listens": "最近听的歌",
+  "aidj.wf.tool.listening_habits": "听歌节律",
+  "aidj.wf.tool.play_frequency": "播放频次",
+  "aidj.wf.sum.time": "{local} · {part}",
+  "aidj.wf.sum.listens": "最近 {n} 首",
+  "aidj.wf.sum.habits": "近 {days} 天 · {plays} 次播放",
+  "aidj.wf.sum.freq": "{order} · {n} 首",
+  "aidj.wf.sum.freqLookup": "查询 {n} 首"
 }
