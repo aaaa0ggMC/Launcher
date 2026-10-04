@@ -1427,4 +1427,30 @@ defineExpose({ toMarkdown })
 .lyrics-mv-play-fab {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
+
+/* 窄屏（≤720px）：封面 + 标题一行，控制区（播放器下拉 + 上一首 / 播放 / 下一首）单独占满一行，
+   否则标题只剩一列宽、被挤成竖排字。桌面不变。 */
+@media (max-width: 720px) {
+  .lyrics-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .lyrics-cover {
+    width: 64px;
+    height: 64px;
+  }
+  .lyrics-controls {
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .lyrics-player-select {
+    flex: 1 1 140px;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+  }
+}
 </style>

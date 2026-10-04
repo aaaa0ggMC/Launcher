@@ -145,7 +145,15 @@ function serveStatic(webRoot: string, pathname: string, res: ServerResponse): vo
   let file = resolve(webRoot, rel || 'index.html')
   if (!file.startsWith(webRoot)) return json(res, 403, { error: 'forbidden' })
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(webRoot, 'index.html')
-  res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' })
+  res.writeHead(200, {
+    'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    // 跨源隔离（self.crossOriginIsolated）：掌机的 mGBA wasm 用 SharedArrayBuffer，没有它会
+    // DataCloneError。Electron 里靠启动开关，网页里只能靠这两个头。COEP 用 credentialless 而不是
+    // require-corp：后者会挡掉没带 CORP 头的跨源图片 / 媒体。（注意 crossOriginIsolated 还要求安全上下文：
+    // https 或 localhost——手机本机 127.0.0.1 访问可以，经局域网 IP 的 http 访问则不行。）
+    'cross-origin-opener-policy': 'same-origin',
+    'cross-origin-embedder-policy': 'credentialless'
+  })
   createReadStream(file).pipe(res)
 }
 
