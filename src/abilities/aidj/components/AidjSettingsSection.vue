@@ -146,6 +146,49 @@ const modelsError = ref(false)
 const libraryInjects = ref<Record<string, boolean>>({})
 const persona = ref(DEFAULT_PERSONA)
 const loopCfg = ref<LoopPolicy>({ ...DEFAULT_LOOP_POLICY })
+
+// ---- AI 循环 · 工具：哪些工具对 AI 可见（默认全部启用；写在 preferences.loop.disabled_tools） ----
+interface LoopToolInfo {
+  name: string
+  group: 'library' | 'pick' | 'context' | 'other'
+  /** 核心工具（没有它循环就没法入队）：锁定为开 */
+  core: boolean
+  /** 被哪个开关挡住：song_timeline / record_freq / web_search / library_agent */
+  requires: string | null
+  /** false = 被上面的开关 / 缺 key 挡住（与用户是否禁用无关） */
+  available: boolean
+}
+const loopTools = ref<LoopToolInfo[]>([])
+const TOOL_GROUP_ORDER = ['library', 'pick', 'context', 'other'] as const
+const toolGroups = computed(() =>
+  TOOL_GROUP_ORDER.map((id) => ({
+    id,
+    tools: loopTools.value.filter((x) => x.group === id)
+  })).filter((g) => g.tools.length > 0)
+)
+const disabledToolCount = computed(
+  () =>
+    loopCfg.value.disabled_tools.filter((n) => loopTools.value.some((x) => x.name === n && !x.core))
+      .length
+)
+
+async function refreshLoopTools(): Promise<void> {
+  const r = (await window.cockpit.command('aidj.loop-tools').catch(() => null)) as {
+    ok?: boolean
+    tools?: LoopToolInfo[]
+  } | null
+  if (r?.ok && r.tools) loopTools.value = r.tools
+}
+const toolOn = (name: string): boolean => !loopCfg.value.disabled_tools.includes(name)
+function setToolOn(name: string, on: boolean): void {
+  const set = new Set(loopCfg.value.disabled_tools)
+  if (on) set.delete(name)
+  else set.add(name)
+  loopCfg.value = { ...loopCfg.value, disabled_tools: [...set].sort() }
+}
+function enableAllTools(): void {
+  loopCfg.value = { ...loopCfg.value, disabled_tools: [] }
+}
 const webSearch = ref<{ enabled: boolean; max_results: number; depth: 'basic' | 'advanced' }>({
   enabled: false,
   max_results: 5,
@@ -164,6 +207,7 @@ const statusBar = ref<Record<string, number>>({
 })
 
 onMounted(async () => {
+  void refreshLoopTools()
   const r = (await window.cockpit.command('aidj.get-config')) as Record<string, unknown>
   if (!r?.ok || !r.config) return
   const cfg = r.config as Record<string, unknown>
@@ -402,6 +446,11 @@ watch(volumeCurve, (v) => update('preferences.volume_curve', v))
 watch(recordFreq, (v) => update('preferences.record_freq', v))
 watch(listeningStats, (v) => update('preferences.listening_stats', v))
 watch(songTimeline, (v) => update('preferences.song_timeline', v))
+// 工具的「可用」取决于这些开关 / key：改了之后稍等配置落盘再刷新清单
+watch(
+  [recordFreq, songTimeline, () => webSearch.value.enabled, () => loopCfg.value.library_agent],
+  () => setTimeout(() => void refreshLoopTools(), 700)
+)
 watch(metadataConcurrency, (v) => update('preferences.metadata_concurrency', v))
 watch(audioOnly, (v) => update('preferences.audio_only', v))
 
@@ -1893,6 +1942,87 @@ defineExpose({
 
       <v-divider />
 
+      <!-- AI 循环 · 工具：默认全部启用；关掉的工具 AI 看不到也用不了（下一批生效） -->
+      <div>
+        <div class="d-flex align-center flex-wrap ga-2 mb-1">
+          <div class="text-subtitle-2">{{ t('aidj.settings.loop_tools', 'AI 可用的工具') }}</div>
+          <v-chip
+            v-if="disabledToolCount > 0"
+            size="small"
+            variant="tonal"
+            color="warning"
+            class="tool-chip"
+          >
+            {{
+              t('aidj.settings.loop_tools_off', '{n} 个已关闭').replace(
+                '{n}',
+                String(disabledToolCount)
+              )
+            }}
+          </v-chip>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-restore"
+            :disabled="disabledToolCount === 0"
+            @click="enableAllTools"
+          >
+            {{ t('aidj.settings.loop_tools_enable_all', '全部启用') }}
+          </v-btn>
+        </div>
+        <div class="text-caption text-medium-emphasis mb-3">
+          {{
+            t(
+              'aidj.settings.loop_tools_hint',
+              '默认全部启用。关掉某个工具，AI 就看不到、也用不了它（下一批生效）。「加入候选」是核心工具，不能关。涉及你听歌记录的工具（最近听的歌 / 听歌节律 / 播放频次）会把记录发给你的 LLM 服务商。'
+            )
+          }}
+        </div>
+        <v-expansion-panels variant="accordion" class="loop-tools">
+          <v-expansion-panel v-for="g in toolGroups" :key="g.id">
+            <v-expansion-panel-title>
+              <span>{{ t(`aidj.settings.loop_tools_group_${g.id}`, g.id) }}</span>
+              <v-chip size="small" variant="tonal" class="ml-3 tool-chip">
+                {{ g.tools.filter((x) => x.core || toolOn(x.name)).length }}/{{ g.tools.length }}
+              </v-chip>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <div v-for="tool in g.tools" :key="tool.name" class="tool-row">
+                <div class="tool-main">
+                  <div class="tool-title">
+                    <span class="tool-label">{{ t(`aidj.wf.tool.${tool.name}`, tool.name) }}</span>
+                    <code class="tool-code">{{ tool.name }}</code>
+                    <v-chip v-if="tool.core" size="small" variant="tonal" class="tool-chip">
+                      {{ t('aidj.settings.loop_tools_core', '核心') }}
+                    </v-chip>
+                  </div>
+                  <div class="tool-desc">
+                    {{ t(`aidj.settings.loop_tool.${tool.name}`, '') }}
+                  </div>
+                  <div v-if="!tool.available && tool.requires" class="tool-warn">
+                    <v-icon size="14">mdi-information-outline</v-icon>
+                    {{ t(`aidj.settings.loop_tools_req_${tool.requires}`, tool.requires) }}
+                  </div>
+                </div>
+                <v-switch
+                  class="tool-switch"
+                  :model-value="tool.core || toolOn(tool.name)"
+                  :disabled="tool.core"
+                  :aria-label="t(`aidj.wf.tool.${tool.name}`, tool.name)"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  inset
+                  @update:model-value="(v) => setToolOn(tool.name, !!v)"
+                />
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+      </div>
+
+      <v-divider />
+
       <div>
         <div class="text-subtitle-2 mb-1">
           {{ t('aidj.settings.web_search', '联网搜索（Tavily）') }}
@@ -2548,6 +2678,54 @@ defineExpose({
 </template>
 
 <style scoped>
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+.tool-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 固定宽度，各行开关对齐（否则随说明文字宽度左右参差） */
+.tool-switch {
+  flex: 0 0 64px;
+  justify-content: flex-end;
+}
+.tool-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tool-label {
+  font-weight: 600;
+}
+.tool-code {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+.tool-desc {
+  font-size: 0.8125rem;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+.tool-warn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: rgb(var(--v-theme-warning));
+}
+.tool-chip {
+  padding-block: 4px;
+  min-height: 24px;
+}
 /* Both columns are fixed to the same height so the persona textarea and the
    rules list align. The rules list scrolls internally when it overflows. */
 .persona-input {

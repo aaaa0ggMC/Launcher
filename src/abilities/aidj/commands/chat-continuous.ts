@@ -19,7 +19,7 @@ import {
 import { state, DBUS_ONLY } from './shared'
 import { resolveLoopPolicy } from '../loop/policy'
 import { resolveLoopPrompts } from '../loop/prompts'
-import { activeDjTools } from '../loop/agent/tools'
+import { activeDjTools, allDjTools, toolGroup } from '../loop/agent/tools'
 import { resolvePlaybooks } from '../loop/agent/playbooks'
 import { AGENT_ROLES, agentModel } from '../loop/models'
 import '../loop/agent/builtin-tools'
@@ -110,6 +110,32 @@ export const chatContinuousCommands: CommandSpec[] = [
         return { ok: false, error: '--songs 不是合法 JSON' }
       }
       return await chatResendPlaylist(taskId, songs as { name: string; path: string }[])
+    }
+  },
+  {
+    name: 'aidj.loop-tools',
+    description:
+      'AI 循环（Agent）的全部工具及状态：分组、是否核心（不可禁用）、被哪个开关挡住（requires / available）、用户是否禁用。设置页「AI 循环 · 工具」用它；禁用写在 preferences.loop.disabled_tools。',
+    usage: 'aidj.loop-tools',
+    ui: ['AIDJ 设置 · AI 循环 · 工具'],
+    related: ['aidj.loop-preview', 'aidj.update-config'],
+    run: async () => {
+      const config = await loadAidjConfig()
+      if (!config) return { ok: false, error: 'AIDJ 配置未找到' }
+      const policy = resolveLoopPolicy(config)
+      const off = new Set(policy.disabled_tools)
+      return {
+        ok: true,
+        tools: allDjTools().map((t) => ({
+          name: t.name,
+          group: toolGroup(t.name),
+          core: !!t.core,
+          requires: t.requires ?? null,
+          /** false = 被记录开关 / 缺 key 等挡住（与用户是否禁用无关） */
+          available: t.enabled?.(policy, config) ?? true,
+          disabled: !t.core && off.has(t.name)
+        }))
+      }
     }
   },
   {

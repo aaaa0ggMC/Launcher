@@ -94,6 +94,7 @@ registerDjTool({
     }
   },
   enabled: timelineOn,
+  requires: 'song_timeline',
   run: async (args, ctx) => {
     const nowSec = Math.floor(listeningSources.nowMs() / 1000)
     const n = clampInt(args.n, 20, 1, 100)
@@ -134,6 +135,7 @@ registerDjTool({
     }
   },
   enabled: timelineOn,
+  requires: 'song_timeline',
   run: async (args, ctx) => {
     const nowMs = listeningSources.nowMs()
     const nowSec = Math.floor(nowMs / 1000)
@@ -176,6 +178,7 @@ registerDjTool({
     }
   },
   enabled: freqOn,
+  requires: 'record_freq',
   run: async (args, ctx) => {
     const freq = await listeningSources.freq()
     const n = clampInt(args.n, 15, 1, 100)

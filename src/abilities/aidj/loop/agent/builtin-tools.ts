@@ -636,6 +636,7 @@ registerDjTool({
   name: 'queue_tracks',
   description:
     'Add tracks to this batch by ID (#xxxx from tool results). pin_first=true pins them to OPEN the batch (the seed / the song the user asked to start from; a pinned track may be one played before). Returns accepted / rejected (with reason) and how many are still needed.',
+  core: true, // 没有它循环就没法入队，设置里锁定为开
   parameters: {
     type: 'object',
     properties: {
@@ -863,6 +864,7 @@ registerDjTool({
     required: ['brief']
   },
   enabled: (policy) => policy.library_agent,
+  requires: 'library_agent',
   run: async (args, ctx) => {
     const scope = scopeOf(ctx, args.scope)
     if (scope.allowed.length === 0) {

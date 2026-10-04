@@ -61,6 +61,13 @@ export interface DjTool {
   parameters: Record<string, unknown>
   /** Hide the tool when this returns false (feature flag off, missing key…). */
   enabled?: (policy: LoopPolicy, config?: AidjConfig) => boolean
+  /**
+   * Why `enabled` can be false — a short code the settings UI turns into a hint
+   * (`song_timeline` / `record_freq` / `web_search` / `library_agent`). Metadata only.
+   */
+  requires?: string
+  /** The loop cannot work without it: `disabled_tools` never hides it and the settings UI locks it on. */
+  core?: boolean
   run: (args: Record<string, unknown>, ctx: DjToolContext) => unknown | Promise<unknown>
 }
 
@@ -79,8 +86,38 @@ export function unregisterDjTool(name: string): void {
 export function activeDjTools(policy: LoopPolicy, config?: AidjConfig): DjTool[] {
   const off = new Set(policy.disabled_tools)
   return [...registry.values()].filter(
-    (t) => !off.has(t.name) && (t.enabled?.(policy, config) ?? true)
+    (t) => (t.core || !off.has(t.name)) && (t.enabled?.(policy, config) ?? true)
   )
+}
+
+/** Every registered tool (settings UI: shows the ones a switch currently hides, too). */
+export function allDjTools(): DjTool[] {
+  return [...registry.values()]
+}
+
+/** Settings-UI grouping; tools registered elsewhere (plugins) fall into `other`. */
+export type ToolGroup = 'library' | 'pick' | 'context' | 'other'
+const TOOL_GROUPS: Record<string, ToolGroup> = {
+  tag_cloud: 'library',
+  filter_library: 'library',
+  search_titles: 'library',
+  search_lyrics: 'library',
+  search_library: 'library',
+  similar_to: 'library',
+  get_songs: 'library',
+  random_pick: 'pick',
+  ask_library_agent: 'pick',
+  dream_from_seeds: 'pick',
+  queue_tracks: 'pick',
+  unqueue_tracks: 'pick',
+  current_time: 'context',
+  recent_listens: 'context',
+  listening_habits: 'context',
+  play_frequency: 'context',
+  session_memory: 'context'
+}
+export function toolGroup(name: string): ToolGroup {
+  return TOOL_GROUPS[name] ?? 'other'
 }
 
 export function toOpenAiTools(tools: DjTool[]): OpenAI.Chat.Completions.ChatCompletionTool[] {

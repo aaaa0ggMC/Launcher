@@ -92,6 +92,7 @@ registerDjTool({
     required: ['query']
   },
   enabled: (_policy, config) => webSearchEnabled(config),
+  requires: 'web_search',
   run: async (args, ctx) => {
     const query = String(args.query ?? '').trim()
     if (!query) return { error: 'query is empty' }

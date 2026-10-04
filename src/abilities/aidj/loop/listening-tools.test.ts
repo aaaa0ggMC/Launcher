@@ -5,7 +5,7 @@ import type { SongMeta } from '../types'
 import { DEFAULT_AIDJ_CONFIG } from '../types'
 import { DEFAULT_LOOP_POLICY } from './policy'
 import { DEFAULT_LOOP_PROMPTS } from './prompts'
-import { activeDjTools, type DjToolContext } from './agent/tools'
+import { activeDjTools, allDjTools, toolGroup, type DjToolContext } from './agent/tools'
 import { buildIdIndex } from './agent/ids'
 import { buildLyricsIndex } from './agent/lyrics-index'
 import { resolvePlaybooks } from './agent/playbooks'
@@ -322,5 +322,57 @@ describe('AIDJ loop — 用户情境工具', () => {
       DEFAULT_AIDJ_CONFIG
     ).map((t) => t.name)
     assert.ok(!off.includes('recent_listens') && off.includes('listening_habits'))
+  })
+
+  it('核心工具（queue_tracks）不会被 disabled_tools 隐藏；其余都可以', () => {
+    const everything = allDjTools().map((t) => t.name)
+    const active = activeDjTools(
+      { ...DEFAULT_LOOP_POLICY, disabled_tools: everything },
+      DEFAULT_AIDJ_CONFIG
+    ).map((t) => t.name)
+    assert.deepEqual(active, ['queue_tracks'])
+    assert.equal(allDjTools().find((t) => t.name === 'queue_tracks')?.core, true)
+    assert.ok(allDjTools().filter((t) => t.core).length === 1)
+  })
+
+  it('allDjTools 含被开关挡住的工具，并标明 requires（设置页据此灰显 + 提示）', () => {
+    const cfg = {
+      ...DEFAULT_AIDJ_CONFIG,
+      preferences: {
+        ...DEFAULT_AIDJ_CONFIG.preferences,
+        song_timeline: false,
+        record_freq: false
+      }
+    }
+    const info = (name: string): { requires?: string; available: boolean } => {
+      const t = allDjTools().find((x) => x.name === name)
+      assert.ok(t, name)
+      return { requires: t.requires, available: t.enabled?.(DEFAULT_LOOP_POLICY, cfg) ?? true }
+    }
+    assert.deepEqual(info('recent_listens'), { requires: 'song_timeline', available: false })
+    assert.deepEqual(info('listening_habits'), { requires: 'song_timeline', available: false })
+    assert.deepEqual(info('play_frequency'), { requires: 'record_freq', available: false })
+    assert.deepEqual(info('current_time'), { requires: undefined, available: true })
+    // 默认配置下都可用
+    assert.equal(info('recent_listens').requires, 'song_timeline')
+    assert.equal(
+      allDjTools()
+        .find((x) => x.name === 'recent_listens')
+        ?.enabled?.(DEFAULT_LOOP_POLICY, DEFAULT_AIDJ_CONFIG),
+      true
+    )
+    assert.equal(
+      allDjTools().find((x) => x.name === 'ask_library_agent')?.requires,
+      'library_agent'
+    )
+  })
+
+  it('toolGroup：已知工具分组固定，未知（插件注册的）落到 other', () => {
+    assert.equal(toolGroup('tag_cloud'), 'library')
+    assert.equal(toolGroup('queue_tracks'), 'pick')
+    assert.equal(toolGroup('recent_listens'), 'context')
+    assert.equal(toolGroup('session_memory'), 'context')
+    assert.equal(toolGroup('web_search'), 'other')
+    assert.equal(toolGroup('some_plugin_tool'), 'other')
   })
 })

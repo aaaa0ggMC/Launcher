@@ -83,6 +83,9 @@ so the AI refers to songs by id instead of copying titles):
 | `no_music`                               | The user doesn't want music this round (just chat, a question, "stop"): no songs, no RankAgent, LoopAgent's reply is the answer, and auto-refill pauses in persistent mode                                            |
 | `web_search`                             | Search the web (Tavily); only offered when web search is enabled with a key in settings                                                                                                                               |
 
+> **Where**: Settings → AI DJ → AI Loop → **Tools the AI can use** (all enabled by default, grouped and collapsible; a tool turned off is invisible to the AI, from the next batch; "Queue tracks" is a core tool and stays on).
+> Tools hidden by a recording switch are greyed out with a hint about which switch to turn on. The config key is `preferences.loop.disabled_tools`.
+>
 > **Privacy**: `recent_listens` / `listening_habits` / `play_frequency` send your listening records to the LLM provider you configured.
 > They are only offered while the matching recording switch is on (turn off "song timeline" / "frequency recording" in settings and they disappear),
 > and each can be disabled in `preferences.loop.disabled_tools` of `aidj/config.json`. The prompt tells the model to use them only to shape picks, never to recite your history back.
