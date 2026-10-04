@@ -44,6 +44,12 @@ const confirmDelete = ref(false)
 // 清除密钥：行内二次确认（没有保存按钮可以反悔）
 const confirmClearKey = ref(false)
 
+// 模板里不要写多语句处理器：prettier（无分号）会把 `a; b` 拆成两行，Vue 编译器解析失败
+function doClearKey(): void {
+  confirmClearKey.value = false
+  emit('clearKey', props.provider.id)
+}
+
 // 密钥草稿：只留在本地，失焦 / 回车才写回 provider.apiKey 并立刻保存
 const keyDraft = ref('')
 
@@ -148,10 +154,7 @@ const filteredModels = computed(() => {
         <v-btn
           variant="text"
           color="error"
-          @click="
-            confirmClearKey = false
-            emit('clearKey', provider.id)
-          "
+          @click="doClearKey"
         >
           {{ t('yaya.settings.api_key_clear_confirm', '确定清除？') }}
         </v-btn>

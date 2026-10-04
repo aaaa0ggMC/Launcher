@@ -203,13 +203,14 @@ pnpm build        # typecheck + electron-vite build
 ## 7. 代码质量
 
 ```bash
-pnpm typecheck    # tsc (node) + vue-tsc (renderer)
+pnpm typecheck    # tsc (node) + vue-tsc (renderer) + 模板编译检查（scripts/check-vue-templates.mjs）
 pnpm lint         # eslint --cache .
 pnpm format       # prettier --write .
 ```
 
 **提交前必须跑 `pnpm typecheck && pnpm lint`，0 errors 才算通过。**
 prettier 配置：单引号、无分号、printWidth 100、无尾逗号。
+**模板里不要写多语句事件处理器**（`@click="a = 1; b()"`）：无分号的 prettier 会把它拆成两行并去掉分号，Vue 编译器解析失败，而 vue-tsc / eslint 都不报——改成调用一个函数。`pnpm typecheck` 里的模板编译检查会拦住这类问题。
 
 **UI 改动必须参照 `DESIGN.md`**（界面排版规范，尤其「§3 尺寸底线」「§4 常见误区」「§6 检查清单」）——避免把界面设计得太紧（元素贴边、文字挤顶部、间距不足）。
 
