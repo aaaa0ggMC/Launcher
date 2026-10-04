@@ -93,6 +93,8 @@ async function saveUiNum(key: UiNumKey): Promise<void> {
 const personal = computed(() => (agentCfg.value.privacy?.personal === 'ask' ? 'ask' : 'allow'))
 const control = computed(() => (agentCfg.value.privacy?.control === 'ask' ? 'ask' : 'allow'))
 
+const DFLT_PORTS: Record<Transport, number> = { mcp: 47802, remote: 47801 }
+
 async function refresh(): Promise<void> {
   const cfg = (await window.cockpit.getConfig()) as { agent?: AgentCfg } | null
   agentCfg.value = cfg?.agent ?? {}
@@ -101,7 +103,10 @@ async function refresh(): Promise<void> {
     Transport,
     TransportStatus
   >
-  for (const tr of ['mcp', 'remote'] as Transport[]) ports.value[tr] = String(status.value[tr].port)
+  for (const tr of ['mcp', 'remote'] as Transport[]) {
+    const p = agentCfg.value[tr]?.port || status.value?.[tr]?.port || DFLT_PORTS[tr]
+    ports.value[tr] = String(p)
+  }
   await refreshSessions()
   token.value = ((await window.cockpit.command('agent.token')) as { token: string }).token
 }
@@ -129,11 +134,12 @@ async function setEnabled(tr: Transport, v: boolean | null): Promise<void> {
 async function savePort(tr: Transport): Promise<void> {
   const n = Number(ports.value[tr])
   if (!Number.isInteger(n) || n <= 1024 || n >= 65536) {
-    ports.value[tr] = String(status.value?.[tr].port ?? '')
+    const fallback = agentCfg.value[tr]?.port || status.value?.[tr]?.port || DFLT_PORTS[tr]
+    ports.value[tr] = String(fallback)
     toast.value = { show: true, text: t('agent.port_invalid', '端口需在 1025–65535 之间') }
     return
   }
-  if (n === status.value?.[tr].port) return
+  if (n === status.value?.[tr]?.port && n === agentCfg.value[tr]?.port) return
   await patchAgent({ [tr]: { ...agentCfg.value[tr], port: n } })
 }
 
@@ -197,6 +203,12 @@ let offSessions: (() => void) | undefined
 onMounted(async () => {
   offStatus = window.cockpit.on('cockpit:agent-status', (s) => {
     status.value = s as Record<Transport, TransportStatus>
+    for (const tr of ['mcp', 'remote'] as Transport[]) {
+      if (!ports.value[tr] || ports.value[tr] === '0') {
+        const p = agentCfg.value[tr]?.port || status.value?.[tr]?.port || DFLT_PORTS[tr]
+        ports.value[tr] = String(p)
+      }
+    }
   })
   offSessions = window.cockpit.on('cockpit:agent-sessions', () => void refreshSessions())
   await refresh()

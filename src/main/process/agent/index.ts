@@ -6,6 +6,7 @@ import { makeLogger } from '../logger'
 import { getBroadcast } from '../broadcast'
 import {
   applyLaunchFlags,
+  DEFAULT_PORTS,
   getAgentToken,
   isEnabledByLaunchFlag,
   loadAgentConfig,
@@ -33,8 +34,22 @@ type Service = McpService | RemoteService
 const services: Partial<Record<AgentTransport, Service>> = {}
 const errors: Partial<Record<AgentTransport, string>> = {}
 const status: Record<AgentTransport, TransportStatus> = {
-  remote: { enabled: false, source: null, running: false, port: 0, url: null, error: null },
-  mcp: { enabled: false, source: null, running: false, port: 0, url: null, error: null }
+  remote: {
+    enabled: false,
+    source: null,
+    running: false,
+    port: DEFAULT_PORTS.remote,
+    url: null,
+    error: null
+  },
+  mcp: {
+    enabled: false,
+    source: null,
+    running: false,
+    port: DEFAULT_PORTS.mcp,
+    url: null,
+    error: null
+  }
 }
 
 let chain: Promise<void> = Promise.resolve()

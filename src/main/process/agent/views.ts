@@ -198,6 +198,9 @@ function create(session: string): View {
 
 /** 取（必要时创建）会话的视图并等它加载完。 */
 export async function prepareAgentView(session: string): Promise<void> {
+  if (process.env.COCKPIT_HEADLESS === '1') {
+    throw new Error('无头（Headless）模式下不支持创建 Agent UI 视图')
+  }
   const v = views.get(session) ?? create(session)
   v.lastUse = Date.now()
   await v.ready
@@ -231,6 +234,7 @@ export function windowOfSender(senderId: number): BrowserWindow | null {
 
 /** 用户点头像：follow 该 agent 的视图（没有就先建）。同一时刻只有一个视图盖在主窗口上。 */
 export async function followAgentView(session: string, mode: FollowMode): Promise<boolean> {
+  if (process.env.COCKPIT_HEADLESS === '1') return false
   if (!getSession(session)) return false
   const v = views.get(session) ?? create(session)
   v.lastUse = Date.now()

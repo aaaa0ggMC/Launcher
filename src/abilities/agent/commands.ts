@@ -44,6 +44,8 @@ export default [
   },
   {
     name: 'agent.follow',
+    enabled: () => process.env.COCKPIT_HEADLESS !== '1',
+    unavailableReason: '无头（Headless）模式下不支持桌面跟随视图',
     description:
       '查看某个 agent 的独立视图 (--id)：默认在主窗口里跟随（agent.ui.followMode 可改为单独窗口），没有视图就先建。agent 在这个视图里操作，不影响你自己的界面',
     usage: 'agent.follow --id <sessionId>',
@@ -55,6 +57,8 @@ export default [
   },
   {
     name: 'agent.unfollow',
+    enabled: () => process.env.COCKPIT_HEADLESS !== '1',
+    unavailableReason: '无头（Headless）模式下不支持桌面跟随视图',
     description: '结束跟随某个 agent (--id)：回到你自己的界面，它的视图继续在后台替它工作',
     usage: 'agent.unfollow --id <sessionId>',
     privacy: USER_ONLY,

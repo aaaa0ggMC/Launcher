@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { translate, translateTemplate } from '../i18n'
 import AgentAvatar from './AgentAvatar.vue'
+import AgentSessionDialog from './AgentSessionDialog.vue'
 import type { AgentUiConfig } from '../composables/agentUi'
 import { useExclusive } from '../composables/exclusive'
 
@@ -90,6 +91,28 @@ function name(s: Session): string {
 function initial(s: Session): string {
   return (name(s).match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase()
 }
+const isNarrow = ref(false)
+let narrowMql: MediaQueryList | null = null
+
+function updateNarrow(): void {
+  isNarrow.value = narrowMql ? narrowMql.matches : window.innerWidth <= 720
+}
+
+const dialogOpen = ref(false)
+
+function openDialog(): void {
+  dialogOpen.value = true
+}
+
+function onAvatarClick(s: Session): void {
+  // 窄屏 / 移动端或无头 Web 模式（无 Electron 宿主窗口）：弹出会话子窗口；宽屏桌面端：直接触发 follow 跟随视图
+  if (isNarrow.value || !window.cockpit.hasCap('window.frame')) {
+    openDialog()
+  } else {
+    follow(s)
+  }
+}
+
 /** 点头像：打开 / 聚焦该 agent 的独立视图（没有就先建）。 */
 function follow(s: Session): void {
   void window.cockpit.command('agent.follow', { id: s.id })
@@ -161,8 +184,14 @@ function relayout(): void {
 function updateEdges(): void {
   const el = scroller.value
   if (!el) return
-  moreLeft.value = el.scrollLeft > 1
-  moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+  const overflow = el.scrollWidth - el.clientWidth
+  if (overflow <= 2) {
+    moreLeft.value = false
+    moreRight.value = false
+    return
+  }
+  moreLeft.value = el.scrollLeft > 2
+  moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
 }
 
 /** 滚轮竖向滚动换算成横向；内容放得下时不拦截。 */
@@ -175,6 +204,10 @@ function onWheel(e: WheelEvent): void {
 }
 
 onMounted(() => {
+  narrowMql = window.matchMedia('(max-width: 720px)')
+  updateNarrow()
+  narrowMql.addEventListener('change', updateNarrow)
+
   void refresh()
   offSessions = window.cockpit.on('cockpit:agent-sessions', () => void refresh())
   offActivity = window.cockpit.on('cockpit:agent-activity', (raw) => {
@@ -195,6 +228,7 @@ onMounted(() => {
   relayout()
 })
 onBeforeUnmount(() => {
+  narrowMql?.removeEventListener('change', updateNarrow)
   offSessions?.()
   offActivity?.()
   if (tick) clearInterval(tick)
@@ -214,10 +248,14 @@ watch(
       <template #activator="{ props: tp }">
         <span
           v-bind="tp"
-          class="agent-bar__avatar"
+          class="agent-bar__avatar agent-bar__avatar--btn"
           :class="{ busy: visibleSessions.some((s) => busy(s.id)) }"
-          role="img"
+          role="button"
+          tabindex="0"
           :aria-label="visibleSessions.map(name).join(', ')"
+          @click="openDialog"
+          @keydown.enter="openDialog"
+          @keydown.space.prevent="openDialog"
           >{{ visibleSessions.length }}</span
         >
       </template>
@@ -227,7 +265,14 @@ watch(
       v-else-if="visibleSessions.length"
       ref="scroller"
       class="agent-bar__scroll"
-      :style="{ '--fl': moreLeft ? '28px' : '0px', '--fr': moreRight ? '28px' : '0px' }"
+      :style="{
+        '--fl': moreLeft ? '28px' : '0px',
+        '--fr': moreRight ? '28px' : '0px',
+        maskImage:
+          moreLeft || moreRight
+            ? 'linear-gradient(to right, transparent 0, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent 100%)'
+            : 'none'
+      }"
       @wheel="onWheel"
       @scroll.passive="updateEdges"
     >
@@ -240,9 +285,10 @@ watch(
             role="button"
             tabindex="0"
             :aria-label="tip(s).join(' · ')"
-            @click="follow(s)"
-            @keydown.enter="follow(s)"
-            @keydown.space.prevent="follow(s)"
+            @click="onAvatarClick(s)"
+            @contextmenu.prevent="openDialog"
+            @keydown.enter="onAvatarClick(s)"
+            @keydown.space.prevent="onAvatarClick(s)"
             ><AgentAvatar
               :avatar="ui.allowAvatar ? s.avatar : undefined"
               :icon="ui.defaultIcon === 'icon' ? s.icon : undefined"
@@ -252,6 +298,18 @@ watch(
         <div v-for="(l, i) in tip(s)" :key="i">{{ l }}</div>
       </v-tooltip>
     </div>
+
+    <!-- AI 会话详情与移动端弹窗 -->
+    <AgentSessionDialog
+      v-model="dialogOpen"
+      :sessions="sessions"
+      :live="live"
+      :ui="ui"
+      :lang="lang"
+      :current-id="currentId"
+      :ability-name="abilityName"
+      @follow="follow"
+    />
   </div>
 </template>
 
@@ -272,21 +330,13 @@ watch(
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  padding: 4px 2px;
+  padding: 4px 6px;
   overflow-x: auto;
   overflow-y: hidden;
   pointer-events: auto;
   /* 无边框窗口里标题栏是拖拽区（-webkit-app-region: drag），会吞掉真实鼠标的悬停 / 滚轮；
      CDP 合成事件绕过它，所以必须在真实鼠标下验证 */
   -webkit-app-region: no-drag;
-  /* 溢出的一侧羽化渐隐（--fl / --fr 为 0 时就是直边） */
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 var(--fl, 0px),
-    #000 calc(100% - var(--fr, 0px)),
-    transparent 100%
-  );
 }
 /* 隐藏滚动条（不用 scrollbar-width：它会让 Chromium 弃用全局 ::-webkit-scrollbar 样式） */
 .agent-bar__scroll::-webkit-scrollbar {

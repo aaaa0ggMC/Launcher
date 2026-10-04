@@ -11,7 +11,7 @@ import { app } from 'electron'
 import { withOrigin } from '../privacy'
 import { withCallSignal } from './call-signal'
 import { makeLogger } from '../logger'
-import { AGENT_TOOLS, describeError, runAgentTool, type ToolOutput } from './tools'
+import { getActiveAgentTools, describeError, runAgentTool, type ToolOutput } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
 import {
   endSession,
@@ -74,7 +74,7 @@ function buildServer(session: () => { id: string; client: string }): McpServer {
     { name: 'linux-cockpit', version: app.getVersion() },
     { instructions: INSTRUCTIONS }
   )
-  for (const tool of AGENT_TOOLS) {
+  for (const tool of getActiveAgentTools()) {
     server.registerTool(
       tool.name,
       {

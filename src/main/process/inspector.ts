@@ -56,6 +56,9 @@ function agentTargetSession(): string | null {
  * 同步取用——视图由 `prepareTarget()`（`ui.*` 命令的 pre-run 钩子）提前建好并等加载完。
  */
 function mainContents(): WebContents {
+  if (process.env.COCKPIT_HEADLESS === '1') {
+    throw new Error('无头（Headless）模式下已禁用 UI 渲染与检查')
+  }
   const s = agentTargetSession()
   const view = s ? agentViewContents(s) : null
   if (view) return view
@@ -66,6 +69,9 @@ function mainContents(): WebContents {
 
 /** agent 的 `ui.*` 调用前：开启隔离时，确保该会话的独立视图存在且已加载。 */
 async function prepareTarget(): Promise<void> {
+  if (process.env.COCKPIT_HEADLESS === '1') {
+    throw new Error('无头（Headless）模式下已禁用 UI 渲染与检查')
+  }
   const s = agentTargetSession()
   if (!s || !(await isolateViewEnabled())) return
   await prepareAgentView(s)

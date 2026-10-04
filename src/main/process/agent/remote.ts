@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { withOrigin } from '../privacy'
 import { withCallSignal } from './call-signal'
 import { makeLogger } from '../logger'
-import { AGENT_TOOLS, describeError, runAgentTool } from './tools'
+import { getActiveAgentTools, describeError, runAgentTool } from './tools'
 import { checkRequest, readBody, sendJson } from './http-guard'
 import { setSessionAvatar, touchSession } from './sessions'
 
@@ -78,14 +78,14 @@ export class RemoteService {
       return sendJson(res, 200, {
         jsonrpc: '2.0',
         id,
-        result: AGENT_TOOLS.map((t) => ({
+        result: getActiveAgentTools().map((t) => ({
           name: t.name,
           description: t.description,
           inputSchema: z.toJSONSchema(z.object(t.shape))
         }))
       })
     }
-    const tool = AGENT_TOOLS.find((t) => t.name === body?.method)
+    const tool = getActiveAgentTools().find((t) => t.name === body?.method)
     if (!tool) return sendJson(res, 200, rpcError(id, -32601, `unknown method: ${body?.method}`))
     const parsed = z.object(tool.shape).safeParse(body.params ?? {})
     if (!parsed.success) {

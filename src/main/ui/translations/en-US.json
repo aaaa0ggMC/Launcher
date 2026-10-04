@@ -188,5 +188,16 @@
   "hostpick.fromDevice": "Choose from this device",
   "hostpick.uploading": "Uploading…",
   "hostpick.uploadFailed": "Upload failed, please retry",
-  "bt.back": "Back to list"
+  "bt.back": "Back to list",
+  "agent.dialog.title": "AI Sessions & Clients",
+  "agent.dialog.online": "{n} active sessions",
+  "agent.dialog.empty": "No active AI sessions",
+  "agent.dialog.calls": "{n} calls",
+  "agent.dialog.lastTool": "Executing",
+  "agent.dialog.executing": "Running",
+  "agent.dialog.disconnect": "Disconnect",
+  "agent.dialog.viewLogs": "View Logs",
+  "agent.dialog.follow": "Follow View",
+  "agent.dialog.heldLease": "Held Resources",
+  "agent.dialog.startedAt": "Connected {time}"
 }

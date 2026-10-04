@@ -141,7 +141,17 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function serveStatic(webRoot: string, pathname: string, res: ServerResponse): void {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '')
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    return json(res, 400, {
+      ok: false,
+      error: 'bad_request',
+      message: '拒绝访问：URL 编码解析失败'
+    })
+  }
+  const rel = normalize(decoded).replace(/^([/\\])+/, '')
   let file = resolve(webRoot, rel || 'index.html')
   if (!file.startsWith(webRoot)) return json(res, 403, { error: 'forbidden' })
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(webRoot, 'index.html')
@@ -165,7 +175,38 @@ export function startServer(opts: {
 }): Promise<Server> {
   const { host, port, token, webRoot } = opts
   const server = createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
+    let url: URL
+    try {
+      const raw = req.url ?? '/'
+      // 拒绝非正常或畸形的 URL 请求（如以 '//' 开头、包含空字节、以反斜杠开头等），防止 WHATWG URL 崩溃与越权穿透
+      if (
+        !raw ||
+        raw.startsWith('//') ||
+        raw.startsWith('/\\') ||
+        raw.startsWith('\\') ||
+        raw.includes('\0')
+      ) {
+        return json(res, 400, {
+          ok: false,
+          error: 'bad_request',
+          message: '拒绝访问：无效或非法的 URL 请求'
+        })
+      }
+      url = new URL(raw, 'http://127.0.0.1')
+      if (url.pathname.startsWith('//')) {
+        return json(res, 400, {
+          ok: false,
+          error: 'bad_request',
+          message: '拒绝访问：非法 URL 路径'
+        })
+      }
+    } catch {
+      return json(res, 400, {
+        ok: false,
+        error: 'bad_request',
+        message: '拒绝访问：URL 解析失败'
+      })
+    }
     const api = url.pathname.startsWith('/api/')
     if (url.pathname.startsWith('/_p/')) {
       if (!authorized(req, url, token)) return json(res, 401, { ok: false, error: 'unauthorized' })
@@ -262,6 +303,12 @@ export function startServer(opts: {
       return
     }
     json(res, 404, { ok: false, error: 'not found' })
+  })
+  server.on('clientError', (err, socket) => {
+    log.warn('client error', String(err))
+    if (!socket.destroyed) {
+      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+    }
   })
   return new Promise((resolveP, reject) => {
     server.once('error', reject)

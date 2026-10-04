@@ -22,6 +22,8 @@ import { loadExternalAbilities } from '../main/process/ability-loader'
 import { registerHostCommands } from './commands'
 import { pushEvent, startServer } from './server'
 import { setStubBroadcast } from './electron-stub'
+import { initPrivacyConsent } from '../main/process/privacy-consent'
+import { initAgentServices } from '../main/process/agent'
 
 function arg(name: string, dflt: string): string {
   const i = process.argv.indexOf(`--${name}`)
@@ -38,6 +40,7 @@ function loadToken(): string {
 }
 
 async function main(): Promise<void> {
+  process.env.COCKPIT_HEADLESS = '1'
   const host = arg('host', '127.0.0.1')
   const port = Number(arg('port', '47810'))
   const webRoot = resolve(arg('web', join(__dirname, '../web')))
@@ -56,6 +59,8 @@ async function main(): Promise<void> {
   registerAudioProtocol()
   registerAbilityCommands()
   registerHostCommands()
+  initPrivacyConsent()
+  void initAgentServices(process.argv)
   await runStartupHooks()
   loadExternalAbilities().catch((e) => console.error('[cockpit] external abilities:', e))
 

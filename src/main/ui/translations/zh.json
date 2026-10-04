@@ -188,5 +188,16 @@
   "hostpick.fromDevice": "从此设备选择",
   "hostpick.uploading": "正在上传…",
   "hostpick.uploadFailed": "上传失败，请重试",
-  "bt.back": "返回列表"
+  "bt.back": "返回列表",
+  "agent.dialog.title": "AI 会话与客户端",
+  "agent.dialog.online": "{n} 个在线会话",
+  "agent.dialog.empty": "当前没有活跃的 AI 会话",
+  "agent.dialog.calls": "调用 {n} 次",
+  "agent.dialog.lastTool": "正在执行",
+  "agent.dialog.executing": "执行中",
+  "agent.dialog.disconnect": "断开",
+  "agent.dialog.viewLogs": "查看日志",
+  "agent.dialog.follow": "跟随视图",
+  "agent.dialog.heldLease": "占用资源",
+  "agent.dialog.startedAt": "已连接 {time}"
 }

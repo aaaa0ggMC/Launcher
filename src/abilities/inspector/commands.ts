@@ -65,12 +65,17 @@ function modifiers(v: unknown): Modifier[] {
     .filter((x): x is Modifier => ['Shift', 'Control', 'Alt', 'Meta'].includes(x))
 }
 
+const headlessGate = {
+  enabled: () => process.env.COCKPIT_HEADLESS !== '1',
+  unavailableReason: '无头（Headless）模式下已禁用 UI 渲染与检查'
+}
+
 /**
  * ui.* —— 像用户一样看和操作主窗口（CLI-first：CLI / 脚本 / AI 共用）。
  * 两种定位方式：快照里的 ref（语义化元素），或截图上的坐标（画布 / 游戏 / 任意位置）。
  * 隐私：快照 / 截图按 DOM 隐私标签脱敏；点击（含按坐标点击）落在隐私区前要许可，禁区拒绝。
  */
-export default [
+const specs: CommandSpec[] = [
   {
     name: 'ui.snapshot',
     description:
@@ -233,4 +238,6 @@ export default [
         save: ctx.named.save === undefined ? undefined : bool(ctx.named.save)
       })
   }
-] satisfies CommandSpec[]
+]
+
+export default specs.map((s) => ({ ...s, ...headlessGate })) satisfies CommandSpec[]

@@ -97,6 +97,17 @@ keeps its privacy and exclusive rules, and limits (maxCalls / cpuMs / wallSec / 
 lowered, never raised — a single step is still cheaper with command_run, real-time input with
 ui_input_timeline.`
 
+export function isHeadless(): boolean {
+  return process.env.COCKPIT_HEADLESS === '1'
+}
+
+export function getActiveAgentTools(): AgentTool[] {
+  if (isHeadless()) {
+    return AGENT_TOOLS.filter((t) => !t.name.startsWith('ui_'))
+  }
+  return AGENT_TOOLS
+}
+
 /**
  * 网关（MCP / Remote）统一的工具执行入口：收集本次调用产生的脱敏，附上 privacy 说明。
  * 调用方需已在 agent origin 下（withOrigin）。
@@ -105,6 +116,11 @@ export async function runAgentTool(
   tool: AgentTool,
   args: Record<string, unknown>
 ): Promise<ToolOutput> {
+  if (isHeadless() && tool.name.startsWith('ui_')) {
+    throw new Error(
+      `UI tool '${tool.name}' is disabled in headless mode. Use capability commands (via command_run) or command_script instead.`
+    )
+  }
   const { value, redacted } = await collectRedactions(() => tool.run(args))
   const notice = privacyNotice(redacted)
   return notice ? { ...value, privacy: notice } : value
