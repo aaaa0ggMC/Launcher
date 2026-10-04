@@ -57,6 +57,13 @@ function toggleSidebar(): void {
 
 // ---- 派生状态 ----
 const assistantName = computed(() => config.value?.assistantName?.trim() || 'YAYA')
+
+// 外壳 App bar 标题 / 侧栏条目跟随助手名（默认名就恢复能力原名）
+const setShellTitle = inject<(id: string, title: string | null) => void>(
+  'cockpit:set-title',
+  () => {}
+)
+watch(assistantName, (name) => setShellTitle('yaya', name === 'YAYA' ? null : name))
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
 const isRunning = computed(
   () => !!activeSessionId.value && runningIds.value.includes(activeSessionId.value)

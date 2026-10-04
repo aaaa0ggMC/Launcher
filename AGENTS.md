@@ -482,7 +482,8 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 3. **依赖声明** `src/abilities/<id>/package.json`（workspace 成员；有专属第三方依赖就写 `dependencies`，没有就留空，见 §2.2）
 4. **领域类型** `src/abilities/<id>/types.ts`（不进 shared）
 5. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
-6. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）；页面里要打开自己的设置用 `useSettings().open('<id>')`（`@ui/composables/settings`）：有设置页就跳到本能力的分类（可选定位到设置项），没有设置页则弹浮窗——**不要**写 `activate('settings', …)`，能力不应依赖 settings 能力存在。无页面的后端能力也可以注入设置
+6. **（可选）自定义显示名**：页面 `inject('cockpit:set-title')` 后调用 `setTitle('<能力id>', '名字' | null)`，App bar 标题与侧栏条目都改用它（存 localStorage，下次启动未挂载时也生效；`null` 恢复原名），如 YAYA 跟随设置里的助手名
+7. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）；页面里要打开自己的设置用 `useSettings().open('<id>')`（`@ui/composables/settings`）：有设置页就跳到本能力的分类（可选定位到设置项），没有设置页则弹浮窗——**不要**写 `activate('settings', …)`，能力不应依赖 settings 能力存在。无页面的后端能力也可以注入设置
 7. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
 8. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
 9. **（涉及个人数据时必做）隐私声明**：`privacy.ts` 定义 scope，命令声明 `privacy`、结果 `shield`，界面 `v-privacy` / `v-agent-forbidden`（见上「隐私 SDK」）

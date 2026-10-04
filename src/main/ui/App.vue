@@ -165,6 +165,35 @@ const agentUi = computed(() =>
 const lang = computed(() => (runtimeConfig.value.language as string) ?? 'zh')
 provide('cockpit:lang', lang)
 
+/**
+ * 页面自定义显示名（App bar 标题 + 侧栏条目）：能力页 inject('cockpit:set-title') 后调用
+ * `setTitle(abilityId, '名字' | null)`。存 localStorage，下次启动页面还没挂载时侧栏也显示自定义名。
+ */
+const TITLE_KEY = 'cockpit-title-overrides'
+const titleOverrides = ref<Record<string, string>>(
+  (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(TITLE_KEY) ?? '{}')
+      return v && typeof v === 'object' ? (v as Record<string, string>) : {}
+    } catch {
+      return {}
+    }
+  })()
+)
+provide('cockpit:set-title', (abilityId: string, title: string | null): void => {
+  const next = { ...titleOverrides.value }
+  const clean = title?.trim()
+  if (clean) next[abilityId] = clean
+  else delete next[abilityId]
+  if (JSON.stringify(next) === JSON.stringify(titleOverrides.value)) return
+  titleOverrides.value = next
+  try {
+    localStorage.setItem(TITLE_KEY, JSON.stringify(next))
+  } catch {
+    /* 存不了就只在本次运行生效 */
+  }
+})
+
 function t(key: string, fallback?: string): string {
   return translate(lang.value, key, fallback)
 }
@@ -427,7 +456,7 @@ const abilities = computed<SidebarAbility[]>(() => {
     .map((meta) => ({
       id: meta.id,
       config: {} as Record<string, unknown>,
-      name: t(`ability.${meta.id}.name`, meta.name),
+      name: titleOverrides.value[meta.id] || t(`ability.${meta.id}.name`, meta.name),
       icon: meta.icon ?? null,
       category: t(`ability.${meta.id}.category`, meta.category),
       keepAlive: meta.keepAlive !== false,
