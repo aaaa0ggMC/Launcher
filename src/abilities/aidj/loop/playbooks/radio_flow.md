@@ -1,7 +1,8 @@
 ---
 id: radio_flow
 title: Continue the radio
-when: autonomous batches with no new user request — keep the flow going from the recent sequence.
+when: ONLY autonomous refills where nobody asked for anything — keep the flow going from the recent sequence. Never for a direct user request.
+phases: autonomous
 ---
 
 1. Read the recent sequence (it is in the batch instruction; recent_history for more).

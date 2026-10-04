@@ -96,7 +96,7 @@ export async function runAgentWorkflow(o: WorkflowOptions): Promise<WorkflowResu
   const emit = (e: AgentEvent): void => o.emit?.({ ...e, batch })
   const ids = getIdIndex(o.metadata, o.musicPaths)
   const staged: PlaylistEntry[] = []
-  const playbooks = resolvePlaybooks(o.config, o.policy)
+  const playbooks = resolvePlaybooks(o.config, o.policy, o.plan.phase)
   const ctx: DjToolContext = {
     config: o.config,
     client: o.client,

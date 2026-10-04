@@ -512,7 +512,13 @@ describe('AIDJ loop — prompt files & playbooks', () => {
 
   it('built-in playbooks load; config overrides, adds and disables', () => {
     const ids0 = resolvePlaybooks(DEFAULT_AIDJ_CONFIG, DEFAULT_LOOP_POLICY).map((p) => p.id)
-    assert.deepEqual([...ids0].sort(), ['artist_pick', 'chat', 'radio_flow', 'seed_start'])
+    assert.deepEqual([...ids0].sort(), [
+      'artist_pick',
+      'chat',
+      'open_request',
+      'radio_flow',
+      'seed_start'
+    ])
     const cfg = {
       ...DEFAULT_AIDJ_CONFIG,
       preferences: {
@@ -527,9 +533,60 @@ describe('AIDJ loop — prompt files & playbooks', () => {
       ...DEFAULT_LOOP_POLICY,
       disabled_playbooks: ['radio_flow']
     })
-    assert.deepEqual(list.map((p) => p.id).sort(), ['artist_pick', 'chat', 'seed_start', 'sleep'])
+    assert.deepEqual(list.map((p) => p.id).sort(), [
+      'artist_pick',
+      'chat',
+      'open_request',
+      'seed_start',
+      'sleep'
+    ])
     assert.equal(list.find((p) => p.id === 'seed_start')?.steps, 'my steps')
     assert.equal(parsePlaybook('---\nid: a\nwhen: b\n---\nsteps', 'x')?.when, 'b')
+  })
+
+  it('playbook 按批次阶段过滤：radio_flow 只在自主续播，open_request 只在用户请求', () => {
+    const ids = (phase?: 'initial' | 'directed' | 'autonomous'): string[] =>
+      resolvePlaybooks(DEFAULT_AIDJ_CONFIG, DEFAULT_LOOP_POLICY, phase)
+        .map((p) => p.id)
+        .sort()
+    // 用户的首次请求 / 新方向：不能出现「续播电台」（描述写了无新要求才用，但 LLM 会对「随便来点」挑它）
+    for (const phase of ['initial', 'directed'] as const) {
+      assert.ok(!ids(phase).includes('radio_flow'), phase)
+      assert.ok(ids(phase).includes('open_request'), phase)
+      assert.ok(ids(phase).includes('seed_start'), phase)
+    }
+    // 自主续播：没有用户请求，open_request 不适用
+    assert.ok(ids('autonomous').includes('radio_flow'))
+    assert.ok(!ids('autonomous').includes('open_request'))
+    // 没给阶段（预览 / 设置页）：不过滤
+    assert.ok(ids().includes('radio_flow') && ids().includes('open_request'))
+    // 没声明 phases 的（如 chat）所有阶段都在
+    for (const phase of ['initial', 'directed', 'autonomous'] as const)
+      assert.ok(ids(phase).includes('chat'))
+  })
+
+  it('parsePlaybook 解析 phases；非法值忽略；用户自定义范式也可带 phases', () => {
+    assert.deepEqual(
+      parsePlaybook('---\nid: a\nwhen: b\nphases: initial, directed\n---\nsteps', 'x')?.phases,
+      ['initial', 'directed']
+    )
+    assert.equal(
+      parsePlaybook('---\nid: a\nwhen: b\nphases: bogus\n---\nsteps', 'x')?.phases,
+      undefined
+    )
+    assert.equal(parsePlaybook('---\nid: a\nwhen: b\n---\nsteps', 'x')?.phases, undefined)
+    const cfg = {
+      ...DEFAULT_AIDJ_CONFIG,
+      preferences: {
+        ...DEFAULT_AIDJ_CONFIG.preferences,
+        loop_playbooks: [
+          { id: 'night', title: 'Night', when: 'late', steps: 's', phases: ['autonomous' as const] }
+        ]
+      }
+    }
+    const inAuto = resolvePlaybooks(cfg, DEFAULT_LOOP_POLICY, 'autonomous').map((p) => p.id)
+    const inInit = resolvePlaybooks(cfg, DEFAULT_LOOP_POLICY, 'initial').map((p) => p.id)
+    assert.ok(inAuto.includes('night') && !inInit.includes('night'))
   })
 
   it('use_playbook returns steps', async () => {

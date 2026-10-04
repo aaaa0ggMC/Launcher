@@ -85,12 +85,17 @@ Four playbooks ship built in. LoopAgent only sees a catalogue (id + when to use)
 prompt and fetches the steps with `use_playbook` when it wants them. Playbooks are guidance, not a
 rigid script.
 
-| Playbook      | When                                          | What it does                                                                                                                                                                          |
-| ------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `seed_start`  | Start from one song / one lyric line / phrase | Title search → lyric search if no hit → read full info incl. lyrics → pick a start (just one if the mood clashes) → pin first → drop mismatched tags → DreamAgent expands → hand over |
-| `artist_pick` | "some <artist>"                               | Title search for that artist's songs → if many, let LibAgent pick by current mood → queue (a user-named artist ignores the per-artist cap)                                            |
-| `radio_flow`  | Auto-refill with no new request               | Read the recent sequence → drop tags that would break the flow → use a recent song as an anchor and let DreamAgent continue; `random_pick` one or two for surprise                    |
-| `chat`        | Chat only, no music                           | `no_music` first, `web_search` for facts if needed, answer in the listener's language and maybe offer songs afterwards                                                                |
+| Playbook       | When                                                                                       | What it does                                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `seed_start`   | Start from one song / one lyric line / phrase                                              | Title search → lyric search if no hit → read full info incl. lyrics → pick a start (just one if the mood clashes) → pin first → drop mismatched tags → DreamAgent expands → hand over |
+| `artist_pick`  | "some <artist>"                                                                            | Title search for that artist's songs → if many, let LibAgent pick by current mood → queue (a user-named artist ignores the per-artist cap)                                            |
+| `open_request` | You want music but name no song / artist / lyric / mood ("anything", "you pick", "random") | Look at the tag cloud without narrowing → let LibAgent pick from your own words, plus a few `random_pick` → queue → say what you chose and offer to steer                             |
+| `radio_flow`   | Auto-refill with no new request                                                            | Read the recent sequence → drop tags that would break the flow → use a recent song as an anchor and let DreamAgent continue; `random_pick` one or two for surprise                    |
+| `chat`         | Chat only, no music                                                                        | `no_music` first, `web_search` for facts if needed, answer in the listener's language and maybe offer songs afterwards                                                                |
+
+A playbook can declare which **batch phases** it is offered in (`phases:` in the frontmatter: `initial` / `directed` / `autonomous`; omitted = all):
+`radio_flow` is only offered for **autonomous refills** (nobody asked for anything), `open_request` only when **you made a request** (a first request or a new direction).
+This is enforced in code — otherwise the LLM picks "continue the radio" for an anchor-less request like "anything".
 
 You can add playbooks without touching code: drop a `.md` in `src/abilities/aidj/loop/playbooks/`
 (a `---` block with `id` / `title` / `when` at the top, steps in the body), or list them in
