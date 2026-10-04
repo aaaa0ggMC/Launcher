@@ -64,6 +64,44 @@ export interface MessageNode {
    * 返回时附带，不落库；长度 > 1 时界面显示 `< i/n >` 翻页器。
    */
   siblingIds?: string[]
+  /** 扩展字段；`workflow` = 本次运行的过程记录（只挂在一次运行的第一个 assistant 节点上） */
+  meta?: MessageMeta
+}
+
+export interface MessageMeta {
+  workflow?: WorkflowRecord
+  [key: string]: unknown
+}
+
+/** 工作流过程记录里的一步 */
+export interface WorkflowStepRecord {
+  id: string
+  /** 执行者：'main' = 写入对话的主 Agent；其余为子 Agent 名（如 'planner'） */
+  agent: string
+  /** llm = 写进对话的一步（messageId 指向该 assistant 节点）；subagent = 不进对话的子 Agent 调用；note = 说明 */
+  kind: 'llm' | 'subagent' | 'note'
+  /** 已翻译的显示名 */
+  label: string
+  /** 子 Agent 输出 / 说明正文（Markdown） */
+  detail?: string
+  messageId?: string
+  status: 'running' | 'ok' | 'error'
+  startedAt: number
+  ms?: number
+  tokens?: number
+}
+
+export interface WorkflowRecord {
+  runId: string
+  workflowId: string
+  /** 已翻译的显示名 */
+  label: string
+  status: 'running' | 'ok' | 'error' | 'stopped'
+  startedAt: number
+  endedAt?: number
+  steps: WorkflowStepRecord[]
+  /** 本次运行所有 LLM 调用的 tokens 合计（拿不到 usage 时为 0） */
+  tokens: number
 }
 
 export interface MessageTreeNode extends MessageNode {
@@ -110,6 +148,8 @@ export interface YayaConfig {
   activeModel: string
   systemPrompt: string
   autoApproveTools: boolean
+  /** 新会话默认使用的工作流 id（缺省 'agent'），见 `yaya.workflows-list` */
+  defaultWorkflow?: string
   /** 被用户禁用的工具名（缺省 = 全部启用） */
   disabledTools?: string[]
   maxLoopSteps: number
@@ -157,4 +197,14 @@ export interface ToolInfo {
   requiresApproval: boolean
   source: 'builtin' | 'mcp' | 'custom'
   enabled: boolean
+}
+
+/** `yaya.workflows-list` 的条目 */
+export interface WorkflowInfo {
+  id: string
+  /** 已按当前语言翻译 */
+  label: string
+  description: string
+  /** 是否会调用工具（纯对话类 workflow 为 false） */
+  usesTools: boolean
 }

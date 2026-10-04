@@ -4,7 +4,7 @@
  * tool 节点不单独显示——结果已经记在对应 assistant 节点的 toolCalls[].result 里，
  * 只有找不到对应调用时（例如导入的数据）才把它当作孤立结果挂到当前轮次。
  */
-import type { MessageNode, ToolCallItem } from '../types'
+import type { MessageNode, ToolCallItem, WorkflowRecord } from '../types'
 
 export interface UserTurn {
   kind: 'user'
@@ -24,6 +24,33 @@ export interface AssistantTurn {
   firstId: string
   lastId: string
   status: MessageNode['status']
+  /** 本次运行的过程记录（挂在第一个 assistant 节点上；旧数据没有） */
+  workflow?: WorkflowRecord
+}
+
+/**
+ * 气泡里显示的「最终回答」：最后一步且没有发起工具调用。
+ * 其余步骤（中间思考、工具调用、中间说明）都收进过程卡片。
+ */
+export function answerStep(turn: AssistantTurn): MessageNode | null {
+  const last = turn.steps[turn.steps.length - 1]
+  return last && !last.toolCalls?.length ? last : null
+}
+
+export function processSteps(turn: AssistantTurn): MessageNode[] {
+  const answer = answerStep(turn)
+  return answer ? turn.steps.slice(0, -1) : turn.steps
+}
+
+/** 是否需要过程卡片：有中间步骤、思考内容，或工作流有子 Agent / 说明步骤 */
+export function hasProcess(turn: AssistantTurn): boolean {
+  if (processSteps(turn).length > 0) return true
+  if (answerStep(turn)?.reasoningContent) return true
+  return Boolean(turn.workflow?.steps.some((s) => s.kind !== 'llm'))
+}
+
+export function toolCallCount(turn: AssistantTurn): number {
+  return turn.steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0)
 }
 
 export type Turn = UserTurn | AssistantTurn
@@ -49,7 +76,8 @@ export function buildTurns(branch: MessageNode[]): Turn[] {
         siblingIds: node.siblingIds,
         firstId: node.id,
         lastId: node.id,
-        status: node.status
+        status: node.status,
+        workflow: node.meta?.workflow
       }
       turns.push(current)
     }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { inject, nextTick, onMounted, ref } from 'vue'
+import { inject, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
+import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import type { MessageNode } from '../types'
+import type { MessageMenuRequest } from './message-menu'
 import BranchSwitcher from './BranchSwitcher.vue'
 
 const props = defineProps<{
@@ -14,22 +16,51 @@ const emit = defineEmits<{
   (e: 'switchBranch', messageId: string): void
   /** 编辑后重发：在原消息的父节点下开新分支 */
   (e: 'edit', text: string): void
+  (e: 'menu', req: MessageMenuRequest): void
 }>()
+
+/** 编辑态由父组件控制（右键菜单「编辑」也能打开） */
+const editing = defineModel<boolean>('editing', { default: false })
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t } = useI18n(lang)
 
-const editing = ref(false)
 const draft = ref('')
 const copied = ref(false)
 const previews = ref<Record<string, string>>({})
 const editor = ref<{ focus: () => void } | null>(null)
 
-async function startEdit(): Promise<void> {
-  draft.value = props.message.content
+function startEdit(): void {
   editing.value = true
-  await nextTick()
-  editor.value?.focus()
+}
+
+watch(
+  editing,
+  async (on) => {
+    if (!on) return
+    draft.value = props.message.content
+    await nextTick()
+    editor.value?.focus()
+  },
+  { immediate: true }
+)
+
+function openMenu(x: number, y: number): void {
+  emit('menu', {
+    x,
+    y,
+    kind: 'user',
+    messageId: props.message.id,
+    text: props.message.content,
+    selection: window.getSelection()?.toString() ?? ''
+  })
+}
+function onContextMenu(ev: MouseEvent): void {
+  ev.preventDefault()
+  openMenu(ev.clientX, ev.clientY)
+}
+function onLongPress(p: LongPressPoint): void {
+  openMenu(p.clientX, p.clientY)
 }
 
 function submitEdit(): void {
@@ -102,7 +133,14 @@ onMounted(async () => {
           </div>
         </template>
       </div>
-      <div v-if="message.content" class="bubble">{{ message.content }}</div>
+      <div
+        v-if="message.content"
+        v-long-press="onLongPress"
+        class="bubble"
+        @contextmenu="onContextMenu"
+      >
+        {{ message.content }}
+      </div>
 
       <div class="user-actions">
         <BranchSwitcher
@@ -130,6 +168,14 @@ onMounted(async () => {
           :aria-label="t('yaya.edit', '编辑并重新发送')"
           @click="startEdit"
         />
+        <v-btn
+          icon="mdi-dots-horizontal"
+          variant="text"
+          size="small"
+          :title="t('yaya.more', '更多')"
+          :aria-label="t('yaya.more', '更多')"
+          @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
+        />
       </div>
     </template>
   </div>
@@ -146,8 +192,12 @@ onMounted(async () => {
 .bubble {
   max-width: min(85%, 640px);
   padding: 10px 16px;
-  border-radius: 18px 18px 6px 18px;
-  background: rgba(var(--v-theme-primary), 0.14);
+  border-radius: 18px 6px 18px 18px;
+  background: rgba(var(--v-theme-primary), 0.16);
+  border: 1px solid rgba(var(--v-theme-primary), 0.28);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.05);
   color: rgb(var(--v-theme-on-surface));
   font-size: 0.95rem;
   line-height: 1.6;

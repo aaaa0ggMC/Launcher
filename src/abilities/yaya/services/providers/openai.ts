@@ -99,28 +99,51 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
   }
 
+  /** 端点拒绝 `stream_options` 后记住，不再发送 */
+  private streamUsageUnsupported = false
+
   private async generateStream(
     messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
     options: ProviderGenerateOptions
   ): Promise<ProviderGenerateResult> {
-    const stream = await this.client.chat.completions.create(
-      {
-        model: options.model,
-        messages,
-        tools,
-        temperature: options.temperature ?? 0.7,
-        stream: true
-      },
-      { signal: options.signal }
-    )
+    type ChunkStream = AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+    const create = (withUsage: boolean): Promise<ChunkStream> =>
+      this.client.chat.completions.create(
+        {
+          model: options.model,
+          messages,
+          tools,
+          temperature: options.temperature ?? 0.7,
+          stream: true,
+          ...(withUsage ? { stream_options: { include_usage: true } } : {})
+        },
+        { signal: options.signal }
+      )
+    let stream: ChunkStream
+    try {
+      stream = await create(!this.streamUsageUnsupported)
+    } catch (e) {
+      // 部分兼容网关不认识 stream_options：去掉重试一次
+      if (this.streamUsageUnsupported || !/stream_options|include_usage/i.test(String(e))) throw e
+      this.streamUsageUnsupported = true
+      stream = await create(false)
+    }
 
+    let usage: ProviderGenerateResult['usage']
     let content = ''
     let reasoningContent = ''
     const toolCallAccumulator: Record<number, { id: string; name: string; args: string }> = {}
 
     for await (const chunk of stream) {
       if (options.signal?.aborted) break
+      if (chunk.usage) {
+        usage = {
+          prompt: chunk.usage.prompt_tokens,
+          completion: chunk.usage.completion_tokens,
+          total: chunk.usage.total_tokens
+        }
+      }
       const delta = chunk.choices[0]?.delta
       if (!delta) continue
 
@@ -166,7 +189,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     return {
       content,
       reasoningContent: reasoningContent || undefined,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage
     }
   }
 

@@ -176,6 +176,24 @@ function renderMessageMarkdown(
   out.push(`## ${index}. ${roleLabel(msg.role, ctx.assistantName)}`)
   if (msg.createdAt) out.push(`_${formatTime(msg.createdAt)}_`)
 
+  // 工作流里不进对话的子 Agent 输出（如规划结果）放在回答前，折叠显示
+  const wf = msg.meta?.workflow
+  if (wf) {
+    out.push('', `> ${t('yaya.io.workflow', '工作流')}：${wf.label}`)
+    for (const step of wf.steps) {
+      if (step.kind === 'llm' || !step.detail?.trim()) continue
+      out.push(
+        '',
+        `<details>`,
+        `<summary>${step.agent} · ${step.label}</summary>`,
+        '',
+        step.detail.trim(),
+        '',
+        `</details>`
+      )
+    }
+  }
+
   const body = msg.content?.trim() ? msg.content.trim() : t('yaya.io.empty_message', '（空消息）')
   out.push('', body)
 

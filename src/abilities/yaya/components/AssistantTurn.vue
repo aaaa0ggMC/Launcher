@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import type { MessageNode } from '../types'
+import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
+import type { ToolCallItem } from '../types'
 import type { AssistantTurn } from './turns'
-import { turnText } from './turns'
+import { answerStep, hasProcess, turnText } from './turns'
 import { renderMarkdown, handleMarkdownClick } from './markdown'
+import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import BranchSwitcher from './BranchSwitcher.vue'
+import WorkflowCard from './WorkflowCard.vue'
 
 const props = defineProps<{
   turn: AssistantTurn
@@ -15,52 +18,81 @@ const props = defineProps<{
   live: boolean
   /** 正挂起等待确认的工具调用 id（Runner 活着时才有） */
   pendingApprovalId: string | null
+  /** 是否为当前分支的最后一轮（决定操作栏是否常显） */
+  isLast: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'switchBranch', messageId: string): void
   (e: 'approve', approved: boolean): void
   (e: 'regenerate', fromMessageId: string): void
+  (e: 'menu', req: MessageMenuRequest): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 
-const openReasoning = ref<Record<string, boolean>>({})
 const copied = ref(false)
-
+const answer = computed(() => answerStep(props.turn))
+const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
-function html(step: MessageNode): string {
-  return renderMarkdown(step.content, labels.value)
-}
+const answerHtml = computed(() =>
+  answer.value?.content ? renderMarkdown(answer.value.content, labels.value) : ''
+)
+
+/** 挂起等待确认的工具调用：固定显示在过程卡片外面，避免被折叠藏起来 */
+const pendingCall = computed<ToolCallItem | null>(() => {
+  if (!props.pendingApprovalId) return null
+  for (const s of props.turn.steps)
+    for (const c of s.toolCalls ?? []) if (c.id === props.pendingApprovalId) return c
+  return null
+})
+
+/** 还没有任何可见内容：显示打字点 */
+const waiting = computed(() => {
+  if (!props.live) return false
+  if (answer.value?.content) return false
+  return !showProcess.value
+})
+
+/** 最后一个出错 / 中断的步骤 */
+const problem = computed(() => {
+  for (let i = props.turn.steps.length - 1; i >= 0; i--) {
+    const s = props.turn.steps[i]
+    if (s.status === 'error' || s.status === 'interrupted') return s
+  }
+  return null
+})
+const stoppedByUser = computed(
+  () => problem.value?.status === 'interrupted' && problem.value.error === 'aborted'
+)
+
+const usage = computed(() => {
+  if (props.turn.workflow?.tokens) return props.turn.workflow.tokens
+  return props.turn.steps.reduce((n, s) => n + (s.usage?.total ?? 0), 0)
+})
 
 function onContentClick(ev: MouseEvent): void {
   if (handleMarkdownClick(ev, t('yaya.copied', '已复制'))) ev.preventDefault()
 }
 
-function isWaiting(step: MessageNode): boolean {
-  return (
-    (step.status === 'pending' || step.status === 'streaming') &&
-    !step.content &&
-    !step.reasoningContent &&
-    !step.toolCalls?.length
-  )
+function openMenu(x: number, y: number): void {
+  emit('menu', {
+    x,
+    y,
+    kind: 'assistant',
+    messageId: props.turn.firstId,
+    text: turnText(props.turn),
+    selection: window.getSelection()?.toString() ?? ''
+  })
 }
-
-function isThinking(step: MessageNode): boolean {
-  return step.status === 'streaming' && Boolean(step.reasoningContent) && !step.content
+function onContextMenu(ev: MouseEvent): void {
+  ev.preventDefault()
+  openMenu(ev.clientX, ev.clientY)
 }
-
-/** 用户主动停止 = 安静的一行提示；其余中断（程序重启等）才用横幅 */
-function stoppedByUser(step: MessageNode): boolean {
-  return step.status === 'interrupted' && step.error === 'aborted'
+function onLongPress(p: LongPressPoint): void {
+  openMenu(p.clientX, p.clientY)
 }
-
-const usage = computed(() => {
-  let total = 0
-  for (const s of props.turn.steps) total += s.usage?.total ?? 0
-  return total
-})
 
 async function copyTurn(): Promise<void> {
   await window.cockpit.copyText(turnText(props.turn))
@@ -71,78 +103,66 @@ async function copyTurn(): Promise<void> {
 
 <template>
   <div class="assistant-turn">
-    <div class="turn-head">
-      <div class="avatar">
-        <v-icon icon="mdi-robot-happy-outline" size="18" />
-      </div>
-      <span class="turn-name">{{ assistantName }}</span>
-      <BranchSwitcher
-        v-if="turn.siblingIds && turn.siblingIds.length > 1"
-        :ids="turn.siblingIds"
-        :current="turn.firstId"
-        @switch="(id) => emit('switchBranch', id)"
-      />
+    <div class="avatar" aria-hidden="true">
+      <v-icon icon="mdi-robot-happy-outline" size="18" />
     </div>
 
-    <div class="turn-body" @click="onContentClick">
-      <template v-for="step in turn.steps" :key="step.id">
-        <div v-if="step.reasoningContent" class="reasoning">
-          <button
-            type="button"
-            class="reasoning-toggle"
-            :aria-expanded="!!openReasoning[step.id]"
-            @click="openReasoning[step.id] = !openReasoning[step.id]"
-          >
-            <v-progress-circular
-              v-if="isThinking(step)"
-              indeterminate
-              size="14"
-              width="2"
-              color="primary"
-            />
-            <v-icon v-else icon="mdi-lightbulb-outline" size="16" />
-            <span>{{
-              isThinking(step) ? t('yaya.thinking_live', '思考中…') : t('yaya.thinking', '思考过程')
-            }}</span>
-            <v-icon
-              :icon="openReasoning[step.id] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-              size="16"
-            />
-          </button>
-          <div v-if="openReasoning[step.id]" class="reasoning-text">
-            {{ step.reasoningContent }}
-          </div>
-        </div>
+    <div class="turn-col">
+      <div class="turn-head">
+        <span class="turn-name">{{ assistantName }}</span>
+        <BranchSwitcher
+          v-if="turn.siblingIds && turn.siblingIds.length > 1"
+          :ids="turn.siblingIds"
+          :current="turn.firstId"
+          @switch="(id) => emit('switchBranch', id)"
+        />
+      </div>
+
+      <div
+        v-long-press="onLongPress"
+        class="bubble"
+        @contextmenu="onContextMenu"
+        @click="onContentClick"
+      >
+        <WorkflowCard
+          v-if="showProcess"
+          :turn="turn"
+          :assistant-name="assistantName"
+          :live="live"
+          :pending-approval-id="pendingApprovalId"
+        />
+
+        <ToolCallRow
+          v-if="pendingCall"
+          :call="pendingCall"
+          :awaiting-approval="true"
+          @approve="(ok) => emit('approve', ok)"
+        />
 
         <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
-        <div v-if="step.content" class="md-body" v-html="html(step)" />
+        <div v-if="answerHtml" class="md-body" v-html="answerHtml" />
 
-        <div v-if="step.toolCalls?.length" class="tools">
-          <ToolCallRow
-            v-for="call in step.toolCalls"
-            :key="call.id"
-            :call="call"
-            :awaiting-approval="call.id === pendingApprovalId"
-            @approve="(ok) => emit('approve', ok)"
-          />
-        </div>
-
-        <div v-if="isWaiting(step)" class="typing" :aria-label="t('yaya.generating', '生成中')">
+        <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
           <span /><span /><span />
         </div>
 
-        <div v-if="stoppedByUser(step)" class="stopped text-medium-emphasis">
+        <div v-for="r in turn.orphanResults" :key="r.id" class="orphan text-medium-emphasis">
+          <span class="tool-name-inline">{{ r.name || 'tool' }}</span>
+          <pre>{{ r.content }}</pre>
+        </div>
+
+        <div v-if="stoppedByUser" class="stopped text-medium-emphasis">
           <v-icon icon="mdi-stop-circle-outline" size="16" />
           {{ t('yaya.stopped', '已停止生成') }}
         </div>
         <div
-          v-else-if="step.status === 'error' || step.status === 'interrupted'"
+          v-else-if="problem"
           class="notice"
-          :class="step.status === 'error' ? 'is-error' : 'is-info'"
+          :class="problem.status === 'error' ? 'is-error' : 'is-info'"
         >
           <v-icon
             :icon="
-              step.status === 'error' ? 'mdi-alert-circle-outline' : 'mdi-pause-circle-outline'
+              problem.status === 'error' ? 'mdi-alert-circle-outline' : 'mdi-pause-circle-outline'
             "
             size="20"
             class="flex-shrink-0"
@@ -150,46 +170,51 @@ async function copyTurn(): Promise<void> {
           <div class="notice-text">
             <div class="font-weight-medium">
               {{
-                step.status === 'error'
+                problem.status === 'error'
                   ? t('yaya.error_title', '生成失败')
                   : t('yaya.interrupted_title', '工作流已中断')
               }}
             </div>
-            <div class="text-medium-emphasis notice-detail">{{ step.error }}</div>
+            <div class="text-medium-emphasis notice-detail">{{ problem.error }}</div>
           </div>
         </div>
-      </template>
-
-      <div v-for="r in turn.orphanResults" :key="r.id" class="orphan text-medium-emphasis">
-        <span class="tool-name-inline">{{ r.name || 'tool' }}</span>
-        <pre>{{ r.content }}</pre>
       </div>
-    </div>
 
-    <div v-if="!live" class="turn-actions">
-      <v-btn
-        icon
-        variant="text"
-        size="small"
-        :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
-        :aria-label="t('yaya.copy', '复制')"
-        @click="copyTurn"
-      >
-        <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="18" />
-      </v-btn>
-      <v-btn
-        icon
-        variant="text"
-        size="small"
-        :title="t('yaya.regenerate', '重新生成')"
-        :aria-label="t('yaya.regenerate', '重新生成')"
-        @click="emit('regenerate', turn.firstId)"
-      >
-        <v-icon icon="mdi-refresh" size="18" />
-      </v-btn>
-      <span v-if="usage" class="usage text-disabled">
-        {{ te('yaya.tokens', { n: usage.toLocaleString() }, '{n} tokens') }}
-      </span>
+      <div v-if="!live" class="turn-actions" :class="{ 'is-pinned': isLast }">
+        <v-btn
+          icon
+          variant="text"
+          size="small"
+          :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
+          :aria-label="t('yaya.copy', '复制')"
+          @click="copyTurn"
+        >
+          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="18" />
+        </v-btn>
+        <v-btn
+          icon
+          variant="text"
+          size="small"
+          :title="t('yaya.regenerate', '重新生成')"
+          :aria-label="t('yaya.regenerate', '重新生成')"
+          @click="emit('regenerate', turn.firstId)"
+        >
+          <v-icon icon="mdi-refresh" size="18" />
+        </v-btn>
+        <v-btn
+          icon
+          variant="text"
+          size="small"
+          :title="t('yaya.more', '更多')"
+          :aria-label="t('yaya.more', '更多')"
+          @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
+        >
+          <v-icon icon="mdi-dots-horizontal" size="18" />
+        </v-btn>
+        <span v-if="usage" class="usage text-disabled">
+          {{ te('yaya.tokens', { n: usage.toLocaleString() }, '{n} tokens') }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -197,19 +222,13 @@ async function copyTurn(): Promise<void> {
 <style scoped>
 .assistant-turn {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
-.turn-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
 .avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  margin-top: 2px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -217,52 +236,41 @@ async function copyTurn(): Promise<void> {
   color: rgb(var(--v-theme-primary));
   flex-shrink: 0;
 }
+.turn-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
 .turn-name {
   font-weight: 600;
-  font-size: 0.9rem;
-}
-.turn-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 38px;
-  min-width: 0;
-}
-.reasoning-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  min-height: 30px;
-  border-radius: 999px;
-  border: none;
-  background: rgba(var(--v-theme-on-surface), 0.05);
-  color: rgba(var(--v-theme-on-surface), 0.75);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-.reasoning-toggle:hover {
-  background: rgba(var(--v-theme-on-surface), 0.09);
-}
-.reasoning-text {
-  margin-top: 8px;
-  padding: 4px 0 4px 14px;
-  border-left: 2px solid rgba(var(--v-theme-on-surface), 0.15);
-  color: rgba(var(--v-theme-on-surface), 0.7);
   font-size: 0.875rem;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
-.tools {
+/* 助手气泡：玻璃底 + 细边框，压在背景图上也读得清；左上角收成小圆角指向头像 */
+.bubble {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-radius: 6px 18px 18px 18px;
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.78));
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border: 1px solid rgba(var(--v-border-color), calc(var(--v-border-opacity) * 1.6));
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
 }
 .typing {
   display: flex;
   gap: 6px;
-  padding: 8px 0;
+  padding: 6px 0;
 }
 .typing span {
   width: 7px;
@@ -334,9 +342,21 @@ async function copyTurn(): Promise<void> {
 .turn-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-left: 32px;
+  gap: 2px;
   min-height: 36px;
+  margin-left: -6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.turn-actions.is-pinned,
+.assistant-turn:hover .turn-actions,
+.turn-actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .turn-actions {
+    opacity: 1;
+  }
 }
 .usage {
   font-size: 0.75rem;
@@ -496,9 +516,7 @@ async function copyTurn(): Promise<void> {
 }
 .md-body :deep(.hljs-attr),
 .md-body :deep(.hljs-attribute),
-.md-body :deep(.hljs-variable) {
-  color: rgb(var(--v-theme-info));
-}
+.md-body :deep(.hljs-variable),
 .md-body :deep(.hljs-type),
 .md-body :deep(.hljs-built_in) {
   color: rgb(var(--v-theme-info));
@@ -508,12 +526,12 @@ async function copyTurn(): Promise<void> {
 }
 
 @media (max-width: 720px) {
-  .turn-body {
-    padding-left: 0;
+  .avatar {
+    display: none;
   }
-  .turn-actions {
-    padding-left: 0;
-    margin-left: -6px;
+  .bubble {
+    padding: 12px 14px;
+    border-radius: 16px;
   }
 }
 </style>

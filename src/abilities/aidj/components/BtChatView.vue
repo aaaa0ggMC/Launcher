@@ -6,7 +6,7 @@ import { translate, translateTemplate } from '../../../main/ui/i18n'
 import { renderMarkdown } from '../../../shared/markdown'
 import ContextMenu from './ContextMenu.vue'
 import WorkflowCard from './WorkflowCard.vue'
-import { vLongPress, type LongPressPoint } from './long-press'
+import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import {
   buildWorkflows,
   isWorkflowEvent,

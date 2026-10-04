@@ -15,7 +15,8 @@ import {
   getMessageBranchWithSiblings,
   getMessageSiblings,
   updateSession,
-  findLatestLeaf
+  findLatestLeaf,
+  deleteMessageSubtree
 } from './services/db'
 import {
   startWorkflow,
@@ -39,6 +40,8 @@ import { ioCommands } from './services/io-commands'
 import type { MessageAttachment, YayaConfig, Session, ProviderConfig, ProviderType } from './types'
 import { fetchModelsFromEndpoint } from './services/models'
 import './jobs'
+import './services/workflow/builtin'
+import { listWorkflowInfo } from './services/workflow/registry'
 
 // 系统启动时恢复异常中断的工作流状态
 registerStartupHook(() => {
@@ -61,16 +64,19 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.session-create',
     description: '创建一个新的 YAYA 聊天会话',
-    usage: 'yaya.session-create [--title <title>] [--model <model>] [--provider <providerId>]',
+    usage:
+      'yaya.session-create [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <id>]',
     run: async (ctx) => {
       const title = (ctx.named.title as string) || '新会话'
       const model = ctx.named.model as string | undefined
       const providerId = ctx.named.provider as string | undefined
+      const workflow = ctx.named.workflow as string | undefined
       const session = createSession({
         id: randomUUID(),
         title,
         model,
-        providerId
+        providerId,
+        meta: workflow ? { workflow } : {}
       })
       return session
     }
@@ -146,13 +152,17 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-update',
     description: '更新指定会话的属性（标题、模型、Provider 等）',
     usage:
-      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>]',
+      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <workflowId>]',
     run: async (ctx) => {
       const id = String(ctx.named.id)
       const updates: Partial<Session> = {}
       if (ctx.named.title !== undefined) updates.title = String(ctx.named.title)
       if (ctx.named.model !== undefined) updates.model = String(ctx.named.model)
       if (ctx.named.provider !== undefined) updates.providerId = String(ctx.named.provider)
+      if (ctx.named.workflow !== undefined) {
+        const current = getSession(id)
+        updates.meta = { ...(current?.meta ?? {}), workflow: String(ctx.named.workflow) }
+      }
       updateSession(id, updates)
       return { ok: true, id, ...updates }
     }
@@ -177,6 +187,26 @@ const commands: CommandSpec[] = [
     description: '从指定消息往上找到用户提问，重新生成一个新的回答分支（旧回答保留为兄弟分支）',
     usage: 'yaya.workflow-regenerate --session <sessionId> --message <messageId>',
     run: async (ctx) => regenerateWorkflow(String(ctx.named.session), String(ctx.named.message))
+  },
+
+  {
+    name: 'yaya.workflows-list',
+    description: '列出可选的工作流（智能体 / 纯对话 / 先规划再执行……）',
+    usage: 'yaya.workflows-list',
+    run: async () => listWorkflowInfo()
+  },
+
+  {
+    name: 'yaya.message-delete',
+    description: '删除一条消息及其后续的整个分支；当前分支被删时切到相邻分支',
+    usage: 'yaya.message-delete --session <sessionId> --id <messageId>',
+    run: async (ctx) => {
+      const sessionId = String(ctx.named.session)
+      const msg = getMessage(String(ctx.named.id))
+      if (!msg || msg.sessionId !== sessionId) throw new Error('message not in session')
+      abortWorkflow(sessionId)
+      return { ok: true, activeLeafId: deleteMessageSubtree(msg.id) }
+    }
   },
 
   {

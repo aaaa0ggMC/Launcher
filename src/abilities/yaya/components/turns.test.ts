@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MessageNode } from '../types'
-import { buildTurns, summarizeArgs, turnText } from './turns'
+import { answerStep, buildTurns, hasProcess, processSteps, summarizeArgs, turnText } from './turns'
 
 let clock = 0
 function node(partial: Partial<MessageNode> & Pick<MessageNode, 'id' | 'role'>): MessageNode {
@@ -72,5 +72,82 @@ describe('summarizeArgs', () => {
     )
     assert.equal(summarizeArgs({ id: '1', name: 'x', args: 'a'.repeat(100) }, 10), 'aaaaaaaaaa…')
     assert.equal(summarizeArgs({ id: '1', name: 'x', args: { n: 1 } }), '{"n":1}')
+  })
+})
+
+describe('answer / process split', () => {
+  const tool = { id: 'c', name: 'run_bash', args: {}, status: 'success' as const }
+  it('puts the last tool-free step in the bubble and the rest in the process card', () => {
+    const [, t] = buildTurns([
+      node({ id: 'u', role: 'user', content: 'q' }),
+      node({ id: 'a1', role: 'assistant', content: 'looking', toolCalls: [tool] }),
+      node({ id: 'a2', role: 'assistant', content: 'answer' })
+    ])
+    assert.ok(t.kind === 'assistant')
+    assert.equal(answerStep(t)?.id, 'a2')
+    assert.deepEqual(
+      processSteps(t).map((s) => s.id),
+      ['a1']
+    )
+    assert.equal(hasProcess(t), true)
+  })
+  it('has no process card for a plain answer, but shows one for reasoning or sub-agents', () => {
+    const plain = buildTurns([
+      node({ id: 'u', role: 'user' }),
+      node({ id: 'a', role: 'assistant', content: 'x' })
+    ])[1]
+    assert.ok(plain.kind === 'assistant')
+    assert.equal(hasProcess(plain), false)
+    const reasoning = buildTurns([
+      node({ id: 'u', role: 'user' }),
+      node({ id: 'a', role: 'assistant', content: 'x', reasoningContent: 'hmm' })
+    ])[1]
+    assert.ok(reasoning.kind === 'assistant')
+    assert.equal(hasProcess(reasoning), true)
+    const planned = buildTurns([
+      node({ id: 'u', role: 'user' }),
+      node({
+        id: 'a',
+        role: 'assistant',
+        content: 'x',
+        meta: {
+          workflow: {
+            runId: 'r',
+            workflowId: 'plan-act',
+            label: 'p',
+            status: 'ok',
+            startedAt: 0,
+            tokens: 0,
+            steps: [
+              {
+                id: 's',
+                agent: 'planner',
+                kind: 'subagent',
+                label: 'plan',
+                status: 'ok',
+                startedAt: 0
+              }
+            ]
+          }
+        }
+      })
+    ])[1]
+    assert.ok(planned.kind === 'assistant')
+    assert.equal(hasProcess(planned), true)
+    assert.equal(planned.workflow?.workflowId, 'plan-act')
+  })
+  it('keeps a step that is still calling tools out of the bubble', () => {
+    const [, t] = buildTurns([
+      node({ id: 'u', role: 'user' }),
+      node({
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [tool],
+        status: 'tool_executing'
+      })
+    ])
+    assert.ok(t.kind === 'assistant')
+    assert.equal(answerStep(t), null)
   })
 })

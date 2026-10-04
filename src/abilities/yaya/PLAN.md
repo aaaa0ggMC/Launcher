@@ -196,7 +196,11 @@
 | | 重新生成 = 新兄弟分支（不再复制一条用户消息） | `[x]` | `yaya.workflow-regenerate` |
 | | 编辑用户消息并重发 = 新分支 | `[x]` | `UserMessage.vue` → `workflow-start --parent` |
 | | 运行中会话广播（侧栏指示） | `[x]` | `cockpit:yaya-running` / `yaya.workflow-running` |
-| | 洋葱模型中间件 (Pipeline Hooks) | `[ ]` | 仍是单函数循环 |
+| **工作流** | 工作流注册表：runner 只做宿主（步骤节点 / 流式 / 工具与审批 / 子 Agent / 过程记录），流程由工作流描述 | `[x]` | `services/workflow/`（`registerWorkflow`，契约见 `types.ts` 文件头） |
+| | 内置工作流：`agent` 工具循环 / `chat` 纯对话 / `plan-act` 规划子 Agent + 执行 | `[x]` | `workflow/builtin.ts`；会话级选择（输入框）+ 设置里的默认工作流 |
+| | 过程记录持久化（每步 Agent / 耗时 / tokens / 子 Agent 输出） | `[x]` | `messages.meta.workflow`（挂在一次运行的第一个 assistant 节点上） |
+| | 流式 usage（`stream_options.include_usage`，网关不支持时自动退回） | `[x]` | `providers/openai.ts` |
+| | 更多工作流（审阅 / 多 Agent 并行等）、MCP 工具编排 | `[ ]` | 照 `builtin.ts` 注册即可 |
 | **内置工具** | `get_system_time` / `cockpit_list_commands` / `cockpit_command` | `[x]` | `services/tools/registry.ts`；`cockpit_command` 对需授权的命令要求确认，禁止调用 `yaya.*` |
 | | `read_file`（分段 / 目录列表）/ `write_file` / `run_bash` | `[x]` | 结果统一截断，`run_bash` 可被「停止」中断 |
 | | `fetch_url`（HTML 去标签、超时） | `[x]` | 同上 |
@@ -227,7 +231,11 @@
 | 模块 | 子功能 | 状态 | 当前实现位置 / 说明 |
 | :--- | :--- | :---: | :--- |
 | **布局** | 铺满内容区、常驻 / 弹出式会话侧栏 | `[x]` | `View.vue` |
-| **消息** | 按「轮次」渲染：一轮回答 = 多步思考 + 工具 + 正文 | `[x]` | `components/turns.ts`（含单测）+ `AssistantTurn.vue` |
+| **消息** | 按「轮次」渲染：中间步骤收进过程卡片，气泡只放最终回答 | `[x]` | `components/turns.ts`（含单测）+ `AssistantTurn.vue` + `WorkflowCard.vue` |
+| | 气泡：助手玻璃底 + 边框，用户 primary 色调 + 边框 | `[x]` | |
+| | 右键 / 长按菜单：复制、复制选中、复制 Markdown、编辑、重新生成、删除分支 | `[x]` | `MessageMenu.vue`；长按指令移到 `@ui/directives/long-press` 共用 |
+| | 输入框展开 / 收起（展开态 Ctrl+Enter 发送、Esc 收起）+ 工作流选择 | `[x]` | `ChatInputBox.vue` |
+| **设置** | 分层导航：宽屏左侧导航，窄屏逐层进入；工具搜索 / 筛选 / 批量开关；服务商列表 → 详情 | `[x]` | `YayaSettingsSection.vue` + `components/settings/` |
 | | 用户消息：复制 / 编辑重发 / 分支翻页 / 图片缩略图 | `[x]` | `UserMessage.vue` |
 | | 停止 = 安静的「已停止」，错误 / 重启中断才用提示条 | `[x]` | `AssistantTurn.vue` |
 | | 贴底自动跟随、上翻后「回到底部」 | `[x]` | `View.vue` |
@@ -249,5 +257,5 @@
 ## 四、 后续开发路线与近期优先级 (Next Action Items)
 
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
-2. **中期**：MCP 客户端（stdio / SSE）→ 动态挂载外部工具；Pipeline Hooks 拆分；长文档 Slot（摘要 + 检索工具）。
+2. **中期**：MCP 客户端（stdio / SSE）→ 动态挂载外部工具（设置的工具页已按来源分组 + 搜索，可直接容纳）；长文档 Slot（摘要 + 检索工具）；更多工作流。
 3. **长期**：Claude / DeepSeek 等导入器；输出小部件沙箱。

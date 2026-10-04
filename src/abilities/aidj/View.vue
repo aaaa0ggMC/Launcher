@@ -12,7 +12,7 @@ import {
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
 import ChatView from './components/ChatView.vue'
-import { vLongPress, type LongPressPoint } from './components/long-press'
+import { vLongPress, type LongPressPoint } from '../../main/ui/directives/long-press'
 import AgentModelsPanel from './components/AgentModelsPanel.vue'
 import SanitizeView from './components/SanitizeView.vue'
 import FreqList from './components/FreqList.vue'

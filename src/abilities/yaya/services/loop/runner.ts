@@ -1,23 +1,39 @@
 /**
- * YAYA Loop 执行核心 (Agent Loop Kernel)
- * 「思考 - 工具决策 - 审批挂起 - 执行 - 观察回传 - 循环」。
+ * YAYA 工作流宿主 (Workflow Host)
  *
- * 状态约定：
- * - 每一步的 assistant 节点在步开始时才插入，结束时一定落到终态
- *   （completed / tool_executing→下一步 / interrupted / error），不留悬空的 streaming 节点。
+ * 为一次运行实现 `WorkflowContext`（见 `../workflow/types.ts`），再把控制权交给选中的工作流。
+ * 宿主保证：
+ * - 每个 assistant 节点结束时一定落到终态（completed / interrupted / error），不留悬空的 streaming；
  * - 流式内容先进内存缓冲（`buffered*`），`yaya.messages-branch` 读取时叠加到 DB 内容上，
- *   所以渲染端任何时候重新拉取都拿到完整的进行中文本；结束 / 中止时落盘。
+ *   渲染端任何时候重拉都拿到完整的进行中文本；
+ * - 过程记录（WorkflowRecord）挂在本次运行的第一个 assistant 节点的 `meta.workflow` 上，
+ *   每次变化落盘并广播快照。
  */
 import { randomUUID } from 'node:crypto'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
 import { t, te } from '../../../../main/process/i18n'
-import type { ToolCallItem } from '../../types'
-import { insertMessage, updateMessage, getMessageBranch, getSession } from '../db'
+import type {
+  Session,
+  ToolCallItem,
+  ToolDefinition,
+  WorkflowRecord,
+  WorkflowStepRecord
+} from '../../types'
+import { insertMessage, updateMessage, getMessage, getMessageBranch, getSession } from '../db'
 import { resolveSystemPrompt } from '../config'
-import type { LoopContext, WorkflowSnapshot, WorkflowStatus } from './types'
 import { getEnabledTools, getTool, toolNeedsApproval } from '../tools/registry'
 import type { ProviderMessage } from '../providers/types'
+import { resolveWorkflow, workflowLabel } from '../workflow/registry'
+import {
+  MaxStepsError,
+  type AssistantStepOptions,
+  type AssistantStepResult,
+  type SubAgentOptions,
+  type WorkflowContext,
+  type WorkflowDefinition
+} from '../workflow/types'
+import type { LoopContext, WorkflowSnapshot, WorkflowStatus } from './types'
 
 const log = makeLogger('yaya-loop')
 
@@ -31,9 +47,19 @@ export class WorkflowRunner {
   private readonly startedAt = Date.now()
   private bufferedContent = ''
   private bufferedReasoning = ''
+  /** 本次运行第一个 assistant 节点（过程记录挂在它上面），首个 assistantStep 复用它 */
+  private readonly anchorId: string
+  private anchorUsed = false
+  /** 对话树上的当前末端（下一个节点的 parent） */
+  private parentId: string
+  private stepCount = 0
+  private record: WorkflowRecord | null = null
+  private session: Session | null = null
 
   constructor(ctx: LoopContext) {
     this.ctx = ctx
+    this.anchorId = ctx.assistantMessageId
+    this.parentId = ctx.userMessageId
   }
 
   get sessionId(): string {
@@ -60,7 +86,7 @@ export class WorkflowRunner {
   abort(): void {
     if (this.aborted) return
     this.abortController.abort()
-    // 挂起中的审批视为拒绝，让循环自然收尾
+    // 挂起中的审批视为拒绝，让流程自然收尾
     this.resolveApproval(false)
     this.ctx.status = 'interrupted'
     updateMessage(this.ctx.assistantMessageId, {
@@ -69,6 +95,7 @@ export class WorkflowRunner {
       status: 'interrupted',
       error: ABORTED_MARK
     })
+    this.finishRecord('stopped')
     this.emitSnapshot()
   }
 
@@ -84,7 +111,7 @@ export class WorkflowRunner {
       sessionId: this.ctx.sessionId,
       messageId: this.ctx.assistantMessageId,
       status: this.ctx.status,
-      currentStep: this.ctx.step,
+      currentStep: this.stepCount,
       maxSteps: this.ctx.maxSteps,
       pendingApprovalTool: this.ctx.pendingApprovalTool,
       bufferedTokens: this.bufferedContent,
@@ -104,134 +131,85 @@ export class WorkflowRunner {
     this.emitSnapshot()
   }
 
+  // ---------------------------------------------------------------------------
+  // 运行
+  // ---------------------------------------------------------------------------
+
   async run(): Promise<void> {
     const session = getSession(this.ctx.sessionId)
     if (!session) throw new Error(`Session ${this.ctx.sessionId} not found`)
-
-    const config = this.ctx.config
-    const systemPrompt = resolveSystemPrompt(session.systemPrompt || config.systemPrompt, config)
-    const model = session.model || config.activeModel
-    // 第一步的 assistant 节点由 manager 预先插入；之后每一步开头插入新节点
-    let assistantMsgId = this.ctx.assistantMessageId
-    let parentId = this.ctx.userMessageId
-    let finished = false
-
-    log.info('workflow start', { session: this.ctx.sessionId, model })
+    this.session = session
+    const workflow = resolveWorkflow(
+      (session.meta?.workflow as string | undefined) ?? this.ctx.config.defaultWorkflow
+    )
+    this.record = {
+      runId: randomUUID(),
+      workflowId: workflow.id,
+      label: workflowLabel(workflow),
+      status: 'running',
+      startedAt: this.startedAt,
+      steps: [],
+      tokens: 0
+    }
+    this.persistRecord()
+    log.info('workflow start', { session: session.id, workflow: workflow.id })
 
     try {
-      while (this.ctx.step < this.ctx.maxSteps && !this.aborted) {
-        this.ctx.step++
-        if (this.ctx.step > 1) {
-          assistantMsgId = randomUUID()
-          insertMessage({
-            id: assistantMsgId,
-            sessionId: this.ctx.sessionId,
-            parentId,
-            role: 'assistant',
-            content: '',
-            status: 'streaming',
-            createdAt: Date.now()
-          })
-          this.ctx.assistantMessageId = assistantMsgId
-        } else {
-          updateMessage(assistantMsgId, { status: 'streaming' })
-        }
-        this.bufferedContent = ''
-        this.bufferedReasoning = ''
-        this.setStatus('streaming')
-
-        const result = await this.ctx.provider.generate({
-          model,
-          messages: this.buildMessages(systemPrompt, parentId),
-          tools: this.ctx.tools.length > 0 ? this.ctx.tools : getEnabledTools(config.disabledTools),
-          stream: config.streamOutput,
-          signal: this.abortController.signal,
-          onToken: (tok) => {
-            const offset = this.bufferedContent.length
-            this.bufferedContent += tok
-            getBroadcast()('cockpit:yaya-token', {
-              sessionId: this.ctx.sessionId,
-              messageId: assistantMsgId,
-              token: tok,
-              offset
-            })
-          },
-          onReasoning: (chunk) => {
-            const offset = this.bufferedReasoning.length
-            this.bufferedReasoning += chunk
-            getBroadcast()('cockpit:yaya-reasoning', {
-              sessionId: this.ctx.sessionId,
-              messageId: assistantMsgId,
-              reasoning: chunk,
-              offset
-            })
-          }
-        })
-        if (this.aborted) break
-
-        const content = result.content || this.bufferedContent
-        const reasoning = result.reasoningContent || this.bufferedReasoning
-        const toolCalls = result.toolCalls ?? []
-        this.bufferedContent = content
-        this.bufferedReasoning = reasoning
-
-        updateMessage(assistantMsgId, {
-          content,
-          reasoningContent: reasoning || undefined,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          status: toolCalls.length > 0 ? 'tool_executing' : 'completed',
-          usage: result.usage
-        })
-
-        if (toolCalls.length === 0) {
-          finished = true
-          this.setStatus('completed')
-          break
-        }
-
-        parentId = await this.runTools(assistantMsgId, toolCalls)
-        if (this.aborted) break
-        updateMessage(assistantMsgId, { status: 'completed', toolCalls })
-      }
-
-      if (!finished && !this.aborted) {
-        // 达到步数上限：最后一步的节点已落盘为 completed，补一个说明性的错误终态
-        updateMessage(assistantMsgId, {
-          status: 'error',
-          error: te(
-            'yaya.err.max_steps',
-            { n: String(this.ctx.maxSteps) },
-            '已达到最大循环步数（{n}），工作流停止'
-          )
-        })
-        this.setStatus('error')
-      }
+      await workflow.run(this.buildContext(workflow))
+      if (this.aborted) return
+      this.closeOpenNode()
+      this.finishRecord('ok')
+      this.setStatus('completed')
     } catch (err: unknown) {
-      if (this.aborted) return // abort() 已落盘 interrupted
-      const errMsg = err instanceof Error ? err.message : String(err)
+      if (this.aborted) return // abort() 已落盘
+      const errMsg =
+        err instanceof MaxStepsError
+          ? te(
+              'yaya.err.max_steps',
+              { n: String(err.steps) },
+              '已达到最大循环步数（{n}），工作流停止'
+            )
+          : err instanceof Error
+            ? err.message
+            : String(err)
       log.error('workflow failed', { error: errMsg })
-      updateMessage(assistantMsgId, {
-        content: this.bufferedContent,
-        reasoningContent: this.bufferedReasoning || undefined,
-        status: 'error',
-        error: errMsg
-      })
+      this.failCurrentNode(errMsg)
+      this.finishRecord('error')
       this.setStatus('error')
     }
   }
 
-  /** 当前分支 → Provider 消息，过滤掉中断 / 报错留下的空节点 */
-  private buildMessages(systemPrompt: string, leafId: string): ProviderMessage[] {
-    const nodes = getMessageBranch(leafId).filter((n) => {
-      const hasText = Boolean(n.content?.trim())
-      if (n.role === 'assistant') return hasText || Boolean(n.toolCalls?.length)
-      if (n.role === 'user') return hasText || Boolean(n.attachments?.length)
-      if (n.role === 'tool') return hasText
-      return true
-    })
-    return [
-      { role: 'system', content: systemPrompt },
-      ...nodes.map((n) => ({
+  private buildContext(workflow: WorkflowDefinition): WorkflowContext {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const host = this
+    return {
+      session: this.session!,
+      config: this.ctx.config,
+      signal: this.abortController.signal,
+      maxSteps: this.ctx.maxSteps,
+      get aborted() {
+        return host.aborted
+      },
+      history: () => this.history(),
+      assistantStep: (opts) => this.assistantStep(workflow, opts),
+      runTools: (step) => this.runTools(step),
+      subAgent: (opts) => this.subAgent(opts),
+      note: (label, detail) => {
+        this.addStep({ agent: 'main', kind: 'note', label, detail, status: 'ok' })
+      }
+    }
+  }
+
+  private history(): ProviderMessage[] {
+    return getMessageBranch(this.parentId)
+      .filter((n) => {
+        const hasText = Boolean(n.content?.trim())
+        if (n.role === 'assistant') return hasText || Boolean(n.toolCalls?.length)
+        if (n.role === 'user') return hasText || Boolean(n.attachments?.length)
+        if (n.role === 'tool') return hasText
+        return false
+      })
+      .map((n) => ({
         role: n.role,
         content: n.content,
         name: n.name,
@@ -239,31 +217,173 @@ export class WorkflowRunner {
         toolCalls: n.toolCalls,
         attachments: n.attachments
       }))
-    ]
   }
 
-  /** 依次执行工具调用，返回最后一个 tool 结果节点的 id（下一步的 parent） */
-  private async runTools(assistantMsgId: string, toolCalls: ToolCallItem[]): Promise<string> {
-    let parentId = assistantMsgId
+  private systemPrompt(extra?: string): string {
+    const base = resolveSystemPrompt(
+      this.session?.systemPrompt || this.ctx.config.systemPrompt,
+      this.ctx.config
+    )
+    return extra ? `${base}\n\n${extra}` : base
+  }
+
+  private resolveTools(opt: AssistantStepOptions['tools']): ToolDefinition[] {
+    if (opt === 'none') return []
+    if (Array.isArray(opt)) return opt
+    return getEnabledTools(this.ctx.config.disabledTools)
+  }
+
+  private get model(): string {
+    return this.session?.model || this.ctx.config.activeModel
+  }
+
+  // ---------------------------------------------------------------------------
+  // WorkflowContext 实现
+  // ---------------------------------------------------------------------------
+
+  private async assistantStep(
+    workflow: WorkflowDefinition,
+    opts: AssistantStepOptions = {}
+  ): Promise<AssistantStepResult> {
+    if (this.aborted) throw new Error('aborted')
+    this.stepCount++
+    const tools = this.resolveTools(opts.tools)
+
+    let messageId: string
+    if (!this.anchorUsed) {
+      this.anchorUsed = true
+      messageId = this.anchorId
+      updateMessage(messageId, { status: 'streaming' })
+    } else {
+      messageId = randomUUID()
+      insertMessage({
+        id: messageId,
+        sessionId: this.ctx.sessionId,
+        parentId: this.parentId,
+        role: 'assistant',
+        content: '',
+        status: 'streaming',
+        createdAt: Date.now()
+      })
+    }
+    this.ctx.assistantMessageId = messageId
+    this.parentId = messageId
+    this.bufferedContent = ''
+    this.bufferedReasoning = ''
+
+    const step = this.addStep({
+      agent: 'main',
+      kind: 'llm',
+      label:
+        opts.label ??
+        (tools.length > 0 && workflow.usesTools
+          ? t('yaya.wf.step.think', '思考与调用工具')
+          : t('yaya.wf.step.answer', '生成回答')),
+      messageId,
+      status: 'running'
+    })
+    this.setStatus('streaming')
+
+    const result = await this.ctx.provider.generate({
+      model: this.model,
+      messages: [
+        { role: 'system', content: this.systemPrompt(opts.extraSystem) },
+        ...this.history()
+      ],
+      tools,
+      stream: this.ctx.config.streamOutput,
+      signal: this.abortController.signal,
+      onToken: (tok) => {
+        const offset = this.bufferedContent.length
+        this.bufferedContent += tok
+        getBroadcast()('cockpit:yaya-token', {
+          sessionId: this.ctx.sessionId,
+          messageId,
+          token: tok,
+          offset
+        })
+      },
+      onReasoning: (chunk) => {
+        const offset = this.bufferedReasoning.length
+        this.bufferedReasoning += chunk
+        getBroadcast()('cockpit:yaya-reasoning', {
+          sessionId: this.ctx.sessionId,
+          messageId,
+          reasoning: chunk,
+          offset
+        })
+      }
+    })
+    if (this.aborted) throw new Error('aborted')
+
+    const content = result.content || this.bufferedContent
+    const reasoning = result.reasoningContent || this.bufferedReasoning
+    const toolCalls = result.toolCalls ?? []
+    this.bufferedContent = content
+    this.bufferedReasoning = reasoning
+
+    updateMessage(messageId, {
+      content,
+      reasoningContent: reasoning || undefined,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      status: toolCalls.length > 0 ? 'tool_executing' : 'completed',
+      usage: result.usage
+    })
+    this.endStep(step, 'ok', result.usage?.total)
+    return { messageId, content, toolCalls }
+  }
+
+  private async subAgent(opts: SubAgentOptions): Promise<{ content: string }> {
+    if (this.aborted) throw new Error('aborted')
+    const step = this.addStep({
+      agent: opts.agent,
+      kind: 'subagent',
+      label: opts.label,
+      status: 'running'
+    })
+    this.setStatus('streaming')
+    try {
+      const result = await this.ctx.provider.generate({
+        model: this.model,
+        messages: [{ role: 'system', content: opts.system }, ...(opts.messages ?? this.history())],
+        stream: false,
+        signal: this.abortController.signal
+      })
+      const content = result.content ?? ''
+      if (opts.recordOutput !== false) step.detail = content
+      this.endStep(step, 'ok', result.usage?.total)
+      return { content }
+    } catch (e) {
+      step.detail = e instanceof Error ? e.message : String(e)
+      this.endStep(step, 'error')
+      throw e
+    }
+  }
+
+  /** 依次执行工具调用，结果节点接到对话树上 */
+  private async runTools(step: AssistantStepResult): Promise<void> {
+    const toolCalls = step.toolCalls
+    const assistantMsgId = step.messageId
     const persist = (): void => {
       updateMessage(assistantMsgId, { toolCalls })
       this.emitSnapshot()
     }
+    const fail = (call: ToolCallItem, error: string): void => {
+      call.status = 'failed'
+      call.error = error
+      this.recordToolMessage(call, { error })
+      persist()
+    }
 
     for (const call of toolCalls) {
       if (this.aborted) {
-        call.status = 'failed'
-        call.error = t('yaya.err.aborted_before_tool', '用户停止，未执行')
-        parentId = this.recordToolMessage(parentId, call, { error: call.error })
+        fail(call, t('yaya.err.aborted_before_tool', '用户停止，未执行'))
         continue
       }
 
       const def = getTool(call.name)
       if (!def) {
-        call.status = 'failed'
-        call.error = te('yaya.err.tool_not_found', { name: call.name }, '工具 {name} 不存在')
-        parentId = this.recordToolMessage(parentId, call, { error: call.error })
-        persist()
+        fail(call, te('yaya.err.tool_not_found', { name: call.name }, '工具 {name} 不存在'))
         continue
       }
 
@@ -271,10 +391,7 @@ export class WorkflowRunner {
       try {
         args = typeof call.args === 'string' ? JSON.parse(call.args || '{}') : call.args
       } catch {
-        call.status = 'failed'
-        call.error = t('yaya.err.bad_args', '工具参数不是合法的 JSON')
-        parentId = this.recordToolMessage(parentId, call, { error: call.error })
-        persist()
+        fail(call, t('yaya.err.bad_args', '工具参数不是合法的 JSON'))
         continue
       }
 
@@ -290,12 +407,12 @@ export class WorkflowRunner {
         this.ctx.pendingApprovalTool = undefined
         updateMessage(assistantMsgId, { status: 'tool_executing' })
         if (!approved) {
-          call.status = 'failed'
-          call.error = this.aborted
-            ? t('yaya.err.aborted_before_tool', '用户停止，未执行')
-            : t('yaya.err.rejected', '用户拒绝了执行该工具')
-          parentId = this.recordToolMessage(parentId, call, { error: call.error })
-          persist()
+          fail(
+            call,
+            this.aborted
+              ? t('yaya.err.aborted_before_tool', '用户停止，未执行')
+              : t('yaya.err.rejected', '用户拒绝了执行该工具')
+          )
           continue
         }
       }
@@ -312,24 +429,24 @@ export class WorkflowRunner {
         })
         call.status = 'success'
         call.result = result
-        parentId = this.recordToolMessage(parentId, call, result)
+        this.recordToolMessage(call, result)
       } catch (e: unknown) {
         call.status = 'failed'
         call.error = e instanceof Error ? e.message : String(e)
-        parentId = this.recordToolMessage(parentId, call, { error: call.error })
+        this.recordToolMessage(call, { error: call.error })
       }
       call.ms = Date.now() - start
       persist()
     }
-    return parentId
+    if (!this.aborted) updateMessage(assistantMsgId, { status: 'completed', toolCalls })
   }
 
-  private recordToolMessage(parentId: string, call: ToolCallItem, result: unknown): string {
+  private recordToolMessage(call: ToolCallItem, result: unknown): void {
     const id = randomUUID()
     insertMessage({
       id,
       sessionId: this.ctx.sessionId,
-      parentId,
+      parentId: this.parentId,
       role: 'tool',
       toolCallId: call.id,
       name: call.name,
@@ -337,6 +454,70 @@ export class WorkflowRunner {
       status: 'completed',
       createdAt: Date.now()
     })
-    return id
+    this.parentId = id
+  }
+
+  // ---------------------------------------------------------------------------
+  // 收尾 / 过程记录
+  // ---------------------------------------------------------------------------
+
+  /** 工作流没走任何 assistantStep 就结束（或首节点没用上）时，别留下 pending 的空节点 */
+  private closeOpenNode(): void {
+    if (!this.anchorUsed) {
+      updateMessage(this.anchorId, { status: 'completed' })
+    }
+  }
+
+  private failCurrentNode(error: string): void {
+    const id = this.anchorUsed ? this.ctx.assistantMessageId : this.anchorId
+    const node = getMessage(id)
+    if (!node) return
+    updateMessage(id, {
+      content:
+        id === this.ctx.assistantMessageId ? this.bufferedContent || node.content : node.content,
+      reasoningContent:
+        id === this.ctx.assistantMessageId
+          ? this.bufferedReasoning || node.reasoningContent
+          : node.reasoningContent,
+      status: 'error',
+      error
+    })
+  }
+
+  private addStep(step: Omit<WorkflowStepRecord, 'id' | 'startedAt'>): WorkflowStepRecord {
+    const full: WorkflowStepRecord = { id: randomUUID(), startedAt: Date.now(), ...step }
+    this.record?.steps.push(full)
+    this.persistRecord()
+    return full
+  }
+
+  private endStep(step: WorkflowStepRecord, status: 'ok' | 'error', tokens?: number): void {
+    step.status = status
+    step.ms = Date.now() - step.startedAt
+    if (tokens) {
+      step.tokens = tokens
+      if (this.record) this.record.tokens += tokens
+    }
+    this.persistRecord()
+  }
+
+  private finishRecord(status: WorkflowRecord['status']): void {
+    if (!this.record || this.record.endedAt) return
+    this.record.status = status
+    this.record.endedAt = Date.now()
+    for (const s of this.record.steps) {
+      if (s.status === 'running') {
+        s.status = status === 'ok' ? 'ok' : 'error'
+        s.ms = this.record.endedAt - s.startedAt
+      }
+    }
+    this.persistRecord()
+  }
+
+  private persistRecord(): void {
+    if (!this.record) return
+    const anchor = getMessage(this.anchorId)
+    if (!anchor) return
+    updateMessage(this.anchorId, { meta: { ...anchor.meta, workflow: this.record } })
   }
 }

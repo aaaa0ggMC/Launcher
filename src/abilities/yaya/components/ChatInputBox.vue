@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import type { MessageAttachment } from '../types'
+import type { MessageAttachment, WorkflowInfo } from '../types'
 
 const props = defineProps<{
   isRunning: boolean
@@ -9,6 +9,7 @@ const props = defineProps<{
   assistantName: string
   /** 新对话草稿还没有会话时，添加附件前先创建会话 */
   ensureSession: () => Promise<string>
+  workflows: WorkflowInfo[]
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +19,10 @@ const emit = defineEmits<{
 
 /** 草稿由父组件持有（空状态的建议会往里填） */
 const draft = defineModel<string>({ default: '' })
+/** 当前会话使用的工作流 */
+const workflowId = defineModel<string>('workflowId', { default: 'agent' })
+/** 展开态（大编辑区，盖住消息区下半部分）由父组件定位 */
+const expanded = defineModel<boolean>('expanded', { default: false })
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
@@ -37,16 +42,35 @@ const canSend = computed(
 )
 
 function onKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && expanded.value) {
+    expanded.value = false
+    return
+  }
   if (e.key !== 'Enter' || e.isComposing || coarse) return
-  if (e.shiftKey) return
+  // 展开态写长文：Enter 换行，Ctrl/⌘+Enter 发送；收起态：Enter 发送，Shift+Enter 换行
+  if (expanded.value ? !(e.ctrlKey || e.metaKey) : e.shiftKey) return
   e.preventDefault()
   send()
 }
+
+/** 多行 / 较长时才显示展开按钮（展开态总是显示收起） */
+const canExpand = computed(
+  () => expanded.value || draft.value.includes('\n') || draft.value.length > 80
+)
+function toggleExpanded(): void {
+  expanded.value = !expanded.value
+  textarea.value?.focus()
+}
+
+const currentWorkflow = computed(
+  () => props.workflows.find((w) => w.id === workflowId.value) ?? props.workflows[0]
+)
 
 function send(): void {
   if (!canSend.value) return
   emit('send', draft.value.trim(), JSON.parse(JSON.stringify(attachments.value)))
   draft.value = ''
+  expanded.value = false
   attachments.value = []
   previews.value = {}
 }
@@ -95,7 +119,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
 </script>
 
 <template>
-  <div class="input-wrap">
+  <div class="input-wrap" :class="{ 'is-expanded': expanded }">
     <div class="input-card">
       <div v-if="attachments.length || importing" class="att-row">
         <div v-for="att in attachments" :key="att.id" class="att">
@@ -122,18 +146,33 @@ defineExpose({ focus: () => textarea.value?.focus() })
         </div>
       </div>
 
-      <v-textarea
-        ref="textarea"
-        v-model="draft"
-        :placeholder="te('yaya.input.placeholder', { name: assistantName }, '给 {name} 发消息')"
-        rows="1"
-        max-rows="8"
-        auto-grow
-        variant="plain"
-        hide-details
-        class="input-textarea"
-        @keydown="onKeyDown"
-      />
+      <div class="text-wrap">
+        <v-textarea
+          ref="textarea"
+          v-model="draft"
+          :placeholder="te('yaya.input.placeholder', { name: assistantName }, '给 {name} 发消息')"
+          :rows="expanded ? 12 : 1"
+          :max-rows="expanded ? undefined : 6"
+          :auto-grow="!expanded"
+          no-resize
+          variant="plain"
+          hide-details
+          class="input-textarea"
+          @keydown="onKeyDown"
+        />
+        <v-btn
+          v-if="canExpand"
+          :icon="expanded ? 'mdi-arrow-collapse' : 'mdi-arrow-expand'"
+          variant="text"
+          size="small"
+          class="expand-btn"
+          :title="expanded ? t('yaya.input.collapse', '收起') : t('yaya.input.expand', '展开编辑')"
+          :aria-label="
+            expanded ? t('yaya.input.collapse', '收起') : t('yaya.input.expand', '展开编辑')
+          "
+          @click="toggleExpanded"
+        />
+      </div>
 
       <div class="input-tools">
         <v-btn
@@ -145,8 +184,41 @@ defineExpose({ focus: () => textarea.value?.focus() })
           :aria-label="t('yaya.input.attach', '添加附件')"
           @click="attach"
         />
+        <v-menu v-if="workflows.length > 1" location="top start">
+          <template #activator="{ props: menuProps }">
+            <button
+              v-bind="menuProps"
+              type="button"
+              class="wf-pick"
+              :title="t('yaya.input.workflow', '工作流')"
+              :aria-label="`${t('yaya.input.workflow', '工作流')}: ${currentWorkflow?.label ?? ''}`"
+            >
+              <v-icon icon="mdi-source-branch" size="16" />
+              <span class="wf-pick-label">{{ currentWorkflow?.label }}</span>
+              <v-icon icon="mdi-chevron-up" size="16" />
+            </button>
+          </template>
+          <v-list density="comfortable" max-width="340" class="wf-menu">
+            <v-list-item
+              v-for="w in workflows"
+              :key="w.id"
+              :active="w.id === workflowId"
+              color="primary"
+              @click="workflowId = w.id"
+            >
+              <v-list-item-title class="font-weight-medium">{{ w.label }}</v-list-item-title>
+              <v-list-item-subtitle class="wf-desc">{{ w.description }}</v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-menu>
         <span class="hint text-disabled">
-          {{ coarse ? '' : t('yaya.input.hint', 'Enter 发送 · Shift+Enter 换行') }}
+          {{
+            coarse
+              ? ''
+              : expanded
+                ? t('yaya.input.hint_expanded', 'Ctrl+Enter 发送 · Esc 收起')
+                : t('yaya.input.hint', 'Enter 发送 · Shift+Enter 换行')
+          }}
         </span>
         <v-spacer />
         <v-btn
@@ -196,6 +268,76 @@ defineExpose({ focus: () => textarea.value?.focus() })
 }
 .input-card:focus-within {
   border-color: rgba(var(--v-theme-primary), 0.55);
+}
+.text-wrap {
+  position: relative;
+}
+.expand-btn {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  opacity: 0.6;
+}
+.expand-btn:hover {
+  opacity: 1;
+}
+.text-wrap:has(.expand-btn) .input-textarea :deep(textarea) {
+  padding-right: 36px;
+}
+/* 展开态：外层由 View 撑高，编辑区吃满剩余高度 */
+.input-wrap.is-expanded,
+.input-wrap.is-expanded .input-card {
+  height: 100%;
+}
+.input-wrap.is-expanded .input-card {
+  display: flex;
+  flex-direction: column;
+}
+.input-wrap.is-expanded .text-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.input-wrap.is-expanded .input-textarea {
+  flex: 1 1 auto;
+}
+.input-wrap.is-expanded .input-textarea :deep(.v-input__control),
+.input-wrap.is-expanded .input-textarea :deep(.v-field),
+.input-wrap.is-expanded .input-textarea :deep(.v-field__field) {
+  height: 100%;
+}
+.input-wrap.is-expanded .input-textarea :deep(textarea) {
+  height: 100% !important;
+  max-height: none;
+  overflow-y: auto;
+}
+.wf-pick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  max-width: 180px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  background: none;
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.wf-pick:hover {
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+.wf-pick-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wf-desc {
+  white-space: normal !important;
+  -webkit-line-clamp: 3 !important;
+  line-height: 1.4;
 }
 .input-textarea :deep(textarea) {
   font-size: 0.95rem;

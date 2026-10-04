@@ -62,9 +62,16 @@ export function getYayaDb(): DatabaseSync {
   const d = new DatabaseSync(path)
   d.exec('PRAGMA journal_mode = WAL')
   d.exec(SCHEMA)
+  migrate(d)
   db = d
   log.info('YAYA database initialized at', { path })
   return db
+}
+
+/** 增量迁移：只加列，不改旧数据 */
+function migrate(d: DatabaseSync): void {
+  const cols = d.prepare('PRAGMA table_info(messages)').all() as unknown as { name: string }[]
+  if (!cols.some((c) => c.name === 'meta')) d.exec('ALTER TABLE messages ADD COLUMN meta TEXT')
 }
 
 interface SessionRow {
@@ -108,6 +115,7 @@ interface MessageRow {
   error: string | null
   created_at: number
   usage: string | null
+  meta: string | null
 }
 
 function parseMessageRow(row: MessageRow): MessageNode {
@@ -125,7 +133,8 @@ function parseMessageRow(row: MessageRow): MessageNode {
     status: row.status as MessageNode['status'],
     error: row.error ?? undefined,
     createdAt: row.created_at,
-    usage: row.usage ? JSON.parse(row.usage) : undefined
+    usage: row.usage ? JSON.parse(row.usage) : undefined,
+    meta: row.meta ? JSON.parse(row.meta) : undefined
   }
 }
 
@@ -236,8 +245,8 @@ export function insertMessage(msg: MessageNode): void {
   d.prepare(
     `INSERT INTO messages (
       id, session_id, parent_id, role, content, reasoning_content,
-      tool_calls, tool_call_id, name, attachments, status, error, created_at, usage
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      tool_calls, tool_call_id, name, attachments, status, error, created_at, usage, meta
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     msg.id,
     msg.sessionId,
@@ -252,7 +261,8 @@ export function insertMessage(msg: MessageNode): void {
     msg.status ?? 'completed',
     msg.error ?? null,
     msg.createdAt,
-    msg.usage ? JSON.stringify(msg.usage) : null
+    msg.usage ? JSON.stringify(msg.usage) : null,
+    msg.meta ? JSON.stringify(msg.meta) : null
   )
 
   // Update session active_leaf_id and updated_at
@@ -274,7 +284,8 @@ export function updateMessage(id: string, updates: Partial<MessageNode>): void {
       attachments = ?,
       status = ?,
       error = ?,
-      usage = ?
+      usage = ?,
+      meta = ?
      WHERE id = ?`
   ).run(
     updated.content,
@@ -284,6 +295,7 @@ export function updateMessage(id: string, updates: Partial<MessageNode>): void {
     updated.status ?? 'completed',
     updated.error ?? null,
     updated.usage ? JSON.stringify(updated.usage) : null,
+    updated.meta ? JSON.stringify(updated.meta) : null,
     id
   )
 }
@@ -301,6 +313,49 @@ export function getSessionMessages(sessionId: string): MessageNode[] {
     .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
     .all(sessionId) as unknown as MessageRow[]
   return rows.map(parseMessageRow)
+}
+
+/**
+ * 删除一个节点及其全部后代。若当前分支经过它，activeLeaf 切到其父节点下最近的分支
+ * （没有兄弟就停在父节点）。返回新的 activeLeaf。
+ */
+export function deleteMessageSubtree(messageId: string): string | null {
+  const msg = getMessage(messageId)
+  if (!msg) return null
+  const d = getYayaDb()
+  const ids: string[] = []
+  const stack = [messageId]
+  const children = d.prepare('SELECT id FROM messages WHERE parent_id = ?')
+  while (stack.length) {
+    const id = stack.pop()!
+    ids.push(id)
+    for (const r of children.all(id) as unknown as { id: string }[]) stack.push(r.id)
+  }
+  const session = getSession(msg.sessionId)
+  const onActive = session?.activeLeafId ? ids.includes(session.activeLeafId) : false
+  d.exec('BEGIN')
+  try {
+    const del = d.prepare('DELETE FROM messages WHERE id = ?')
+    for (const id of ids) del.run(id)
+    d.exec('COMMIT')
+  } catch (e) {
+    d.exec('ROLLBACK')
+    throw e
+  }
+  if (!session) return null
+  if (!onActive) return session.activeLeafId ?? null
+  let leaf: string | null = msg.parentId
+  if (msg.parentId) leaf = findLatestLeaf(msg.parentId)
+  else {
+    const root = d
+      .prepare(
+        'SELECT id FROM messages WHERE session_id = ? AND parent_id IS NULL ORDER BY created_at DESC LIMIT 1'
+      )
+      .get(msg.sessionId) as unknown as { id: string } | undefined
+    leaf = root ? findLatestLeaf(root.id) : null
+  }
+  updateSession(msg.sessionId, { activeLeafId: leaf })
+  return leaf
 }
 
 /**

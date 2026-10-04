@@ -2,7 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
-import type { Session, MessageNode, MessageAttachment, YayaConfig } from './types'
+import type { Session, MessageNode, MessageAttachment, YayaConfig, WorkflowInfo } from './types'
 import type { WorkflowSnapshot } from './services/loop/types'
 import { buildTurns } from './components/turns'
 import ChatSessionList from './components/ChatSessionList.vue'
@@ -10,6 +10,8 @@ import UserMessage from './components/UserMessage.vue'
 import AssistantTurn from './components/AssistantTurn.vue'
 import ChatInputBox from './components/ChatInputBox.vue'
 import ModelSelectDialog from './components/ModelSelectDialog.vue'
+import MessageMenu from './components/MessageMenu.vue'
+import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
 defineOptions({ name: 'cockpit-yaya-view' })
 
@@ -28,6 +30,13 @@ const draft = ref('')
 const showModelSelect = ref(false)
 const loadingMessages = ref(false)
 const notice = ref<{ text: string; error?: boolean } | null>(null)
+const workflows = ref<WorkflowInfo[]>([])
+/** 新对话草稿里选的工作流（会话创建时带上） */
+const draftWorkflow = ref<string | null>(null)
+const composerExpanded = ref(false)
+const menuRequest = ref<MessageMenuRequest | null>(null)
+const editingId = ref<string | null>(null)
+const pendingDelete = ref<{ messageId: string; kind: 'user' | 'assistant' } | null>(null)
 
 const shellEl = ref<HTMLElement | null>(null)
 const scrollEl = ref<HTMLElement | null>(null)
@@ -68,6 +77,26 @@ const currentProviderName = computed(
 )
 const sessionTitle = computed(() => activeSession.value?.title || t('yaya.new_chat', '新对话'))
 
+/** 当前会话的工作流：会话自己的选择 → 草稿选择 → 设置里的默认 → agent */
+const currentWorkflowId = computed({
+  get: () =>
+    (activeSession.value?.meta?.workflow as string | undefined) ||
+    draftWorkflow.value ||
+    config.value?.defaultWorkflow ||
+    'agent',
+  set: (id: string) => {
+    const s = activeSession.value
+    if (!s) {
+      draftWorkflow.value = id
+      return
+    }
+    s.meta = { ...(s.meta ?? {}), workflow: id }
+    window.cockpit.command('yaya.session-update', { id: s.id, workflow: id }).catch((e) => {
+      showNotice(errText(e), true)
+    })
+  }
+})
+
 // ---- 滚动：贴底时跟随，用户上翻后不打扰 ----
 const stickToBottom = ref(true)
 function onScroll(): void {
@@ -90,6 +119,14 @@ async function loadConfig(): Promise<void> {
     config.value = (await window.cockpit.command('yaya.config-get')) as YayaConfig
   } catch (e) {
     console.error('[yaya] load config failed', e)
+  }
+}
+
+async function loadWorkflows(): Promise<void> {
+  try {
+    workflows.value = (await window.cockpit.command('yaya.workflows-list')) as WorkflowInfo[]
+  } catch {
+    workflows.value = []
   }
 }
 
@@ -163,6 +200,7 @@ function newChat(): void {
   activeSessionId.value = null
   messages.value = []
   snapshot.value = null
+  draftWorkflow.value = null
   void nextTick(() => inputRef.value?.focus())
 }
 
@@ -171,7 +209,8 @@ async function ensureSession(): Promise<string> {
   const s = (await window.cockpit.command('yaya.session-create', {
     title: t('yaya.new_chat', '新对话'),
     model: config.value?.activeModel,
-    provider: config.value?.activeProviderId
+    provider: config.value?.activeProviderId,
+    workflow: draftWorkflow.value || undefined
   })) as Session
   sessions.value.unshift(s)
   activeSessionId.value = s.id
@@ -352,6 +391,90 @@ async function saveConfig(): Promise<void> {
   }
 }
 
+// ---- 消息右键 / 长按菜单 ----
+const menuItems = computed<MessageMenuItem[]>(() => {
+  const req = menuRequest.value
+  if (!req) return []
+  const items: MessageMenuItem[] = []
+  if (req.selection.trim())
+    items.push({
+      key: 'copy-selection',
+      icon: 'mdi-selection',
+      label: t('yaya.menu.copy_selection', '复制选中内容')
+    })
+  items.push({
+    key: 'copy',
+    icon: 'mdi-content-copy',
+    label:
+      req.kind === 'user' ? t('yaya.copy', '复制') : t('yaya.menu.copy_markdown', '复制 Markdown')
+  })
+  if (req.kind === 'user') {
+    items.push({
+      key: 'edit',
+      icon: 'mdi-pencil-outline',
+      label: t('yaya.edit', '编辑并重新发送'),
+      disabled: isRunning.value
+    })
+  } else {
+    items.push({
+      key: 'regenerate',
+      icon: 'mdi-refresh',
+      label: t('yaya.regenerate', '重新生成'),
+      disabled: isRunning.value
+    })
+  }
+  items.push({
+    key: 'delete',
+    icon: 'mdi-delete-outline',
+    label:
+      req.kind === 'user'
+        ? t('yaya.menu.delete_from_here', '删除此消息及之后的对话')
+        : t('yaya.menu.delete_answer', '删除这个回答'),
+    danger: true,
+    divider: true,
+    disabled: isRunning.value
+  })
+  return items
+})
+
+async function onMenuSelect(key: string): Promise<void> {
+  const req = menuRequest.value
+  menuRequest.value = null
+  if (!req) return
+  switch (key) {
+    case 'copy-selection':
+      await window.cockpit.copyText(req.selection)
+      break
+    case 'copy':
+      await window.cockpit.copyText(req.text)
+      break
+    case 'edit':
+      editingId.value = req.messageId
+      break
+    case 'regenerate':
+      await handleRegenerate(req.messageId)
+      break
+    case 'delete':
+      pendingDelete.value = { messageId: req.messageId, kind: req.kind }
+      break
+  }
+}
+
+async function confirmDelete(): Promise<void> {
+  const target = pendingDelete.value
+  pendingDelete.value = null
+  if (!target || !activeSessionId.value) return
+  try {
+    await window.cockpit.command('yaya.message-delete', {
+      session: activeSessionId.value,
+      id: target.messageId
+    })
+    await loadMessages()
+  } catch (e) {
+    showNotice(errText(e), true)
+  }
+}
+
 function openSettings(): void {
   settings.open('yaya')
 }
@@ -438,7 +561,7 @@ onMounted(async () => {
     })
   )
 
-  await loadConfig()
+  await Promise.all([loadConfig(), loadWorkflows()])
   await loadSessions()
   runningIds.value = ((await window.cockpit.command('yaya.workflow-running').catch(() => [])) ??
     []) as string[]
@@ -612,8 +735,11 @@ watch(isRunning, (now, before) => {
               v-if="turn.kind === 'user'"
               :message="turn.message"
               :busy="isRunning"
+              :editing="editingId === turn.message.id"
+              @update:editing="(on: boolean) => (editingId = on ? turn.message.id : null)"
               @switch-branch="handleSwitchBranch"
               @edit="(text) => handleEdit(turn.message, text)"
+              @menu="(req) => (menuRequest = req)"
             />
             <AssistantTurn
               v-else
@@ -621,15 +747,17 @@ watch(isRunning, (now, before) => {
               :assistant-name="assistantName"
               :live="isRunning && turn.key === lastTurnKey"
               :pending-approval-id="turn.key === lastTurnKey ? pendingApprovalId : null"
+              :is-last="turn.key === lastTurnKey"
               @switch-branch="handleSwitchBranch"
               @approve="handleApprove"
               @regenerate="handleRegenerate"
+              @menu="(req) => (menuRequest = req)"
             />
           </template>
         </div>
       </div>
 
-      <div class="composer">
+      <div class="composer" :class="{ 'is-expanded': composerExpanded }">
         <transition name="fade">
           <v-btn
             v-if="!stickToBottom && turns.length > 0"
@@ -660,6 +788,9 @@ watch(isRunning, (now, before) => {
         <ChatInputBox
           ref="inputRef"
           v-model="draft"
+          v-model:workflow-id="currentWorkflowId"
+          v-model:expanded="composerExpanded"
+          :workflows="workflows"
           :is-running="isRunning"
           :session-id="activeSessionId || ''"
           :ensure-session="ensureSession"
@@ -669,6 +800,48 @@ watch(isRunning, (now, before) => {
         />
       </div>
     </section>
+
+    <MessageMenu
+      :request="menuRequest"
+      :items="menuItems"
+      @select="onMenuSelect"
+      @close="menuRequest = null"
+    />
+
+    <v-dialog
+      :model-value="pendingDelete !== null"
+      max-width="420"
+      @update:model-value="(v: boolean) => !v && (pendingDelete = null)"
+    >
+      <v-card class="pa-2">
+        <v-card-title class="text-h6">{{ t('yaya.menu.delete_title', '删除消息') }}</v-card-title>
+        <v-card-text class="text-body-2">
+          {{
+            pendingDelete?.kind === 'user'
+              ? t(
+                  'yaya.menu.delete_user_hint',
+                  '这条消息以及它之后的所有回答、分支都会被删除，无法恢复。'
+                )
+              : t(
+                  'yaya.menu.delete_answer_hint',
+                  '这个回答（含它之后的追问分支）会被删除，无法恢复。'
+                )
+          }}
+        </v-card-text>
+        <v-card-actions class="px-4 pb-4 ga-2">
+          <v-spacer />
+          <v-btn variant="text" @click="pendingDelete = null">{{ t('yaya.cancel', '取消') }}</v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            prepend-icon="mdi-delete-outline"
+            @click="confirmDelete"
+          >
+            {{ t('yaya.menu.delete', '删除') }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <ModelSelectDialog
       v-model="showModelSelect"
@@ -911,10 +1084,29 @@ watch(isRunning, (now, before) => {
 }
 .jump-btn {
   position: absolute;
-  top: -48px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: -52px;
+  right: 24px;
   z-index: 2;
+}
+/* 展开编辑：输入区盖住消息区下方大部分，顶栏仍可见 */
+.composer.is-expanded {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: max(76px, 22%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--v-theme-surface), 0) 0,
+    rgba(var(--v-theme-surface), 0.55) 32px
+  );
+}
+.composer.is-expanded > :last-child {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .notice {
   display: flex;
@@ -966,6 +1158,12 @@ watch(isRunning, (now, before) => {
   }
   .composer {
     padding: 6px 8px 10px;
+  }
+  .composer.is-expanded {
+    top: 64px;
+  }
+  .jump-btn {
+    right: 12px;
   }
   .suggestions {
     grid-template-columns: minmax(0, 1fr);
