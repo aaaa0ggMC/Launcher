@@ -1,7 +1,15 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MessageNode } from '../types'
-import { answerStep, buildTurns, hasProcess, processSteps, summarizeArgs, turnText } from './turns'
+import {
+  answerStep,
+  buildTurns,
+  hasProcess,
+  processSteps,
+  summarizeArgs,
+  turnSegments,
+  turnText
+} from './turns'
 
 let clock = 0
 function node(partial: Partial<MessageNode> & Pick<MessageNode, 'id' | 'role'>): MessageNode {
@@ -149,5 +157,54 @@ describe('answer / process split', () => {
     ])
     assert.ok(t.kind === 'assistant')
     assert.equal(answerStep(t), null)
+  })
+})
+
+describe('turnSegments', () => {
+  it('interleaves narration with process blocks; only reasoning and tools are folded', () => {
+    const call = (id: string): MessageNode['toolCalls'] => [
+      { id, name: 'cockpit_command_script', args: { code: 'x' }, status: 'success' }
+    ]
+    const turns = buildTurns([
+      node({ id: 'u', role: 'user', content: 'play' }),
+      node({
+        id: 's1',
+        role: 'assistant',
+        content: '',
+        reasoningContent: 'plan',
+        toolCalls: call('c1')
+      }),
+      node({
+        id: 's2',
+        role: 'assistant',
+        content: 'intro is playing',
+        reasoningContent: 'hmm',
+        toolCalls: call('c2')
+      }),
+      node({ id: 's3', role: 'assistant', content: 'title screen', toolCalls: call('c3') }),
+      node({ id: 's4', role: 'assistant', content: 'done', reasoningContent: 'wrap up' })
+    ])
+    const turn = turns[1]
+    assert.ok(turn.kind === 'assistant')
+    const segs = turnSegments(turn)
+    assert.deepEqual(
+      segs.map((s) => (s.kind === 'text' ? `text:${s.node.id}` : `proc:${s.items.length}`)),
+      // [s1 全部 + s2 思考] → s2 的话 → [s2 工具] → s3 的话 → [s3 工具 + s4 思考]
+      ['proc:2', 'text:s2', 'proc:1', 'text:s3', 'proc:2']
+    )
+    const first = segs[0]
+    assert.ok(first.kind === 'process')
+    assert.deepEqual(
+      first.items.map((i) => (i.kind === 'llm' ? `${i.node.id}:${i.part}` : i.kind)),
+      ['s1:all', 's2:reasoning']
+    )
+    const last = segs[4]
+    assert.ok(last.kind === 'process')
+    assert.deepEqual(
+      last.items.map((i) => (i.kind === 'llm' ? `${i.node.id}:${i.part}:${i.answer}` : i.kind)),
+      ['s3:tools:false', 's4:all:true']
+    )
+    // 最终回答不在分段里
+    assert.ok(!segs.some((s) => s.kind === 'text' && s.node.id === 's4'))
   })
 })

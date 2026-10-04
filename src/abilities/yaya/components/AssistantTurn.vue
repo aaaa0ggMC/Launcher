@@ -2,9 +2,9 @@
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
-import type { ToolCallItem } from '../types'
+import type { ApprovalScope, ToolCallItem } from '../types'
 import type { AssistantTurn } from './turns'
-import { answerStep, hasProcess, turnText } from './turns'
+import { answerStep, hasProcess, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
 import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
 import type { MessageMenuRequest } from './message-menu'
@@ -25,7 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'switchBranch', messageId: string): void
-  (e: 'approve', approved: boolean, reason?: string): void
+  (e: 'approve', approved: boolean, reason?: string, scope?: ApprovalScope): void
   (e: 'regenerate', fromMessageId: string): void
   (e: 'menu', req: MessageMenuRequest): void
 }>()
@@ -41,6 +41,31 @@ const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
 const answerSegments = computed(() =>
   answer.value?.content ? renderSegments(answer.value.content, fenceLangs.value, labels.value) : []
 )
+
+/**
+ * 过程块与 AI 中途说的话交错显示（说的话不再藏进过程卡片，只有思考 / 工具调用收起）。
+ * 说的话与最终回答用同一套 Markdown 分段（插件代码块照样接管）。
+ */
+const segments = computed(() =>
+  showProcess.value
+    ? turnSegments(props.turn).map((seg) =>
+        seg.kind === 'text'
+          ? { ...seg, parts: renderSegments(seg.node.content, fenceLangs.value, labels.value) }
+          : seg
+      )
+    : []
+)
+const lastProcessKey = computed(() => {
+  for (let i = segments.value.length - 1; i >= 0; i--)
+    if (segments.value[i].kind === 'process') return segments.value[i].key
+  return ''
+})
+const firstProcessKey = computed(() => segments.value.find((s) => s.kind === 'process')?.key ?? '')
+/** 运行中：最后一块过程之后已经有 AI 在说的话 → 这些话才是「当前」，过程块不再转圈 */
+const textAfterLastProcess = computed(() => {
+  const i = segments.value.findIndex((s) => s.key === lastProcessKey.value)
+  return i >= 0 && i < segments.value.length - 1
+})
 
 /** 挂起等待确认的工具调用：固定显示在过程卡片外面，避免被折叠藏起来 */
 const pendingCall = computed<ToolCallItem | null>(() => {
@@ -138,19 +163,40 @@ async function copyTurn(): Promise<void> {
         @contextmenu="onContextMenu"
         @click="onContentClick"
       >
-        <WorkflowCard
-          v-if="showProcess"
-          :turn="turn"
-          :assistant-name="assistantName"
-          :live="live"
-          :pending-approval-id="pendingApprovalId"
-        />
+        <template v-for="seg in segments" :key="seg.key">
+          <WorkflowCard
+            v-if="seg.kind === 'process'"
+            :turn="turn"
+            :items="seg.items"
+            :first="seg.key === firstProcessKey"
+            :last="seg.key === lastProcessKey && !textAfterLastProcess && !answer?.content"
+            :assistant-name="assistantName"
+            :live="live"
+            :pending-approval-id="pendingApprovalId"
+          />
+          <div v-else-if="'parts' in seg" class="narration">
+            <template v-for="(part, i) in seg.parts" :key="i">
+              <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+              <div v-if="part.kind === 'html'" class="md-body" v-html="part.html" />
+              <component
+                :is="fenceViewFor(part.lang)"
+                v-else
+                :lang="part.lang"
+                :source="part.source"
+                :streaming="live && !part.closed"
+              />
+            </template>
+          </div>
+        </template>
 
         <ToolCallRow
           v-if="pendingCall"
           :call="pendingCall"
           :awaiting-approval="true"
-          @approve="(ok: boolean, reason?: string) => emit('approve', ok, reason)"
+          @approve="
+            (ok: boolean, reason?: string, scope?: ApprovalScope) =>
+              emit('approve', ok, reason, scope)
+          "
         />
 
         <template v-for="(seg, i) in answerSegments" :key="i">
@@ -295,6 +341,9 @@ async function copyTurn(): Promise<void> {
   -webkit-backdrop-filter: blur(16px) saturate(1.15);
   border: 1px solid rgba(var(--v-border-color), calc(var(--v-border-opacity) * 1.6));
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+}
+.narration {
+  min-width: 0;
 }
 .typing {
   display: flex;

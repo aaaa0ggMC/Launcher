@@ -4,7 +4,7 @@
  * tool 节点不单独显示——结果已经记在对应 assistant 节点的 toolCalls[].result 里，
  * 只有找不到对应调用时（例如导入的数据）才把它当作孤立结果挂到当前轮次。
  */
-import type { MessageNode, ToolCallItem, WorkflowRecord } from '../types'
+import type { MessageNode, ToolCallItem, WorkflowRecord, WorkflowStepRecord } from '../types'
 
 export interface UserTurn {
   kind: 'user'
@@ -51,6 +51,92 @@ export function hasProcess(turn: AssistantTurn): boolean {
 
 export function toolCallCount(turn: AssistantTurn): number {
   return turn.steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0)
+}
+
+/**
+ * 过程时间线的一项。llm 项的 `part` 决定显示哪部分：AI 说的话（content）不在过程卡片里，
+ * 而是作为正文段落插在过程块之间（见 `turnSegments`），过程卡片只收思考与工具调用。
+ */
+export type ProcessItem =
+  | {
+      kind: 'llm'
+      key: string
+      node: MessageNode
+      /** 是不是最终回答那一步（只有它的思考会进过程） */
+      answer: boolean
+      rec?: WorkflowStepRecord
+      part: 'reasoning' | 'tools' | 'all'
+    }
+  | { kind: 'subagent' | 'note'; key: string; rec: WorkflowStepRecord }
+
+/** 时间线：有过程记录就按记录顺序（含子 Agent），旧数据按节点顺序 */
+export function processItems(turn: AssistantTurn): ProcessItem[] {
+  const answer = answerStep(turn)
+  const shown = new Set(processSteps(turn).map((n) => n.id))
+  if (answer?.reasoningContent) shown.add(answer.id)
+  const byId = new Map(turn.steps.map((n) => [n.id, n]))
+  const llm = (node: MessageNode, rec?: WorkflowStepRecord): ProcessItem => ({
+    kind: 'llm',
+    key: node.id,
+    node,
+    answer: node.id === answer?.id,
+    rec,
+    part: 'all'
+  })
+  const rec = turn.workflow
+  if (!rec) return turn.steps.filter((n) => shown.has(n.id)).map((n) => llm(n))
+  const out: ProcessItem[] = []
+  const used = new Set<string>()
+  for (const s of rec.steps) {
+    if (s.kind === 'llm') {
+      const node = s.messageId ? byId.get(s.messageId) : undefined
+      if (node && shown.has(node.id)) {
+        out.push(llm(node, s))
+        used.add(node.id)
+      }
+    } else out.push({ kind: s.kind, key: s.id, rec: s })
+  }
+  // 记录里漏掉的节点（理论上不会）补在末尾，保证内容不丢
+  for (const n of turn.steps) if (shown.has(n.id) && !used.has(n.id)) out.push(llm(n))
+  return out
+}
+
+export type TurnSegment =
+  | { kind: 'process'; key: string; items: ProcessItem[] }
+  | { kind: 'text'; key: string; node: MessageNode }
+
+/**
+ * 一轮回答的显示顺序：过程块（思考 / 工具 / 子 Agent）与 AI 中途说的话交错，
+ * 最终回答不在这里（AssistantTurn 单独渲染在最后）。一步之内按模型输出顺序：
+ * 思考 → 说的话 → 工具调用。
+ */
+export function turnSegments(turn: AssistantTurn): TurnSegment[] {
+  const out: TurnSegment[] = []
+  let block: ProcessItem[] = []
+  const flush = (): void => {
+    if (!block.length) return
+    out.push({ kind: 'process', key: `p:${block[0].key}`, items: block })
+    block = []
+  }
+  for (const item of processItems(turn)) {
+    if (item.kind !== 'llm') {
+      block.push(item)
+      continue
+    }
+    const n = item.node
+    const text = !item.answer && n.content?.trim()
+    const tools = !item.answer && !!n.toolCalls?.length
+    if (!text) {
+      if (n.reasoningContent || tools) block.push({ ...item, part: 'all' })
+      continue
+    }
+    if (n.reasoningContent) block.push({ ...item, key: `${item.key}:r`, part: 'reasoning' })
+    flush()
+    out.push({ kind: 'text', key: `t:${n.id}`, node: n })
+    if (tools) block.push({ ...item, key: `${item.key}:t`, part: 'tools' })
+  }
+  flush()
+  return out
 }
 
 export type Turn = UserTurn | AssistantTurn

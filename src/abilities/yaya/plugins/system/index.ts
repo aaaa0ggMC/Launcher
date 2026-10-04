@@ -9,8 +9,11 @@ import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { guard, SCOPE_EXEC } from '../../../../main/process/privacy'
 import { runShell } from './shell'
+import { isPrivateUrl } from './net-guard'
 import { clipText } from '../../services/plugins/registry'
 import type { PluginTool, YayaPlugin } from '../../services/plugins/types'
+
+const MAX_REDIRECTS = 5
 
 const tools: PluginTool[] = [
   {
@@ -137,6 +140,7 @@ const tools: PluginTool[] = [
   },
   {
     name: 'fetch_url',
+    docs: '访问本机 / 局域网 / 链路本地地址（含经重定向到达的）需要隐私授权。',
     description:
       '以 GET 请求抓取 http(s) URL，返回状态码与正文文本（HTML 会去掉标签，长文本截断）。',
     parameters: {
@@ -153,7 +157,22 @@ const tools: PluginTool[] = [
       const maxChars = typeof args.maxChars === 'number' ? Math.max(500, args.maxChars) : 20_000
       const timeout = AbortSignal.timeout(20_000)
       const signal = AbortSignal.any([ctx.signal, timeout])
-      const res = await fetch(url, { signal, redirect: 'follow' })
+      // 本机 / 局域网地址要先过隐私授权；重定向逐跳检查（公网地址不能把请求跳到本机）
+      let target = new URL(url)
+      let res: Response | null = null
+      for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        if (!/^https?:$/.test(target.protocol)) {
+          return { ok: false, error: 'only http(s) URLs are supported' }
+        }
+        if (await isPrivateUrl(target))
+          await guard(SCOPE_EXEC, `fetch_url 访问本机 / 局域网地址 ${target.host}`)
+        res = await fetch(target, { signal, redirect: 'manual' })
+        const loc = res.headers.get('location')
+        if (res.status < 300 || res.status >= 400 || !loc) break
+        target = new URL(loc, target)
+        res = null
+      }
+      if (!res) return { ok: false, error: `too many redirects (> ${MAX_REDIRECTS})` }
       const type = res.headers.get('content-type') ?? ''
       if (!/text|json|xml|javascript/i.test(type)) {
         return { ok: res.ok, status: res.status, contentType: type, note: 'non-text body omitted' }

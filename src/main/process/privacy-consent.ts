@@ -17,16 +17,18 @@ import {
   decideConsent,
   denyAllPending,
   listPendingRequests,
-  getPrivacyScope,
   type ConsentDecision,
   type ConsentRequest,
-  type PrivacyScopeDef
+  toConsentView as toView,
+  type ConsentRequestView
 } from './privacy'
 import { createChildWindow, getChildWindow, getMainWindow } from './windows'
 import { readJson } from './util'
 import { CONFIG_JSON } from './paths'
 import { makeLogger } from './logger'
 import { t } from './i18n'
+
+export type { ConsentRequestView }
 
 const log = makeLogger('privacy')
 
@@ -39,21 +41,6 @@ export function isReservedWindowId(id: unknown): boolean {
 
 export function isReservedWindowView(view: unknown): boolean {
   return typeof view === 'string' && view === CONSENT_VIEW
-}
-
-/** 渲染端展示用：请求 + 展开后的 scope 定义。 */
-export interface ConsentRequestView extends Omit<ConsentRequest, 'scopes'> {
-  scopes: PrivacyScopeDef[]
-}
-
-function toView(r: ConsentRequest): ConsentRequestView {
-  return {
-    ...r,
-    scopes: r.scopes.map(
-      (id) =>
-        getPrivacyScope(id) ?? { id, ability: id.split('.')[0] ?? id, level: 'sensitive' as const }
-    )
-  }
 }
 
 function consentWindow(): BrowserWindow | null {
@@ -144,7 +131,7 @@ function fromConsentWindow(e: Electron.IpcMainInvokeEvent): boolean {
   return !!win && e.sender === win.webContents
 }
 
-const DECISIONS: ReadonlySet<ConsentDecision> = new Set(['deny', 'once', 'session'])
+const DECISIONS: ReadonlySet<ConsentDecision> = new Set(['deny', 'once', 'agent', 'session'])
 
 /** 启动时调用一次（registerIpc 之后）。 */
 export function initPrivacyConsent(): void {

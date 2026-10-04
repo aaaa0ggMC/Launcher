@@ -30,7 +30,7 @@
   "agent.no_sessions": "No connections",
   "agent.session_meta": "since {since} · last {last} · {calls} calls",
   "agent.disconnect": "Disconnect",
-  "agent.run_grants": "Allowed for this run:",
+  "agent.run_grants": "Allowed until Cockpit closes:",
   "agent.revoke_all": "Revoke all",
   "agent.policy_title": "Privacy policy",
   "agent.allow": "Allow",
@@ -94,5 +94,6 @@
   "agent.script_wall_sec": "Total time limit",
   "agent.script_wall_sec_hint": "Overall wall-clock limit in seconds (5–1800); the privacy consent window also counts against it, so raise it when a step may need the user to approve",
   "agent.script_memory_mb": "Memory",
-  "agent.script_memory_mb_hint": "Memory the sandbox may use (16–512 MB)"
+  "agent.script_memory_mb_hint": "Memory the sandbox may use (16–512 MB)",
+  "agent.ui_presence": "Show a floating panel while YAYA runs (pause / stop)"
 }

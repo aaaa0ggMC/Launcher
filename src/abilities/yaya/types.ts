@@ -58,11 +58,7 @@ export interface MessageNode {
     | 'error'
   error?: string
   createdAt: number
-  usage?: {
-    prompt: number
-    completion: number
-    total: number
-  }
+  usage?: TokenUsage
   /**
    * 同级分支（同一 parent 的全部子节点 id，按创建时间）。仅 `yaya.messages-branch`
    * 返回时附带，不落库；长度 > 1 时界面显示 `< i/n >` 翻页器。
@@ -71,6 +67,25 @@ export interface MessageNode {
   /** 扩展字段；`workflow` = 本次运行的过程记录（只挂在一次运行的第一个 assistant 节点上） */
   meta?: MessageMeta
 }
+
+export interface TokenUsage {
+  prompt: number
+  completion: number
+  total: number
+  /** 输入里命中提示词缓存的部分（端点给了才有） */
+  cached?: number
+  /** 输出里的推理 / 思考 token（端点给了才有） */
+  reasoning?: number
+}
+
+/** 思考强度：default = 不发参数（模型默认）；off = 尽量不思考 */
+export type ReasoningEffort = 'default' | 'off' | 'low' | 'medium' | 'high'
+/** 思考参数的格式（各家不统一）；auto = 按服务商地址猜 */
+export type ReasoningStyle =
+  'auto' | 'openai' | 'deepseek' | 'qwen' | 'openrouter' | 'llamacpp' | 'none'
+
+/** 批准的范围：once = 这一次；run = 本次执行里同一工具不再询问；session = 本对话都不再询问 */
+export type ApprovalScope = 'once' | 'run' | 'session'
 
 export interface MessageMeta {
   workflow?: WorkflowRecord
@@ -137,6 +152,8 @@ export interface ProviderConfig {
   models: string[]
   defaultModel?: string
   enabled: boolean
+  /** 思考强度参数的格式（缺省 auto） */
+  reasoningStyle?: ReasoningStyle
 }
 
 export type McpTransport = 'streamable-http' | 'sse'
@@ -181,6 +198,8 @@ export interface YayaConfig {
    * 显式覆盖优先于全局 `autoApproveTools`（用户点名要确认的工具，开了全局自动也照样确认）。
    */
   toolApproval?: Record<string, ToolApprovalMode>
+  /** 新会话默认的思考强度（会话可单独覆盖，存 session.meta.reasoning） */
+  reasoningEffort?: ReasoningEffort
   maxLoopSteps: number
   streamOutput: boolean
   providers: ProviderConfig[]

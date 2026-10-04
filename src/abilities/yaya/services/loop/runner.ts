@@ -14,17 +14,27 @@
  * - 组装历史时修复悬空的 tool_calls（打断后缺结果的调用补一条「已中断」），打断不需要回滚。
  */
 import { randomUUID } from 'node:crypto'
+import { normalizeEffort } from '../providers/reasoning'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
 import { t, te } from '../../../../main/process/i18n'
 import type {
+  ApprovalScope,
   MessageAttachment,
+  ReasoningEffort,
   Session,
   ToolCallItem,
   WorkflowRecord,
   WorkflowStepRecord
 } from '../../types'
-import { insertMessage, updateMessage, getMessage, getMessageBranch, getSession } from '../db'
+import {
+  insertMessage,
+  updateMessage,
+  getMessage,
+  getMessageBranch,
+  getSession,
+  updateSession
+} from '../db'
 import { normalizeAssistantName, resolveSystemPrompt } from '../config'
 import {
   buildPluginInstructions,
@@ -39,6 +49,7 @@ import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
 import { currentBrowserClient, withBrowserClient } from '../../../../main/process/browser-ui'
 import {
   endSession,
+  setSessionAttention,
   setSessionControl,
   setSessionPaused,
   touchSession
@@ -59,6 +70,7 @@ const log = makeLogger('yaya-loop')
 interface ApprovalDecision {
   approved: boolean
   reason?: string
+  scope?: ApprovalScope
 }
 
 /** 用户主动停止时写进 message.error 的标记，界面据此显示「已停止」而不是错误横幅 */
@@ -174,12 +186,46 @@ export class WorkflowRunner {
     this.emitSnapshot()
   }
 
-  /** 用户对挂起工具调用的决定；拒绝时可附理由（会作为工具结果回传给模型） */
-  resolveApproval(approved: boolean, reason?: string): void {
+  /**
+   * 用户对挂起工具调用的决定；拒绝时可附理由（会作为工具结果回传给模型）。
+   * 批准可带范围：run = 本次执行里同一工具不再询问；session = 记进会话，本对话都不再询问。
+   * 只跳过 YAYA 的工具审批——工具内部的隐私授权（guard）照样会弹。
+   */
+  resolveApproval(approved: boolean, reason?: string, scope: ApprovalScope = 'once'): void {
     if (this.approvalResolver) {
-      this.approvalResolver({ approved, reason: reason?.trim().slice(0, 2000) || undefined })
+      this.approvalResolver({
+        approved,
+        reason: reason?.trim().slice(0, 2000) || undefined,
+        scope
+      })
       this.approvalResolver = null
     }
+  }
+
+  /** 本次执行里已「都允许」的工具（wire name） */
+  private runApproved = new Set<string>()
+
+  /** 本次执行或本对话已免确认 */
+  private preApproved(name: string): boolean {
+    if (this.runApproved.has(name)) return true
+    const list = this.session?.meta?.approvedTools
+    return Array.isArray(list) && list.includes(name)
+  }
+
+  private rememberApproval(name: string, scope: ApprovalScope | undefined): void {
+    if (scope === 'run') this.runApproved.add(name)
+    if (scope !== 'session') return
+    // 以数据库里的最新会话为准（运行期间用户可能在别处改过 meta）
+    const fresh = getSession(this.ctx.sessionId) ?? this.session
+    if (!fresh) return
+    const list = Array.isArray(fresh.meta?.approvedTools)
+      ? (fresh.meta.approvedTools as string[])
+      : []
+    if (list.includes(name)) return
+    const meta = { ...(fresh.meta ?? {}), approvedTools: [...list, name] }
+    updateSession(this.ctx.sessionId, { meta })
+    this.session = { ...fresh, meta }
+    getBroadcast()('cockpit:yaya-sessions-changed', {})
   }
 
   getSnapshot(): WorkflowSnapshot {
@@ -234,7 +280,12 @@ export class WorkflowRunner {
     touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', () => this.abort())
     setSessionControl(
       this.agentSessionId,
-      { pause: () => this.pause(), resume: () => this.resume(), stop: () => this.abort() },
+      {
+        pause: () => this.pause(),
+        resume: () => this.resume(),
+        stop: () => this.abort(),
+        approve: (ok, scope) => this.resolveApproval(ok, undefined, scope)
+      },
       'yaya',
       { session: this.ctx.sessionId }
     )
@@ -313,6 +364,11 @@ export class WorkflowRunner {
     }))
   }
 
+  /** 思考强度：会话自己的选择 → 设置里的默认 */
+  private get reasoning(): ReasoningEffort {
+    return normalizeEffort(this.session?.meta?.reasoning ?? this.ctx.config.reasoningEffort)
+  }
+
   private get model(): string {
     return this.session?.model || this.ctx.config.activeModel
   }
@@ -378,6 +434,7 @@ export class WorkflowRunner {
       ],
       tools,
       stream: this.ctx.config.streamOutput,
+      reasoning: this.reasoning,
       signal: this.abortController.signal,
       onToken: (tok) => {
         const offset = this.bufferedContent.length
@@ -436,6 +493,7 @@ export class WorkflowRunner {
         model: this.model,
         messages: [{ role: 'system', content: opts.system }, ...(opts.messages ?? this.history())],
         stream: false,
+        reasoning: this.reasoning,
         signal: this.abortController.signal
       })
       const content = result.content ?? ''
@@ -491,16 +549,20 @@ export class WorkflowRunner {
         continue
       }
 
-      if (toolNeedsApproval(def, args, this.ctx.config)) {
+      if (toolNeedsApproval(def, args, this.ctx.config) && !this.preApproved(call.name)) {
         call.status = 'awaiting_approval'
         this.ctx.pendingApprovalTool = call
         updateMessage(assistantMsgId, { toolCalls, status: 'waiting_approval' })
         this.setStatus('waiting_approval')
 
+        // 用户不在对话页时，悬浮窗据此强制展开并给出批准 / 拒绝
+        setSessionAttention(this.agentSessionId, { kind: 'approval', tool: call.name }, { args })
         const decision = await new Promise<ApprovalDecision>((resolve) => {
           this.approvalResolver = resolve
         })
+        setSessionAttention(this.agentSessionId, null)
         this.ctx.pendingApprovalTool = undefined
+        if (decision.approved) this.rememberApproval(call.name, decision.scope)
         updateMessage(assistantMsgId, { status: 'tool_executing' })
         if (!decision.approved) {
           if (this.aborted) markAborted(call)

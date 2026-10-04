@@ -159,5 +159,12 @@
   "window.blurModeHint": "Frosted glass (the blur behind translucent panels, the sidebar and menus) and background-image blur are expensive on phones; the pop-up sidebar may drop frames when it opens.",
   "window.blurOn": "On",
   "window.blurAuto": "Auto (off on narrow screens, e.g. phones)",
-  "window.blurOff": "Off (panels get a more solid background)"
+  "window.blurOff": "Off (panels get a more solid background)",
+  "settings.outsider.title": "Allow abilities to show floating panels",
+  "settings.outsider.description": "When off, no ability can show a floating panel; you can also expand an ability below to block it alone. YAYA's AI presence panel and consent prompts are not affected.",
+  "settings.outsider.perms": "Floating panel permission",
+  "settings.outsider.allow": "Allow floating panels",
+  "settings.outsider.declared": "Declared panels: ",
+  "settings.outsider.master_off": "All ability panels are turned off above",
+  "settings.outsider.none": "No ability declares a floating panel yet."
 }

@@ -8,6 +8,7 @@ import {
   onMounted,
   onBeforeUnmount,
   watch,
+  watchEffect,
   nextTick
 } from 'vue'
 import { useTheme } from 'vuetify'
@@ -38,6 +39,15 @@ import AgentBar from './components/AgentBar.vue'
 import { resolveAgentUi } from './composables/agentUi'
 import AgentActivityOverlay from './components/AgentActivityOverlay.vue'
 import ExclusiveBanner from './components/ExclusiveBanner.vue'
+import OutsiderLayer from './components/OutsiderLayer.vue'
+import type { PresenceFinished, PresenceSession } from './components/AgentPresence.vue'
+import {
+  closeOutsider,
+  openOutsider,
+  registerShellOutsider,
+  setOutsiderPolicy,
+  syncAbilityOutsiders
+} from './outsider'
 import ScreenshotButton from './components/ScreenshotButton.vue'
 import { useShortcutDispatcher, syncAbilityShortcuts } from './shortcuts'
 import { fileIconUrl } from './icon'
@@ -971,6 +981,120 @@ watch(
   },
   { immediate: true }
 )
+// 能力注入的悬浮窗（Outsider SDK）+ 用户策略（config.json `outsider`，设置 → 能力）
+watch(
+  abilities,
+  (list) => {
+    const mods = getAbilityModules()
+    syncAbilityOutsiders(
+      list.flatMap((a) => (mods[a.id]?.outsiders ?? []).map((decl) => ({ owner: a.id, decl })))
+    )
+  },
+  { immediate: true }
+)
+watch(() => runtimeConfig.value.outsider, setOutsiderPolicy, { immediate: true })
+
+// 「AI 在场」悬浮窗：进程内 agent（YAYA，transport local）和用户共用这个界面，运行期间浮出来
+registerShellOutsider({
+  key: 'agent-presence',
+  label: 'AI 在场',
+  component: () => import('./components/AgentPresence.vue'),
+  attrs: { anchor: 'bottom-right', offset: { x: 20, y: 20 } }
+})
+/** 进程内 agent 会话（YAYA 的运行）与「跑完了、回到对话」提示 */
+const localSessions = ref<PresenceSession[]>([])
+const finishedRuns = ref<PresenceFinished[]>([])
+async function refreshLocalAgent(): Promise<void> {
+  let next: PresenceSession[] = []
+  try {
+    const r = (await window.cockpit.command('agent.sessions')) as {
+      sessions: (PresenceSession & { transport: string })[]
+    }
+    next = r.sessions.filter((s) => s.transport === 'local')
+  } catch {
+    next = []
+  }
+  // 跑完的运行：对话页不在眼前时留一条「回到对话」提示（同一对话只留最新一条）
+  const alive = new Set(next.map((s) => s.id))
+  for (const s of localSessions.value) {
+    if (alive.has(s.id) || !s.openAbility || s.openAbility === currentId.value) continue
+    const key = JSON.stringify([s.openAbility, s.openTarget ?? {}])
+    finishedRuns.value = [
+      ...finishedRuns.value.filter(
+        (f) => JSON.stringify([f.openAbility, f.openTarget ?? {}]) !== key
+      ),
+      {
+        id: s.id,
+        client: s.client,
+        avatar: s.avatar,
+        icon: s.icon,
+        openAbility: s.openAbility,
+        openTarget: s.openTarget
+      }
+    ].slice(-3)
+  }
+  localSessions.value = next
+}
+// 用户自己回到了对话页：对应的提示就不需要了
+watch(currentId, (id) => {
+  finishedRuns.value = finishedRuns.value.filter((f) => f.openAbility !== id)
+})
+function dismissFinished(id: string): void {
+  finishedRuns.value = finishedRuns.value.filter((f) => f.id !== id)
+}
+/** 人就在对话页时悬浮窗是多余的（对话页自己有停止 / 批准）；离开对话页才显示 */
+const presenceSessions = computed(() =>
+  localSessions.value.filter((s) => !s.openAbility || s.openAbility !== currentId.value)
+)
+const abilityNames = computed(() => Object.fromEntries(abilities.value.map((a) => [a.id, a.name])))
+watchEffect(() => {
+  const ui = agentUi.value
+  const show =
+    !agentView &&
+    ui.presence &&
+    (presenceSessions.value.length > 0 || finishedRuns.value.length > 0)
+  if (!show) {
+    closeOutsider('shell.agent-presence')
+    return
+  }
+  openOutsider('shell.agent-presence', {
+    sessions: presenceSessions.value,
+    finished: finishedRuns.value,
+    currentId: currentId.value,
+    abilityNames: abilityNames.value,
+    busyTimeoutSec: ui.busyTimeoutSec,
+    statusTtlSec: ui.statusTtlSec,
+    dismiss: dismissFinished
+  })
+})
+let localAgentUnsub: (() => void) | null = null
+onMounted(() => {
+  if (agentView) return
+  void refreshLocalAgent()
+  localAgentUnsub = window.cockpit.on('cockpit:agent-sessions', () => void refreshLocalAgent())
+})
+onBeforeUnmount(() => localAgentUnsub?.())
+
+// 网页版隐私授权（无头宿主没有授权窗口）：模态外壳悬浮窗，AI 禁区 + 只认真实手势
+if (window.cockpit.cap('privacy.consent') === 'web' && !agentView) {
+  registerShellOutsider({
+    key: 'privacy-consent',
+    label: '隐私授权',
+    component: () => import('./components/PrivacyConsentPopup.vue'),
+    attrs: { modal: true }
+  })
+  const syncConsent = (list: unknown): void => {
+    if (Array.isArray(list) && list.length) openOutsider('shell.privacy-consent')
+    else closeOutsider('shell.privacy-consent')
+  }
+  let consentUnsub: (() => void) | null = null
+  onMounted(async () => {
+    consentUnsub = window.cockpit.on('privacy:pending', syncConsent)
+    syncConsent(await window.cockpit.privacyPending())
+  })
+  onBeforeUnmount(() => consentUnsub?.())
+}
+
 // 应用内快捷键：绑定来自 config.json 的 shortcuts；AI 视图里不响应（那是 AI 的工作台）
 useShortcutDispatcher(
   () => runtimeConfig.value.shortcuts as Record<string, unknown> | undefined,
@@ -1512,6 +1636,7 @@ onBeforeUnmount(() => {
       :highlight="settingsDialog.highlight"
     />
     <HostFilePicker v-if="!agentView" />
+    <OutsiderLayer v-if="!agentView" />
     <HelpDialog v-model="helpOpen" :ability="helpAbility" :tree="helpTree" />
 
     <!-- Quit confirmation when background tasks are still running -->

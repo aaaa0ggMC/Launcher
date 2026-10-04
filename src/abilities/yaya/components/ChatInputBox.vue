@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import type { MessageAttachment, WorkflowInfo } from '../types'
+import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
 
 const props = defineProps<{
   isRunning: boolean
@@ -21,6 +21,27 @@ const emit = defineEmits<{
 const draft = defineModel<string>({ default: '' })
 /** 当前会话使用的工作流 */
 const workflowId = defineModel<string>('workflowId', { default: 'agent' })
+/** 当前会话的思考强度 */
+const reasoning = defineModel<ReasoningEffort>('reasoning', { default: 'default' })
+const REASONING_OPTIONS: { value: ReasoningEffort; icon: string }[] = [
+  { value: 'default', icon: 'mdi-brain' },
+  { value: 'off', icon: 'mdi-lightning-bolt-outline' },
+  { value: 'low', icon: 'mdi-signal-cellular-1' },
+  { value: 'medium', icon: 'mdi-signal-cellular-2' },
+  { value: 'high', icon: 'mdi-signal-cellular-3' }
+]
+const reasoningLabel = (v: ReasoningEffort): string =>
+  ({
+    default: t('yaya.reasoning.default', '默认思考'),
+    off: t('yaya.reasoning.off', '不思考'),
+    low: t('yaya.reasoning.low', '浅思考'),
+    medium: t('yaya.reasoning.medium', '中等思考'),
+    high: t('yaya.reasoning.high', '深度思考')
+  })[v]
+const reasoningIcon = computed(
+  () => REASONING_OPTIONS.find((o) => o.value === reasoning.value)?.icon ?? 'mdi-brain'
+)
+
 /** 展开态（大编辑区，盖住消息区下半部分）由父组件定位 */
 const expanded = defineModel<boolean>('expanded', { default: false })
 
@@ -209,6 +230,37 @@ defineExpose({ focus: () => textarea.value?.focus() })
             >
               <v-list-item-title class="font-weight-medium">{{ w.label }}</v-list-item-title>
               <v-list-item-subtitle class="wf-desc">{{ w.description }}</v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-menu location="top start">
+          <template #activator="{ props: menuProps }">
+            <button
+              v-bind="menuProps"
+              type="button"
+              class="wf-pick"
+              :title="t('yaya.reasoning.title', '思考强度')"
+              :aria-label="`${t('yaya.reasoning.title', '思考强度')}: ${reasoningLabel(reasoning)}`"
+            >
+              <v-icon :icon="reasoningIcon" size="16" />
+              <span class="wf-pick-label">{{ reasoningLabel(reasoning) }}</span>
+              <v-icon icon="mdi-chevron-up" size="16" />
+            </button>
+          </template>
+          <v-list density="comfortable" max-width="300" class="wf-menu">
+            <v-list-subheader>{{ t('yaya.reasoning.title', '思考强度') }}</v-list-subheader>
+            <v-list-item
+              v-for="o in REASONING_OPTIONS"
+              :key="o.value"
+              :active="o.value === reasoning"
+              :prepend-icon="o.icon"
+              color="primary"
+              @click="reasoning = o.value"
+            >
+              <v-list-item-title>{{ reasoningLabel(o.value) }}</v-list-item-title>
+              <v-list-item-subtitle v-if="o.value === 'default'" class="wf-desc">
+                {{ t('yaya.reasoning.default_hint', '不发送思考参数，按模型自己的默认') }}
+              </v-list-item-subtitle>
             </v-list-item>
           </v-list>
         </v-menu>
@@ -467,6 +519,10 @@ defineExpose({ focus: () => textarea.value?.focus() })
   }
   .send-btn :deep(.v-btn__prepend) {
     margin-inline: 0 !important;
+  }
+  /* 两个选择器（工作流 / 思考）只留图标，名字在 aria-label / 菜单里 */
+  .wf-pick-label {
+    display: none;
   }
 }
 </style>

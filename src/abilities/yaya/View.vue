@@ -2,7 +2,15 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
-import type { Session, MessageNode, MessageAttachment, YayaConfig, WorkflowInfo } from './types'
+import type {
+  Session,
+  MessageNode,
+  ApprovalScope,
+  MessageAttachment,
+  ReasoningEffort,
+  YayaConfig,
+  WorkflowInfo
+} from './types'
 import type { WorkflowSnapshot } from './services/loop/types'
 import { buildTurns } from './components/turns'
 import ChatSessionList from './components/ChatSessionList.vue'
@@ -11,6 +19,7 @@ import AssistantTurn from './components/AssistantTurn.vue'
 import ChatInputBox from './components/ChatInputBox.vue'
 import ModelSelectDialog from './components/ModelSelectDialog.vue'
 import MessageMenu from './components/MessageMenu.vue'
+import UsageDialog from './components/UsageDialog.vue'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
@@ -29,11 +38,13 @@ const runningIds = ref<string[]>([])
 const snapshot = ref<WorkflowSnapshot | null>(null)
 const draft = ref('')
 const showModelSelect = ref(false)
+const showUsage = ref(false)
 const loadingMessages = ref(false)
 const notice = ref<{ text: string; error?: boolean } | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
 /** 新对话草稿里选的工作流（会话创建时带上） */
 const draftWorkflow = ref<string | null>(null)
+const draftReasoning = ref<ReasoningEffort | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
 const editingId = ref<string | null>(null)
@@ -109,6 +120,26 @@ const currentWorkflowId = computed({
     }
     s.meta = { ...(s.meta ?? {}), workflow: id }
     window.cockpit.command('yaya.session-update', { id: s.id, workflow: id }).catch((e) => {
+      showNotice(errText(e), true)
+    })
+  }
+})
+
+/** 当前会话的思考强度：会话自己的选择 → 草稿选择 → 设置里的默认 → default（不发参数） */
+const currentReasoning = computed<ReasoningEffort>({
+  get: () =>
+    (activeSession.value?.meta?.reasoning as ReasoningEffort | undefined) ||
+    draftReasoning.value ||
+    config.value?.reasoningEffort ||
+    'default',
+  set: (v: ReasoningEffort) => {
+    const s = activeSession.value
+    if (!s) {
+      draftReasoning.value = v
+      return
+    }
+    s.meta = { ...(s.meta ?? {}), reasoning: v }
+    window.cockpit.command('yaya.session-update', { id: s.id, reasoning: v }).catch((e) => {
       showNotice(errText(e), true)
     })
   }
@@ -227,7 +258,8 @@ async function ensureSession(): Promise<string> {
     title: t('yaya.new_chat', '新对话'),
     model: config.value?.activeModel,
     provider: config.value?.activeProviderId,
-    workflow: draftWorkflow.value || undefined
+    workflow: draftWorkflow.value || undefined,
+    reasoning: draftReasoning.value || undefined
   })) as Session
   sessions.value.unshift(s)
   activeSessionId.value = s.id
@@ -299,13 +331,31 @@ async function handleAbort(): Promise<void> {
   await loadMessages()
 }
 
-async function handleApprove(approved: boolean, reason?: string): Promise<void> {
+async function handleApprove(
+  approved: boolean,
+  reason?: string,
+  scope?: ApprovalScope
+): Promise<void> {
   if (!activeSessionId.value) return
   await window.cockpit.command('yaya.workflow-approve', {
     session: activeSessionId.value,
     approved,
-    ...(reason ? { reason } : {})
+    ...(reason ? { reason } : {}),
+    ...(scope ? { scope } : {})
   })
+}
+
+/** 本对话「都允许」免确认的工具 */
+const approvedTools = computed(() => {
+  const list = activeSession.value?.meta?.approvedTools
+  return Array.isArray(list) ? (list as string[]) : []
+})
+async function clearApprovedTools(): Promise<void> {
+  const s = activeSession.value
+  if (!s) return
+  await window.cockpit.command('yaya.session-approved-tools', { id: s.id, clear: true })
+  s.meta = { ...(s.meta ?? {}), approvedTools: [] }
+  showNotice(t('yaya.approved_cleared', '已撤销本对话的免确认，之后会重新询问'))
 }
 
 async function handleSwitchBranch(messageId: string): Promise<void> {
@@ -710,6 +760,25 @@ watch(isRunning, (now, before) => {
               :disabled="!activeSessionId"
               @click="exportSession('jsonl')"
             />
+            <v-list-item
+              v-if="approvedTools.length"
+              prepend-icon="mdi-shield-off-outline"
+              :title="
+                te(
+                  'yaya.approved_clear',
+                  { n: String(approvedTools.length) },
+                  '撤销免确认（{n} 个工具）'
+                )
+              "
+              :subtitle="approvedTools.join('、')"
+              @click="clearApprovedTools"
+            />
+            <v-list-item
+              prepend-icon="mdi-chart-box-outline"
+              :title="t('yaya.usage.title', '用量统计')"
+              :disabled="!activeSessionId"
+              @click="showUsage = true"
+            />
             <v-divider class="my-1" />
             <v-list-item
               prepend-icon="mdi-cog-outline"
@@ -829,6 +898,7 @@ watch(isRunning, (now, before) => {
           ref="inputRef"
           v-model="draft"
           v-model:workflow-id="currentWorkflowId"
+          v-model:reasoning="currentReasoning"
           v-model:expanded="composerExpanded"
           :workflows="workflows"
           :is-running="isRunning"
@@ -883,6 +953,11 @@ watch(isRunning, (now, before) => {
       </v-card>
     </v-dialog>
 
+    <UsageDialog
+      v-model="showUsage"
+      :session-id="activeSessionId || ''"
+      :session-title="sessionTitle"
+    />
     <ModelSelectDialog
       v-model="showModelSelect"
       :current-model="currentModel"

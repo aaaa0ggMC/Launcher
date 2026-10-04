@@ -38,6 +38,23 @@ const saveApi = inject<YayaSettingsSaveApi | null>(YAYA_SAVE_API_KEY, null)
 
 const providerTypes = computed(() => providerTypeItems(t))
 
+/** 思考强度参数格式（各家不统一；auto 按地址猜） */
+const reasoningStyles = computed(() => [
+  { value: 'auto', title: t('yaya.settings.reasoning_style_auto', '自动（按地址识别）') },
+  { value: 'openai', title: 'OpenAI / Ollama（reasoning_effort）' },
+  { value: 'deepseek', title: 'DeepSeek（thinking）' },
+  { value: 'qwen', title: 'Qwen / DashScope（enable_thinking）' },
+  { value: 'openrouter', title: 'OpenRouter（reasoning）' },
+  { value: 'llamacpp', title: 'llama.cpp（chat_template_kwargs）' },
+  { value: 'none', title: t('yaya.settings.reasoning_style_none', '不支持（从不发送）') }
+])
+const reasoningStyle = computed({
+  get: () => props.provider.reasoningStyle ?? 'auto',
+  set: (v: ProviderConfig['reasoningStyle']) => {
+    props.provider.reasoningStyle = v
+  }
+})
+
 // 删除：行内二次确认（不用原生 confirm）
 const confirmDelete = ref(false)
 
@@ -123,6 +140,21 @@ const filteredModels = computed(() => {
       :label="t('yaya.settings.base_url', 'API Base URL')"
       placeholder="https://api.openai.com/v1"
       variant="outlined"
+    />
+
+    <v-select
+      v-model="reasoningStyle"
+      :items="reasoningStyles"
+      :label="t('yaya.settings.reasoning_style', '思考强度参数格式')"
+      :hint="
+        t(
+          'yaya.settings.reasoning_style_hint',
+          '对话里选择「不思考 / 浅 / 中 / 深」时按这种格式发送；端点不认识会自动去掉重试'
+        )
+      "
+      persistent-hint
+      variant="outlined"
+      class="mb-2"
     />
 
     <!-- 密钥：本地草稿，失焦 / 回车才写回并立刻保存（不随打字保存） -->

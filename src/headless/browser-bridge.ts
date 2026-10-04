@@ -620,6 +620,11 @@ function needRef(args: BridgeArgs): Target {
   return el && el.isConnected ? el : 'stale'
 }
 
+/** 坐标处的目标元素：跳过悬浮层（Outsider）——AI 的操作穿过悬浮窗，碰不到它的按钮 */
+function pointTarget(x: number, y: number): Element | null {
+  return document.elementsFromPoint(x, y).find((e) => !e.closest('[data-outsider-layer]')) ?? null
+}
+
 function focusTarget(): Element | null {
   const el = document.activeElement
   if (!el || el === document.body || el === document.documentElement) return null
@@ -898,7 +903,7 @@ const HANDLERS: Record<string, Handler> = {
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return { ok: false, code: 'bad_args', error: '需要数字坐标 x / y（CSS 像素）' }
     }
-    return elementOp(args, document.elementFromPoint(x, y), (el) => clickEl(el as Element, args))
+    return elementOp(args, pointTarget(x, y), (el) => clickEl(el as Element, args))
   },
 
   type: async (args) => {
@@ -942,7 +947,7 @@ const HANDLERS: Record<string, Handler> = {
       const at = args.at as { x?: unknown; y?: unknown }
       const x = Number(at.x)
       const y = Number(at.y)
-      if (Number.isFinite(x) && Number.isFinite(y)) el = document.elementFromPoint(x, y)
+      if (Number.isFinite(x) && Number.isFinite(y)) el = pointTarget(x, y)
     }
     if (!el) {
       window.scrollBy(dx, dy)

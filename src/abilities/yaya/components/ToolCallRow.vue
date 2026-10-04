@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import type { ToolCallItem } from '../types'
+import type { ApprovalScope, ToolCallItem } from '../types'
 import { summarizeArgs } from './turns'
 import { argFields, resultFields, type FieldView } from './tool-view'
 import { highlightCode } from './markdown'
@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   /** 拒绝时可附理由，会作为工具结果回传给模型 */
-  (e: 'approve', approved: boolean, reason?: string): void
+  (e: 'approve', approved: boolean, reason?: string, scope?: ApprovalScope): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh'))
@@ -204,10 +204,33 @@ function onReasonKey(e: KeyboardEvent): void {
             color="primary"
             variant="flat"
             prepend-icon="mdi-check"
-            @click="emit('approve', true)"
+            @click="emit('approve', true, undefined, 'once')"
           >
             {{ t('yaya.tool.approve', '允许执行') }}
           </v-btn>
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-check-all"
+            :title="t('yaya.tool.approve_run_hint', '这次运行里再调用这个工具不再询问')"
+            @click="emit('approve', true, undefined, 'run')"
+          >
+            {{ t('yaya.tool.approve_run', '本次执行都允许') }}
+          </v-btn>
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-shield-check-outline"
+            :title="
+              t(
+                'yaya.tool.approve_session_hint',
+                '这个对话以后都不再询问这个工具（可在右上角菜单撤销）'
+              )
+            "
+            @click="emit('approve', true, undefined, 'session')"
+          >
+            {{ t('yaya.tool.approve_session', '本对话都允许') }}
+          </v-btn>
+          <span class="approval-gap" />
           <v-btn variant="outlined" prepend-icon="mdi-close" @click="emit('approve', false)">
             {{ t('yaya.tool.reject', '拒绝') }}
           </v-btn>
@@ -382,7 +405,13 @@ function onReasonKey(e: KeyboardEvent): void {
 .approval-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+/* 允许类按钮与拒绝类按钮分成两组；放不下时自然换行 */
+.approval-gap {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .reject-note {
   display: flex;

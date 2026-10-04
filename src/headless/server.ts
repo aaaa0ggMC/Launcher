@@ -26,6 +26,7 @@ import {
   withBrowserClient
 } from '../main/process/browser-ui'
 import { cliExec } from '../main/process/cli'
+import { CONSENT_CHANNEL, decideFromPage, denyAllFromPage, pendingConsentFrames } from './consent'
 import { makeLogger } from '../main/process/logger'
 import { USER_CONFIG_DIR } from '../main/process/paths'
 
@@ -267,6 +268,12 @@ export function startServer(opts: {
       })
       res.write(': ok\n\n')
       clients.add(res)
+      // 新连上的页面补发待处理的授权请求（含一次性 nonce，只走 SSE）
+      const pendingConsent = pendingConsentFrames()
+      if (pendingConsent.length)
+        res.write(
+          `data: ${JSON.stringify({ channel: CONSENT_CHANNEL, args: [pendingConsent] })}\n\n`
+        )
       const ping = setInterval(() => res.write(': ping\n\n'), 25000)
       req.on('close', () => {
         clearInterval(ping)
@@ -294,6 +301,19 @@ export function startServer(opts: {
         json(res, 500, { ok: false, error: 'internal error' })
       )
       return
+    }
+    if (url.pathname === '/api/privacy/decide' && req.method === 'POST') {
+      // 授权决定：token + 随请求下发的一次性 nonce（见 consent.ts）；不是命令
+      readJson(req, 4096)
+        .then((body) => {
+          const r = decideFromPage(body)
+          json(res, r.ok ? 200 : 400, r)
+        })
+        .catch(() => json(res, 400, { ok: false, error: 'bad request' }))
+      return
+    }
+    if (url.pathname === '/api/privacy/deny-all' && req.method === 'POST') {
+      return json(res, 200, { ok: true, count: denyAllFromPage() })
     }
     if (url.pathname === '/api/ui-result' && req.method === 'POST') {
       // 页面回传界面请求结果：必须来自同一个 clientId 且 id 仍在 pending（否则拒绝）

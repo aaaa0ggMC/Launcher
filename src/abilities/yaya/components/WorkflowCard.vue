@@ -1,18 +1,28 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import type { MessageNode, WorkflowStepRecord } from '../types'
-import type { AssistantTurn } from './turns'
-import { answerStep, processSteps, toolCallCount } from './turns'
+import type { AssistantTurn, ProcessItem } from './turns'
+import { processItems } from './turns'
 import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
 
-const props = defineProps<{
-  turn: AssistantTurn
-  assistantName: string
-  live: boolean
-  pendingApprovalId: string | null
-}>()
+/**
+ * 过程块：一段连续的思考 / 工具调用 / 子 Agent 步骤（AI 说的话在块外，见 turns.ts `turnSegments`）。
+ * 一轮回答可能有多块；`first` 块显示工作流名，`last` 块在运行中显示「当前在做什么」。
+ */
+const props = withDefaults(
+  defineProps<{
+    turn: AssistantTurn
+    assistantName: string
+    live: boolean
+    pendingApprovalId: string | null
+    /** 这一块包含的条目（缺省 = 整轮） */
+    items?: ProcessItem[]
+    first?: boolean
+    last?: boolean
+  }>(),
+  { items: undefined, first: true, last: true }
+)
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
@@ -20,44 +30,30 @@ const { t, te } = useI18n(lang)
 const open = ref(false)
 const openDetails = ref<Record<string, boolean>>({})
 
-type Item =
-  | { kind: 'llm'; key: string; node: MessageNode; answer: boolean; rec?: WorkflowStepRecord }
-  | { kind: 'subagent' | 'note'; key: string; rec: WorkflowStepRecord }
+const items = computed<ProcessItem[]>(() => props.items ?? processItems(props.turn))
+/** 本块在运行（整轮在运行且是最后一块） */
+const blockLive = computed(() => props.live && props.last)
 
-/** 时间线：有过程记录就按记录顺序（含子 Agent），旧数据按节点顺序 */
-const items = computed<Item[]>(() => {
-  const answer = answerStep(props.turn)
-  const shown = new Set(processSteps(props.turn).map((n) => n.id))
-  if (answer?.reasoningContent) shown.add(answer.id)
-  const byId = new Map(props.turn.steps.map((n) => [n.id, n]))
-  const llm = (node: MessageNode, rec?: WorkflowStepRecord): Item => ({
-    kind: 'llm',
-    key: node.id,
-    node,
-    answer: node.id === answer?.id,
-    rec
-  })
-
-  const rec = props.turn.workflow
-  if (!rec) return props.turn.steps.filter((n) => shown.has(n.id)).map((n) => llm(n))
-  const out: Item[] = []
-  const used = new Set<string>()
-  for (const s of rec.steps) {
-    if (s.kind === 'llm') {
-      const node = s.messageId ? byId.get(s.messageId) : undefined
-      if (node && shown.has(node.id)) {
-        out.push(llm(node, s))
-        used.add(node.id)
-      }
-    } else out.push({ kind: s.kind, key: s.id, rec: s })
+const toolCount = computed(() =>
+  items.value.reduce(
+    (n, it) =>
+      it.kind === 'llm' && !it.answer && it.part !== 'reasoning'
+        ? n + (it.node.toolCalls?.length ?? 0)
+        : n,
+    0
+  )
+)
+const tokens = computed(() => {
+  const seen = new Set<string>()
+  let n = 0
+  for (const it of items.value) {
+    const r = it.rec
+    if (!r?.tokens || seen.has(r.id)) continue
+    seen.add(r.id)
+    n += r.tokens
   }
-  // 记录里漏掉的节点（理论上不会）补在末尾，保证内容不丢
-  for (const n of props.turn.steps) if (shown.has(n.id) && !used.has(n.id)) out.push(llm(n))
-  return out
+  return n
 })
-
-const toolCount = computed(() => toolCallCount(props.turn))
-const tokens = computed(() => props.turn.workflow?.tokens ?? 0)
 
 // 运行中实时计时
 const now = ref(Date.now())
@@ -75,10 +71,26 @@ watch(
 )
 onBeforeUnmount(() => timer && clearInterval(timer))
 
+/** 本块耗时：各步骤耗时之和；运行中的步骤按开始时间实时计 */
 const elapsed = computed(() => {
-  const w = props.turn.workflow
-  if (!w) return 0
-  return (w.endedAt ?? (props.live ? now.value : w.startedAt)) - w.startedAt
+  const seen = new Set<string>()
+  let ms = 0
+  for (const it of items.value) {
+    const r = it.rec
+    if (!r || seen.has(r.id)) continue
+    seen.add(r.id)
+    if (r.ms !== undefined) ms += r.ms
+    else if (r.status === 'running' && props.live) ms += now.value - r.startedAt
+  }
+  return ms
+})
+
+/** 收起时的标题：这一块做了什么 */
+const summary = computed(() => {
+  if (toolCount.value)
+    return te('yaya.wf.tool_count', { n: String(toolCount.value) }, '{n} 次工具调用')
+  if (items.value.some((it) => it.kind !== 'llm')) return t('yaya.wf.process', '过程')
+  return t('yaya.wf.thinking', '思考过程')
 })
 
 /** 运行中标题：当前在做什么 */
@@ -100,7 +112,8 @@ const activity = computed(() => {
 
 const status = computed(() => {
   const w = props.turn.workflow
-  if (props.live) return 'running'
+  if (blockLive.value) return 'running'
+  if (props.live) return 'ok'
   if (w?.status === 'error' || props.turn.status === 'error') return 'error'
   if (w?.status === 'stopped') return 'stopped'
   return 'ok'
@@ -135,7 +148,7 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
       :title="open ? t('yaya.wf.collapse', '收起过程') : t('yaya.wf.expand', '展开过程')"
       @click="open = !open"
     >
-      <v-progress-circular v-if="live" indeterminate size="16" width="2" color="primary" />
+      <v-progress-circular v-if="blockLive" indeterminate size="16" width="2" color="primary" />
       <v-icon
         v-else
         size="20"
@@ -149,12 +162,9 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
         :color="status === 'error' ? 'error' : status === 'stopped' ? undefined : 'success'"
       />
       <span class="wf-title">
-        {{ live ? activity : t('yaya.wf.process', '过程') }}
+        {{ blockLive ? activity : summary }}
       </span>
-      <span v-if="turn.workflow" class="wf-badge">{{ turn.workflow.label }}</span>
-      <span v-if="!live && toolCount" class="wf-meta">
-        {{ te('yaya.wf.tool_count', { n: String(toolCount) }, '{n} 次工具调用') }}
-      </span>
+      <span v-if="first && turn.workflow" class="wf-badge">{{ turn.workflow.label }}</span>
       <span class="wf-spacer" />
       <span v-if="tokens" class="wf-meta wf-hide-narrow">{{ fmtTokens(tokens) }} tokens</span>
       <span v-if="elapsed" class="wf-meta">{{ fmtMs(elapsed) }}</span>
@@ -167,7 +177,7 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
           <span class="wf-dot" :class="`is-${item.rec?.status ?? 'ok'}`" />
 
           <template v-if="item.kind === 'llm'">
-            <div class="wf-row">
+            <div v-if="item.part !== 'tools' || !item.node.reasoningContent" class="wf-row">
               <span class="wf-agent">{{ agentName(item.rec?.agent ?? 'main') }}</span>
               <span class="wf-label">{{
                 item.rec?.label ??
@@ -183,16 +193,13 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
                 fmtMs(item.rec.ms)
               }}</span>
             </div>
-            <div v-if="item.node.reasoningContent" class="wf-reasoning">
+            <div v-if="item.part !== 'tools' && item.node.reasoningContent" class="wf-reasoning">
               {{ item.node.reasoningContent }}
             </div>
-            <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
             <div
-              v-if="!item.answer && item.node.content"
-              class="wf-text"
-              v-html="md(item.node.content)"
-            />
-            <div v-if="item.node.toolCalls?.length" class="wf-tools">
+              v-if="item.part !== 'reasoning' && !item.answer && item.node.toolCalls?.length"
+              class="wf-tools"
+            >
               <ToolCallRow
                 v-for="call in item.node.toolCalls"
                 :key="call.id"

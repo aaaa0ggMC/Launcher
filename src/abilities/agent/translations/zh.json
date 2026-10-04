@@ -23,7 +23,7 @@
   "agent.sessions_title": "已连接的 AI / 脚本",
   "agent.no_sessions": "暂无连接",
   "agent.disconnect": "断开",
-  "agent.run_grants": "本次运行始终允许：",
+  "agent.run_grants": "关闭 Cockpit 前都允许：",
   "agent.revoke_all": "全部撤销",
   "agent.policy_title": "隐私策略",
   "agent.allow": "允许",
@@ -94,5 +94,6 @@
   "agent.script_wall_sec": "总时限",
   "agent.script_wall_sec_hint": "整段脚本的秒数上限（5–1800）；隐私授权窗口的等待也占用它，需要等待请调大",
   "agent.script_memory_mb": "内存",
-  "agent.script_memory_mb_hint": "沙箱可用的内存上限（16–512 MB）"
+  "agent.script_memory_mb_hint": "沙箱可用的内存上限（16–512 MB）",
+  "agent.ui_presence": "YAYA 运行时显示悬浮窗（可暂停 / 停止）"
 }

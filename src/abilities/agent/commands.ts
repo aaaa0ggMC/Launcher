@@ -5,7 +5,10 @@ import {
   controlSession,
   listSessions,
   pauseAllSessions,
-  setSessionPage
+  setSessionPage,
+  getAttentionDetail,
+  getSession,
+  type SessionAction
 } from '../../main/process/agent/sessions'
 import { followAgentView, unfollowAgentView } from '../../main/process/agent/views'
 import { followModeSetting } from '../../main/process/agent/config'
@@ -109,14 +112,31 @@ export default [
   {
     name: 'agent.control',
     description:
-      '暂停 / 继续 / 停止一个 agent 会话（--id --action pause|resume|stop；只对登记了控制器的会话有效，如 YAYA 的运行）',
-    usage: 'agent.control --id <sessionId> --action pause|resume|stop',
+      '暂停 / 继续 / 停止一个 agent 会话，或批准 / 拒绝它挂起的请求（--id --action pause|resume|stop|approve|reject；只对登记了控制器的会话有效，如 YAYA 的运行）',
+    usage:
+      'agent.control --id <sessionId> --action pause|resume|stop|approve|reject [--scope once|run|session]',
     privacy: USER_ONLY,
     run: (ctx) => {
       const action = String(ctx.named.action ?? '')
-      if (action !== 'pause' && action !== 'resume' && action !== 'stop')
-        throw new Error('action must be pause | resume | stop')
-      return { ok: controlSession(String(ctx.named.id ?? ''), action) }
+      if (!['pause', 'resume', 'stop', 'approve', 'reject'].includes(action))
+        throw new Error('action must be pause | resume | stop | approve | reject')
+      const scope =
+        ctx.named.scope === 'run' || ctx.named.scope === 'session' ? ctx.named.scope : 'once'
+      return { ok: controlSession(String(ctx.named.id ?? ''), action as SessionAction, scope) }
+    }
+  },
+  {
+    name: 'agent.attention-detail',
+    description:
+      '读取 agent 会话待处理事项的详情（如 YAYA 等待批准的工具调用参数），给悬浮窗展开查看',
+    usage: 'agent.attention-detail --id <sessionId>',
+    privacy: USER_ONLY,
+    run: (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      return {
+        attention: getSession(id)?.attention ?? null,
+        detail: getAttentionDetail(id) ?? null
+      }
     }
   },
   {
@@ -128,7 +148,7 @@ export default [
   },
   {
     name: 'agent.revoke-grants',
-    description: '撤销「本次运行始终允许」的授权 (--scope <id>，缺省全部)',
+    description: '撤销「关闭 Cockpit 前都允许」的授权 (--scope <id>，缺省全部)',
     usage: 'agent.revoke-grants [--scope campusinfo.identity]',
     privacy: USER_ONLY,
     run: (ctx) => {

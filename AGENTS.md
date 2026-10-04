@@ -316,6 +316,17 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 
 与 `settings` 同构：能力在 `index.ts` 里声明 `shortcuts: [{ key, label }]`（完整 id = `<能力id>.<key>`，label 走 `label.<原文>` 翻译），`App.vue` 汇总进注册表；页面里用 `useShortcut('<id>.<key>', handler)`（`@ui/shortcuts`，页面可见才生效）。外壳自己的用 `registerShortcut({ ..., group: 'shell' })`（如截图模式）。设置 → 快捷键（`ShortcutsSection.vue`）按能力分组管理：改键 / 清除 / 冲突标红 / 整组禁用 / 搜索（名称、能力、id、按键）。**所有快捷键默认都不绑定**（防止互相冲突，没有 defaultKey 这回事），用户自己启用。绑定存 `config.json` 的 `shortcuts`（`{ id: 'Ctrl+Shift+S' }`），整组禁用存 `shortcutGroupsOff`（组 id 数组）。默认仅窗口有焦点时生效；每项可单独开「全局」（`config.json` 的 `shortcutGlobal` id 数组，需至少两个修饰键，主进程 `global-shortcuts.ts` 用 `globalShortcut` 注册，Wayland 下启用 `GlobalShortcutsPortal` 走 xdg portal，注册结果显示在设置页；声明里的 `command` 让没有页面处理函数时也能触发），组合键必须带修饰键（F1–F12 除外），AI 视图里不响应。
 
+### 悬浮窗（Outsider SDK，`src/main/ui/outsider.ts`）
+
+浮在页面之上的小窗（桌宠、迷你播放器、AI 在场提示、网页版授权弹窗）。宿主 `OutsiderLayer.vue` 在 `App.vue` 挂一层，单个窗由 `OutsiderItem.vue` 负责定位 / 拖动 / 位置记忆。
+
+- **注入**：能力在 `index.ts` 声明 `outsiders: [{ key, label, component, attrs }]`（同 `shortcuts`），完整 id = `<能力id>.<key>`；任意渲染端代码 `openOutsider(id, props?)` / `closeOutsider(id)`。**没声明的 id 打不开**。组件里 `inject(OUTSIDER_CTX)` 拿 `{ id, close }`。
+- **attrs**：`draggable`（缺省 true，超过 5px 才算拖，从按钮上拖动后吞掉那次 click）/ `pinned` / `anchor`（四个角）+ `offset` / `persist`（记住拖到的位置，存成离最近角的偏移，窗口缩放后收回可见区）/ `modal`（居中 + 遮罩，仅外壳用）。
+- **用户策略**：config.json `outsider: { enabled, blocked: [能力id] }`，设置 → 能力（总开关 + 每个声明了悬浮窗的能力可展开单独禁止）。被禁的能力打开时静默不弹，已打开的立即隐藏。agent 不能改 `outsider`（`config.set` 拒绝）。外壳自己的 `shell.*`（AI 在场 / 授权）是安全控制，不受名单影响，各有开关。
+- **对 AI 不可见、不可点**：整层是 AI 禁区；inspector 每次 `Input.dispatchMouseEvent` 前给 `<html>` 加 `agent-pass`（页面侧 250ms 后撤销，快到期续一次），悬浮层 `pointer-events:none`，AI 的点击穿过它；`HIT_FN` / 页面桥的坐标命中都跳过 `[data-outsider-layer]`。悬浮窗不抢焦点（mousedown 默认被阻止，输入框例外），否则 AI 之后的回车会按在悬浮窗按钮上。AI 独立视图里不渲染悬浮层。
+- **AI 在场**（`AgentPresence.vue`，`shell.agent-presence`）：只给进程内 agent（YAYA，transport `local`）；**对话页就在眼前时不显示**（App.vue 按 `openAbility` 与当前页过滤）。暂停 / 继续 / 停止 / 打开对话；「跳到 AI 正在操作的页面」用会话的 `focus`（命令注册表每次执行前 `noteAgentCommand` 记下 agent 最近命令所属能力，框架命令与 `ui.*` 不算）；会话 `attention`（YAYA 等待批准工具）时强制展开并给出批准 / 拒绝（`agent.control --action approve|reject` → 控制器 `approve`）；运行结束时若对话页不在眼前，留一条「回到对话」提示，回到对话页或关闭即消失。点头像收成小圆点；`agent.ui.presence` 开关（设置 → AI 指示）。MCP / Remote 在独立视图里操作，仍只用标题栏头像。
+- **ref 点击遮挡检查**：`ui.click` / `ui.type` 按 ref 操作前确认点下去的位置最上层就是目标（或其后代 / 祖先）；中心被盖住就换目标上没被遮挡的点，全被盖住报「被遮挡」，不盲点到遮罩 / 禁区上。悬浮层不算遮挡。
+
 ### 帮助系统（`help/`）
 
 每个能力可选自带 `help/` 目录；外壳侧栏底部「后台任务 / 复制页面」之后的固定「?」按钮打开**当前能力**的帮助浮窗：
@@ -347,17 +358,20 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **命令声明** `CommandSpec.privacy`：`reads`（结果含哪些 scope）/ `requires`（agent 调用前需要的许可，如 `SCOPE_EXEC` / `SCOPE_CONTROL`）/ `agent: 'deny'`（凭据登录、修改账号等只能用户本人做）。未声明的命令 agent 也能调，但结果会再过一遍凭据 key 兜底脱敏。
   - `system.exec`：**调用方决定执行什么**（任意命令行 / 代码 / 任意路径写文件）；`system.control`：行为固定但改变系统状态。能力内部用固定参数调外部程序不算 exec。
 - **渲染端**：`v-privacy="'<scope>'"` 给子树打标签（AI 快照 / 截图按标签脱敏，**与用户是否点开明文无关**）；`v-agent-forbidden` 标禁区（凭据输入框、授权相关设置）；打码文本用 `@ui/components/PrivacyText.vue`。
-- **授权窗口**（`privacy-consent.ts` + `windows/PrivacyConsent.vue`）：窗口 id / view 保留，渲染端无法创建或替换；决定只走 `privacy:decide` IPC 并校验 sender。**绝不能把「批准」做成命令**。开发模式可用 `privacy.debug-request --scopes <id> --reason ...` 手动弹出测试。
+- **授权窗口**（`privacy-consent.ts` + `windows/PrivacyConsent.vue`，展示与防误触在 `components/PrivacyConsentPanel.vue`）：窗口 id / view 保留，渲染端无法创建或替换；决定只走 `privacy:decide` IPC 并校验 sender。授权四档：拒绝 / 允许本次（限时）/ 本次执行都允许（`agent`，该 agent 会话结束即撤销）/ 关闭 Cockpit 前都允许（`session`）。**绝不能把「批准」做成命令**。无头网页没有窗口：`src/headless/consent.ts` 把待处理请求经 SSE 推给页面，外壳模态悬浮窗 `PrivacyConsentPopup.vue` 展示（AI 禁区、「允许」只认 `isTrusted`）；决定走 `POST /api/privacy/decide`，除 token 外还要随请求生成、只经 SSE 下发、用后作废的 nonce（web-shim 持有，页面组件拿不到）。开发模式可用 `privacy.debug-request --scopes <id> --reason ...` 手动弹出测试。
 - 新增 / 改动涉及个人数据的能力：先按上面的标准定级，再在命令和界面两侧同时接入。
 
 ### YAYA 插件 SDK
 
 - 后端插件放 `src/abilities/yaya/plugins/<id>/index.ts`，默认导出 `YayaPlugin`（契约在 `services/plugins/types.ts`），构建 glob 自动注册。插件可提供工具、稳定的 instructions、start / stop 与连接状态；MCP / Skill 由动态 provider 扩展同一注册表。
 - system 插件保留旧工具名；其余工具 wire name 为 `<namespace>_<tool>`，超 64 字符附稳定哈希。插件开关 `pluginEnabled`、工具开关 `disabledTools` 与审批 `toolApproval` 都存能力配置。工具表与 instructions 的顺序和内容必须稳定，避免击穿提示词缓存。
-- 工具执行来源是 `local-agent`，受隐私 SDK 的脱敏 / guard / `agent: 'deny'` 约束。直接读写任意文件或运行 Shell 的插件必须自己 `await guard(SCOPE_EXEC)`，审批模式 auto 不能替代隐私授权。工具需响应 `ctx.signal`，无法取消的已执行操作不回滚。
+- 工具执行来源是 `local-agent`，受隐私 SDK 的脱敏 / guard / `agent: 'deny'` 约束。`fetch_url` 访问本机 / 局域网 / 链路本地地址（含重定向后到达的）前要 `guard(SCOPE_EXEC)`（`plugins/system/net-guard.ts`）。直接读写任意文件或运行 Shell 的插件必须自己 `await guard(SCOPE_EXEC)`，审批模式 auto 不能替代隐私授权。工具需响应 `ctx.signal`，无法取消的已执行操作不回滚。
 - 工作流登记 transport `local` 会话，AgentBar 支持暂停 / 继续 / 停止；每步、每次工具执行前（包括审批后）经过暂停闸门。外壳快捷键 `shell.agent-pause-all` 调 `agent.pause-all`，默认不绑定。
 - 渲染端可在 `plugins/<id>/ui.ts` 导出 `definePluginUi`，声明 toolViews / fences。变换只影响显示，数据库和模型历史保留原文；工具图片存会话资产，数据库不存 base64。视图必须遵守 DESIGN.md 与隐私标签规范。
 - MCP 支持 Streamable HTTP / SSE，请求头值加密存储，页面只有头名与 `headersSet`；编辑留空沿用、移除才清空。连接失败不得在未知执行结果下自动重放工具调用。Skill 扫描配置目录的 SKILL.md，系统提示词只列名称 / 描述，`skill_load` / `skill_read_file` 渐进读取，附属路径不得越界。
+- **思考强度**：会话级 `session.meta.reasoning`（default / off / low / medium / high，缺省取 `reasoningEffort`），按服务商的 `reasoningStyle`（auto 按地址识别：DeepSeek `thinking` / Qwen `enable_thinking` / OpenRouter `reasoning` / llama.cpp `chat_template_kwargs` / 其余 `reasoning_effort`）转成请求参数（`services/providers/reasoning.ts`）；端点 400 拒绝时去掉重试并记住。usage 记录缓存命中 `cached` 与推理 `reasoning` token。**用量统计** `yaya.session-usage`（`services/usage.ts`）：token、每次调用的上下文、按工具汇总与明细（风险 = 工具默认审批：ask 高危 / 动态 视参数）。
+- **工具审批范围**：允许执行（once）/ 本次执行都允许（run，内存，运行结束即失效）/ 本对话都允许（session，存 `session.meta.approvedTools`，`yaya.session-approved-tools` 查看 / 撤销）。只跳过 YAYA 的工具审批，工具内部的隐私 guard 照样弹窗。`yaya.workflow-approve` / `agent.control --action approve` 都带 `--scope`。
+- **回答的显示顺序**：AI 中途说的话不进过程卡片，与过程块（思考 / 工具 / 子 Agent）交错显示（`turns.ts` 的 `turnSegments`），只有思考与工具调用收起。
 - 每次运行登记的 agent 会话 id 是 `yaya:<会话>:<锚点>`（每次运行独立）；YAYA 页面自己的暂停 / 继续 / 停止走 `yaya.workflow-control` / `yaya.workflow-abort`（按会话 id 找运行，用户专属），不要手拼 agent 会话 id。
 - **无头宿主下的 `ui_*`（`src/main/process/browser-ui.ts` + `src/headless/browser-bridge.ts`）**：Electron 走 CDP；无头宿主的界面在浏览器标签页里，`ui.snapshot / navigate / click / click-at / type / key / scroll / wait` 改由**发起本次工作流的那个标签页**执行固定方法的 DOM 操作（无截图、无拖动、无输入时间轴，这些在无头下保持不可用）。每个标签页随机 `clientId`（`/api/command` 请求体与 SSE 连接都带），服务器用 AsyncLocalStorage 关联调用，请求只定向发给该标签页，应答必须同 clientId + 仍在等待的请求 id。只有 `local-agent`（YAYA）能用，CLI / 远程 agent 明确报错，绝不挑「最新」标签页顶包。输入是合成事件（`isTrusted=false`），打不开文件选择器等依赖真实手势的东西。隐私与 CDP 版同规则：快照按 DOM 标签脱敏（含祖先 / 后代、密码框、私密 `<label>`），受保护动作先预检不执行、主机 `guard()` 后带许可与目标令牌重试、页面复核同一目标。页面串行执行请求；停止 / 超时时主机发 `cockpit:browser-ui-cancel`，排队中的直接丢弃，执行中的在等待与动作前中止（按住的键会松开）。agent 输入标记只由页面在执行时打，用户真实手势（`isTrusted` 的 pointerdown / keydown）立即清除。
 
@@ -417,7 +431,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
   - `.page-menu-pop`（aidj 页面菜单 / 播放器菜单 / yarj 菜单共用类名）、`.v-dialog` 的宽度 / 高度夹取都在 `global.css` 里统一处理，别在组件里各写各的。
   - 网页静态资源带 `COOP: same-origin` + `COEP: credentialless`（掌机 mGBA 要 `SharedArrayBuffer`；需要安全上下文：https 或 localhost）。
   - 验证别只信静态检查：下游（opencode）看不到真实界面，它写的窄屏覆盖有过「没带 !important 实际没生效」「把封面挤成药丸」这类缺陷，合并后必须在 400px / 650px 宽度下截图看。
-- **没做 / 已知缺口**：agent 系统（MCP / Remote / 隐私授权窗口 / agent 独立视图）未接入无头入口，ui inspector 只有 YAYA 经页面桥可用（见「YAYA 插件 SDK」）；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
+- **没做 / 已知缺口**：agent 系统（MCP / Remote / agent 独立视图）未接入无头入口，隐私授权改用网页悬浮窗，ui inspector 只有 YAYA 经页面桥可用（见「YAYA 插件 SDK」）；缩略图（`nativeImage`）在网页模式下退回原图；Termux 真机未验证。
 
 ### 镜像源 toggle 安全性
 
@@ -495,6 +509,7 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 5. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
 6. **（可选）自定义显示名**：页面 `inject('cockpit:set-title')` 后调用 `setTitle('<能力id>', '名字' | null)`，App bar 标题与侧栏条目都改用它（存 localStorage，下次启动未挂载时也生效；`null` 恢复原名），如 YAYA 跟随设置里的助手名
 7. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）；页面里要打开自己的设置用 `useSettings().open('<id>')`（`@ui/composables/settings`）：有设置页就跳到本能力的分类（可选定位到设置项），没有设置页则弹浮窗——**不要**写 `activate('settings', …)`，能力不应依赖 settings 能力存在。无页面的后端能力也可以注入设置
+7. **（可选）悬浮窗** `index.ts` 里的 `outsiders` 数组（见上「悬浮窗（Outsider SDK）」），用户可在设置 → 能力里禁止
 7. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
 8. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
 9. **（涉及个人数据时必做）隐私声明**：`privacy.ts` 定义 scope，命令声明 `privacy`、结果 `shield`，界面 `v-privacy` / `v-agent-forbidden`（见上「隐私 SDK」）

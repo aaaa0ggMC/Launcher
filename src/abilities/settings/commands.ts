@@ -79,6 +79,10 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
   if (isAgentOrigin() && patch && typeof patch === 'object' && 'agent' in patch) {
     throw new PrivacyDeniedError('agent_denied', [], 'agent may not modify agent.* settings')
   }
+  // 悬浮窗策略（哪些能力不许弹）同理：只有用户能改，agent 不能替能力解禁
+  if (isAgentOrigin() && patch && typeof patch === 'object' && 'outsider' in patch) {
+    throw new PrivacyDeniedError('agent_denied', [], 'agent may not modify outsider settings')
+  }
   try {
     const existed = existsSync(CONFIG_JSON)
     const current = await readJson<Record<string, unknown>>(CONFIG_JSON)

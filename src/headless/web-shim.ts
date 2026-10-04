@@ -81,9 +81,29 @@ window.addEventListener('pointerdown', clearAgentAttribution, { capture: true })
 window.addEventListener('keydown', clearAgentAttribution, { capture: true })
 
 const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}`)
+/**
+ * 隐私授权（网页版）：宿主随每个待处理请求下发一次性 nonce（只走 SSE）。nonce 留在这里，
+ * 页面组件拿到的列表不含它；提交决定时由这里附上（见 src/headless/consent.ts）。
+ */
+let consentList: Record<string, unknown>[] = []
+const consentNonces = new Map<string, string>()
+function onConsentFrame(raw: unknown): Record<string, unknown>[] {
+  const list = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : []
+  consentNonces.clear()
+  consentList = list.map(({ nonce, ...rest }) => {
+    if (typeof rest.id === 'string' && typeof nonce === 'string') consentNonces.set(rest.id, nonce)
+    return rest
+  })
+  return consentList
+}
+
 es.onmessage = (ev) => {
   try {
     const { channel, args } = JSON.parse(ev.data) as { channel: string; args: unknown[] }
+    if (channel === 'privacy:pending') {
+      emit(channel, onConsentFrame(args?.[0]))
+      return
+    }
     emit(channel, ...(args ?? []))
   } catch {
     /* 忽略坏帧 */
@@ -113,8 +133,6 @@ const NOP_RESULT: Record<string, unknown> = {
   'shortcut:sync-global': {},
   'screenshot:capture': null,
   'screenshot:save': null,
-  'privacy:pending': [],
-  'privacy:deny-all': 0,
   'agent-view:control': false
 }
 
@@ -144,6 +162,20 @@ const cockpit = createCockpit({
       }
       case 'command:list':
         return api('/api/commands')
+      case 'privacy:pending':
+        return consentList
+      case 'privacy:decide': {
+        const [id, decision] = args as [string, string]
+        const nonce = consentNonces.get(id)
+        if (!nonce) return false
+        const r = await api<{ ok: boolean }>('/api/privacy/decide', { id, nonce, decision })
+        if (r.ok) consentNonces.delete(id)
+        return r.ok
+      }
+      case 'privacy:deny-all': {
+        const r = await api<{ ok: boolean; count?: number }>('/api/privacy/deny-all', {})
+        return r.count ?? 0
+      }
       case 'dialog:pick-file':
       case 'dialog:save-file':
         // 浏览器拿不到宿主机路径：交给 HostFilePicker.vue 浏览宿主文件系统
@@ -187,7 +219,8 @@ const cockpit = createCockpit({
     'file.save': 'web',
     'shortcut.global': 'none',
     screenshot: 'none',
-    'privacy.consent': 'none',
+    // 授权弹窗：外壳悬浮窗（Outsider SDK，PrivacyConsentPopup.vue）
+    'privacy.consent': 'web',
     // 浏览器有等价实现
     clipboard: 'web',
     external: 'web'

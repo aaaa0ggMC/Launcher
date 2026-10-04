@@ -21,6 +21,7 @@ import { runStartupHooks } from '../main/process/startup'
 import { loadExternalAbilities } from '../main/process/ability-loader'
 import { registerHostCommands } from './commands'
 import { pushEvent, startServer } from './server'
+import { initHeadlessConsent } from './consent'
 import { setStubBroadcast } from './electron-stub'
 import { initPrivacyConsent } from '../main/process/privacy-consent'
 import { initAgentServices } from '../main/process/agent'
@@ -60,6 +61,8 @@ async function main(): Promise<void> {
   registerAbilityCommands()
   registerHostCommands()
   initPrivacyConsent()
+  // 网页里没有授权窗口：待处理请求经 SSE 推给页面的授权悬浮窗
+  initHeadlessConsent((channel, list) => pushEvent(channel, list))
   void initAgentServices(process.argv)
   await runStartupHooks()
   loadExternalAbilities().catch((e) => console.error('[cockpit] external abilities:', e))

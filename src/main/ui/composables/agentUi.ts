@@ -15,6 +15,8 @@ export interface AgentUiConfig {
   showBar: boolean
   /** agent 操作时给整个窗口描边 */
   outline: boolean
+  /** 进程内 agent（YAYA）运行期间浮出「AI 在场」悬浮窗（暂停 / 继续 / 停止） */
+  presence: boolean
   /** Agent 过期时间（秒）：距离最近一次调用多久内算「正在操作」；描边也按它渐隐 */
   busyTimeoutSec: number
   /** set_status 文字的有效期（秒） */
@@ -37,6 +39,7 @@ export const AGENT_UI_DEFAULTS: AgentUiConfig = {
   screenshotMode: 'auto',
   showBar: true,
   outline: true,
+  presence: true,
   busyTimeoutSec: 60,
   statusTtlSec: 120,
   hideIdleAfterMin: 0,
@@ -71,6 +74,7 @@ export function resolveAgentUi(raw: unknown): AgentUiConfig {
       r.screenshotMode === 'capture' || r.screenshotMode === 'cdp' ? r.screenshotMode : 'auto',
     showBar: bool('showBar'),
     outline: bool('outline'),
+    presence: bool('presence'),
     busyTimeoutSec: num(r.busyTimeoutSec, 'busyTimeoutSec'),
     statusTtlSec: num(r.statusTtlSec, 'statusTtlSec'),
     hideIdleAfterMin: num(r.hideIdleAfterMin, 'hideIdleAfterMin'),

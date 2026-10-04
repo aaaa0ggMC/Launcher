@@ -230,6 +230,8 @@ export const DENY_COOLDOWN_MS = 30_000
 const sessionGrants = new Set<string>()
 /** `${session}\0${scope}` → 过期时间 */
 const onceGrants = new Map<string, number>()
+/** 本次执行都允许：`${session}\0${scope}`，会话结束（revokeSessionGrants）即撤销 */
+const agentGrants = new Set<string>()
 /** `${session}\0${scope}` → 拒绝时间 */
 const recentDenials = new Map<string, number>()
 /**
@@ -260,7 +262,7 @@ export function hasClearance(scope: string, origin: CallOrigin = currentOrigin()
   return clearanceVia(scope, origin) !== null
 }
 
-type ClearanceVia = 'non-agent' | 'policy' | 'run' | 'once'
+type ClearanceVia = 'non-agent' | 'policy' | 'run' | 'agent' | 'once'
 
 /** hasClearance 的实现：返回许可来自哪里（null = 未持有）。once 过期时顺带记录过期时间。 */
 function clearanceVia(scope: string, origin: CallOrigin): ClearanceVia | null {
@@ -276,6 +278,7 @@ function clearanceVia(scope: string, origin: CallOrigin): ClearanceVia | null {
   }
   if (sessionGrants.has(scope)) return 'run'
   const key = sessionKey(origin, scope)
+  if (agentGrants.has(key)) return 'agent'
   const until = onceGrants.get(key)
   if (until !== undefined) {
     if (until > now()) return 'once'
@@ -288,8 +291,8 @@ function clearanceVia(scope: string, origin: CallOrigin): ClearanceVia | null {
 export interface ClearanceInfo {
   scope: string
   held: boolean
-  /** policy = 设置页策略放行；run = 本次运行始终允许；once = 限时授权 */
-  via?: 'policy' | 'run' | 'once'
+  /** policy = 设置页策略放行；run = Cockpit 关闭前都允许；agent = 本次执行都允许；once = 限时授权 */
+  via?: 'policy' | 'run' | 'agent' | 'once'
   /** once 授权的到期时间（ms epoch）；policy / run 没有到期时间 */
   expiresAt?: number
   /** 未持有、但本会话的 once 授权在这个时间过期了（近 EXPIRED_NOTICE_MS 内） */
@@ -316,6 +319,7 @@ export function revokeSessionGrants(session: string): void {
       if (key.startsWith(`${session}\0`)) map.delete(key)
     }
   }
+  for (const key of [...agentGrants]) if (key.startsWith(`${session}\0`)) agentGrants.delete(key)
 }
 
 /** 撤销「本次运行始终允许」（设置页「撤销授权」）。不传 = 全部。 */
@@ -515,7 +519,8 @@ export function scrubForAgent<T>(value: T): T {
 // Consent requests
 // ---------------------------------------------------------------------------
 
-export type ConsentDecision = 'deny' | 'once' | 'session'
+/** once = 这一次（限时）；agent = 本次执行（该 agent 会话结束前）；session = Cockpit 关闭前 */
+export type ConsentDecision = 'deny' | 'once' | 'agent' | 'session'
 export type RequestStatus = 'pending' | 'granted' | 'denied' | 'expired'
 
 export interface ConsentRequest {
@@ -627,6 +632,21 @@ function settle(entry: PendingEntry, status: RequestStatus, decision?: ConsentDe
  * 用户在授权窗口做出决定。**只允许 privacy-consent.ts 的 IPC（已校验 sender）调用**——
  * 绝不能注册成命令，否则 agent 可以自己批准自己。
  */
+/** 渲染端展示用：请求 + 展开后的 scope 定义（授权窗口 / 网页授权悬浮窗共用）。 */
+export interface ConsentRequestView extends Omit<ConsentRequest, 'scopes'> {
+  scopes: PrivacyScopeDef[]
+}
+
+export function toConsentView(r: ConsentRequest): ConsentRequestView {
+  return {
+    ...r,
+    scopes: r.scopes.map(
+      (id) =>
+        getPrivacyScope(id) ?? { id, ability: id.split('.')[0] ?? id, level: 'sensitive' as const }
+    )
+  }
+}
+
 export function decideConsent(requestId: string, decision: ConsentDecision): boolean {
   const entry = pending.get(requestId)
   if (!entry) return false
@@ -640,6 +660,7 @@ export function decideConsent(requestId: string, decision: ConsentDecision): boo
   for (const s of req.scopes) {
     if (!isGrantable(s)) continue
     if (decision === 'session') sessionGrants.add(s)
+    else if (decision === 'agent') agentGrants.add(sessionKey(req.origin, s))
     else onceGrants.set(sessionKey(req.origin, s), now() + ONCE_GRANT_MS)
   }
   audit({ type: 'decide', requestId, scopes: req.scopes, decision, origin: req.origin })
@@ -814,6 +835,7 @@ export function __resetPrivacyState(): void {
   settled.clear()
   sessionGrants.clear()
   onceGrants.clear()
+  agentGrants.clear()
   recentDenials.clear()
   expiredGrants.clear()
   knownSecrets.clear()

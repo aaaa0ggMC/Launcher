@@ -1,4 +1,5 @@
 import type { Component } from 'vue'
+import type { AbilityOutsider } from './outsider'
 
 /**
  * Ability contract — framework-owned (lives in the shell, not in any ability).
@@ -46,6 +47,11 @@ export interface Ability {
    * 绑定处理函数——页面可见时才生效。用户绑定存 config.json 的 `shortcuts`。
    */
   shortcuts?: AbilityShortcut[]
+  /**
+   * 悬浮窗注入（Outsider SDK，`@ui/outsider`）：先声明才能 `openOutsider('<能力id>.<key>')`。
+   * 用户可在设置 → 能力里关掉全部能力悬浮窗或禁止某个能力弹出。
+   */
+  outsiders?: AbilityOutsider[]
 }
 
 /** 能力注入的一个快捷键声明 */

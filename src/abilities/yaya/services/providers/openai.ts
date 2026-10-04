@@ -2,7 +2,7 @@
  * OpenAI 及其兼容端点（Codex-Proxy, DeepSeek, Ollama, vLLM 等）Provider 实现
  */
 import OpenAI from 'openai'
-import type { ProviderConfig, ToolCallItem, MessageAttachment } from '../../types'
+import type { ProviderConfig, ToolCallItem, MessageAttachment, TokenUsage } from '../../types'
 import type {
   AIProvider,
   ProviderGenerateOptions,
@@ -11,6 +11,7 @@ import type {
   ProviderTool
 } from './types'
 import { readAssetData, resolveAssetLocalPath, isTextMime } from '../assets'
+import { reasoningParams, resolveReasoningStyle } from './reasoning'
 import { makeLogger } from '../../../../main/process/logger'
 
 const log = makeLogger('yaya-provider-openai')
@@ -58,14 +59,17 @@ export class OpenAICompatibleProvider implements AIProvider {
     tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
     options: ProviderGenerateOptions
   ): Promise<ProviderGenerateResult> {
-    const res = await this.client.chat.completions.create(
-      {
-        model: options.model,
-        messages,
-        tools,
-        temperature: options.temperature ?? 0.7
-      },
-      { signal: options.signal }
+    const res = await this.withReasoningFallback(options, (extra) =>
+      this.client.chat.completions.create(
+        {
+          model: options.model,
+          messages,
+          tools,
+          temperature: options.temperature ?? 0.7,
+          ...extra
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+        { signal: options.signal }
+      )
     )
 
     const choice = res.choices[0]
@@ -93,13 +97,45 @@ export class OpenAICompatibleProvider implements AIProvider {
       content: msg?.content ?? '',
       reasoningContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      usage: res.usage
-        ? {
-            prompt: res.usage.prompt_tokens,
-            completion: res.usage.completion_tokens,
-            total: res.usage.total_tokens
-          }
-        : undefined
+      usage: res.usage ? toUsage(res.usage) : undefined
+    }
+  }
+
+  /** 端点不认识思考参数（400 且提到参数名 / unknown 之类）后记住，不再发送 */
+  private reasoningUnsupported = false
+
+  /** 带上思考参数发请求；端点拒绝这些参数时去掉重试一次 */
+  private async withReasoningFallback<T>(
+    options: ProviderGenerateOptions,
+    send: (extra: Record<string, unknown>) => Promise<T>
+  ): Promise<T> {
+    const extra = this.reasoningUnsupported
+      ? {}
+      : reasoningParams(
+          resolveReasoningStyle(this.config),
+          options.reasoning ?? 'default',
+          this.config.type
+        )
+    const keys = Object.keys(extra)
+    if (!keys.length) return send({})
+    try {
+      return await send(extra)
+    } catch (e) {
+      const msg = String(e)
+      const status = (e as { status?: number }).status
+      const rejected =
+        status === 400 &&
+        (keys.some((k) => msg.includes(k)) ||
+          /unrecognized|unknown|unexpected|extra|not permitted|unsupported|invalid param/i.test(
+            msg
+          ))
+      if (!rejected || options.signal?.aborted) throw e
+      log.warn(`Provider ${this.id} rejected reasoning params; sending without them`, {
+        keys,
+        error: msg.slice(0, 300)
+      })
+      this.reasoningUnsupported = true
+      return send({})
     }
   }
 
@@ -113,16 +149,19 @@ export class OpenAICompatibleProvider implements AIProvider {
   ): Promise<ProviderGenerateResult> {
     type ChunkStream = AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
     const create = (withUsage: boolean): Promise<ChunkStream> =>
-      this.client.chat.completions.create(
-        {
-          model: options.model,
-          messages,
-          tools,
-          temperature: options.temperature ?? 0.7,
-          stream: true,
-          ...(withUsage ? { stream_options: { include_usage: true } } : {})
-        },
-        { signal: options.signal }
+      this.withReasoningFallback(options, (extra) =>
+        this.client.chat.completions.create(
+          {
+            model: options.model,
+            messages,
+            tools,
+            temperature: options.temperature ?? 0.7,
+            stream: true,
+            ...(withUsage ? { stream_options: { include_usage: true } } : {}),
+            ...extra
+          } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+          { signal: options.signal }
+        )
       )
     let stream: ChunkStream
     try {
@@ -141,13 +180,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     for await (const chunk of stream) {
       if (options.signal?.aborted) break
-      if (chunk.usage) {
-        usage = {
-          prompt: chunk.usage.prompt_tokens,
-          completion: chunk.usage.completion_tokens,
-          total: chunk.usage.total_tokens
-        }
-      }
+      if (chunk.usage) usage = toUsage(chunk.usage)
       const delta = chunk.choices[0]?.delta
       if (!delta) continue
 
@@ -158,7 +191,10 @@ export class OpenAICompatibleProvider implements AIProvider {
       }
 
       // 思考 / 推理过程（DeepSeek reasoning_content 或 OpenAI Responses 思考）
-      const reasoning = (delta as { reasoning_content?: string })?.reasoning_content
+      // OpenRouter 等用 `reasoning` 字段
+      const d = delta as { reasoning_content?: string; reasoning?: unknown }
+      const reasoning =
+        d.reasoning_content || (typeof d.reasoning === 'string' ? d.reasoning : undefined)
       if (reasoning) {
         reasoningContent += reasoning
         options.onReasoning?.(reasoning)
@@ -327,5 +363,19 @@ function tryParseJson(str: string): Record<string, unknown> | string {
     return JSON.parse(str)
   } catch {
     return str
+  }
+}
+
+/** 各家 usage 字段归一：缓存命中（OpenAI prompt_tokens_details / DeepSeek prompt_cache_hit_tokens）、推理 token */
+function toUsage(u: OpenAI.Completions.CompletionUsage): TokenUsage {
+  const x = u as OpenAI.Completions.CompletionUsage & { prompt_cache_hit_tokens?: number }
+  const cached = x.prompt_tokens_details?.cached_tokens ?? x.prompt_cache_hit_tokens
+  const reasoning = x.completion_tokens_details?.reasoning_tokens
+  return {
+    prompt: u.prompt_tokens,
+    completion: u.completion_tokens,
+    total: u.total_tokens,
+    ...(typeof cached === 'number' ? { cached } : {}),
+    ...(typeof reasoning === 'number' ? { reasoning } : {})
   }
 }

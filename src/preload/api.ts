@@ -226,8 +226,10 @@ export function createCockpit(t: CockpitTransport) {
     // privacy consent window ONLY — the main process rejects these from any other
     // sender (privacy-consent.ts), so exposing them everywhere grants nothing.
     privacyPending: (): Promise<unknown[]> => t.invoke('privacy:pending'),
-    privacyDecide: (id: string, decision: 'deny' | 'once' | 'session'): Promise<boolean> =>
-      t.invoke('privacy:decide', id, decision),
+    privacyDecide: (
+      id: string,
+      decision: 'deny' | 'once' | 'agent' | 'session'
+    ): Promise<boolean> => t.invoke('privacy:decide', id, decision),
     privacyDenyAll: (): Promise<number> => t.invoke('privacy:deny-all'),
 
     /** agent 视图里 App 外壳的「返回我的界面 / 关闭」——只有 agent 视图发来的才会被主进程接受 */

@@ -3,6 +3,8 @@
  * CLI-first 架构：UI 与 CLI / Headless 共享同一套 CommandSpec。
  */
 import { randomUUID } from 'node:crypto'
+import type { ApprovalScope } from './types'
+import { normalizeEffort } from './services/providers/reasoning'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
 import { currentOrigin, SCOPE_EXEC } from '../../main/process/privacy'
@@ -19,8 +21,11 @@ import {
   updateSession,
   findLatestLeaf,
   deleteMessageSubtree,
-  searchSessionMessages
+  searchSessionMessages,
+  getSessionMessages,
+  getMessageBranch
 } from './services/db'
+import { computeSessionUsage, type ToolRisk } from './services/usage'
 import {
   startWorkflow,
   regenerateWorkflow,
@@ -57,6 +62,8 @@ import { fetchModelsFromEndpoint } from './services/models'
 import './jobs'
 import './services/workflow/builtin'
 import { listWorkflowInfo } from './services/workflow/registry'
+
+const normalizeScope = (v: unknown): ApprovalScope => (v === 'run' || v === 'session' ? v : 'once')
 
 // 命令脚本与工具都经过注册表：不要让 YAYA 经脚本递归启动或修改自己。
 registerPreRunHook('yaya.', async () => {
@@ -111,18 +118,22 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-create',
     description: '创建一个新的 YAYA 聊天会话',
     usage:
-      'yaya.session-create [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <id>]',
+      'yaya.session-create [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <id>] [--reasoning <effort>]',
     run: async (ctx) => {
       const title = (ctx.named.title as string) || '新会话'
       const model = ctx.named.model as string | undefined
       const providerId = ctx.named.provider as string | undefined
       const workflow = ctx.named.workflow as string | undefined
+      const reasoning = ctx.named.reasoning
       const session = createSession({
         id: randomUUID(),
         title,
         model,
         providerId,
-        meta: workflow ? { workflow } : {}
+        meta: {
+          ...(workflow ? { workflow } : {}),
+          ...(reasoning !== undefined ? { reasoning: normalizeEffort(reasoning) } : {})
+        }
       })
       return session
     }
@@ -198,16 +209,19 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-update',
     description: '更新指定会话的属性（标题、模型、Provider 等）',
     usage:
-      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <workflowId>]',
+      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <workflowId>] [--reasoning default|off|low|medium|high]',
     run: async (ctx) => {
       const id = String(ctx.named.id)
       const updates: Partial<Session> = {}
       if (ctx.named.title !== undefined) updates.title = String(ctx.named.title)
       if (ctx.named.model !== undefined) updates.model = String(ctx.named.model)
       if (ctx.named.provider !== undefined) updates.providerId = String(ctx.named.provider)
-      if (ctx.named.workflow !== undefined) {
+      if (ctx.named.workflow !== undefined || ctx.named.reasoning !== undefined) {
         const current = getSession(id)
-        updates.meta = { ...(current?.meta ?? {}), workflow: String(ctx.named.workflow) }
+        updates.meta = { ...(current?.meta ?? {}) }
+        if (ctx.named.workflow !== undefined) updates.meta.workflow = String(ctx.named.workflow)
+        if (ctx.named.reasoning !== undefined)
+          updates.meta.reasoning = normalizeEffort(ctx.named.reasoning)
       }
       updateSession(id, updates)
       return { ok: true, id, ...updates }
@@ -301,6 +315,29 @@ const commands: CommandSpec[] = [
     }
   },
 
+  {
+    name: 'yaya.session-usage',
+    description:
+      '会话用量统计：token（输入 / 缓存命中 / 输出 / 推理，按模型）、每次调用的上下文大小、工具调用（按工具汇总与明细，带风险等级）',
+    usage: 'yaya.session-usage --id <sessionId> [--branch true]',
+    ui: ['YAYA 右上角菜单 → 用量统计'],
+    run: async (ctx) => {
+      const id = String(ctx.named.id)
+      const session = getSession(id)
+      if (!session) throw new Error(`Session ${id} not found`)
+      const activeIds = new Set(getMessageBranch(session.activeLeafId).map((n) => n.id))
+      const approval = new Map<string, string>()
+      for (const p of listPluginInfo(loadYayaConfig()))
+        for (const tool of p.tools) approval.set(tool.wireName, tool.defaultApproval)
+      const riskOf = (name: string): ToolRisk => {
+        const d = approval.get(name)
+        return d === 'ask' ? 'high' : d === 'dynamic' ? 'medium' : d === 'auto' ? 'low' : 'unknown'
+      }
+      const onlyActive = ctx.named.branch === true || ctx.named.branch === 'true'
+      return computeSessionUsage(getSessionMessages(id), activeIds, riskOf, onlyActive)
+    }
+  },
+
   // 9. 中止当前运行中的工作流
   {
     name: 'yaya.workflow-abort',
@@ -331,13 +368,37 @@ const commands: CommandSpec[] = [
     name: 'yaya.workflow-approve',
     description: '授权或拒绝当前挂起的工具调用',
     usage:
-      'yaya.workflow-approve --session <sessionId> --approved <true|false> [--reason <拒绝理由>]',
+      'yaya.workflow-approve --session <sessionId> --approved <true|false> [--reason <拒绝理由>] [--scope once|run|session]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
       const approved = ctx.named.approved === true || ctx.named.approved === 'true'
       const reason = ctx.named.reason !== undefined ? String(ctx.named.reason) : undefined
-      const ok = approveToolCall(sessionId, approved, reason)
+      const scope = normalizeScope(ctx.named.scope)
+      const ok = approveToolCall(sessionId, approved, reason, scope)
       return { ok }
+    }
+  },
+
+  {
+    name: 'yaya.session-approved-tools',
+    description:
+      '查看 / 撤销本对话里「都允许」免确认的工具（--remove <wire name> 撤销一个，--clear true 全部撤销）',
+    usage: 'yaya.session-approved-tools --id <sessionId> [--remove <tool>] [--clear true]',
+    run: async (ctx) => {
+      const id = String(ctx.named.id)
+      const session = getSession(id)
+      if (!session) throw new Error(`Session ${id} not found`)
+      let list = Array.isArray(session.meta?.approvedTools)
+        ? (session.meta.approvedTools as string[])
+        : []
+      const clear = ctx.named.clear === true || ctx.named.clear === 'true'
+      const remove = ctx.named.remove !== undefined ? String(ctx.named.remove) : null
+      if (clear || remove) {
+        list = clear ? [] : list.filter((x) => x !== remove)
+        updateSession(id, { meta: { ...(session.meta ?? {}), approvedTools: list } })
+        getBroadcast()('cockpit:yaya-sessions-changed', {})
+      }
+      return { ok: true, approvedTools: list }
     }
   },
 

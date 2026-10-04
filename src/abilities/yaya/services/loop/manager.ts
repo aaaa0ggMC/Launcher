@@ -3,6 +3,7 @@
  * 统一管理正在运行的任务，支持断线重连、断点续传、异常恢复与人类授权。
  */
 import { randomUUID } from 'node:crypto'
+import type { ApprovalScope } from '../../types'
 import { makeLogger } from '../../../../main/process/logger'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { t } from '../../../../main/process/i18n'
@@ -202,10 +203,15 @@ export function controlWorkflow(sessionId: string, action: 'pause' | 'resume'): 
   return true
 }
 
-export function approveToolCall(sessionId: string, approved: boolean, reason?: string): boolean {
+export function approveToolCall(
+  sessionId: string,
+  approved: boolean,
+  reason?: string,
+  scope?: ApprovalScope
+): boolean {
   const runner = activeRunners.get(sessionId)
   if (!runner) return false
-  runner.resolveApproval(approved, reason)
+  runner.resolveApproval(approved, reason, scope)
   return true
 }
 

@@ -2119,6 +2119,14 @@ onUnmounted(() => {
     z-index: 30;
     flex: 0 0 auto;
     width: min(320px, calc(100% - 8px));
+    /* 叠在编辑器 / 控制台上：底色要实，否则下面的代码透出来和表单文字叠在一起 */
+    background: rgba(var(--v-theme-surface), var(--glass-a, 0.94));
+    backdrop-filter: blur(18px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  }
+  .ide-config-panel .ide-config-topbar,
+  .ide-config-panel .ide-config-body {
+    background: transparent;
   }
 }
 </style>

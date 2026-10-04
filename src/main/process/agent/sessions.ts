@@ -6,7 +6,8 @@
  * 会话结束时撤销它的 once 授权（privacy.revokeSessionGrants）。
  */
 import { getBroadcast } from '../broadcast'
-import { revokeSessionGrants } from '../privacy'
+import { currentOrigin, isAgentOrigin, revokeSessionGrants } from '../privacy'
+import { commandOwnerOf } from '../ability-runtime'
 import { makeLogger } from '../logger'
 import { CONFIG_JSON } from '../paths'
 import { readJson } from '../util'
@@ -31,7 +32,11 @@ export interface AgentSession {
   /** agent 自报「我在忙什么」（set_status 工具），过期由渲染端按 `at` 判断 */
   status?: { text: string; progress?: number; at: number }
   /** 登记了控制器的会话支持哪些动作（AgentBar 据此显示暂停 / 停止） */
-  controls?: { pause: boolean; stop: boolean }
+  controls?: { pause: boolean; stop: boolean; approve: boolean }
+  /** AI 最近一次执行的命令属于哪个能力（「跳到 AI 正在操作的页面」用） */
+  focus?: string
+  /** 需要用户处理的事（如 YAYA 等待批准工具调用）——悬浮窗据此强制展开 */
+  attention?: { kind: 'approval'; tool: string }
   /** 已被用户暂停 */
   paused?: boolean
   /** 点击「打开」时跳转的能力页（如 yaya） */
@@ -44,7 +49,11 @@ export interface SessionControl {
   pause?: () => void
   resume?: () => void
   stop?: () => void
+  /** 批准 / 拒绝当前挂起的请求（`attention.kind === 'approval'` 时）；scope：once / run / session */
+  approve?: (approved: boolean, scope?: 'once' | 'run' | 'session') => void
 }
+
+export type SessionAction = 'pause' | 'resume' | 'stop' | 'approve' | 'reject'
 
 const AVATAR_RE = /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/]+=*$/
 /** agent 的头像来自不可信输入：只收 data: 小图（<img> 渲染，svg 脚本不执行），不抓远程 URL（会泄露 IP / 被追踪）。 */
@@ -152,7 +161,11 @@ export function setSessionControl(
   const s = sessions.get(id)
   if (!s) return
   controllers.set(id, control)
-  s.controls = { pause: Boolean(control.pause && control.resume), stop: Boolean(control.stop) }
+  s.controls = {
+    pause: Boolean(control.pause && control.resume),
+    stop: Boolean(control.stop),
+    approve: Boolean(control.approve)
+  }
   if (openAbility) s.openAbility = openAbility
   if (openTarget) s.openTarget = openTarget
   changed()
@@ -166,13 +179,73 @@ export function setSessionPaused(id: string, paused: boolean): void {
   changed()
 }
 
-/** 用户对会话的控制（AgentBar / 快捷键）；返回是否有对应的控制器 */
-export function controlSession(id: string, action: 'pause' | 'resume' | 'stop'): boolean {
+/**
+ * 待处理事项的详情（如等待批准的工具参数）。不放进会话列表：列表会广播给所有渲染端
+ * （含 agent 独立视图），详情只经用户专属命令 `agent.attention-detail` 读取。
+ */
+const attentionDetails = new Map<string, unknown>()
+
+/** 控制器汇报「需要用户处理」的事（null = 已处理）；detail 只给用户看 */
+export function setSessionAttention(
+  id: string,
+  attention: AgentSession['attention'] | null,
+  detail?: unknown
+): void {
+  const s = sessions.get(id)
+  if (!s) return
+  if (attention && detail !== undefined) attentionDetails.set(id, detail)
+  else attentionDetails.delete(id)
+  if (!attention && !s.attention) return
+  s.attention = attention ?? undefined
+  changed()
+}
+
+export function getAttentionDetail(id: string): unknown {
+  return sessions.get(id)?.attention ? attentionDetails.get(id) : undefined
+}
+
+/** 用户对会话的控制（AgentBar / 悬浮窗 / 快捷键）；返回是否有对应的控制器 */
+export function controlSession(
+  id: string,
+  action: SessionAction,
+  scope?: 'once' | 'run' | 'session'
+): boolean {
   const c = controllers.get(id)
+  if (action === 'approve' || action === 'reject') {
+    if (!c?.approve) return false
+    c.approve(action === 'approve', action === 'approve' ? scope : undefined)
+    return true
+  }
   const fn = c?.[action]
   if (!fn) return false
   fn()
   return true
+}
+
+/** 这些能力的命令不算「AI 在操作的页面」（框架 / 自身 / 纯后端） */
+const FOCUS_IGNORE = new Set([
+  'agent',
+  'privacy',
+  'inspector',
+  'settings',
+  'help',
+  'background',
+  'logs',
+  'yaya',
+  'scripting'
+])
+
+/** 命令注册表每次执行前调用：记下 agent 会话最近操作的能力 */
+export function noteAgentCommand(name: string): void {
+  const o = currentOrigin()
+  if (!isAgentOrigin(o) || !o.session) return
+  const s = sessions.get(o.session)
+  if (!s) return
+  const owner = commandOwnerOf(name) || name.split('.')[0]
+  if (!owner || FOCUS_IGNORE.has(owner) || name.startsWith('ui.')) return
+  if (s.focus === owner) return
+  s.focus = owner
+  changed()
 }
 
 /** 暂停所有可暂停的会话（「暂停所有 AI 操作」快捷键）；返回暂停了几个 */
@@ -259,6 +332,7 @@ export function endSession(id: string): void {
   if (!sessions.delete(id)) return
   closers.delete(id)
   controllers.delete(id)
+  attentionDetails.delete(id)
   revokeSessionGrants(id)
   for (const h of endedHooks) h(id)
   changed()

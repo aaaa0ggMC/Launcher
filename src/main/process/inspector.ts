@@ -130,6 +130,8 @@ interface CdpState {
   waiters: Set<(d: DialogNote) => void>
   /** 自动处理过、还没报告给调用方的对话框 */
   notes: DialogNote[]
+  /** 悬浮层（Outsider）指针穿透有效到何时（主进程时钟，ms） */
+  passUntil: number
 }
 const cdpStates = new WeakMap<WebContents, CdpState>()
 
@@ -151,7 +153,7 @@ function autoHandleDialog(wc: WebContents, st: CdpState): void {
 function cdpStateOf(wc: WebContents): CdpState {
   let st = cdpStates.get(wc)
   if (st) return st
-  const fresh: CdpState = { open: null, inflight: 0, waiters: new Set(), notes: [] }
+  const fresh: CdpState = { open: null, inflight: 0, waiters: new Set(), notes: [], passUntil: 0 }
   st = fresh
   cdpStates.set(wc, fresh)
   const onMessage = (_e: unknown, method: string, params: unknown): void => {
@@ -181,6 +183,16 @@ function dialogError(d: DialogNote): Error {
   )
 }
 
+/** 悬浮层穿透：页面里保持 PASS_HOLD_MS，剩不到 PASS_RENEW_MS 时续期 */
+const PASS_HOLD_MS = 250
+const PASS_RENEW_MS = 120
+const PASS_JS = `(() => {
+  const h = document.documentElement
+  h.classList.add('agent-pass')
+  clearTimeout(window.__cockpitPass)
+  window.__cockpitPass = setTimeout(() => h.classList.remove('agent-pass'), ${PASS_HOLD_MS})
+})()`
+
 function cdpFor(wc: WebContents): Cdp {
   const dbg = wc.debugger
   if (!dbg.isAttached()) {
@@ -194,6 +206,12 @@ function cdpFor(wc: WebContents): Cdp {
   }
   const st = cdpStateOf(wc)
   return async (method, params) => {
+    // 注入鼠标事件前让悬浮层（Outsider）对指针透明：AI 的点击穿过悬浮窗落到下面的页面，
+    // 碰不到「继续」之类的按钮。页面侧定时撤销，连续事件只在快到期时续一次。
+    if (method === 'Input.dispatchMouseEvent' && Date.now() > st.passUntil - PASS_RENEW_MS) {
+      st.passUntil = Date.now() + PASS_HOLD_MS
+      await dbg.sendCommand('Runtime.evaluate', { expression: PASS_JS }).catch(() => {})
+    }
     if (st.open && !st.open.handled) {
       if (isAgentView(wc)) autoHandleDialog(wc, st)
       else throw dialogError(st.open)
@@ -860,6 +878,10 @@ interface ElementInfo {
   y: number
   w: number
   h: number
+  /** ref 操作：目标整个被别的元素盖住（点下去会落到盖住它的东西上） */
+  occluded?: boolean
+  /** 盖住它的是什么（禁区只说 forbidden，不带文字） */
+  cover?: string
 }
 
 const ELEMENT_INFO_FN = `function () {
@@ -868,12 +890,32 @@ const ELEMENT_INFO_FN = `function () {
   const r = el.getBoundingClientRect()
   const p = el.closest('[data-privacy]')
   const a = el.closest('[data-privacy-action]')
+  // 点击落在「该点最上层的元素」上：目标被别的东西（遮罩 / 禁区 / 弹层）盖住时，
+  // 换目标上一个没被遮挡的点；全被盖住就标 occluded，不盲点到盖住它的东西上。
+  // 悬浮层（Outsider）不算遮挡——AI 的鼠标事件会穿过它。
+  const topAt = (x, y) => document.elementsFromPoint(x, y).find((e) => !e.closest('[data-outsider-layer]'))
+  const hits = (x, y) => { const t = topAt(x, y); return !!t && (t === el || el.contains(t) || t.contains(el)) }
+  let pt = null
+  if (r.width > 0 && r.height > 0) {
+    const fx = [0.5, 0.25, 0.75, 0.1, 0.9], fy = [0.5, 0.25, 0.75, 0.1, 0.9]
+    outer: for (const ty of fy) for (const tx of fx) {
+      const x = r.left + r.width * tx, y = r.top + r.height * ty
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue
+      if (hits(x, y)) { pt = { x, y }; break outer }
+    }
+  }
+  let cover = ''
+  if (!pt && r.width > 0 && r.height > 0) {
+    const c = topAt(r.left + r.width / 2, r.top + r.height / 2)
+    cover = c ? (c.closest('[data-agent="forbidden"]') ? 'forbidden' : (c.getAttribute('aria-label') || c.getAttribute('role') || c.tagName.toLowerCase())) : ''
+  }
   return {
     privacy: p ? p.getAttribute('data-privacy') : null,
     action: a ? a.getAttribute('data-privacy-action') : null,
     label: (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || '').trim().slice(0, 40),
     forbidden: !!el.closest('[data-agent="forbidden"]'),
-    x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height
+    x: pt ? pt.x : r.left + r.width / 2, y: pt ? pt.y : r.top + r.height / 2, w: r.width, h: r.height,
+    occluded: !pt && r.width > 0 && r.height > 0, cover
   }
 }`
 
@@ -910,7 +952,12 @@ async function guardElement(info: ElementInfo, action: string, fallback: string)
 }
 
 /** 定位元素 + 隐私检查。 */
-async function prepare(cdp: Cdp, ref: string, action: string): Promise<ElementInfo> {
+async function prepare(
+  cdp: Cdp,
+  ref: string,
+  action: string,
+  opts: { allowOccluded?: boolean } = {}
+): Promise<ElementInfo> {
   const objectId = await objectIdOf(cdp, ref)
   const r = (await cdp('Runtime.callFunctionOn', {
     objectId,
@@ -920,6 +967,11 @@ async function prepare(cdp: Cdp, ref: string, action: string): Promise<ElementIn
   const info = r.result.value
   await guardElement(info, action, ref)
   if (info.w <= 0 || info.h <= 0) throw new Error(`${ref} 不可见（尺寸为 0），无法${action}`)
+  if (info.occluded && !opts.allowOccluded) {
+    throw new Error(
+      `${ref} 被其他元素遮挡（${info.cover || '未知'}），无法${action}；先关闭遮挡它的对话框 / 弹层，或重新 ui.snapshot`
+    )
+  }
   return info
 }
 
@@ -942,7 +994,8 @@ async function toCss(cdp: Cdp, p: Point, space: CoordSpace = 'image'): Promise<P
 
 /** 坐标命中测试：该点下面是哪个元素、是否在隐私区 / 禁区（不滚动页面）。 */
 const HIT_FN = (x: number, y: number): string => `(() => {
-  const el = document.elementFromPoint(${x}, ${y})
+  // 跳过悬浮层：AI 的鼠标事件会穿过它（见 cdpFor 的 agent-pass）
+  const el = document.elementsFromPoint(${x}, ${y}).find((e) => !e.closest('[data-outsider-layer]'))
   if (!el) return null
   const p = el.closest('[data-privacy]')
   const a = el.closest('[data-privacy-action]')
@@ -2196,7 +2249,7 @@ export async function screenshot(
   await settle(cdp)
   let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined
   if (opts.ref) {
-    const info = await prepare(cdp, opts.ref, '截图')
+    const info = await prepare(cdp, opts.ref, '截图', { allowOccluded: true })
     clip = {
       x: Math.max(0, info.x - info.w / 2),
       y: Math.max(0, info.y - info.h / 2),

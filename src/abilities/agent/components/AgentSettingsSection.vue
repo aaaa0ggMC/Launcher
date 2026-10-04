@@ -385,6 +385,13 @@ defineExpose({
             @update:model-value="(v) => setUi('outline', !!v)"
           />
           <v-switch
+            :model-value="ui.presence"
+            :label="t('agent.ui_presence', 'YAYA 运行时显示悬浮窗（可暂停 / 停止）')"
+            color="primary"
+            hide-details
+            @update:model-value="(v) => setUi('presence', !!v)"
+          />
+          <v-switch
             :model-value="ui.tooltipDetail"
             :label="t('agent.ui_tooltip', '悬停显示页面 / 状态 / 最近操作')"
             color="primary"
@@ -547,7 +554,7 @@ defineExpose({
           </v-btn>
         </div>
         <div v-if="runGrants.length" class="d-flex align-center flex-wrap ga-2 pt-2">
-          <span class="text-body-2">{{ t('agent.run_grants', '本次运行始终允许：') }}</span>
+          <span class="text-body-2">{{ t('agent.run_grants', '关闭 Cockpit 前都允许：') }}</span>
           <v-chip v-for="g in runGrants" :key="g" class="agent-chip" variant="tonal">{{
             g
           }}</v-chip>

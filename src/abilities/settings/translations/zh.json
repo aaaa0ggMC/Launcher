@@ -159,5 +159,12 @@
   "window.blurModeHint": "毛玻璃（半透明面板、侧栏、菜单下面的模糊）和背景图模糊在手机上开销很大，弹出式侧栏展开时可能掉帧。",
   "window.blurOn": "开启",
   "window.blurAuto": "自动（窄屏关闭，如手机）",
-  "window.blurOff": "关闭（面板底色会更实一些）"
+  "window.blurOff": "关闭（面板底色会更实一些）",
+  "settings.outsider.title": "允许能力弹出悬浮窗",
+  "settings.outsider.description": "关闭后所有能力都不能弹出悬浮窗；也可以展开下面某个能力单独禁止。YAYA 的「AI 在场」悬浮窗与授权弹窗不受影响。",
+  "settings.outsider.perms": "悬浮窗权限",
+  "settings.outsider.allow": "允许弹出悬浮窗",
+  "settings.outsider.declared": "声明的悬浮窗：",
+  "settings.outsider.master_off": "已在上方关闭全部能力悬浮窗",
+  "settings.outsider.none": "目前没有能力声明悬浮窗。"
 }

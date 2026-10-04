@@ -2,6 +2,7 @@ import type { CommandSpec } from './types'
 import { makeLogger } from '../logger'
 import { acquire, touch } from '../exclusive'
 import { registerCommand, commandBlock, commandOwnerOf } from '../ability-runtime'
+import { noteAgentCommand } from '../agent/sessions'
 import {
   isAgentOrigin,
   guard,
@@ -177,6 +178,7 @@ export async function tryRunCommand(input: string): Promise<string | null> {
   const { named, positional } = parseArgs(tokens.slice(1))
   try {
     for (const h of preRunHooks) if (name.startsWith(h.prefix)) await h.fn()
+    noteAgentCommand(name)
     const result = await runWithPrivacy(spec, { named, positional })
     return formatResult(result)
   } catch (e) {
@@ -206,5 +208,6 @@ export async function runCommand(
   const unavailable = await commandUnavailableReason(name)
   if (unavailable) throw new CommandUnavailableError(name, unavailable)
   for (const h of preRunHooks) if (name.startsWith(h.prefix)) await h.fn()
+  noteAgentCommand(name)
   return await runWithPrivacy(spec, { named: args, positional: [] })
 }
