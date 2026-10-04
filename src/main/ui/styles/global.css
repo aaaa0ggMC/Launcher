@@ -484,6 +484,20 @@ html.motion-off *::after {
 }
 
 /* ---------------------------------------------------------------------------
+ * 页面菜单（.page-menu：aidj 页面菜单 / aidj 播放器菜单 / yarj 旅行记录菜单，三处各有一份 scoped 样式，
+ * 都是 overflow:hidden 且没有高度上限）：条目一多就直接超出屏幕。统一限制高度并允许滚动。
+ * 高度 = 可见视口 − 应用栏 64 − 页面容器上下内边距 32 − 把手与间距约 40；宽度不超过视口。
+ * scoped 规则特异性更高，所以这里要 !important。
+ * ------------------------------------------------------------------------- */
+.page-menu .page-menu-pop {
+  max-width: calc(var(--app-vw, 100vw) - 24px) !important;
+  max-height: calc(var(--app-vh, 100vh) - 136px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+/* ---------------------------------------------------------------------------
  * 对话框宽度夹取：Vuetify 把 <v-dialog width="640"> 的 640px 作为内联样式落在 .v-overlay__content 上，
  * 没有任何视口夹取；而外壳是 overflow:hidden，窄屏（手机 / 缩小的窗口）里超出的部分直接被裁掉，
  * 保存 / 删除按钮点不到。统一限制为「视口宽 − 24px」（全屏对话框不受影响）。

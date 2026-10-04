@@ -877,9 +877,16 @@ const hasTrack = computed(() => track.value !== '')
     padding-inline: 16px;
     padding-top: 24px;
   }
+  /* .cover-wrap 是居中列里「宽度由内容决定」的盒子：封面若直接写 width:100% 相对它，就成了循环依赖，
+     会被解成一个很小的值（封面变成细长药丸）。所以先让它占满行宽，百分比才有可解析的参照。 */
+  .cover-wrap {
+    width: 100%;
+  }
   .cover-img {
-    /* 容器窄于封面时不要溢出（object-fit: cover 裁切，画面不变形） */
+    /* 容器窄于封面时不要溢出；高度用 aspect-ratio 跟随，object-fit: cover 裁切、画面不变形 */
     width: min(200px, 100%);
+    height: auto;
+    aspect-ratio: 1 / 1;
   }
   /* 底栏一行塞不下「两枚 chip + A / B / 音量」：换行而不是把按钮挤出屏幕 */
   .volume-footer {

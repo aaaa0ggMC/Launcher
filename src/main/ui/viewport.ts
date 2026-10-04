@@ -33,6 +33,8 @@ export function installViewportVar(): void {
     if (visible <= 0) return
     const px = Math.max(0, (visible - safe) / zoom)
     root.style.setProperty('--app-vh', `${px}px`)
+    // 宽度同理：CSS zoom 下 100vw 不会除以倍数，按视口宽度夹取的规则要用这个（见 global.css 的 .page-menu-pop）
+    root.style.setProperty('--app-vw', `${window.innerWidth / zoom}px`)
 
     const info = {
       innerHeight: Math.round(window.innerHeight),
