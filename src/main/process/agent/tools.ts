@@ -214,14 +214,19 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'ui_snapshot',
     title: 'UI snapshot',
     description:
-      'Accessibility-tree snapshot of your Cockpit view (a private window of your own — the main window of the user is not affected; the user can watch it by clicking your avatar in the title bar). Interactive elements have [ref=eN] for the ui_* tools; <canvas> elements (games / charts) get a ref too. Scrollable areas show their position ("more below" → scroll to load more). boxes=true appends each ref\'s position on the screenshot as @(x,y wxh) in screenshot pixels. mode=full also includes plain text.',
+      'Accessibility-tree snapshot of your Cockpit view (a private window of your own — the main window of the user is not affected; the user can watch it by clicking your avatar in the title bar). Interactive elements have [ref=eN] for the ui_* tools; <canvas> elements (games / charts) get a ref too. Scrollable areas show their position ("more below" → scroll to load more). boxes=true appends each ref\'s position on the screenshot as @(x,y wxh) in screenshot pixels. mode=full also includes plain text. Large pages are paged: the text ends with "call again with offset=N" — pass that offset to read the rest (refs stay the same across pages).',
     shape: {
       mode: z.enum(['interactive', 'full']).optional(),
-      boxes: z.boolean().optional().describe('append @(x,y wxh) screenshot-pixel boxes to refs')
+      boxes: z.boolean().optional().describe('append @(x,y wxh) screenshot-pixel boxes to refs'),
+      offset: z.number().int().min(0).optional().describe('line to start from (paging)')
     },
     readOnly: true,
     run: async (a) => {
-      const r = (await runCommand('ui.snapshot', { mode: a.mode, boxes: a.boxes })) as {
+      const r = (await runCommand('ui.snapshot', {
+        mode: a.mode,
+        boxes: a.boxes,
+        offset: a.offset
+      })) as {
         text: string
         [k: string]: unknown
       }

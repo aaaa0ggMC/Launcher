@@ -48,7 +48,28 @@ const headless = (): boolean => process.env.COCKPIT_HEADLESS === '1'
 const AGENT_INPUT_TAG_MS = 3000
 const SETTLE_QUIET_MS = 300
 const SETTLE_MAX_MS = 4000
+/** 一页快照的行数；超出的部分用 offset 翻页（页面再大也不会被截掉看不到） */
 const MAX_SNAPSHOT_LINES = 1500
+/** 整棵树最多收集的行数（翻页上限） */
+const SNAPSHOT_HARD_LINES = 12000
+
+/** 按 offset 取一页，并在末尾说明还有多少、怎么继续看 */
+export function pageSnapshotLines(
+  lines: string[],
+  offset: number | undefined,
+  hardTruncated: boolean,
+  pageSize = MAX_SNAPSHOT_LINES
+): { text: string; truncated: boolean; totalLines: number; offset: number } {
+  const from = Math.max(0, Math.min(Math.floor(offset ?? 0), Math.max(0, lines.length - 1)))
+  const to = Math.min(lines.length, from + pageSize)
+  let text = lines.slice(from, to).join('\n')
+  const more = to < lines.length
+  if (from > 0) text = `… (lines ${from + 1}–${to} of ${lines.length})\n` + text
+  if (more)
+    text += `\n… (${lines.length - to} more lines; call again with offset=${to} to continue)`
+  else if (hardTruncated) text += `\n… (page too large: stopped at ${SNAPSHOT_HARD_LINES} lines)`
+  return { text, truncated: more || hardTruncated, totalLines: lines.length, offset: from }
+}
 
 type Cdp = (method: string, params?: Record<string, unknown>) => Promise<unknown>
 
@@ -535,7 +556,10 @@ async function bridge<T>(
 }
 
 async function snapshotViaBrowser(opts: SnapshotOptions): Promise<SnapshotResult> {
-  const r = await bridge<Partial<SnapshotResult>>('snapshot', { mode: opts.mode ?? 'interactive' })
+  const r = await bridge<Partial<SnapshotResult>>('snapshot', {
+    mode: opts.mode ?? 'interactive',
+    offset: opts.offset ?? 0
+  })
   return {
     ok: true,
     page: r.page ?? '',
@@ -547,6 +571,7 @@ async function snapshotViaBrowser(opts: SnapshotOptions): Promise<SnapshotResult
     pendingCommands: 0,
     refs: r.refs ?? 0,
     text: r.text ?? '',
+    ...(r.totalLines ? { totalLines: r.totalLines } : {}),
     ...(r.truncated ? { truncated: true } : {})
   }
 }
@@ -582,6 +607,29 @@ async function clickAtViaBrowser(
   })
   const res = r as { target?: string; settledMs?: number }
   return { ok: true, target: res.target ?? '', settledMs: res.settledMs ?? 0 }
+}
+
+/** 无头：按 CSS 坐标的鼠标移动 / 按下松开 / 拖动（合成指针事件，命中测试与 click-at 相同） */
+async function pointerViaBrowser(
+  method: 'move' | 'mouse' | 'drag',
+  args: Record<string, unknown>,
+  action: string
+): Promise<{ ok: true; target?: string; settledMs: number }> {
+  const nums = [
+    args.x,
+    args.y,
+    ...['from', 'to'].flatMap((k) => {
+      const p = args[k] as { x?: unknown; y?: unknown } | undefined
+      return p ? [p.x, p.y] : []
+    })
+  ]
+  if (nums.some((v) => v !== undefined && !Number.isFinite(Number(v))))
+    throw new Error('坐标需要是数字')
+  const r = (await browserUiGuardedCall({ method, args, action })) as {
+    target?: string
+    settledMs?: number
+  }
+  return { ok: true, ...(r.target ? { target: r.target } : {}), settledMs: r.settledMs ?? 0 }
 }
 
 async function typeViaBrowser(
@@ -638,6 +686,8 @@ export interface SnapshotOptions {
   mode?: 'interactive' | 'full'
   /** 给每个 ref 附上它在截图上的位置 `@(x,y wxh)`（截图像素），便于对照截图按坐标操作 */
   boxes?: boolean
+  /** 从第几行开始（大页面翻页；ref 编号在整棵树里统一分配，翻页不变） */
+  offset?: number
 }
 
 export interface SnapshotResult {
@@ -652,6 +702,8 @@ export interface SnapshotResult {
   pendingCommands: number
   refs: number
   text: string
+  /** 整棵树的行数（> 返回的行数时用 offset 翻页） */
+  totalLines?: number
   truncated?: boolean
 }
 
@@ -677,7 +729,7 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
   const lines: string[] = []
   let truncated = false
   const emit = (depth: number, line: string): void => {
-    if (lines.length >= MAX_SNAPSHOT_LINES) {
+    if (lines.length >= SNAPSHOT_HARD_LINES) {
       truncated = true
       return
     }
@@ -812,7 +864,8 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
 
   const iconHints = await namelessIconHints(cdp, nodes)
   walk(nodes[0], 0, undefined, '')
-  let text = lines.join('\n')
+  const paged = pageSnapshotLines(lines, opts.offset, truncated)
+  let text = paged.text
   if (opts.boxes) text = await appendBoxes(cdp, text, meta.zoom)
   return {
     ok: true,
@@ -823,8 +876,9 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
     settledMs,
     pendingCommands: inflightCommands(),
     refs: vs().refMap.size,
-    text: text + (truncated ? `\n… (truncated at ${MAX_SNAPSHOT_LINES} lines)` : ''),
-    ...(truncated ? { truncated } : {})
+    text,
+    totalLines: paged.totalLines,
+    ...(paged.truncated ? { truncated: true } : {})
   }
 }
 
@@ -1080,6 +1134,7 @@ export async function moveTo(
   point: Point,
   opts: ActOptions = {}
 ): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+  if (headless()) return pointerViaBrowser('move', { x: point.x, y: point.y }, '移动鼠标')
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -1101,6 +1156,12 @@ export async function mouseButton(
   point: Point,
   opts: ActOptions & { button?: MouseButton } = {}
 ): Promise<{ ok: true; target?: string; settledMs: number; dialogs?: DialogNote[] }> {
+  if (headless())
+    return pointerViaBrowser(
+      'mouse',
+      { action, x: point.x, y: point.y, button: opts.button ?? 'left' },
+      action === 'down' ? '按下' : '松开'
+    )
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const p = await toCss(cdp, point, opts.space)
@@ -1150,6 +1211,18 @@ export async function drag(
   to: Point,
   opts: ActOptions & { button?: MouseButton; steps?: number; durationMs?: number } = {}
 ): Promise<{ ok: true; settledMs: number; dialogs?: DialogNote[] }> {
+  if (headless())
+    return pointerViaBrowser(
+      'drag',
+      {
+        from: { x: from.x, y: from.y },
+        to: { x: to.x, y: to.y },
+        button: opts.button ?? 'left',
+        steps: opts.steps,
+        durationMs: opts.durationMs
+      },
+      '拖动'
+    )
   const wc = mainContents()
   const cdp = cdpFor(wc)
   const a = await toCss(cdp, from, opts.space)
@@ -2082,7 +2155,8 @@ const OVERLAY_JS = (cleared: string[], maskForbidden: boolean): string => `(() =
 
 export interface ScreenshotResult {
   ok: true
-  mime: 'image/png'
+  /** Electron 为 PNG；无头（DOM 光栅化）为 JPEG */
+  mime: 'image/png' | 'image/jpeg'
   width: number
   height: number
   /** 截图像素 / CSS 像素；ui.click_at 等默认就用截图像素坐标，无需换算 */
@@ -2241,9 +2315,51 @@ async function captureMasked(
   return { buf, redactedRegions, shownScopes }
 }
 
+/** 无头：页面自己把 DOM 光栅化（browser-bridge doScreenshot），遮罩规则与 captureMasked 相同 */
+async function screenshotViaBrowser(opts: {
+  ref?: string
+  save?: boolean
+}): Promise<ScreenshotResult> {
+  const reader = isAgentReader()
+  const all = [...listPrivacyScopes().map((s) => s.id), SCOPE_SECRET]
+  const cleared = reader ? all.filter((id) => hasClearance(id)) : all
+  const r = await bridge<{
+    mime: 'image/jpeg' | 'image/png'
+    width: number
+    height: number
+    scale: number
+    redactedRegions: number
+    scopes?: string[]
+    data: string
+  }>(
+    'screenshot',
+    { ...(opts.ref ? { ref: opts.ref } : {}), cleared, maskForbidden: reader },
+    30_000
+  )
+  if (reader) for (const sc of r.scopes ?? []) noteRedaction(sc)
+  const base = {
+    ok: true as const,
+    mime: r.mime,
+    width: r.width,
+    height: r.height,
+    scale: r.scale,
+    redactedRegions: r.redactedRegions
+  }
+  if (opts.save ?? !reader) {
+    const dir = join(USER_CONFIG_DIR, 'screenshots')
+    await mkdir(dir, { recursive: true })
+    const ext = r.mime === 'image/png' ? 'png' : 'jpg'
+    const path = join(dir, `shot-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`)
+    await writeFile(path, Buffer.from(r.data, 'base64'))
+    return { ...base, path }
+  }
+  return { ...base, data: r.data }
+}
+
 export async function screenshot(
   opts: { ref?: string; save?: boolean } = {}
 ): Promise<ScreenshotResult> {
+  if (headless()) return screenshotViaBrowser(opts)
   const wc = mainContents()
   const cdp = cdpFor(wc)
   await settle(cdp)

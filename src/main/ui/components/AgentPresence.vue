@@ -328,10 +328,7 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div v-if="s.attention?.kind === 'approval' && s.controls?.approve" class="presence__ask">
-          <v-btn variant="text" @click="open(s)">
-            {{ t('agent.presence.view', '去对话里看') }}
-          </v-btn>
-          <v-spacer />
+          <!-- 「去对话里看」= 标题行右侧的「打开对话」按钮；这里只放决定，窄宽度下也排得下一行 -->
           <v-btn variant="tonal" prepend-icon="mdi-close" @click="control(s, 'reject')">
             {{ t('agent.presence.reject', '拒绝') }}
           </v-btn>
@@ -345,16 +342,18 @@ onBeforeUnmount(() => {
             >
               {{ t('agent.presence.approve', '批准') }}
             </v-btn>
+            <!-- 不用 icon 按钮：图标按钮在触屏下会被放大成圆形，和左半边高度对不齐 -->
             <v-btn
               color="primary"
               variant="flat"
               class="presence__split-more"
-              :icon="moreApproveId === s.id ? 'mdi-chevron-up' : 'mdi-chevron-down'"
               :title="t('agent.presence.approve_more', '更多批准方式')"
               :aria-label="t('agent.presence.approve_more', '更多批准方式')"
               :aria-expanded="moreApproveId === s.id"
               @click="moreApproveId = moreApproveId === s.id ? null : s.id"
-            />
+            >
+              <v-icon :icon="moreApproveId === s.id ? 'mdi-chevron-up' : 'mdi-chevron-down'" />
+            </v-btn>
           </div>
         </div>
         <div v-if="moreApproveId === s.id" class="presence__ask presence__ask--more">
@@ -441,9 +440,8 @@ onBeforeUnmount(() => {
   border-bottom-right-radius: 0 !important;
 }
 .presence__split-more {
-  width: 36px !important;
-  min-width: 36px !important;
-  height: 36px !important;
+  min-width: 40px !important;
+  padding: 0 8px !important;
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
   border-left: 1px solid rgba(var(--v-theme-on-primary), 0.3);
@@ -524,8 +522,9 @@ onBeforeUnmount(() => {
 .presence__ask {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .presence__avatar {
   position: relative;

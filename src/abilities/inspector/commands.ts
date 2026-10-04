@@ -73,15 +73,19 @@ const headlessGate = {
 }
 
 /**
- * 无头（网页）宿主里浏览器桥**能实现**的 ui.* 命令（B5）：快照 / 跳页 / 点击（ref 或 CSS
- * 坐标）/ 输入 / 按键 / 滚动 / 等待。其余（截图、自由鼠标、拖动、输入时间轴）依赖 Electron
- * 的可信输入与截图，无头下保持不可用并说明原因——绝不假成功。
+ * 无头（网页）宿主里浏览器桥**能实现**的 ui.* 命令（B5）：快照 / 截图（DOM 光栅化）/ 跳页 /
+ * 点击（ref 或 CSS 坐标）/ 鼠标移动 / 按下松开 / 拖动 / 输入 / 按键 / 滚动 / 等待。
+ * 输入时间轴依赖主进程精确派发可信输入，无头下保持不可用并说明原因——绝不假成功。
  */
 const HEADLESS_BRIDGE_COMMANDS = new Set([
   'ui.snapshot',
   'ui.navigate',
   'ui.click',
   'ui.click-at',
+  'ui.move',
+  'ui.mouse',
+  'ui.drag',
+  'ui.screenshot',
   'ui.type',
   'ui.key',
   'ui.scroll',
@@ -113,13 +117,14 @@ const specs: CommandSpec[] = [
   {
     name: 'ui.snapshot',
     description:
-      '读取主窗口的界面快照：可交互元素带 [ref=eN]，可滚动区域标注位置，<canvas> 也给 ref；--boxes true 附上每个 ref 在截图上的位置 (--mode interactive|full)',
-    usage: 'ui.snapshot [--mode full] [--boxes true]',
+      '读取主窗口的界面快照：可交互元素带 [ref=eN]，可滚动区域标注位置，<canvas> 也给 ref；--boxes true 附上每个 ref 在截图上的位置 (--mode interactive|full)；页面很大时分页返回，末尾提示用 --offset 继续看',
+    usage: 'ui.snapshot [--mode full] [--boxes true] [--offset 1500]',
     privacy: {},
     run: async (ctx) =>
       snapshot({
         mode: ctx.named.mode === 'full' ? 'full' : 'interactive',
-        boxes: bool(ctx.named.boxes)
+        boxes: bool(ctx.named.boxes),
+        offset: num(ctx.named.offset)
       })
   },
   {
