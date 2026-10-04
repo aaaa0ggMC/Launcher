@@ -355,7 +355,7 @@ function formatCoords(coords: [number, number] | null): string {
 
 .drawer-footer {
   flex-shrink: 0;
-  background: rgba(var(--v-theme-surface), 0.7);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.7));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   min-height: 52px;

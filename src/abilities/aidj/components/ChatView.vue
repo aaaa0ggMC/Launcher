@@ -1818,7 +1818,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(var(--v-theme-surface), 0.2);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.2));
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
@@ -1856,7 +1856,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(var(--v-theme-surface), 0.35);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.35));
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   z-index: 5;

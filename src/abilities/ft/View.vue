@@ -620,7 +620,7 @@ defineExpose({ toMarkdown })
   gap: 6px;
   padding: 6px;
   border-radius: 12px;
-  background: rgba(var(--v-theme-surface-variant), 0.42);
+  background: rgba(var(--v-theme-surface-variant), var(--glass-a, 0.42));
   backdrop-filter: blur(14px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
 }
@@ -636,7 +636,7 @@ defineExpose({ toMarkdown })
   display: flex;
   flex-direction: column;
   border-radius: 14px;
-  background: rgba(var(--v-theme-surface-variant), 0.42);
+  background: rgba(var(--v-theme-surface-variant), var(--glass-a, 0.42));
   backdrop-filter: blur(14px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
   z-index: 5;

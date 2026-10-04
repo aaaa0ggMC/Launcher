@@ -753,7 +753,7 @@ onBeforeUnmount(() => {
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  background: rgba(var(--v-theme-surface), 0.55) !important;
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.55)) !important;
   backdrop-filter: blur(18px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.32);
 }
@@ -774,7 +774,7 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .bt-list :deep(.v-list-item) {
-  background: rgba(var(--v-theme-surface), 0.28);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.28));
   backdrop-filter: blur(8px);
 }
 .bt-list :deep(.v-list-item:hover) {

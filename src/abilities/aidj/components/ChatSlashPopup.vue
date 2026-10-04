@@ -47,7 +47,7 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
   max-height: 168px;
   overflow-y: auto;
   border-radius: 10px;
-  background: rgba(var(--v-theme-surface), 0.2);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.2));
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);

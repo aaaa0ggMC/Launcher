@@ -153,7 +153,7 @@ onMounted(() => {
 }
 /* Translucent frosted card — the EQ editor floats over the player page. */
 .eq-dialog-card {
-  background: rgba(var(--v-theme-surface), 0.72) !important;
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.72)) !important;
   backdrop-filter: blur(28px) saturate(1.2);
   -webkit-backdrop-filter: blur(28px) saturate(1.2);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);

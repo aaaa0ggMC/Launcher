@@ -892,7 +892,7 @@ defineExpose({ toMarkdown })
   border: none;
   cursor: pointer;
   color: rgb(var(--v-theme-on-surface-variant));
-  background: rgba(var(--v-theme-surface), 0.2);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.2));
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
@@ -911,7 +911,7 @@ defineExpose({ toMarkdown })
 .page-menu-pop {
   margin-top: 4px;
   width: 340px;
-  background: rgba(var(--v-theme-surface), 0.2);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.2));
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
@@ -1037,7 +1037,7 @@ defineExpose({ toMarkdown })
   min-width: 130px;
   padding: 4px;
   border-radius: 8px;
-  background: rgba(var(--v-theme-surface), 0.2);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.2));
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);

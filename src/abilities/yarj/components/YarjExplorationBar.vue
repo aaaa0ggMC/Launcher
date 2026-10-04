@@ -559,7 +559,7 @@ function resetToGranularity(): void {
 
 .exploration-card {
   pointer-events: auto;
-  background: rgba(var(--v-theme-surface), 0.88);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.88));
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);

@@ -403,7 +403,7 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
   z-index: 35;
   border-radius: 16px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-  background: rgba(var(--v-theme-surface), 0.85);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.85));
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   border: 2px solid rgb(var(--v-theme-primary));

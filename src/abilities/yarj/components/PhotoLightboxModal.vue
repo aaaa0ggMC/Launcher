@@ -518,7 +518,7 @@ onBeforeUnmount(() => {
 
 .lightbox-topbar {
   flex-shrink: 0;
-  background: rgba(var(--v-theme-surface), 0.6);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.6));
   backdrop-filter: blur(16px);
   border-bottom: 1px solid rgba(var(--v-theme-surface-bright), 0.2);
   z-index: 10;
@@ -599,7 +599,7 @@ onBeforeUnmount(() => {
 }
 
 .video-error-fallback {
-  background: rgba(var(--v-theme-surface), 0.88);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.88));
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(var(--v-theme-warning), 0.3);
@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 6px 14px;
-  background: rgba(var(--v-theme-surface), 0.85);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.85));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.3);

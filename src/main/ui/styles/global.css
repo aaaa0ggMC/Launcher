@@ -518,6 +518,11 @@ html.no-blur *::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+/* 自定义玻璃面板（半透明底 + backdrop-filter）：背景透明度写成 var(--glass-a, 原值)，
+   关闭模糊时统一拉实，没有模糊也能和身后内容区分开。新写玻璃面板请同样用这个变量。 */
+html.no-blur {
+  --glass-a: 0.94;
+}
 html.no-blur .v-application .v-app-bar {
   background: rgba(var(--v-theme-surface), 0.92) !important;
 }

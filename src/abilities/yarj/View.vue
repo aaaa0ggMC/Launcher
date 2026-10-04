@@ -3169,7 +3169,7 @@ async function reloadPreferences(): Promise<void> {
   border-radius: 8px;
   font-size: 0.85rem;
   color: rgb(var(--v-theme-error));
-  background: rgba(var(--v-theme-surface), 0.85);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.85));
   backdrop-filter: blur(12px);
   border: 1px solid rgba(var(--v-theme-error), 0.4);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
@@ -3185,7 +3185,7 @@ async function reloadPreferences(): Promise<void> {
   border-radius: 999px;
   font-size: 0.82rem;
   color: rgb(var(--v-theme-on-surface-variant));
-  background: rgba(var(--v-theme-surface), 0.7);
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.7));
   backdrop-filter: blur(12px);
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.25);
   pointer-events: none;
