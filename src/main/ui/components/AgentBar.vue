@@ -67,8 +67,13 @@ async function refresh(): Promise<void> {
   try {
     const r = (await window.cockpit.command('agent.sessions')) as { sessions: Session[] }
     sessions.value = [...r.sessions].sort((a, b) => a.startedAt - b.startedAt)
+    const alive = new Set(sessions.value.map((s) => s.id))
+    for (const id of Object.keys(live.value)) {
+      if (!alive.has(id)) delete live.value[id]
+    }
   } catch {
     sessions.value = []
+    live.value = {}
   }
 }
 
