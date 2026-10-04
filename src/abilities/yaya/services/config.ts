@@ -22,6 +22,7 @@ export const DEFAULT_YAYA_CONFIG: YayaConfig = {
     'You are {name}, an intelligent personal assistant and autonomous agent running inside Linux System Cockpit. You are helpful, precise, and capable of executing tools to assist the user.',
   autoApproveTools: false,
   maxLoopSteps: 25,
+  processPreviewSteps: 1,
   streamOutput: true,
   providers: [
     {
@@ -96,6 +97,7 @@ export function loadYayaConfig(): YayaConfig {
       mcpServers: normalizeMcpServers(parsed.mcpServers)
     }
     cfg.assistantName = normalizeAssistantName(cfg.assistantName)
+    cfg.processPreviewSteps = normalizeProcessPreviewSteps(cfg.processPreviewSteps)
 
     // 解密 MCP 自定义请求头的值
     for (const m of cfg.mcpServers) {
@@ -177,6 +179,15 @@ export function normalizeAssistantName(name: unknown): string {
   return s || DEFAULT_ASSISTANT_NAME
 }
 
+/** 过程卡片收起时预览的步数：0 = 完全折叠；上限 5（再多的预览没有意义） */
+export const PROCESS_PREVIEW_STEPS_MAX = 5
+
+export function normalizeProcessPreviewSteps(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number.parseInt(String(v ?? ''), 10)
+  if (!Number.isFinite(n)) return 1
+  return Math.min(PROCESS_PREVIEW_STEPS_MAX, Math.max(0, Math.round(n)))
+}
+
 /** 系统提示词：`{name}` 替换为助手名 */
 export function resolveSystemPrompt(prompt: string, config: YayaConfig): string {
   return prompt.split('{name}').join(normalizeAssistantName(config.assistantName))
@@ -242,6 +253,7 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
   const current = loadYayaConfig()
   const next: YayaConfig = JSON.parse(JSON.stringify(incoming))
   next.assistantName = normalizeAssistantName(next.assistantName)
+  next.processPreviewSteps = normalizeProcessPreviewSteps(next.processPreviewSteps)
   next.providers = (next.providers ?? []).map((p) => {
     const prev = current.providers.find((c) => c.id === p.id)
     let apiKey = p.apiKey

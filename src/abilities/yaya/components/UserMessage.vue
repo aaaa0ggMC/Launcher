@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { inject, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import type { MessageNode } from '../types'
 import type { MessageMenuRequest } from './message-menu'
 import BranchSwitcher from './BranchSwitcher.vue'
+import ImagePreviewDialog from './ImagePreviewDialog.vue'
 
 const props = defineProps<{
   message: MessageNode
@@ -94,6 +95,28 @@ onMounted(async () => {
     }
   }
 })
+
+/** 图片（已有预览）= 缩略图网格，点击看大图；其余 = 文件 chip */
+const imageAttachments = computed(() =>
+  (props.message.attachments ?? []).filter(
+    (a) => a.mimeType.startsWith('image/') && !!previews.value[a.id]
+  )
+)
+const fileAttachments = computed(() =>
+  (props.message.attachments ?? []).filter((a) => !imageAttachments.value.includes(a))
+)
+const previewImages = computed(() =>
+  imageAttachments.value.map((a) => ({ src: previews.value[a.id], name: a.name }))
+)
+
+const previewOpen = ref(false)
+const previewIndex = ref(0)
+function openPreview(id: string): void {
+  const i = imageAttachments.value.findIndex((a) => a.id === id)
+  if (i < 0) return
+  previewIndex.value = i
+  previewOpen.value = true
+}
 </script>
 
 <template>
@@ -119,19 +142,21 @@ onMounted(async () => {
 
     <template v-else>
       <div v-if="message.attachments?.length" class="attachments">
-        <template v-for="att in message.attachments" :key="att.id">
-          <img
-            v-if="previews[att.id]"
-            :src="previews[att.id]"
-            :alt="att.name"
-            :title="att.name"
-            class="thumb"
-          />
-          <div v-else class="file-chip" :title="att.name">
-            <v-icon icon="mdi-file-outline" size="16" />
-            <span class="text-truncate">{{ att.name }}</span>
-          </div>
-        </template>
+        <button
+          v-for="att in imageAttachments"
+          :key="att.id"
+          type="button"
+          class="thumb"
+          :title="att.name"
+          :aria-label="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
+          @click="openPreview(att.id)"
+        >
+          <img :src="previews[att.id]" :alt="att.name" loading="lazy" />
+        </button>
+        <div v-for="att in fileAttachments" :key="att.id" class="file-chip" :title="att.name">
+          <v-icon icon="mdi-file-outline" size="16" />
+          <span class="text-truncate">{{ att.name }}</span>
+        </div>
       </div>
       <div
         v-if="message.content"
@@ -178,6 +203,8 @@ onMounted(async () => {
         />
       </div>
     </template>
+
+    <ImagePreviewDialog v-model="previewOpen" :images="previewImages" :index="previewIndex" />
   </div>
 </template>
 
@@ -205,18 +232,31 @@ onMounted(async () => {
   word-break: break-word;
 }
 .attachments {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 88px);
   justify-content: flex-end;
   gap: 8px;
   max-width: 85%;
 }
 .thumb {
-  max-width: 220px;
-  max-height: 180px;
+  display: block;
+  width: 88px;
+  height: 88px;
+  padding: 0;
   border-radius: 12px;
-  object-fit: cover;
+  overflow: hidden;
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  background: none;
+  cursor: zoom-in;
+}
+.thumb:hover {
+  border-color: rgba(var(--v-theme-primary), 0.6);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .file-chip {
   display: flex;
@@ -255,9 +295,12 @@ onMounted(async () => {
   .attachments {
     max-width: 92%;
   }
+  .attachments {
+    grid-template-columns: repeat(auto-fill, 72px);
+  }
   .thumb {
-    max-width: 160px;
-    max-height: 140px;
+    width: 72px;
+    height: 72px;
   }
 }
 
@@ -268,6 +311,13 @@ onMounted(async () => {
     font-size: 0.9rem;
     line-height: 1.55;
     border-radius: 14px 6px 14px 14px;
+  }
+  .attachments {
+    grid-template-columns: repeat(auto-fill, 64px);
+  }
+  .thumb {
+    width: 64px;
+    height: 64px;
   }
   .user-actions {
     min-height: 34px;

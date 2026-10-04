@@ -96,7 +96,106 @@ export function renderMarkdown(text: string, labels: { copy: string }): string {
   // 依赖 epoch：高亮器加载完后让调用方的 computed 失效重算
   void highlightEpoch.value
   if (/```|~~~/.test(text)) ensureHighlighter()
-  return md.render(text || '', { labels })
+  const blocks = splitBlocks(text || '')
+  return blocks.map((b, i) => cachedHtml(b, labels, i < blocks.length - 1)).join('')
+}
+
+// ---------------------------------------------------------------------------
+// 分块渲染缓存：流式输出时每来一个 token 都要重渲染整段回答，长回答会越来越卡（O(n²)）。
+// 把文本按「顶层空行」切成互不影响的块，已完成的块按原文缓存，只有最后一块（还在写）每次重渲染。
+// ---------------------------------------------------------------------------
+
+const BLOCK_CACHE_MAX = 600
+const blockCache = new Map<string, unknown>()
+let cacheEpoch = -1
+
+function cacheGet<T>(key: string): T | undefined {
+  if (cacheEpoch !== highlightEpoch.value) {
+    // 高亮器 / KaTeX 刚加载完：旧的 HTML 是没高亮的版本，作废
+    blockCache.clear()
+    cacheEpoch = highlightEpoch.value
+  }
+  const v = blockCache.get(key)
+  if (v !== undefined) {
+    // 最近使用的移到末尾（Map 按插入顺序淘汰）
+    blockCache.delete(key)
+    blockCache.set(key, v)
+  }
+  return v as T | undefined
+}
+
+function cacheSet(key: string, v: unknown): void {
+  blockCache.set(key, v)
+  if (blockCache.size > BLOCK_CACHE_MAX) {
+    const oldest = blockCache.keys().next().value
+    if (oldest !== undefined) blockCache.delete(oldest)
+  }
+}
+
+function cachedHtml(block: string, labels: { copy: string }, cache: boolean): string {
+  if (!cache) return md.render(block, { labels })
+  const key = `h|${labels.copy}|${block}`
+  const hit = cacheGet<string>(key)
+  if (hit !== undefined) return hit
+  const html = md.render(block, { labels })
+  cacheSet(key, html)
+  return html
+}
+
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/
+const LIST_RE = /^ {0,3}([-*+]|\d{1,9}[.)])\s/
+/** 列表块里，空行之后这些开头仍属于这个列表（下一项 / 缩进的续行段落），不能切开 */
+const CONTINUES_RE = /^(\s|[-*+]\s|\d{1,9}[.)]\s)/
+
+/**
+ * 按顶层空行切块：代码块、`$$` / `\[` 数学块内部不切；列表块里空行后紧跟缩进行或列表项时不切
+ * （松散列表、列表项的续行段落保持在同一块）。各块单独渲染与整段渲染等价（引用式链接定义
+ * 跨块时除外——模型几乎不用）。
+ */
+export function splitBlocks(text: string): string[] {
+  const lines = text.split('\n')
+  const blocks: string[] = []
+  let cur: string[] = []
+  let fence: { ch: string; len: number } | null = null
+  let math: '$$' | '\\]' | null = null
+  let blank = false
+  const flush = (): void => {
+    if (cur.length) blocks.push(cur.join('\n'))
+    cur = []
+  }
+  for (const line of lines) {
+    if (fence) {
+      cur.push(line)
+      const m = FENCE_RE.exec(line)
+      if (m && m[1][0] === fence.ch && m[1].length >= fence.len && !line.slice(m[0].length).trim())
+        fence = null
+      continue
+    }
+    if (math) {
+      cur.push(line)
+      if (line.includes(math)) math = null
+      continue
+    }
+    if (!line.trim()) {
+      blank = cur.length > 0
+      if (blank) cur.push(line)
+      continue
+    }
+    if (blank && !(LIST_RE.test(cur[0]) && CONTINUES_RE.test(line))) {
+      // 去掉块尾的空行再切
+      while (cur.length && !cur[cur.length - 1].trim()) cur.pop()
+      flush()
+    }
+    blank = false
+    cur.push(line)
+    const m = FENCE_RE.exec(line)
+    if (m) fence = { ch: m[1][0], len: m[1].length }
+    else if ((line.match(/\$\$/g)?.length ?? 0) % 2 === 1) math = '$$'
+    else if (line.includes('\\[') && !line.includes('\\]')) math = '\\]'
+  }
+  while (cur.length && !cur[cur.length - 1].trim()) cur.pop()
+  flush()
+  return blocks
 }
 
 /**
@@ -160,6 +259,39 @@ export function renderSegments(
   if (!langs.size || !/```|~~~/.test(text))
     return [{ kind: 'html', html: renderMarkdown(text, labels) }]
   ensureHighlighter()
+  // 分块：只有含代码块的块才需要按 token 切段，其余块走 HTML 缓存；相邻 HTML 段合并
+  const blocks = splitBlocks(text || '')
+  const out: MarkdownSegment[] = []
+  const pushHtml = (html: string): void => {
+    const last = out[out.length - 1]
+    if (last?.kind === 'html') last.html += html
+    else out.push({ kind: 'html', html })
+  }
+  blocks.forEach((block, i) => {
+    const done = i < blocks.length - 1
+    if (!/```|~~~/.test(block)) {
+      pushHtml(cachedHtml(block, labels, done))
+      return
+    }
+    const key = `s|${labels.copy}|${[...langs].join(',')}|${block}`
+    let segs = done ? cacheGet<MarkdownSegment[]>(key) : undefined
+    if (!segs) {
+      segs = segmentBlock(block, langs, labels)
+      if (done) cacheSet(key, segs)
+    }
+    for (const seg of segs) {
+      if (seg.kind === 'html') pushHtml(seg.html)
+      else out.push({ ...seg })
+    }
+  })
+  return out
+}
+
+function segmentBlock(
+  text: string,
+  langs: Set<string>,
+  labels: { copy: string }
+): MarkdownSegment[] {
   const env = { labels }
   const tokens = md.parse(text || '', env)
   const out: MarkdownSegment[] = []

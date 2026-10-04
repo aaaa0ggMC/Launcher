@@ -120,6 +120,11 @@ export interface CockpitApi {
     any?: boolean
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
+  /** 多选文件（附件等）；取消返回 [] */
+  pickFiles: (opts?: {
+    title?: string
+    filters?: { name: string; extensions: string[] }[]
+  }) => Promise<string[]>
   pickSaveFile: (opts?: {
     title?: string
     defaultPath?: string

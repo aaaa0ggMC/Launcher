@@ -17,6 +17,7 @@ import {
   createSession,
   deleteSession,
   getMessageBranchWithSiblings,
+  getMessageBranchWindow,
   getMessageSiblings,
   updateSession,
   findLatestLeaf,
@@ -43,7 +44,22 @@ import {
   publicYayaConfig,
   mergeIncomingYayaConfig
 } from './services/config'
-import { saveAsset, importAssetFromPath, assetDataUrl } from './services/assets'
+import {
+  MAX_ASSET_DATA_BYTES,
+  normalizeAssetMime,
+  sanitizeAssetFilename,
+  saveAsset,
+  importAssetFromPath,
+  assetDataUrl
+} from './services/assets'
+import { t, te } from '../../main/process/i18n'
+
+/** 附件体积的简短显示（错误信息用） */
+function formatAssetBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
 import {
   listPluginInfo,
   refreshPlugins,
@@ -166,13 +182,22 @@ const commands: CommandSpec[] = [
   // 5. 获取当前分支的完整消息历史
   {
     name: 'yaya.messages-branch',
-    description: '获取指定会话当前活跃分支的消息列表',
-    usage: 'yaya.messages-branch --session <sessionId> [--leaf <leafId>]',
+    description:
+      '获取指定会话当前活跃分支的消息列表。不带 --limit 返回整条分支（数组）；带 --limit 返回 { messages, hasMore }：按用户消息边界取最后 N 轮，--before 取该消息之前的 N 轮（长会话滑动加载）',
+    usage:
+      'yaya.messages-branch --session <sessionId> [--leaf <leafId>] [--limit <轮数> [--before <messageId>]]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
       const session = getSession(sessionId)
+      const leafId = (ctx.named.leaf as string) || session?.activeLeafId
+      const limit = Number(ctx.named.limit)
+      if (Number.isFinite(limit) && limit > 0) {
+        if (!session) return { messages: [], hasMore: false }
+        const before = ctx.named.before ? String(ctx.named.before) : undefined
+        const win = getMessageBranchWindow(leafId, { limit, before })
+        return { ...win, messages: overlayLiveBuffer(sessionId, win.messages) }
+      }
       if (!session) return []
-      const leafId = (ctx.named.leaf as string) || session.activeLeafId
       return overlayLiveBuffer(sessionId, getMessageBranchWithSiblings(leafId))
     }
   },
@@ -419,6 +444,43 @@ const commands: CommandSpec[] = [
     description: '把宿主上的文件复制进会话资产目录，返回可作为附件发送的 MessageAttachment',
     usage: 'yaya.asset-import --session <sessionId> --path <file>',
     run: async (ctx) => importAssetFromPath(String(ctx.named.session), String(ctx.named.path))
+  },
+  {
+    name: 'yaya.asset-import-data',
+    logArgs: false, // 参数里是大段 base64，不进日志
+    description:
+      '把 base64 数据（粘贴 / 拖放的图片等）存进会话资产目录，返回可作为附件发送的 MessageAttachment',
+    usage:
+      'yaya.asset-import-data --session <sessionId> --name <文件名> --mime <type> --data <base64>',
+    run: async (ctx) => {
+      const sessionId = String(ctx.named.session ?? '')
+      if (!sessionId) {
+        throw new Error(t('yaya.asset.err_no_session', '缺少参数：需要 --session <会话 id>'))
+      }
+      const base64 = String(ctx.named.data ?? '')
+      if (!base64) {
+        throw new Error(t('yaya.asset.err_no_data', '缺少参数：需要 --data <base64>'))
+      }
+      const buf = Buffer.from(base64, 'base64')
+      if (!buf.length) {
+        throw new Error(t('yaya.asset.err_empty_data', '数据为空，无法作为附件导入'))
+      }
+      if (buf.length > MAX_ASSET_DATA_BYTES) {
+        throw new Error(
+          te(
+            'yaya.asset.err_too_large',
+            {
+              size: formatAssetBytes(buf.length),
+              max: formatAssetBytes(MAX_ASSET_DATA_BYTES)
+            },
+            '文件太大（{size}，上限 {max}）'
+          )
+        )
+      }
+      const name = sanitizeAssetFilename(String(ctx.named.name ?? ''))
+      const mime = normalizeAssetMime(String(ctx.named.mime ?? ''), name)
+      return saveAsset(sessionId, name, buf, mime)
+    }
   },
   {
     name: 'yaya.asset-preview',

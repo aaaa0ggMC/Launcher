@@ -335,7 +335,12 @@
 
 ## 六、 下一步计划（2026-10-05 记）
 
-### 6.1 长会话滑动窗口加载（未做）
+### 6.1 长会话滑动窗口加载（已做第一版，2026-10-05）
+
+**已完成**：`yaya.messages-branch --limit N [--before id]`（`getMessageBranchWindow`：轻量查询走路径、按用户消息边界截窗口、只给窗口内节点查兄弟分支）；页面先加载最后 20 轮，滚到顶部 / 点「加载更早的消息」向上翻页并保持位置；运行中只刷新最后两轮（`refreshTail`），未变化的节点 / 轮次复用旧对象（`mergeNodes` / `buildTurnsReusing`）不重渲染；token 每 50ms 合并写入；Markdown 按顶层空行分块缓存（流式只重渲染最后一块）；轮次 `content-visibility: auto`；滚动按方向判断用户意图（上翻立即停止跟随）。网页版 SSE 断线自动重连 + 重连 / 回到前台 / 切回页面时重新同步。
+**还没做**：搜索命中 / 用量统计跳转到窗口外的消息；工具图片缩略图懒加载。
+
+原计划：
 
 **现状**：`yaya.messages-branch` 每次返回整条分支，并对每个节点查兄弟分支（`getMessageBranchWithSiblings`）；View 渲染全部轮次；运行中多处 `loadMessages()` 整枝重载。几百步、带截图的长会话（如 GBA）会越来越卡。
 

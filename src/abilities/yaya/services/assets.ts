@@ -61,6 +61,32 @@ export function resolveAssetLocalPath(assetUri: string): string | null {
 /** 单个附件上限（图片会以 base64 发给模型，过大的文件没有意义） */
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024
 
+/** 粘贴 / 拖放进来的数据（base64 解码后）上限 */
+export const MAX_ASSET_DATA_BYTES = 20 * 1024 * 1024
+
+/** 数据导入的文件名消毒：去路径分隔符与控制字符，限长 */
+export function sanitizeAssetFilename(name: string): string {
+  const cleaned = String(name ?? '')
+    .replace(/[\\/]+/g, '_')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned.slice(0, 120) || 'file'
+}
+
+/** 数据导入的 mime 规范化：只信任图片与已有导入逻辑认识的类型，其余按二进制流 */
+export function normalizeAssetMime(mime: string, name = ''): string {
+  const m = String(mime ?? '')
+    .trim()
+    .toLowerCase()
+  if (m.startsWith('image/')) return m
+  const known = guessMimeType(name)
+  if (known !== 'application/octet-stream') return known
+  if (m === 'application/pdf' || m === 'application/json' || isTextMime(m)) return m
+  return 'application/octet-stream'
+}
+
 /** 把宿主上的文件复制进会话资产目录（pickFile 给的是宿主路径，网页模式同样适用） */
 export async function importAssetFromPath(
   sessionId: string,

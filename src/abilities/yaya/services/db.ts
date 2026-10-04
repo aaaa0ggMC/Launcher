@@ -429,6 +429,75 @@ export function getMessageBranchWithSiblings(leafId: string | null | undefined):
   })
 }
 
+export interface BranchWindow {
+  messages: MessageNode[]
+  /** 窗口之前还有更早的消息 */
+  hasMore: boolean
+}
+
+/**
+ * 当前分支的一个窗口（长会话滑动加载）：先用轻量查询（只取 id / parent / role）走出整条路径，
+ * 再按用户消息边界截取最后 `limit` 轮（不拆开一轮回答），只给窗口内的节点取全文与兄弟分支。
+ * `before` = 只取该节点之前的部分（向上翻页）；节点不在当前分支上时返回空窗口。
+ */
+export function getMessageBranchWindow(
+  leafId: string | null | undefined,
+  opts: { limit: number; before?: string }
+): BranchWindow {
+  if (!leafId) return { messages: [], hasMore: false }
+  const d = getYayaDb()
+  const head = d.prepare('SELECT session_id FROM messages WHERE id = ?').get(leafId) as unknown as
+    { session_id: string } | undefined
+  if (!head) return { messages: [], hasMore: false }
+  const rows = d
+    .prepare(
+      'SELECT id, parent_id, role FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+    )
+    .all(head.session_id) as unknown as { id: string; parent_id: string | null; role: string }[]
+  const byId = new Map<string, { id: string; parent_id: string | null; role: string }>()
+  const byParent = new Map<string, string[]>()
+  for (const r of rows) {
+    byId.set(r.id, r)
+    const key = r.parent_id ?? ''
+    const list = byParent.get(key)
+    if (list) list.push(r.id)
+    else byParent.set(key, [r.id])
+  }
+  const path: { id: string; role: string }[] = []
+  const seen = new Set<string>()
+  for (let curr: string | null = leafId; curr && !seen.has(curr);) {
+    seen.add(curr)
+    const r = byId.get(curr)
+    if (!r) break
+    path.unshift(r)
+    curr = r.parent_id
+  }
+  let end = path.length
+  if (opts.before) {
+    end = path.findIndex((r) => r.id === opts.before)
+    if (end < 0) return { messages: [], hasMore: false }
+  }
+  // 从末尾往前数 limit 条用户消息：窗口从第 limit 条用户消息开始
+  const limit = Math.max(1, Math.floor(opts.limit))
+  let start = 0
+  let users = 0
+  for (let i = end - 1; i >= 0; i--) {
+    if (path[i].role !== 'user') continue
+    if (++users === limit) {
+      start = i
+      break
+    }
+  }
+  const messages: MessageNode[] = []
+  for (const r of path.slice(start, end)) {
+    const m = getMessage(r.id)
+    if (!m) continue
+    const sib = byParent.get(m.parentId ?? '') ?? [m.id]
+    messages.push(sib.length > 1 ? { ...m, siblingIds: sib } : m)
+  }
+  return { messages, hasMore: start > 0 }
+}
+
 /**
  * 从某节点往下走到「最近更新」的叶子：切换分支时用，
  * 否则直接把 activeLeaf 设成兄弟节点会把该分支后续的对话截掉。

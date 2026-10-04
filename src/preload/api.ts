@@ -206,6 +206,11 @@ export function createCockpit(t: CockpitTransport) {
       any?: boolean
       filters?: { name: string; extensions: string[] }[]
     }): Promise<string | null> => t.invoke('dialog:pick-file', opts),
+    /** 多选文件（附件等）；取消返回 [] */
+    pickFiles: (opts?: {
+      title?: string
+      filters?: { name: string; extensions: string[] }[]
+    }): Promise<string[]> => t.invoke('dialog:pick-files', opts),
     pickSaveFile: (opts?: {
       title?: string
       defaultPath?: string

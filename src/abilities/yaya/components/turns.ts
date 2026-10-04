@@ -141,6 +141,60 @@ export function turnSegments(turn: AssistantTurn): TurnSegment[] {
 
 export type Turn = UserTurn | AssistantTurn
 
+/**
+ * 复用上一次的轮次对象：节点对象都没变（View 合并消息时会复用未变的节点）就返回旧轮次，
+ * 这样未变化的轮次 props 不变，Vue 不会重渲染它们（长会话里每次刷新只重画最后一两轮）。
+ */
+export function buildTurnsReusing(branch: MessageNode[], prev: Turn[]): Turn[] {
+  const next = buildTurns(branch)
+  if (!prev.length) return next
+  const old = new Map(prev.map((t) => [t.key, t]))
+  const same = <T>(a: T[] | undefined, b: T[] | undefined): boolean =>
+    (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((x, i) => x === b![i])
+  return next.map((t) => {
+    const o = old.get(t.key)
+    if (!o || o.kind !== t.kind) return t
+    if (t.kind === 'user') return (o as UserTurn).message === t.message ? o : t
+    const a = o as AssistantTurn
+    return same(a.steps, t.steps) &&
+      same(a.orphanResults, t.orphanResults) &&
+      same(a.siblingIds, t.siblingIds) &&
+      a.status === t.status &&
+      a.workflow === t.workflow &&
+      a.lastId === t.lastId
+      ? a
+      : t
+  })
+}
+
+/**
+ * 合并一次刷新拿到的节点：内容没变的节点复用旧对象（流式期间旧对象可能已经被追加了 token，
+ * 新对象不会更长时也保留旧的），只有真正变化的节点换成新对象。
+ */
+export function mergeNodes(prev: MessageNode[], fresh: MessageNode[]): MessageNode[] {
+  if (!prev.length) return fresh
+  const old = new Map(prev.map((m) => [m.id, m]))
+  return fresh.map((m) => {
+    const o = old.get(m.id)
+    return o && nodeSig(o) === nodeSig(m) ? o : m
+  })
+}
+
+function nodeSig(m: MessageNode): string {
+  return [
+    m.role,
+    m.status ?? '',
+    m.content?.length ?? 0,
+    m.reasoningContent?.length ?? 0,
+    m.error ?? '',
+    m.toolCalls ? JSON.stringify(m.toolCalls) : '',
+    m.meta ? JSON.stringify(m.meta) : '',
+    m.siblingIds?.join(',') ?? '',
+    m.attachments?.length ?? 0,
+    m.usage?.total ?? ''
+  ].join('|')
+}
+
 export function buildTurns(branch: MessageNode[]): Turn[] {
   const turns: Turn[] = []
   let current: AssistantTurn | null = null

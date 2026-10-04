@@ -197,6 +197,19 @@ export function registerIpc(): void {
     }
   )
 
+  // Multi-file picker (attachments, batch imports). Cancelled → [].
+  ipcMain.handle(
+    'dialog:pick-files',
+    async (_e, opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
+      const res = await dialog.showOpenDialog(senderWindow(_e) ?? undefined!, {
+        title: opts?.title ?? '选择文件',
+        properties: ['openFile', 'multiSelections'],
+        filters: opts?.filters ?? []
+      })
+      return res.canceled ? [] : res.filePaths
+    }
+  )
+
   // Save-as dialog (e.g. exporting a vectors JSON file).
   ipcMain.handle(
     'dialog:save-file',

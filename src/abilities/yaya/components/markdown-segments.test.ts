@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { renderMarkdown, renderSegments } from './markdown'
+import { renderMarkdown, renderSegments, splitBlocks } from './markdown'
 
 const labels = { copy: 'Copy' }
 it('plugin fences split top-level content while surrounding raw HTML stays escaped', () => {
@@ -24,4 +24,56 @@ it('unclaimed markdown keeps the normal renderer output', () => {
   assert.deepEqual(renderSegments(text, new Set(['widget']), labels), [
     { kind: 'html', html: renderMarkdown(text, labels) }
   ])
+})
+it('splitBlocks keeps fences, math, loose lists and indented continuations together', () => {
+  const text = [
+    'Intro para',
+    '',
+    '```js',
+    'a()',
+    '',
+    'b()',
+    '```',
+    '',
+    '- one',
+    '',
+    '- two',
+    '',
+    '  continued',
+    '',
+    '$$',
+    'x',
+    '',
+    'y',
+    '$$',
+    '',
+    'End'
+  ].join('\n')
+  assert.deepEqual(splitBlocks(text), [
+    'Intro para',
+    '```js\na()\n\nb()\n```',
+    '- one\n\n- two\n\n  continued',
+    '$$\nx\n\ny\n$$',
+    'End'
+  ])
+})
+it('block-cached rendering equals rendering the joined blocks, also while streaming', () => {
+  const full = '# T\n\npara **b**\n\n```py\nprint(1)\n```\n\n1. a\n2. b\n\nlast'
+  for (let n = 1; n <= full.length; n += 7) {
+    const part = full.slice(0, n)
+    const expected = splitBlocks(part)
+      .map((b) => renderMarkdown(b, labels))
+      .join('')
+    assert.equal(renderMarkdown(part, labels), expected)
+  }
+  // 插件代码块在中间块、未闭合的在末尾
+  const segs = renderSegments(
+    'a\n\n```widget\nx\n```\n\nb\n\n```widget\ny',
+    new Set(['widget']),
+    labels
+  )
+  assert.deepEqual(
+    segs.map((s) => (s.kind === 'fence' ? `fence:${s.closed}` : 'html')),
+    ['html', 'fence:true', 'html', 'fence:false']
+  )
 })

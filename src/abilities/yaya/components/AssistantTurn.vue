@@ -21,6 +21,8 @@ const props = defineProps<{
   pendingApprovalId: string | null
   /** 是否为当前分支的最后一轮（决定操作栏是否常显） */
   isLast: boolean
+  /** 过程卡片收起时预览的步数（设置项「收起时显示最近几步」） */
+  previewSteps?: number
 }>()
 
 const emit = defineEmits<{
@@ -173,6 +175,7 @@ async function copyTurn(): Promise<void> {
             :assistant-name="assistantName"
             :live="live"
             :pending-approval-id="pendingApprovalId"
+            :preview-steps="previewSteps"
           />
           <div v-else-if="'parts' in seg" class="narration">
             <template v-for="(part, i) in seg.parts" :key="i">

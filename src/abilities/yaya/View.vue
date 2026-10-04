@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  inject,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch
+} from 'vue'
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
 import type {
@@ -12,7 +21,7 @@ import type {
   WorkflowInfo
 } from './types'
 import type { WorkflowSnapshot } from './services/loop/types'
-import { buildTurns } from './components/turns'
+import { buildTurnsReusing, mergeNodes, type Turn } from './components/turns'
 import ChatSessionList from './components/ChatSessionList.vue'
 import UserMessage from './components/UserMessage.vue'
 import AssistantTurn from './components/AssistantTurn.vue'
@@ -80,7 +89,9 @@ const activeSession = computed(() => sessions.value.find((s) => s.id === activeS
 const isRunning = computed(
   () => !!activeSessionId.value && runningIds.value.includes(activeSessionId.value)
 )
-const turns = computed(() => buildTurns(messages.value))
+// 复用未变化的轮次对象：刷新时只有真正变化的轮次重渲染
+let prevTurns: Turn[] = []
+const turns = computed(() => (prevTurns = buildTurnsReusing(messages.value, prevTurns)))
 const lastTurnKey = computed(() => turns.value[turns.value.length - 1]?.key)
 /** 用户在标题栏头像上暂停了本会话的运行 */
 const isPaused = computed(() => isRunning.value && snapshot.value?.status === 'paused')
@@ -104,6 +115,12 @@ const currentProviderName = computed(
   () => config.value?.providers.find((p) => p.id === currentProviderId.value)?.name ?? ''
 )
 const sessionTitle = computed(() => activeSession.value?.title || t('yaya.new_chat', '新对话'))
+
+/** 过程卡片收起时预览的步数（设置项「收起时显示最近几步」，0 = 完全折叠） */
+const processPreviewSteps = computed(() => {
+  const v = config.value?.processPreviewSteps
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(5, Math.max(0, Math.round(v))) : 1
+})
 
 /** 当前会话的工作流：会话自己的选择 → 草稿选择 → 设置里的默认 → agent */
 const currentWorkflowId = computed({
@@ -146,19 +163,38 @@ const currentReasoning = computed<ReasoningEffort>({
 })
 
 // ---- 滚动：贴底时跟随，用户上翻后不打扰 ----
+// 按「方向」判断用户意图，而不是按离底部的距离：流式输出时每帧都在把视图拉回底部，
+// 手指刚往上拖几十像素（还在 80px 阈值内）就会被下一帧拉回去，永远翻不上去。
 const stickToBottom = ref(true)
+let lastScrollTop = 0
 function onScroll(): void {
   const el = scrollEl.value
   if (!el) return
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (dist < 4) stickToBottom.value = true
+  else if (el.scrollTop < lastScrollTop - 1) stickToBottom.value = false
+  else if (dist < 80 && el.scrollTop > lastScrollTop) stickToBottom.value = true
+  lastScrollTop = el.scrollTop
+  if (el.scrollTop < 400) void loadOlder()
 }
+/** 鼠标滚轮向上：立即停止跟随（内容还不够长、不会触发 scroll 时也生效） */
+function onWheel(ev: WheelEvent): void {
+  if (ev.deltaY < 0) stickToBottom.value = false
+}
+let scrollFrame = 0
 async function scrollToBottom(force = false): Promise<void> {
+  if (force) stickToBottom.value = true
   await nextTick()
-  const el = scrollEl.value
-  if (el && (force || stickToBottom.value)) {
-    el.scrollTop = el.scrollHeight
-    stickToBottom.value = true
-  }
+  if (scrollFrame) return
+  // 同一帧里的多次请求（每个 token 一次）合并成一次布局
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0
+    const el = scrollEl.value
+    if (el && stickToBottom.value) {
+      el.scrollTop = el.scrollHeight
+      lastScrollTop = el.scrollTop
+    }
+  })
 }
 
 // ---- 数据加载 ----
@@ -189,24 +225,112 @@ async function loadSessions(): Promise<void> {
   }
 }
 
+// ---- 长会话滑动窗口：只加载最后若干轮，滚到顶部再往前加载 ----
+/** 首次加载 / 向上翻页的轮数（按用户消息计） */
+const WINDOW_TURNS = 20
+const hasMore = ref(false)
+const loadingOlder = ref(false)
+
+interface BranchWindow {
+  messages: MessageNode[]
+  hasMore: boolean
+}
+function fetchWindow(session: string, limit: number, before?: string): Promise<BranchWindow> {
+  return window.cockpit.command('yaya.messages-branch', {
+    session,
+    limit,
+    ...(before ? { before } : {})
+  }) as Promise<BranchWindow>
+}
+function userTurnCount(): number {
+  return messages.value.reduce((n, m) => (m.role === 'user' ? n + 1 : n), 0)
+}
+
 let loadSeq = 0
+/** 整个窗口重新加载（切会话 / 切分支 / 删除后）；同一会话里保留已经翻出来的轮数 */
 async function loadMessages(): Promise<void> {
   const id = activeSessionId.value
   if (!id) {
     messages.value = []
+    hasMore.value = false
     return
   }
   const seq = ++loadSeq
+  flushChunks()
   try {
-    const branch = (await window.cockpit.command('yaya.messages-branch', {
-      session: id
-    })) as MessageNode[]
+    const limit = Math.max(WINDOW_TURNS, userTurnCount())
+    const win = await fetchWindow(id, limit)
     if (seq !== loadSeq || id !== activeSessionId.value) return
-    messages.value = branch
+    messages.value = mergeNodes(messages.value, win.messages)
+    hasMore.value = win.hasMore
     void scrollToBottom()
+    void fillViewport()
   } catch (e) {
     console.error('[yaya] load messages failed', e)
   }
+}
+
+/**
+ * 运行中的增量刷新：只重新拉最后两轮，拼回窗口末尾（未变化的节点复用旧对象）。
+ * 拼不上（分支变了）就整窗重载。
+ */
+async function refreshTail(): Promise<void> {
+  const id = activeSessionId.value
+  if (!id) return
+  if (!messages.value.length) return loadMessages()
+  const seq = ++loadSeq
+  flushChunks()
+  try {
+    const win = await fetchWindow(id, 2)
+    if (seq !== loadSeq || id !== activeSessionId.value) return
+    const first = win.messages[0]
+    const at = first ? messages.value.findIndex((m) => m.id === first.id) : -1
+    if (at < 0) {
+      void loadMessages()
+      return
+    }
+    messages.value = [
+      ...messages.value.slice(0, at),
+      ...mergeNodes(messages.value.slice(at), win.messages)
+    ]
+    void scrollToBottom()
+  } catch (e) {
+    console.error('[yaya] refresh failed', e)
+  }
+}
+
+/** 向上翻页：保持当前看到的内容不跳 */
+async function loadOlder(): Promise<void> {
+  const id = activeSessionId.value
+  const first = messages.value[0]
+  if (!id || !first || !hasMore.value || loadingOlder.value) return
+  loadingOlder.value = true
+  try {
+    const win = await fetchWindow(id, WINDOW_TURNS, first.id)
+    if (id !== activeSessionId.value || messages.value[0]?.id !== first.id) return
+    const el = scrollEl.value
+    const fromBottom = el ? el.scrollHeight - el.scrollTop : 0
+    messages.value = [...win.messages, ...messages.value]
+    hasMore.value = win.hasMore
+    await nextTick()
+    // 浏览器的滚动锚定可能已经补偿过：按「离底部的距离不变」写回，两种情况都对
+    if (el) {
+      el.scrollTop = el.scrollHeight - fromBottom
+      lastScrollTop = el.scrollTop
+    }
+  } catch (e) {
+    console.error('[yaya] load older failed', e)
+  } finally {
+    loadingOlder.value = false
+  }
+  void fillViewport()
+}
+
+/** 内容还撑不满一屏时（不会触发滚动事件）继续往前加载 */
+async function fillViewport(): Promise<void> {
+  await nextTick()
+  const el = scrollEl.value
+  if (el && hasMore.value && el.scrollHeight <= el.clientHeight + 400) void loadOlder()
 }
 
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
@@ -214,8 +338,18 @@ function scheduleReload(): void {
   if (reloadTimer) return
   reloadTimer = setTimeout(() => {
     reloadTimer = null
-    void loadMessages()
-  }, 60)
+    void refreshTail()
+  }, 120)
+}
+
+/** 断线重连 / 页面回到前台：重新同步运行状态与消息（期间错过的推送不会补发） */
+async function resync(): Promise<void> {
+  try {
+    runningIds.value = ((await window.cockpit.command('yaya.workflow-running')) ?? []) as string[]
+  } catch {
+    /* 下次事件再同步 */
+  }
+  await Promise.all([refreshTail(), refreshSnapshot()])
 }
 
 async function refreshSnapshot(): Promise<void> {
@@ -237,6 +371,8 @@ async function selectSession(id: string): Promise<void> {
   if (id === activeSessionId.value) return
   activeSessionId.value = id
   messages.value = []
+  hasMore.value = false
+  pendingChunks.clear()
   loadingMessages.value = true
   await Promise.all([loadMessages(), refreshSnapshot()])
   loadingMessages.value = false
@@ -247,6 +383,7 @@ function newChat(): void {
   drawerOpen.value = false
   activeSessionId.value = null
   messages.value = []
+  hasMore.value = false
   snapshot.value = null
   draftWorkflow.value = null
   void nextTick(() => inputRef.value?.focus())
@@ -285,7 +422,7 @@ async function handleSend(prompt: string, attachments: MessageAttachment[]): Pro
       attachments
     })
     markRunning(id)
-    await loadMessages()
+    await refreshTail()
     void scrollToBottom(true)
   } catch (e) {
     showNotice(te('yaya.send_failed', { error: errText(e) }, '发送失败：{error}'), true)
@@ -328,7 +465,7 @@ async function handleAbort(): Promise<void> {
   if (!activeSessionId.value) return
   await window.cockpit.command('yaya.workflow-abort', { session: activeSessionId.value })
   runningIds.value = runningIds.value.filter((x) => x !== activeSessionId.value)
-  await loadMessages()
+  await refreshTail()
 }
 
 async function handleApprove(
@@ -578,19 +715,59 @@ interface ChunkEvent {
   messageId: string
   offset: number
 }
-/** 按 offset 追加：重复的块忽略，有缺口就整体重拉（拉取结果已叠加主进程缓冲） */
+/**
+ * 按 offset 追加：重复的块忽略，有缺口就重拉（拉取结果已叠加主进程缓冲）。
+ * token 先攒在 `pendingChunks`，每 ~50ms 合并写入一次——每个 token 都改响应式数据会让
+ * 整段回答每秒重渲染几十次。
+ */
+interface PendingChunk {
+  node: MessageNode
+  field: 'content' | 'reasoningContent'
+  /** 攒的文本应该接在 node[field] 的哪个长度上 */
+  base: number
+  text: string
+}
+const pendingChunks = new Map<string, PendingChunk>()
+let chunkTimer: ReturnType<typeof setTimeout> | null = null
+
 function applyChunk(p: ChunkEvent, field: 'content' | 'reasoningContent', chunk: string): void {
   if (p.sessionId !== activeSessionId.value) return
   const target = messages.value.find((m) => m.id === p.messageId)
   if (!target) return scheduleReload()
-  const current = target[field] ?? ''
-  if (current.length === p.offset) {
-    target[field] = current + chunk
-    if (target.status === 'pending') target.status = 'streaming'
-    void scrollToBottom()
-  } else if (current.length < p.offset) {
+  const key = `${p.messageId}:${field}`
+  let pend = pendingChunks.get(key)
+  if (pend && pend.node !== target) {
+    pendingChunks.delete(key)
+    pend = undefined
+  }
+  const length = (target[field] ?? '').length + (pend?.text.length ?? 0)
+  if (length === p.offset) {
+    if (pend) pend.text += chunk
+    else
+      pendingChunks.set(key, {
+        node: target,
+        field,
+        base: (target[field] ?? '').length,
+        text: chunk
+      })
+    if (!chunkTimer) chunkTimer = setTimeout(flushChunks, 50)
+  } else if (length < p.offset) {
     scheduleReload()
   }
+}
+
+function flushChunks(): void {
+  if (chunkTimer) clearTimeout(chunkTimer)
+  chunkTimer = null
+  for (const pend of pendingChunks.values()) {
+    const current = pend.node[pend.field] ?? ''
+    // 节点已被刷新替换 / 内容对不上：丢弃，刷新结果里已经包含主进程缓冲
+    if (current.length !== pend.base || !messages.value.includes(pend.node)) continue
+    pend.node[pend.field] = current + pend.text
+    if (pend.node.status === 'pending') pend.node.status = 'streaming'
+  }
+  pendingChunks.clear()
+  void scrollToBottom()
 }
 
 const unsubs: (() => void)[] = []
@@ -637,8 +814,13 @@ onMounted(async () => {
     }),
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()
+    }),
+    // 网页版事件流断线重连：期间的 token / 状态推送都丢了，重新同步
+    window.cockpit.on('cockpit:host-reconnected', () => {
+      void resync()
     })
   )
+  document.addEventListener('visibilitychange', onVisibility)
 
   await Promise.all([loadConfig(), loadWorkflows()])
   await loadSessions()
@@ -650,8 +832,22 @@ onMounted(async () => {
   else if (sessions.value.length > 0) await selectSession(sessions.value[0].id)
 })
 
+// keep-alive：从别的页面切回来时同步一次（离开期间可能错过了推送）
+let mountedOnce = false
+onActivated(() => {
+  if (mountedOnce && activeSessionId.value) void resync()
+  mountedOnce = true
+})
+
+function onVisibility(): void {
+  if (document.visibilityState === 'visible' && activeSessionId.value) void resync()
+}
+
 onBeforeUnmount(() => {
   for (const off of unsubs) off()
+  document.removeEventListener('visibilitychange', onVisibility)
+  if (chunkTimer) clearTimeout(chunkTimer)
+  if (scrollFrame) cancelAnimationFrame(scrollFrame)
   ro?.disconnect()
   if (reloadTimer) clearTimeout(reloadTimer)
   if (noticeTimer) clearTimeout(noticeTimer)
@@ -789,8 +985,20 @@ watch(isRunning, (now, before) => {
         </v-menu>
       </header>
 
-      <div ref="scrollEl" class="scroll" @scroll.passive="onScroll">
+      <div ref="scrollEl" class="scroll" @scroll.passive="onScroll" @wheel.passive="onWheel">
         <div class="thread">
+          <div v-if="hasMore && !loadingMessages" class="older">
+            <v-progress-circular
+              v-if="loadingOlder"
+              indeterminate
+              size="22"
+              width="2"
+              color="primary"
+            />
+            <v-btn v-else variant="text" prepend-icon="mdi-history" @click="loadOlder">
+              {{ t('yaya.load_older', '加载更早的消息') }}
+            </v-btn>
+          </div>
           <div v-if="loadingMessages" class="loading">
             <v-progress-circular indeterminate size="28" width="3" color="primary" />
           </div>
@@ -828,6 +1036,7 @@ watch(isRunning, (now, before) => {
           <template v-for="turn in turns" :key="turn.key">
             <UserMessage
               v-if="turn.kind === 'user'"
+              class="turn-item"
               :message="turn.message"
               :busy="isRunning"
               :editing="editingId === turn.message.id"
@@ -838,11 +1047,13 @@ watch(isRunning, (now, before) => {
             />
             <AssistantTurn
               v-else
+              class="turn-item"
               :turn="turn"
               :assistant-name="assistantName"
               :live="isRunning && turn.key === lastTurnKey"
               :pending-approval-id="turn.key === lastTurnKey ? pendingApprovalId : null"
               :is-last="turn.key === lastTurnKey"
+              :preview-steps="processPreviewSteps"
               @switch-branch="handleSwitchBranch"
               @approve="handleApprove"
               @regenerate="handleRegenerate"
@@ -1130,6 +1341,17 @@ watch(isRunning, (now, before) => {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+.older {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+  align-items: center;
+}
+/* 视口外的轮次跳过布局与绘制（长会话滚动不卡）；auto 记住渲染过的真实高度 */
+.thread > .turn-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
 }
 .loading {
   display: flex;

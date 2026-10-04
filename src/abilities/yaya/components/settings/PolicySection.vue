@@ -17,6 +17,9 @@ const props = defineProps<{
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t } = useI18n(lang)
 
+/** 过程卡片收起时预览的步数上限（与主进程 config.ts 的归一化一致） */
+const stepsMax = 5
+
 // 最大步数：用本地草稿输入，失焦 / 回车才夹取（1–100）写回 config，
 // 避免输入过程中的空值 / 超范围值被自动保存
 const stepsDraft = ref('')
@@ -34,6 +37,12 @@ function commitSteps(): void {
   const clamped = Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) : 10
   stepsDraft.value = String(clamped)
   props.config.maxLoopSteps = clamped
+}
+
+/** 收起时预览的步数：夹到 0–5（0 = 完全折叠） */
+function onPreviewSteps(v: number | null): void {
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : 1
+  props.config.processPreviewSteps = Math.min(stepsMax, Math.max(0, n))
 }
 </script>
 
@@ -91,6 +100,34 @@ function commitSteps(): void {
       @blur="commitSteps"
       @keydown.enter.prevent="commitSteps"
     />
+
+    <div class="mt-6">
+      <div class="d-flex align-center ga-3">
+        <span class="text-body-2 font-weight-medium">
+          {{ t('yaya.settings.preview_steps', '收起时显示最近几步') }}
+        </span>
+        <v-spacer />
+        <span class="text-body-2 text-medium-emphasis text-right" style="min-width: 2em">
+          {{ config.processPreviewSteps }}
+        </span>
+      </div>
+      <div class="text-caption text-medium-emphasis mt-1 mb-2">
+        {{ t('yaya.settings.preview_steps_hint', '过程卡片收起时仍预览最后几步，0 = 完全折叠') }}
+      </div>
+      <v-slider
+        :model-value="config.processPreviewSteps ?? 1"
+        :min="0"
+        :max="stepsMax"
+        :step="1"
+        show-ticks
+        color="primary"
+        hide-details
+        density="compact"
+        class="preview-slider"
+        :aria-label="t('yaya.settings.preview_steps', '收起时显示最近几步')"
+        @update:model-value="onPreviewSteps"
+      />
+    </div>
   </div>
 </template>
 
@@ -110,6 +147,10 @@ function commitSteps(): void {
 }
 
 .max-w-field {
+  max-width: 320px;
+}
+
+.preview-slider {
   max-width: 320px;
 }
 

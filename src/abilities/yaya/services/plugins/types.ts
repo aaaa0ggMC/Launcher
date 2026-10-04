@@ -34,10 +34,35 @@ export interface ToolContentResult {
   isError?: boolean
 }
 
+/**
+ * 本次运行的上下文信息（插件 SDK 提供，插件自己决定怎么用：给模型看、据此裁剪输出等）。
+ * 只读快照；token 数来自服务商最近一次返回的 usage，没有时为 null。
+ */
+export interface ToolSessionContext {
+  sessionId: string
+  model: string
+  providerId: string
+  /** 当前第几步 / 本次运行的步数上限 */
+  step: number
+  maxSteps: number
+  /** 最近一次模型调用的输入 token（≈ 当前上下文大小）/ 输出 token / 缓存命中 */
+  lastPromptTokens: number | null
+  lastCompletionTokens: number | null
+  lastCachedTokens: number | null
+  /** 本次运行累计 token */
+  runTotalTokens: number
+  /** 当前分支的消息节点数（user / assistant / tool） */
+  branchMessages: number
+  /** 当前可用的工具数（wire name 去重） */
+  toolCount: number
+}
+
 export interface ToolRunContext {
   sessionId: string
   pluginId: string
   signal: AbortSignal
+  /** 本次运行的上下文信息（宿主按需计算；旧调用方 / 测试里可能没有） */
+  context?: () => ToolSessionContext
 }
 
 /** 提供方默认审批：ask = 每次确认；auto = 直接执行；函数 = 按参数判断 */

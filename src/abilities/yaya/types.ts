@@ -200,6 +200,10 @@ export interface YayaConfig {
   toolApproval?: Record<string, ToolApprovalMode>
   /** 新会话默认的思考强度（会话可单独覆盖，存 session.meta.reasoning） */
   reasoningEffort?: ReasoningEffort
+  /**
+   * 过程卡片收起时仍显示最近几步的预览（默认 1，0–5，0 = 完全折叠）。
+   */
+  processPreviewSteps?: number
   maxLoopSteps: number
   streamOutput: boolean
   providers: ProviderConfig[]

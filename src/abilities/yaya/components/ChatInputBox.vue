@@ -2,6 +2,7 @@
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
+import ImagePreviewDialog from './ImagePreviewDialog.vue'
 
 const props = defineProps<{
   isRunning: boolean
@@ -97,36 +98,6 @@ function send(): void {
   previews.value = {}
 }
 
-async function attach(): Promise<void> {
-  attachError.value = ''
-  const path = await window.cockpit.pickFile({ title: t('yaya.input.pick_title', '选择附件') })
-  if (!path) return
-  importing.value = true
-  try {
-    const session = await props.ensureSession()
-    const att = (await window.cockpit.command('yaya.asset-import', {
-      session,
-      path
-    })) as MessageAttachment
-    if (!attachments.value.some((a) => a.id === att.id)) attachments.value.push(att)
-    if (att.mimeType.startsWith('image/')) {
-      const url = (await window.cockpit.command('yaya.asset-preview', {
-        uri: att.assetPath
-      })) as string | null
-      if (url) previews.value[att.id] = url
-    }
-  } catch (e) {
-    attachError.value = te(
-      'yaya.input.attach_failed',
-      { error: e instanceof Error ? e.message : String(e) },
-      '添加附件失败：{error}'
-    )
-  } finally {
-    importing.value = false
-    textarea.value?.focus()
-  }
-}
-
 function remove(id: string): void {
   attachments.value = attachments.value.filter((a) => a.id !== id)
 }
@@ -137,16 +108,216 @@ function formatSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+/** 粘贴 / 拖放进来的单个文件上限（与主进程 yaya.asset-import-data 一致） */
+const MAX_PASTED_BYTES = 20 * 1024 * 1024
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+function baseName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+/** 图片附件（已有预览）显示成缩略图；其余（含预览失败的图片）显示文件 chip */
+const imageAttachments = computed(() =>
+  attachments.value.filter((a) => a.mimeType.startsWith('image/') && !!previews.value[a.id])
+)
+const fileAttachments = computed(() =>
+  attachments.value.filter((a) => !imageAttachments.value.includes(a))
+)
+const previewImages = computed(() =>
+  imageAttachments.value.map((a) => ({ src: previews.value[a.id], name: a.name }))
+)
+
+async function attach(): Promise<void> {
+  attachError.value = ''
+  const paths = await window.cockpit.pickFiles({ title: t('yaya.input.pick_title', '选择附件') })
+  await importPaths(paths)
+}
+
+async function importPaths(paths: string[]): Promise<void> {
+  if (!paths.length) return
+  importing.value = true
+  try {
+    const session = await props.ensureSession()
+    for (const p of paths) {
+      try {
+        const att = (await window.cockpit.command('yaya.asset-import', {
+          session,
+          path: p
+        })) as MessageAttachment
+        await addAttachment(att)
+      } catch (e) {
+        attachError.value = te(
+          'yaya.input.attach_file_failed',
+          { name: baseName(p), error: errText(e) },
+          '添加「{name}」失败：{error}'
+        )
+      }
+    }
+  } catch (e) {
+    attachError.value = te(
+      'yaya.input.attach_failed',
+      { error: errText(e) },
+      '添加附件失败：{error}'
+    )
+  } finally {
+    importing.value = false
+    textarea.value?.focus()
+  }
+}
+
+/** 粘贴 / 拖放的文件：读成 base64 走 yaya.asset-import-data，逐个导入、互不影响 */
+async function importDataFiles(files: File[]): Promise<void> {
+  if (!files.length) return
+  const tooBig = files.find((f) => f.size > MAX_PASTED_BYTES)
+  if (tooBig) {
+    attachError.value = te(
+      'yaya.input.attach_too_large',
+      { name: tooBig.name },
+      '「{name}」超过 20MB，无法作为附件'
+    )
+    return
+  }
+  importing.value = true
+  attachError.value = ''
+  try {
+    const session = await props.ensureSession()
+    for (const f of files) {
+      try {
+        const name = f.name || `pasted-${Date.now()}`
+        const data = await readAsBase64(f)
+        const att = (await window.cockpit.command('yaya.asset-import-data', {
+          session,
+          name,
+          mime: f.type || 'application/octet-stream',
+          data
+        })) as MessageAttachment
+        await addAttachment(att)
+      } catch (e) {
+        attachError.value = te(
+          'yaya.input.attach_file_failed',
+          { name: f.name, error: errText(e) },
+          '添加「{name}」失败：{error}'
+        )
+      }
+    }
+  } catch (e) {
+    attachError.value = te(
+      'yaya.input.attach_failed',
+      { error: errText(e) },
+      '添加附件失败：{error}'
+    )
+  } finally {
+    importing.value = false
+    textarea.value?.focus()
+  }
+}
+
+function readAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result ?? '')
+      const comma = text.indexOf(',')
+      resolve(comma >= 0 ? text.slice(comma + 1) : text)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'))
+    reader.readAsDataURL(file)
+  })
+}
+
+/** 加入附件列表并拉预览图（图片） */
+async function addAttachment(att: MessageAttachment): Promise<void> {
+  if (attachments.value.some((a) => a.id === att.id)) return
+  attachments.value.push(att)
+  if (!att.mimeType.startsWith('image/')) return
+  try {
+    const url = (await window.cockpit.command('yaya.asset-preview', {
+      uri: att.assetPath
+    })) as string | null
+    if (url) previews.value[att.id] = url
+  } catch {
+    /* 预览失败：退回文件 chip */
+  }
+}
+
+/** 粘贴：有图片文件时按附件导入，纯文本保持默认行为 */
+async function onPaste(e: ClipboardEvent): Promise<void> {
+  const dt = e.clipboardData
+  if (!dt) return
+  let files: File[] = []
+  if (dt.files?.length) files = Array.from(dt.files)
+  else {
+    for (const item of Array.from(dt.items ?? [])) {
+      if (item.kind !== 'file') continue
+      const f = item.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  const images = files.filter((f) => f.type.startsWith('image/'))
+  if (!images.length) return
+  e.preventDefault()
+  await importDataFiles(images)
+}
+
+function onDragOver(e: DragEvent): void {
+  // 不 preventDefault 不会触发 drop
+  e.preventDefault()
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  e.preventDefault()
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  await importDataFiles(files)
+}
+
+const previewOpen = ref(false)
+const previewIndex = ref(0)
+
+function openPreview(id: string): void {
+  const i = imageAttachments.value.findIndex((a) => a.id === id)
+  if (i < 0) return
+  previewIndex.value = i
+  previewOpen.value = true
+}
+
 defineExpose({ focus: () => textarea.value?.focus() })
 </script>
 
 <template>
   <div class="input-wrap" :class="{ 'is-expanded': expanded }">
-    <div class="input-card">
+    <div class="input-card" @dragover.prevent="onDragOver" @drop.prevent="onDrop">
       <div v-if="attachments.length || importing" class="att-row">
-        <div v-for="att in attachments" :key="att.id" class="att">
-          <img v-if="previews[att.id]" :src="previews[att.id]" :alt="att.name" class="att-thumb" />
-          <v-icon v-else icon="mdi-file-outline" size="20" class="att-icon" />
+        <div v-for="att in imageAttachments" :key="att.id" class="att-img">
+          <button
+            type="button"
+            class="att-thumb-btn"
+            :title="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
+            :aria-label="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
+            @click="openPreview(att.id)"
+          >
+            <img
+              v-if="previews[att.id]"
+              :src="previews[att.id]"
+              :alt="att.name"
+              class="att-thumb"
+            />
+            <v-icon v-else icon="mdi-image-outline" size="24" class="att-thumb-missing" />
+          </button>
+          <button
+            type="button"
+            class="att-remove"
+            :title="t('yaya.input.remove', '移除附件')"
+            :aria-label="t('yaya.input.remove', '移除附件')"
+            @click="remove(att.id)"
+          >
+            <v-icon icon="mdi-close" size="16" />
+          </button>
+        </div>
+        <div v-for="att in fileAttachments" :key="att.id" class="att">
+          <v-icon icon="mdi-file-outline" size="20" class="att-icon" />
           <div class="att-meta">
             <div class="att-name text-truncate" :title="att.name">{{ att.name }}</div>
             <div class="att-size text-medium-emphasis">{{ formatSize(att.size) }}</div>
@@ -181,6 +352,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           hide-details
           class="input-textarea"
           @keydown="onKeyDown"
+          @paste="onPaste"
         />
         <v-btn
           v-if="canExpand"
@@ -311,6 +483,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
         </v-btn>
       </div>
     </div>
+    <ImagePreviewDialog v-model="previewOpen" :images="previewImages" :index="previewIndex" />
     <div v-if="attachError" class="attach-error text-error">{{ attachError }}</div>
   </div>
 </template>
@@ -401,6 +574,13 @@ defineExpose({ focus: () => textarea.value?.focus() })
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 弹出菜单：图标与文字之间默认 32px 的空隙在手机上显得很散，收紧到与顶栏菜单一致 */
+.wf-menu :deep(.v-list-item__spacer) {
+  width: 14px !important;
+}
+.wf-menu :deep(.v-list-item) {
+  min-height: 44px;
+}
 .wf-desc {
   white-space: normal !important;
   -webkit-line-clamp: 3 !important;
@@ -445,12 +625,67 @@ defineExpose({ focus: () => textarea.value?.focus() })
   border-radius: 12px;
   background: rgba(var(--v-theme-on-surface), 0.06);
 }
-.att-thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  object-fit: cover;
+/* 图片附件：方形缩略图，点开预览；右上角移除按钮（触屏热区 ≥ 32px） */
+.att-img {
+  position: relative;
   flex-shrink: 0;
+  margin: 6px;
+}
+.att-thumb-btn {
+  display: block;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  cursor: zoom-in;
+}
+.att-thumb-btn:hover {
+  border-color: rgba(var(--v-theme-primary), 0.6);
+}
+.att-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.att-thumb-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: rgba(var(--v-theme-on-surface), 0.45);
+}
+.att-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 50%;
+  background: rgba(var(--v-theme-surface), 0.95);
+  color: rgb(var(--v-theme-on-surface));
+  cursor: pointer;
+}
+.att-remove:hover {
+  background: rgba(var(--v-theme-error), 0.16);
+}
+/* 触屏：移除按钮热区再放大一点 */
+@media (pointer: coarse) {
+  .att-remove {
+    width: 40px;
+    height: 40px;
+  }
+  .att-remove :deep(.v-icon) {
+    font-size: 20px;
+  }
 }
 .att-icon {
   margin: 0 6px;
@@ -506,6 +741,13 @@ defineExpose({ focus: () => textarea.value?.focus() })
   }
   .att {
     min-height: 40px;
+  }
+  .att-img {
+    margin: 4px;
+  }
+  .att-thumb-btn {
+    width: 56px;
+    height: 56px;
   }
 }
 /* 很窄时发送 / 停止只留图标（保留 aria-label） */

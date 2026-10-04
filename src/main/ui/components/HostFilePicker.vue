@@ -7,7 +7,7 @@
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
-import { translate } from '../i18n'
+import { translate, translateTemplate } from '../i18n'
 
 interface PickOpts {
   title?: string
@@ -17,9 +17,9 @@ interface PickOpts {
   filters?: { name: string; extensions: string[] }[]
 }
 interface PickRequest {
-  mode: 'open' | 'save'
+  mode: 'open' | 'save' | 'open-multi'
   opts?: PickOpts
-  resolve: (path: string | null) => void
+  resolve: (path: string | string[] | null) => void
 }
 interface Listing {
   path: string
@@ -31,6 +31,8 @@ interface Listing {
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (k: string, f?: string): string => translate(uiLang.value, k, f)
+const te = (k: string, vars: Record<string, string>, f: string): string =>
+  translateTemplate(uiLang.value, k, vars, f)
 
 const open = ref(false)
 const req = ref<PickRequest | null>(null)
@@ -38,6 +40,8 @@ const listing = ref<Listing | null>(null)
 const loading = ref(false)
 const pathInput = ref('')
 const selected = ref<string | null>(null)
+/** 多选模式（open-multi）：勾选的完整路径，按勾选顺序 */
+const picked = ref<string[]>([])
 const filename = ref('')
 const showAll = ref(false)
 const showHidden = ref(false)
@@ -47,11 +51,18 @@ const showHidden = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadPct = ref(0)
+/** 多文件上传：第几个 / 共几个 */
+const uploadIndex = ref(0)
+const uploadTotal = ref(0)
 const uploadError = ref(false)
+/** 本次上传已成功的宿主路径（中途失败也保留，用户可只使用这些） */
+const uploadedPaths = ref<string[]>([])
 let uploadXhr: XMLHttpRequest | null = null
+let uploadAborted = false
 
 const mode = computed(() => req.value?.mode ?? 'open')
 const opts = computed(() => req.value?.opts ?? {})
+const multi = computed(() => mode.value === 'open-multi')
 const wantsDir = computed(() => mode.value === 'open' && !!opts.value.directory)
 const sep = computed(() =>
   listing.value && listing.value.path.includes('\\') && !listing.value.path.includes('/')
@@ -71,42 +82,83 @@ function pickFromDevice(): void {
 
 function onDeviceFile(ev: Event): void {
   const input = ev.target as HTMLInputElement
-  const f = input.files?.[0]
+  const files = Array.from(input.files ?? [])
   input.value = '' // 允许再次选同一个文件
-  if (!f) return
+  if (files.length) void uploadFiles(files)
+}
+
+/** 顺序上传（一次一个，进度按「第 i / n 个」显示）；中途失败保留已成功的路径 */
+async function uploadFiles(files: File[]): Promise<void> {
+  cancelUpload()
   uploading.value = true
+  uploadAborted = false
   uploadPct.value = 0
+  uploadIndex.value = 0
+  uploadTotal.value = files.length
   uploadError.value = false
-  const xhr = new XMLHttpRequest()
-  uploadXhr = xhr
-  // 同源请求自动带 cockpit_token Cookie 鉴权
-  xhr.open('POST', `/api/upload?name=${encodeURIComponent(f.name)}`)
-  xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable) uploadPct.value = Math.round((e.loaded / e.total) * 100)
-  }
-  xhr.onload = () => {
-    uploading.value = false
-    uploadXhr = null
-    try {
-      const r = JSON.parse(xhr.responseText) as { ok?: boolean; path?: string }
-      if (xhr.status === 200 && r.ok && r.path) return finish(r.path)
-    } catch {
-      /* fallthrough */
+  uploadedPaths.value = []
+  for (let i = 0; i < files.length; i++) {
+    uploadIndex.value = i + 1
+    uploadPct.value = 0
+    const path = await uploadOne(files[i])
+    if (uploadAborted) {
+      uploading.value = false
+      uploadXhr = null
+      return
     }
-    uploadError.value = true
+    if (!path) {
+      uploadError.value = true
+      break
+    }
+    uploadedPaths.value.push(path)
   }
-  xhr.onerror = () => {
-    uploading.value = false
-    uploadXhr = null
-    uploadError.value = true
+  uploading.value = false
+  uploadXhr = null
+  // 全部成功：直接结束；失败时留着对话框，用户可用「仅使用已上传的 n 个」
+  if (!uploadError.value) {
+    finish(multi.value ? uploadedPaths.value : (uploadedPaths.value[0] ?? null))
   }
-  xhr.send(f)
+}
+
+/** 上传单个文件；取消 / 失败返回 null */
+function uploadOne(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest()
+    uploadXhr = xhr
+    // 同源请求自动带 cockpit_token Cookie 鉴权
+    xhr.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) uploadPct.value = Math.round((e.loaded / e.total) * 100)
+    }
+    const done = (path: string | null): void => {
+      if (uploadXhr === xhr) uploadXhr = null
+      resolve(path)
+    }
+    xhr.onload = () => {
+      try {
+        const r = JSON.parse(xhr.responseText) as { ok?: boolean; path?: string }
+        if (xhr.status === 200 && r.ok && r.path) return done(r.path)
+      } catch {
+        /* fallthrough */
+      }
+      done(null)
+    }
+    xhr.onerror = () => done(null)
+    xhr.onabort = () => done(null)
+    xhr.send(file)
+  })
 }
 
 function cancelUpload(): void {
+  uploadAborted = true
   uploadXhr?.abort()
   uploadXhr = null
-  uploading.value = false
+}
+
+/** 上传中途失败：只把已成功上传的路径当结果 */
+function useUploaded(): void {
+  const paths = uploadedPaths.value
+  finish(multi.value ? paths : (paths[0] ?? null))
 }
 
 const title = computed(
@@ -148,6 +200,7 @@ async function go(dir?: string): Promise<void> {
     listing.value = r
     pathInput.value = r.path
     selected.value = null
+    picked.value = []
   } catch {
     listing.value = null
   } finally {
@@ -165,6 +218,7 @@ function onRequest(ev: Event): void {
   req.value?.resolve(null)
   req.value = detail
   showAll.value = false
+  picked.value = []
   filename.value = ''
   let start: string | undefined
   const dp = detail.opts?.defaultPath
@@ -184,7 +238,7 @@ function onRequest(ev: Event): void {
 onMounted(() => window.addEventListener('cockpit:host-pick', onRequest))
 onBeforeUnmount(() => window.removeEventListener('cockpit:host-pick', onRequest))
 
-function finish(path: string | null): void {
+function finish(path: string | string[] | null): void {
   cancelUpload()
   const r = req.value
   req.value = null
@@ -196,6 +250,7 @@ const canConfirm = computed(() => {
   if (!listing.value || listing.value.error) return false
   if (mode.value === 'save') return filename.value.trim().length > 0
   if (wantsDir.value) return true
+  if (multi.value) return picked.value.length > 0
   return !!selected.value || !!opts.value.any
 })
 
@@ -203,13 +258,29 @@ function confirm(): void {
   const l = listing.value
   if (!l || !canConfirm.value) return
   if (mode.value === 'save') return finish(join(l.path, filename.value.trim()))
+  if (multi.value) return finish([...picked.value])
   if (selected.value) return finish(join(l.path, selected.value))
   finish(l.path) // 文件夹模式 / any 模式下没选文件 = 选当前目录
 }
 
+function fullPath(e: Listing['entries'][number]): string {
+  return join(listing.value!.path, e.name)
+}
+
+function isPicked(e: Listing['entries'][number]): boolean {
+  return picked.value.includes(fullPath(e))
+}
+
+function togglePicked(path: string): void {
+  picked.value = picked.value.includes(path)
+    ? picked.value.filter((p) => p !== path)
+    : [...picked.value, path]
+}
+
 function onItem(e: Listing['entries'][number]): void {
-  if (e.type === 'dir') void go(join(listing.value!.path, e.name))
-  else if (mode.value === 'save') filename.value = e.name
+  if (e.type === 'dir') return void go(fullPath(e))
+  if (mode.value === 'save') filename.value = e.name
+  else if (multi.value) togglePicked(fullPath(e))
   else selected.value = e.name
 }
 
@@ -280,6 +351,7 @@ function size(n?: number): string {
           type="file"
           class="d-none"
           :accept="acceptAttr"
+          :multiple="multi"
           @change="onDeviceFile"
         />
       </div>
@@ -287,16 +359,39 @@ function size(n?: number): string {
       <div v-if="uploading || uploadError" class="px-6 pb-3">
         <template v-if="uploading">
           <div class="d-flex align-center ga-2 mb-1">
-            <span class="text-body-2"
-              >{{ t('hostpick.uploading', '正在上传…') }} {{ uploadPct }}%</span
-            >
+            <span class="text-body-2">
+              <template v-if="uploadTotal > 1">
+                {{
+                  te(
+                    'hostpick.uploading_multi',
+                    { i: String(uploadIndex), n: String(uploadTotal) },
+                    '正在上传第 {i} / {n} 个…'
+                  )
+                }}
+                {{ uploadPct }}%
+              </template>
+              <template v-else
+                >{{ t('hostpick.uploading', '正在上传…') }} {{ uploadPct }}%</template
+              >
+            </span>
             <v-spacer />
             <v-btn variant="text" @click="cancelUpload">{{ t('hostpick.cancel', '取消') }}</v-btn>
           </div>
           <v-progress-linear :model-value="uploadPct" color="primary" height="6" rounded />
         </template>
-        <div v-else class="text-error text-body-2">
-          {{ t('hostpick.uploadFailed', '上传失败，请重试') }}
+        <div v-else class="d-flex flex-wrap align-center ga-2">
+          <span class="text-error text-body-2">
+            {{ t('hostpick.uploadFailed', '上传失败，请重试') }}
+          </span>
+          <v-btn v-if="uploadedPaths.length" variant="text" @click="useUploaded">
+            {{
+              te(
+                'hostpick.use_uploaded',
+                { n: String(uploadedPaths.length) },
+                '仅使用已上传的 {n} 个'
+              )
+            }}
+          </v-btn>
         </div>
       </div>
 
@@ -313,13 +408,28 @@ function size(n?: number): string {
           <v-list-item
             v-for="e in visible"
             :key="e.name"
-            :active="selected === e.name"
-            :prepend-icon="e.type === 'dir' ? 'mdi-folder-outline' : 'mdi-file-outline'"
+            :active="multi ? isPicked(e) : selected === e.name"
+            :prepend-icon="
+              multi ? undefined : e.type === 'dir' ? 'mdi-folder-outline' : 'mdi-file-outline'
+            "
             :title="e.name"
             :subtitle="size(e.size)"
             @click="onItem(e)"
-            @dblclick="e.type === 'file' && mode === 'open' && ((selected = e.name), confirm())"
-          />
+            @dblclick="
+              !multi && e.type === 'file' && mode === 'open' && ((selected = e.name), confirm())
+            "
+          >
+            <template v-if="multi && e.type === 'file'" #prepend>
+              <v-checkbox
+                :model-value="isPicked(e)"
+                density="compact"
+                hide-details
+                :title="te('hostpick.toggle', { name: e.name }, '选择 {name}')"
+                :aria-label="te('hostpick.toggle', { name: e.name }, '选择 {name}')"
+                @click.stop="onItem(e)"
+              />
+            </template>
+          </v-list-item>
         </v-list>
       </v-card-text>
       <v-divider />
@@ -351,14 +461,18 @@ function size(n?: number): string {
         />
         <v-spacer />
         <v-btn variant="text" @click="finish(null)">{{ t('hostpick.cancel', '取消') }}</v-btn>
+        <span v-if="multi && picked.length" class="text-caption text-medium-emphasis">
+          {{ te('hostpick.picked', { n: String(picked.length) }, '已选 {n} 个') }}
+        </span>
         <v-btn color="primary" variant="flat" :disabled="!canConfirm" @click="confirm">
-          {{
-            mode === 'save'
-              ? t('hostpick.save', '保存')
-              : wantsDir || (!selected && opts.any)
-                ? t('hostpick.selectFolder', '选择此文件夹')
-                : t('hostpick.select', '选择')
-          }}
+          <template v-if="mode === 'save'">{{ t('hostpick.save', '保存') }}</template>
+          <template v-else-if="multi">
+            {{ te('hostpick.select_multi', { n: String(picked.length) }, '选择（{n}）') }}
+          </template>
+          <template v-else-if="wantsDir || (!selected && opts.any)">
+            {{ t('hostpick.selectFolder', '选择此文件夹') }}
+          </template>
+          <template v-else>{{ t('hostpick.select', '选择') }}</template>
         </v-btn>
       </v-card-actions>
     </v-card>

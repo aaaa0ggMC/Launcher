@@ -24,6 +24,7 @@ import type {
   ReasoningEffort,
   Session,
   ToolCallItem,
+  TokenUsage,
   WorkflowRecord,
   WorkflowStepRecord
 } from '../../types'
@@ -45,6 +46,7 @@ import {
   type ResolvedTool
 } from '../plugins/registry'
 import type { ProviderMessage, ProviderTool } from '../providers/types'
+import type { ToolSessionContext } from '../plugins/types'
 import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
 import { currentBrowserClient, withBrowserClient } from '../../../../main/process/browser-ui'
 import {
@@ -101,6 +103,8 @@ export class WorkflowRunner {
    * Electron 下为 null（界面操作走 CDP inspector）。
    */
   private readonly browserClient: string | null = null
+  /** 最近一次主循环模型调用的 usage（给插件 SDK 的 ctx.context） */
+  private lastUsage: TokenUsage | null = null
 
   constructor(ctx: LoopContext) {
     this.ctx = ctx
@@ -369,6 +373,24 @@ export class WorkflowRunner {
     return normalizeEffort(this.session?.meta?.reasoning ?? this.ctx.config.reasoningEffort)
   }
 
+  /** 插件 SDK：本次运行的上下文快照（按需计算，分支节点数要查库） */
+  private toolContext(): ToolSessionContext {
+    const u = this.lastUsage
+    return {
+      sessionId: this.ctx.sessionId,
+      model: this.model,
+      providerId: this.ctx.provider.id,
+      step: this.stepCount,
+      maxSteps: this.ctx.maxSteps,
+      lastPromptTokens: u?.prompt ?? null,
+      lastCompletionTokens: u?.completion ?? null,
+      lastCachedTokens: u?.cached ?? null,
+      runTotalTokens: this.record?.tokens ?? 0,
+      branchMessages: getMessageBranch(this.parentId).length,
+      toolCount: this.tools.length
+    }
+  }
+
   private get model(): string {
     return this.session?.model || this.ctx.config.activeModel
   }
@@ -473,6 +495,7 @@ export class WorkflowRunner {
       usage: result.usage,
       meta: { ...getMessage(messageId)?.meta, model: this.model, provider: this.ctx.provider.id }
     })
+    if (result.usage) this.lastUsage = result.usage
     this.endStep(step, 'ok', result.usage?.total)
     return { messageId, content, toolCalls }
   }
@@ -602,7 +625,8 @@ export class WorkflowRunner {
             withOrigin(this.origin, () =>
               runPluginTool(def, args, {
                 sessionId: this.ctx.sessionId,
-                signal: this.abortController.signal
+                signal: this.abortController.signal,
+                context: () => this.toolContext()
               })
             ),
           this.abortController.signal

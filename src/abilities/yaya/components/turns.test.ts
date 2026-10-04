@@ -4,6 +4,8 @@ import type { MessageNode } from '../types'
 import {
   answerStep,
   buildTurns,
+  buildTurnsReusing,
+  mergeNodes,
   hasProcess,
   processSteps,
   summarizeArgs,
@@ -207,4 +209,40 @@ describe('turnSegments', () => {
     // 最终回答不在分段里
     assert.ok(!segs.some((s) => s.kind === 'text' && s.node.id === 's4'))
   })
+})
+
+it('buildTurnsReusing keeps unchanged turn objects and mergeNodes keeps unchanged nodes', () => {
+  const mk = (
+    id: string,
+    role: MessageNode['role'],
+    content: string,
+    parentId: string | null
+  ): MessageNode =>
+    ({
+      id,
+      sessionId: 's',
+      parentId,
+      role,
+      content,
+      createdAt: 0,
+      status: 'completed'
+    }) as MessageNode
+  const v1 = [
+    mk('u1', 'user', 'hi', null),
+    mk('a1', 'assistant', 'yo', 'u1'),
+    mk('u2', 'user', 'q', 'a1'),
+    mk('a2', 'assistant', 'par', 'u2')
+  ]
+  const t1 = buildTurns(v1)
+  const fresh = v1.map((m) => ({ ...m }))
+  fresh[3] = { ...fresh[3], content: 'partial more' }
+  const merged = mergeNodes(v1, fresh)
+  assert.equal(merged[0], v1[0])
+  assert.equal(merged[1], v1[1])
+  assert.notEqual(merged[3], v1[3])
+  const t2 = buildTurnsReusing(merged, t1)
+  assert.equal(t2[0], t1[0])
+  assert.equal(t2[1], t1[1])
+  assert.equal(t2[2], t1[2])
+  assert.notEqual(t2[3], t1[3])
 })

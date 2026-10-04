@@ -2,7 +2,8 @@
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { AssistantTurn, ProcessItem } from './turns'
-import { processItems } from './turns'
+import { processItems, summarizeArgs } from './turns'
+import type { ToolCallItem } from '../types'
 import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
 
@@ -20,8 +21,10 @@ const props = withDefaults(
     items?: ProcessItem[]
     first?: boolean
     last?: boolean
+    /** 收起时仍预览最近几步（0 = 完全折叠） */
+    previewSteps?: number
   }>(),
-  { items: undefined, first: true, last: true }
+  { items: undefined, first: true, last: true, previewSteps: 1 }
 )
 
 const lang = inject('cockpit:lang', ref('zh'))
@@ -137,6 +140,71 @@ function fmtTokens(n: number): string {
 
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
 const md = (text: string): string => renderMarkdown(text, labels.value)
+
+/** 收起时预览的块：本块最后几步过程条目 */
+const previewItems = computed<ProcessItem[]>(() => {
+  const n = Math.max(0, Math.round(props.previewSteps) || 0)
+  if (n <= 0) return []
+  return items.value.slice(-n)
+})
+
+/** 预览行：思考取尾部几行纯文本、工具调用一行摘要、子 Agent / note 一行 label */
+interface PreviewRow {
+  key: string
+  kind: 'reasoning' | 'tool' | 'label'
+  text: string
+  call?: ToolCallItem
+}
+const previewRows = computed<PreviewRow[]>(() => {
+  const out: PreviewRow[] = []
+  for (const it of previewItems.value) {
+    if (it.kind !== 'llm') {
+      out.push({ key: it.key, kind: 'label', text: it.rec.label })
+      continue
+    }
+    // 一步可能被拆成「思考」与「工具」两项（中间夹着 AI 说的话），各自只预览自己那部分
+    const reasoning = it.part !== 'tools' ? it.node.reasoningContent?.trim() : ''
+    if (reasoning) {
+      out.push({ key: `${it.key}:r`, kind: 'reasoning', text: tailLines(reasoning, 3) })
+    }
+    const calls = it.part !== 'reasoning' && !it.answer ? (it.node.toolCalls ?? []) : []
+    for (const c of calls) {
+      out.push({ key: `${it.key}:${c.id}`, kind: 'tool', text: c.name, call: c })
+    }
+  }
+  return out
+})
+
+/** 取文本最后几行（思考的预览，纯文本不渲染 Markdown） */
+function tailLines(text: string, lines = 3): string {
+  // 只看末尾一段：思考可能有几万字，流式时每次刷新都整段 split 没必要
+  const kept = text
+    .slice(-800)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-lines)
+  return kept.join('\n')
+}
+
+function toolIcon(call: ToolCallItem): string {
+  switch (call.status) {
+    case 'failed':
+      return 'mdi-alert-circle-outline'
+    case 'awaiting_approval':
+      return 'mdi-help-circle-outline'
+    case 'executing':
+    case 'pending':
+      return 'mdi-circle-outline'
+    default:
+      return 'mdi-check-circle-outline'
+  }
+}
+function toolColor(call: ToolCallItem): string | undefined {
+  if (call.status === 'failed') return 'error'
+  if (call.status === 'success') return 'success'
+  return undefined
+}
 </script>
 
 <template>
@@ -170,6 +238,40 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
       <span v-if="elapsed" class="wf-meta">{{ fmtMs(elapsed) }}</span>
       <v-icon :icon="open ? 'mdi-chevron-up' : 'mdi-chevron-down'" size="18" class="wf-chevron" />
     </button>
+
+    <div
+      v-if="!open && previewRows.length"
+      class="wf-preview"
+      role="button"
+      tabindex="0"
+      :title="t('yaya.wf.expand', '展开过程')"
+      :aria-label="t('yaya.wf.expand', '展开过程')"
+      @click="open = true"
+      @keydown.enter="open = true"
+      @keydown.space.prevent="open = true"
+    >
+      <p v-for="row in previewRows" :key="row.key" class="wf-pv-row" :class="`is-${row.kind}`">
+        <v-icon
+          v-if="row.kind === 'tool' && row.call"
+          :icon="toolIcon(row.call)"
+          :color="toolColor(row.call)"
+          size="14"
+          class="wf-pv-icon"
+        />
+        <v-icon
+          v-else-if="row.kind === 'label'"
+          icon="mdi-chevron-right"
+          size="14"
+          class="wf-pv-icon"
+        />
+        <span v-if="row.kind === 'reasoning'" class="wf-pv-reasoning">{{ row.text }}</span>
+        <span v-else-if="row.kind === 'tool'" class="wf-pv-tool">{{ row.text }}</span>
+        <span v-else class="wf-pv-label">{{ row.text }}</span>
+        <span v-if="row.kind === 'tool' && row.call" class="wf-pv-args">
+          {{ summarizeArgs(row.call) }}
+        </span>
+      </p>
+    </div>
 
     <div v-if="open" class="wf-body">
       <ol class="wf-timeline">
@@ -314,6 +416,57 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
 .wf-body {
   padding: 4px 12px 12px;
   border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+.wf-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 12px 8px;
+  cursor: pointer;
+}
+.wf-preview:hover {
+  background: rgba(var(--v-theme-on-surface), 0.03);
+}
+.wf-pv-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+.wf-pv-icon {
+  flex-shrink: 0;
+  align-self: center;
+  opacity: 0.7;
+}
+.wf-pv-reasoning {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wf-pv-tool {
+  flex-shrink: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+.wf-pv-args {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+}
+.wf-pv-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wf-timeline {
   list-style: none;
@@ -475,6 +628,12 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
   }
   .wf-body {
     padding: 2px 10px 10px;
+  }
+  .wf-preview {
+    padding: 2px 10px 6px;
+  }
+  .wf-pv-row {
+    font-size: 0.76rem;
   }
   .wf-item {
     padding: 8px 0 8px 18px;
