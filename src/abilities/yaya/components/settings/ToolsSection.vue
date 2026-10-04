@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useI18n } from '@ui/i18n'
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
-import type { ToolInfo, YayaConfig } from '../../types'
+import type { ToolApprovalMode, ToolInfo, YayaConfig } from '../../types'
 
 defineOptions({ name: 'cockpit-yaya-settings-tools' })
 
@@ -25,27 +25,85 @@ const query = ref('')
 type ToolFilter = 'all' | 'enabled' | 'disabled' | 'approval'
 const filter = ref<ToolFilter>('all')
 
-onMounted(async () => {
-  toolsLoading.value = true
-  toolsError.value = null
-  try {
-    const res = (await window.cockpit.command('yaya.tools-list')) as
-      ToolInfo[] | { tools?: ToolInfo[] }
-    tools.value = Array.isArray(res) ? res : (res.tools ?? [])
-  } catch (err) {
-    tools.value = []
-    toolsError.value = String(err)
-  } finally {
-    toolsLoading.value = false
-  }
-})
+/** 审批三档：default = 跟随提供方默认 */
+type ApprovalChoice = 'default' | ToolApprovalMode
+/** 当前生效的审批方式（含提供方默认的 dynamic） */
+type EffectiveApproval = 'ask' | 'auto' | 'dynamic'
 
-function setToolEnabled(tool: ToolInfo, on: boolean): void {
-  tool.enabled = on
-  const disabled = new Set(props.config.disabledTools ?? [])
-  if (on) disabled.delete(tool.name)
-  else disabled.add(tool.name)
-  props.config.disabledTools = [...disabled]
+/** 这个工具的显式覆盖（无 = 跟随提供方默认） */
+function approvalOverride(tool: ToolInfo): ToolApprovalMode | undefined {
+  return props.config.toolApproval?.[tool.name]
+}
+
+/**
+ * 生效的审批方式，优先级与主进程 `toolNeedsApproval` 一致：
+ * 显式设置 > 全局「自动允许工具调用」> 提供方默认
+ */
+function effectiveApproval(tool: ToolInfo): EffectiveApproval {
+  const override = approvalOverride(tool)
+  if (override) return override
+  if (props.config.autoApproveTools) return 'auto'
+  return tool.defaultApproval
+}
+
+/** 生效值来自全局开关、而不是本工具自己的设置（chip 标注「全局」） */
+function fromGlobal(tool: ToolInfo): boolean {
+  return !approvalOverride(tool) && props.config.autoApproveTools && tool.defaultApproval !== 'auto'
+}
+
+/** 生效状态 chip 的颜色：需确认 = warning；按命令确认 = info；自动执行不着色 */
+function approvalChipColor(tool: ToolInfo): string | undefined {
+  const eff = effectiveApproval(tool)
+  if (eff === 'ask') return 'warning'
+  if (eff === 'dynamic') return 'info'
+  return undefined
+}
+
+function approvalChipText(tool: ToolInfo): string {
+  const eff = effectiveApproval(tool)
+  if (eff === 'auto') {
+    return fromGlobal(tool)
+      ? t('yaya.settings.tools_eff_auto_global', '自动执行（全局）')
+      : t('yaya.settings.tools_eff_auto', '自动执行')
+  }
+  if (eff === 'dynamic') return t('yaya.settings.tools_eff_dynamic', '按命令确认')
+  return t('yaya.settings.tool_needs_approval', '需确认')
+}
+
+/** 「默认」一档的说明文字带上该工具的提供方默认值 */
+function approvalDefaultText(tool: ToolInfo): string {
+  const [stateKey, stateFallback] =
+    tool.defaultApproval === 'auto'
+      ? (['yaya.settings.tools_def_auto', '免确认'] as const)
+      : tool.defaultApproval === 'dynamic'
+        ? (['yaya.settings.tools_def_dynamic', '按命令判断'] as const)
+        : (['yaya.settings.tools_def_ask', '需确认'] as const)
+  return te(
+    'yaya.settings.tools_approval_default',
+    { state: t(stateKey, stateFallback) },
+    '默认（{state}）'
+  )
+}
+
+/** 审批三档按钮 */
+function approvalOptions(tool: ToolInfo): Array<{ value: ApprovalChoice; text: string }> {
+  return [
+    { value: 'default', text: approvalDefaultText(tool) },
+    { value: 'ask', text: t('yaya.settings.tools_approval_ask', '总是确认') },
+    { value: 'auto', text: t('yaya.settings.tools_approval_auto', '自动执行') }
+  ]
+}
+
+function approvalValue(tool: ToolInfo): ApprovalChoice {
+  return approvalOverride(tool) ?? 'default'
+}
+
+/** 写单工具的审批覆盖；'default' = 删键回到提供方默认 */
+function setToolApproval(tool: ToolInfo, value: string): void {
+  const next: Record<string, ToolApprovalMode> = { ...(props.config.toolApproval ?? {}) }
+  if (value === 'ask' || value === 'auto') next[tool.name] = value
+  else delete next[tool.name]
+  props.config.toolApproval = next
 }
 
 const filteredTools = computed(() => {
@@ -55,7 +113,8 @@ const filteredTools = computed(() => {
       return false
     if (filter.value === 'enabled' && !tool.enabled) return false
     if (filter.value === 'disabled' && tool.enabled) return false
-    if (filter.value === 'approval' && !tool.requiresApproval) return false
+    // 「需确认」按生效值过滤：显式设置 > 全局自动允许 > 提供方默认
+    if (filter.value === 'approval' && effectiveApproval(tool) === 'auto') return false
     return true
   })
 })
@@ -86,12 +145,74 @@ function bulkSetEnabled(on: boolean): void {
     if (tool.enabled !== on) setToolEnabled(tool, on)
   }
 }
+
+/** 把当前筛选结果的审批全部恢复到提供方默认（删除显式覆盖的键） */
+function bulkResetApproval(): void {
+  const next: Record<string, ToolApprovalMode> = { ...(props.config.toolApproval ?? {}) }
+  let changed = false
+  for (const tool of filteredTools.value) {
+    if (!(tool.name in next)) continue
+    delete next[tool.name]
+    changed = true
+  }
+  if (changed) props.config.toolApproval = next
+}
+
+function setToolEnabled(tool: ToolInfo, on: boolean): void {
+  tool.enabled = on
+  const disabled = new Set(props.config.disabledTools ?? [])
+  if (on) disabled.delete(tool.name)
+  else disabled.add(tool.name)
+  props.config.disabledTools = [...disabled]
+}
+
+// 容器 < 560px（如手机 / 窄分栏）时审批控件换到描述下方独立一行，
+// 用 ResizeObserver 量容器而不是窗口断点——设置页可能嵌在别处或被缩放。
+const toolsStack = ref<HTMLElement | null>(null)
+const narrowRow = ref(false)
+let resizeObs: ResizeObserver | null = null
+
+onMounted(async () => {
+  toolsLoading.value = true
+  toolsError.value = null
+  try {
+    const res = (await window.cockpit.command('yaya.tools-list')) as
+      ToolInfo[] | { tools?: ToolInfo[] }
+    tools.value = Array.isArray(res) ? res : (res.tools ?? [])
+  } catch (err) {
+    tools.value = []
+    toolsError.value = String(err)
+  } finally {
+    toolsLoading.value = false
+  }
+  await nextTick()
+  if (toolsStack.value) {
+    narrowRow.value = toolsStack.value.clientWidth < 560
+    resizeObs = new ResizeObserver(() => {
+      narrowRow.value = (toolsStack.value?.clientWidth ?? 0) < 560
+    })
+    resizeObs.observe(toolsStack.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObs?.disconnect()
+  resizeObs = null
+})
 </script>
 
 <template>
   <div class="section-page d-flex flex-column ga-4">
     <div class="text-caption text-medium-emphasis">
       {{ t('yaya.settings.tools_desc', '关闭后该工具不再提供给助手调用') }}
+    </div>
+    <div class="text-caption text-medium-emphasis">
+      {{
+        t(
+          'yaya.settings.tools_approval_hint',
+          '全局『自动允许工具调用』在执行策略里；对单个工具的设置优先于全局开关。'
+        )
+      }}
     </div>
 
     <template v-if="!toolsLoading && tools.length > 0">
@@ -154,6 +275,15 @@ function bulkSetEnabled(on: boolean): void {
               )
             }}
           </v-btn>
+          <v-btn variant="text" prepend-icon="mdi-backup-restore" @click="bulkResetApproval()">
+            {{
+              te(
+                'yaya.settings.tools_reset_approval_all',
+                { n: String(filteredTools.length) },
+                '全部恢复默认审批（{n}）'
+              )
+            }}
+          </v-btn>
         </div>
       </div>
     </template>
@@ -183,7 +313,7 @@ function bulkSetEnabled(on: boolean): void {
         {{ t('yaya.settings.tools_filter_empty', '没有匹配的工具') }}
       </span>
     </div>
-    <div v-else class="tools-stack d-flex flex-column ga-3">
+    <div v-else ref="toolsStack" class="tools-stack d-flex flex-column ga-3">
       <template v-for="group in groups" :key="group.source">
         <div v-if="multiSource" class="text-caption font-weight-medium text-medium-emphasis pt-1">
           {{ groupTitle(group.source) }}
@@ -192,7 +322,8 @@ function bulkSetEnabled(on: boolean): void {
           <div
             v-for="tool in group.items"
             :key="tool.name"
-            class="tool-row d-flex align-center ga-3 py-2 px-3 rounded-lg border"
+            class="tool-row d-flex flex-wrap align-center ga-3 py-3 px-3 rounded-lg border"
+            :class="{ 'tool-row-narrow': narrowRow }"
           >
             <div class="min-w-0 flex-grow-1">
               <div class="d-flex align-center flex-wrap ga-2">
@@ -200,19 +331,32 @@ function bulkSetEnabled(on: boolean): void {
                   {{ tool.name }}
                 </span>
                 <v-chip
-                  v-if="tool.requiresApproval"
                   size="small"
                   variant="tonal"
-                  color="warning"
+                  :color="approvalChipColor(tool)"
                   class="chip-pad flex-shrink-0"
                 >
-                  {{ t('yaya.settings.tool_needs_approval', '需确认') }}
+                  {{ approvalChipText(tool) }}
                 </v-chip>
               </div>
               <div class="text-caption text-medium-emphasis tool-desc">
                 {{ tool.description }}
               </div>
             </div>
+            <v-btn-toggle
+              :model-value="approvalValue(tool)"
+              class="approval-toggle flex-shrink-0"
+              density="comfortable"
+              variant="outlined"
+              divided
+              mandatory
+              :disabled="!tool.enabled"
+              @update:model-value="setToolApproval(tool, $event)"
+            >
+              <v-btn v-for="opt in approvalOptions(tool)" :key="opt.value" :value="opt.value">
+                {{ opt.text }}
+              </v-btn>
+            </v-btn-toggle>
             <v-switch
               :model-value="tool.enabled"
               color="primary"
@@ -253,5 +397,20 @@ function bulkSetEnabled(on: boolean): void {
 .tool-desc {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* 容器放不下时审批控件换到描述下方独立一行（flex 100% 触发换行） */
+.tool-row-narrow .approval-toggle {
+  flex: 0 0 100%;
+  margin-top: 8px;
+  /* 窄屏允许按钮自身换行，不在 toggle 内部出横向滚动条 */
+  flex-wrap: wrap;
+  height: auto !important;
+  overflow: visible;
+}
+
+/* 审批按钮文字不裁切 */
+.approval-toggle :deep(.v-btn) {
+  white-space: nowrap;
 }
 </style>

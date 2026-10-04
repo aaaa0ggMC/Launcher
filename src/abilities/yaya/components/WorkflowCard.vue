@@ -424,6 +424,11 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
   overflow-x: auto;
   font-size: 0.8rem;
 }
+.wf-text :deep(.md-math-display) {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .wf-text :deep(.md-code-head) {
   display: none;
 }
@@ -443,6 +448,37 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
   .wf-head {
     padding: 8px 10px;
     gap: 8px;
+  }
+}
+
+@container yaya (max-width: 600px) {
+  .wf-head {
+    min-height: 40px;
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .wf-title {
+    font-size: 0.82rem;
+  }
+  .wf-meta {
+    font-size: 0.72rem;
+  }
+  .wf-hide-narrow {
+    display: none;
+  }
+  .wf-body {
+    padding: 2px 10px 10px;
+  }
+  .wf-item {
+    padding: 8px 0 8px 18px;
+    gap: 6px;
+  }
+  .wf-label,
+  .wf-text {
+    font-size: 0.82rem;
+  }
+  .wf-reasoning {
+    font-size: 0.8rem;
   }
 }
 </style>

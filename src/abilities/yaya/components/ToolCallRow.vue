@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed, inject, nextTick, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { ToolCallItem } from '../types'
 import { summarizeArgs } from './turns'
+import { argFields, resultFields, type FieldView } from './tool-view'
+import { highlightCode } from './markdown'
 
 const props = defineProps<{
   call: ToolCallItem
@@ -11,7 +13,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'approve', approved: boolean): void
+  /** 拒绝时可附理由，会作为工具结果回传给模型 */
+  (e: 'approve', approved: boolean, reason?: string): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh'))
@@ -19,15 +22,13 @@ const { t } = useI18n(lang)
 
 const open = ref(false)
 const summary = computed(() => summarizeArgs(props.call))
-const argsText = computed(() =>
-  typeof props.call.args === 'string' ? props.call.args : JSON.stringify(props.call.args, null, 2)
-)
-const resultText = computed(() => {
-  const r = props.call.result
-  if (r === undefined || r === null) return ''
-  const s = typeof r === 'string' ? r : JSON.stringify(r, null, 2)
-  return s.length > 20000 ? `${s.slice(0, 20000)}\n…` : s
-})
+const args = computed(() => argFields(props.call.args))
+const results = computed(() => resultFields(props.call.result))
+
+/** 代码 / JSON 字段的高亮 HTML（highlight.js 未加载时是转义纯文本） */
+function codeHtml(f: FieldView): string {
+  return highlightCode(f.value, f.lang ?? 'plaintext')
+}
 
 const statusIcon = computed(() => {
   switch (props.call.status) {
@@ -47,6 +48,29 @@ const duration = computed(() => {
   if (ms === undefined) return ''
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
 })
+
+// ---- 拒绝并说明 ----
+const rejecting = ref(false)
+const reason = ref('')
+const reasonField = ref<{ focus: () => void } | null>(null)
+
+async function startReject(): Promise<void> {
+  rejecting.value = true
+  await nextTick()
+  reasonField.value?.focus()
+}
+function cancelReject(): void {
+  rejecting.value = false
+  reason.value = ''
+}
+function submitReject(): void {
+  emit('approve', false, reason.value.trim() || undefined)
+  cancelReject()
+}
+function onReasonKey(e: KeyboardEvent): void {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitReject()
+  else if (e.key === 'Escape') cancelReject()
+}
 </script>
 
 <template>
@@ -70,37 +94,95 @@ const duration = computed(() => {
       />
     </button>
 
-    <div v-if="awaitingApproval" class="approval">
-      <div class="text-body-2">
-        {{ t('yaya.tool.approval_hint', '这个操作会修改系统状态，确认参数无误后再允许执行。') }}
+    <!-- 字段视图：参数（审批时总是展开）/ 结果 -->
+    <template
+      v-for="section in [
+        { show: awaitingApproval || open, label: t('yaya.tool.args', '参数'), fields: args },
+        { show: open && results.length > 0, label: t('yaya.tool.result', '结果'), fields: results }
+      ]"
+      :key="section.label"
+    >
+      <div v-if="section.show && section.fields.length" class="tool-section">
+        <div v-if="!awaitingApproval || section.fields !== args" class="tool-label">
+          {{ section.label }}
+        </div>
+        <div class="fields">
+          <template v-for="(f, i) in section.fields" :key="`${f.key}-${i}`">
+            <div v-if="f.kind === 'inline'" class="field-inline">
+              <span v-if="f.key" class="field-key">{{ f.key }}</span>
+              <span class="field-value" :class="{ 'text-error': f.danger }">{{ f.value }}</span>
+            </div>
+            <div v-else class="field-block">
+              <div v-if="f.key" class="field-key" :class="{ 'text-error': f.danger }">
+                {{ f.key }}
+              </div>
+              <!-- eslint-disable-next-line vue/no-v-html -- highlightCode 输出已转义 -->
+              <pre
+                v-if="f.kind === 'code' || f.kind === 'json'"
+                class="tool-pre hl"
+                v-html="codeHtml(f)"
+              />
+              <pre v-else class="tool-pre" :class="{ 'text-error': f.danger }">{{ f.value }}</pre>
+            </div>
+          </template>
+        </div>
       </div>
-      <pre class="tool-pre approval-pre">{{ argsText }}</pre>
-      <div class="d-flex flex-wrap ga-2">
-        <v-btn
-          color="primary"
-          variant="flat"
-          prepend-icon="mdi-check"
-          @click="emit('approve', true)"
-        >
-          {{ t('yaya.tool.approve', '允许执行') }}
-        </v-btn>
-        <v-btn variant="outlined" prepend-icon="mdi-close" @click="emit('approve', false)">
-          {{ t('yaya.tool.reject', '拒绝') }}
-        </v-btn>
-      </div>
+    </template>
+
+    <div v-if="open && call.error && !results.length" class="tool-section">
+      <div class="tool-label text-error">{{ t('yaya.tool.error', '错误') }}</div>
+      <pre class="tool-pre text-error">{{ call.error }}</pre>
     </div>
 
-    <div v-if="open" class="tool-body">
-      <div class="tool-label">{{ t('yaya.tool.args', '参数') }}</div>
-      <pre class="tool-pre">{{ argsText }}</pre>
-      <template v-if="resultText">
-        <div class="tool-label">{{ t('yaya.tool.result', '结果') }}</div>
-        <pre class="tool-pre">{{ resultText }}</pre>
+    <div v-if="awaitingApproval" class="approval">
+      <div class="approval-hint text-medium-emphasis">
+        <v-icon icon="mdi-shield-alert-outline" size="16" color="warning" />
+        {{ t('yaya.tool.approval_hint', '这个操作会修改系统状态，确认参数无误后再允许执行。') }}
+      </div>
+      <template v-if="!rejecting">
+        <div class="approval-actions">
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-check"
+            @click="emit('approve', true)"
+          >
+            {{ t('yaya.tool.approve', '允许执行') }}
+          </v-btn>
+          <v-btn variant="outlined" prepend-icon="mdi-close" @click="emit('approve', false)">
+            {{ t('yaya.tool.reject', '拒绝') }}
+          </v-btn>
+          <v-btn variant="text" prepend-icon="mdi-message-reply-text-outline" @click="startReject">
+            {{ t('yaya.tool.reject_with_reason', '拒绝并说明') }}
+          </v-btn>
+        </div>
       </template>
-      <template v-if="call.error">
-        <div class="tool-label text-error">{{ t('yaya.tool.error', '错误') }}</div>
-        <pre class="tool-pre text-error">{{ call.error }}</pre>
+      <template v-else>
+        <v-textarea
+          ref="reasonField"
+          v-model="reason"
+          variant="outlined"
+          rows="2"
+          auto-grow
+          max-rows="6"
+          hide-details
+          :placeholder="
+            t('yaya.tool.reason_placeholder', '告诉它为什么不行、或者应该怎么做（会发给模型）')
+          "
+          @keydown="onReasonKey"
+        />
+        <div class="approval-actions">
+          <v-btn variant="text" @click="cancelReject">{{ t('yaya.cancel', '取消') }}</v-btn>
+          <v-btn color="error" variant="tonal" prepend-icon="mdi-send" @click="submitReject">
+            {{ t('yaya.tool.reject_send', '拒绝并发送理由') }}
+          </v-btn>
+        </div>
       </template>
+    </div>
+
+    <div v-if="call.rejectReason" class="reject-note text-medium-emphasis">
+      <v-icon icon="mdi-message-reply-text-outline" size="16" />
+      <span>{{ call.rejectReason }}</span>
     </div>
   </div>
 </template>
@@ -111,6 +193,7 @@ const duration = computed(() => {
   border-radius: 10px;
   background: rgba(var(--v-theme-surface-variant), 0.22);
   overflow: hidden;
+  container-type: inline-size;
 }
 .tool-row.is-awaiting {
   border-color: rgba(var(--v-theme-warning), 0.5);
@@ -150,21 +233,40 @@ const duration = computed(() => {
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.approval {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 4px 12px 12px;
-}
-.tool-body {
-  padding: 4px 12px 12px;
-  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+.tool-section {
+  padding: 2px 12px 10px;
 }
 .tool-label {
   font-size: 0.75rem;
   font-weight: 600;
   opacity: 0.7;
-  margin: 10px 0 4px;
+  margin: 6px 0;
+}
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+.field-key {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+.field-block .field-key {
+  margin-bottom: 3px;
+}
+.field-value {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  min-width: 0;
 }
 .tool-pre {
   margin: 0;
@@ -173,20 +275,73 @@ const duration = computed(() => {
   background: rgba(var(--v-theme-on-surface), 0.05);
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 320px;
   overflow: auto;
 }
-.approval-pre {
-  max-height: 200px;
+/* 高亮配色跟主题（与正文代码块一致） */
+.hl :deep(.hljs-keyword),
+.hl :deep(.hljs-built_in) {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
 }
-@media (max-width: 720px) {
-  /* 窄屏：参数摘要换到第二行，名称独占首行 */
+.hl :deep(.hljs-string) {
+  color: rgb(var(--v-theme-success));
+}
+.hl :deep(.hljs-number),
+.hl :deep(.hljs-literal) {
+  color: rgb(var(--v-theme-warning));
+}
+.hl :deep(.hljs-attr),
+.hl :deep(.hljs-variable),
+.hl :deep(.hljs-template-variable) {
+  color: rgb(var(--v-theme-info));
+}
+.hl :deep(.hljs-comment) {
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  font-style: italic;
+}
+.hl :deep(.hljs-meta),
+.hl :deep(.hljs-punctuation) {
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+.approval-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.reject-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 12px 10px 14px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+/* 窄容器：参数摘要换到第二行，内边距收紧 */
+@container (max-width: 520px) {
   .tool-head {
     flex-wrap: wrap;
     row-gap: 2px;
+    padding: 6px 10px;
+    min-height: 40px;
+    gap: 8px;
   }
   .tool-summary {
     order: 10;
@@ -198,6 +353,14 @@ const duration = computed(() => {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .tool-section,
+  .approval {
+    padding-inline: 10px;
+  }
+  .tool-pre {
+    padding: 8px 10px;
+    font-size: 0.78rem;
   }
 }
 </style>

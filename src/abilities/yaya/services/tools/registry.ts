@@ -9,7 +9,7 @@ import { dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { runCommand, listCommands } from '../../../../main/process/commands/registry'
-import type { ToolDefinition, ToolInfo } from '../../types'
+import type { ToolApprovalMode, ToolDefinition, ToolInfo, YayaConfig } from '../../types'
 
 const execAsync = promisify(exec)
 
@@ -33,19 +33,39 @@ export function getEnabledTools(disabled: string[] | undefined): ToolDefinition[
   return getAllTools().filter((t) => !off.has(t.name))
 }
 
-export function listToolInfo(disabled: string[] | undefined): ToolInfo[] {
+export function listToolInfo(
+  disabled: string[] | undefined,
+  approval: Record<string, ToolApprovalMode> | undefined
+): ToolInfo[] {
   const off = new Set(disabled ?? [])
-  return getAllTools().map((t) => ({
-    name: t.name,
-    description: t.description,
-    requiresApproval: t.requiresApproval === true || typeof t.requiresApproval === 'function',
-    source: t.source ?? 'builtin',
-    enabled: !off.has(t.name)
-  }))
+  return getAllTools().map((t) => {
+    const defaultApproval =
+      typeof t.requiresApproval === 'function' ? 'dynamic' : t.requiresApproval ? 'ask' : 'auto'
+    return {
+      name: t.name,
+      description: t.description,
+      requiresApproval: defaultApproval !== 'auto',
+      defaultApproval,
+      approval: approval?.[t.name],
+      source: t.source ?? 'builtin',
+      enabled: !off.has(t.name)
+    }
+  })
 }
 
-/** 本次调用是否需要人工确认（`requiresApproval` 可以按参数动态判断） */
-export function toolNeedsApproval(tool: ToolDefinition, args: Record<string, unknown>): boolean {
+/**
+ * 本次调用是否需要人工确认。优先级：用户对该工具的显式设置 > 全局「自动允许」> 提供方默认
+ * （`requiresApproval` 可以是按参数判断的函数）。
+ */
+export function toolNeedsApproval(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  config: Pick<YayaConfig, 'toolApproval' | 'autoApproveTools'>
+): boolean {
+  const override = config.toolApproval?.[tool.name]
+  if (override === 'ask') return true
+  if (override === 'auto') return false
+  if (config.autoApproveTools) return false
   const r = tool.requiresApproval
   return typeof r === 'function' ? r(args) : r === true
 }

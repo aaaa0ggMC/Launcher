@@ -260,4 +260,24 @@ onMounted(async () => {
     max-height: 140px;
   }
 }
+
+@container yaya (max-width: 600px) {
+  .bubble {
+    max-width: 92%;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    border-radius: 14px 6px 14px 14px;
+  }
+  .user-actions {
+    min-height: 34px;
+  }
+  .user-actions :deep(.v-btn) {
+    width: 34px;
+    height: 34px;
+  }
+  .user-actions :deep(.v-icon) {
+    font-size: 18px;
+  }
+}
 </style>

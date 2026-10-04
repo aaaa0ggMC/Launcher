@@ -78,6 +78,7 @@ git submodule update --remote src/main/ui/assets/game-icon-pack
 - `apps` → `chokidar`
 - `dashboard` → `gridstack`
 - `rungame` → `three`（+ devDeps `@types/three`）
+- `yaya` → `openai` / `katex`（数学公式，渲染端按需加载）
 - 其余 ability 只用框架提供的东西（vue/vuetify 等），`package.json` 留空
 
 **规则与机制**：

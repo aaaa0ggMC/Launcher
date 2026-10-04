@@ -229,9 +229,12 @@ const commands: CommandSpec[] = [
 
   {
     name: 'yaya.tools-list',
-    description: '列出智能体可用的工具（含是否需要确认、是否被禁用）',
+    description: '列出智能体可用的工具（含提供方默认审批、用户覆盖、是否被禁用）',
     usage: 'yaya.tools-list',
-    run: async () => listToolInfo(loadYayaConfig().disabledTools)
+    run: async () => {
+      const cfg = loadYayaConfig()
+      return listToolInfo(cfg.disabledTools, cfg.toolApproval)
+    }
   },
 
   // 9. 中止当前运行中的工作流
@@ -250,11 +253,13 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.workflow-approve',
     description: '授权或拒绝当前挂起的工具调用',
-    usage: 'yaya.workflow-approve --session <sessionId> --approved <true|false>',
+    usage:
+      'yaya.workflow-approve --session <sessionId> --approved <true|false> [--reason <拒绝理由>]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
       const approved = ctx.named.approved === true || ctx.named.approved === 'true'
-      const ok = approveToolCall(sessionId, approved)
+      const reason = ctx.named.reason !== undefined ? String(ctx.named.reason) : undefined
+      const ok = approveToolCall(sessionId, approved, reason)
       return { ok }
     }
   },

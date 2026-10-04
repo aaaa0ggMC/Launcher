@@ -282,11 +282,12 @@ async function handleAbort(): Promise<void> {
   await loadMessages()
 }
 
-async function handleApprove(approved: boolean): Promise<void> {
+async function handleApprove(approved: boolean, reason?: string): Promise<void> {
   if (!activeSessionId.value) return
   await window.cockpit.command('yaya.workflow-approve', {
     session: activeSessionId.value,
-    approved
+    approved,
+    ...(reason ? { reason } : {})
   })
 }
 
@@ -666,7 +667,7 @@ watch(isRunning, (now, before) => {
               <v-icon icon="mdi-dots-vertical" />
             </v-btn>
           </template>
-          <v-list density="comfortable" min-width="220">
+          <v-list density="compact" min-width="190" class="yaya-menu">
             <v-list-item
               prepend-icon="mdi-language-markdown-outline"
               :title="t('yaya.export_md', '导出为 Markdown')"
@@ -856,6 +857,8 @@ watch(isRunning, (now, before) => {
   inset: 0;
   display: flex;
   overflow: hidden;
+  /* 子组件用 @container yaya (…) 按页面自身宽度收紧，不看窗口宽度（缩放 / 嵌入时也对） */
+  container: yaya / inline-size;
 }
 
 /* ---- 会话侧栏 ---- */
@@ -916,7 +919,8 @@ watch(isRunning, (now, before) => {
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
 }
 .title-block {
-  flex: 1 1 auto;
+  /* basis 0：标题只用剩余空间，模型按钮优先显示完整 */
+  flex: 1 1 0;
   min-width: 0;
   padding-left: 4px;
 }
@@ -1166,5 +1170,65 @@ watch(isRunning, (now, before) => {
   .empty {
     padding-top: 4vh;
   }
+}
+
+/* ---- 小窗口（页面宽 ≤ 600px）：整体收紧 ---- */
+@container yaya (max-width: 600px) {
+  .topbar {
+    min-height: 50px;
+    padding: 4px 6px;
+    gap: 2px;
+  }
+  .assistant-name {
+    font-size: 0.95rem;
+  }
+  .session-title {
+    font-size: 0.72rem;
+  }
+  .model-btn {
+    max-width: 48%;
+    min-height: 34px;
+    padding: 2px 6px 2px 10px;
+    gap: 6px;
+    border-radius: 10px;
+  }
+  .model-name {
+    font-size: 0.78rem;
+  }
+  .provider-name {
+    display: none;
+  }
+  .thread {
+    padding: 12px 10px 8px;
+    gap: 14px;
+  }
+  .composer {
+    padding: 4px 8px 8px;
+  }
+  .empty {
+    padding-top: 3vh;
+  }
+  .empty-title {
+    font-size: 1.2rem;
+  }
+  .empty-sub {
+    font-size: 0.82rem;
+    margin-bottom: 18px;
+  }
+  .suggestion {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+}
+
+.yaya-menu :deep(.v-list-item) {
+  min-height: 40px;
+}
+.yaya-menu :deep(.v-list-item-title) {
+  font-size: 0.875rem;
+}
+.yaya-menu :deep(.v-list-item__spacer) {
+  width: 14px !important;
 }
 </style>

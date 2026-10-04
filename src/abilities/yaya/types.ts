@@ -31,6 +31,8 @@ export interface ToolCallItem {
   error?: string
   status?: 'pending' | 'awaiting_approval' | 'executing' | 'success' | 'failed'
   ms?: number
+  /** 用户拒绝时给的理由（已作为工具结果回传给模型） */
+  rejectReason?: string
 }
 
 export interface MessageNode {
@@ -157,6 +159,11 @@ export interface YayaConfig {
   defaultWorkflow?: string
   /** 被用户禁用的工具名（缺省 = 全部启用） */
   disabledTools?: string[]
+  /**
+   * 逐工具审批覆盖：'ask' = 每次都要确认，'auto' = 直接执行；缺省 = 工具提供方的默认值。
+   * 显式覆盖优先于全局 `autoApproveTools`（用户点名要确认的工具，开了全局自动也照样确认）。
+   */
+  toolApproval?: Record<string, ToolApprovalMode>
   maxLoopSteps: number
   streamOutput: boolean
   providers: ProviderConfig[]
@@ -195,11 +202,21 @@ export interface ToolExecutionContext {
   onProgress?: (progress: unknown) => void
 }
 
+export type ToolApprovalMode = 'ask' | 'auto'
+
 /** `yaya.tools-list` 的条目（给设置页 / agent 看的工具清单） */
 export interface ToolInfo {
   name: string
   description: string
+  /** 提供方默认是否需要确认（`defaultApproval !== 'auto'`），保留给旧调用方 */
   requiresApproval: boolean
+  /**
+   * 提供方默认：ask = 总要确认；auto = 直接执行；dynamic = 按参数判断
+   * （如 cockpit_command 只对需授权的命令确认）
+   */
+  defaultApproval: 'ask' | 'auto' | 'dynamic'
+  /** 用户覆盖（来自 `toolApproval`）；undefined = 跟随默认 */
+  approval?: ToolApprovalMode
   source: 'builtin' | 'mcp' | 'custom'
   enabled: boolean
 }

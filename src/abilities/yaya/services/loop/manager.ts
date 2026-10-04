@@ -193,10 +193,10 @@ export function abortWorkflow(sessionId: string): boolean {
   return true
 }
 
-export function approveToolCall(sessionId: string, approved: boolean): boolean {
+export function approveToolCall(sessionId: string, approved: boolean, reason?: string): boolean {
   const runner = activeRunners.get(sessionId)
   if (!runner) return false
-  runner.resolveApproval(approved)
+  runner.resolveApproval(approved, reason)
   return true
 }
 

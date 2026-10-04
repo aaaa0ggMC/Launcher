@@ -23,7 +23,7 @@ const target = computed<[number, number]>(() => [props.request?.x ?? 0, props.re
 
 <template>
   <v-menu v-model="open" :target="target" location="bottom start" :close-on-content-click="true">
-    <v-list density="comfortable" min-width="220" class="message-menu" role="menu">
+    <v-list density="compact" min-width="180" class="message-menu" role="menu">
       <template v-for="item in items" :key="item.key">
         <v-divider v-if="item.divider" class="my-1" />
         <v-list-item
@@ -41,6 +41,15 @@ const target = computed<[number, number]>(() => [props.request?.x ?? 0, props.re
 
 <style scoped>
 .message-menu :deep(.v-list-item) {
-  min-height: 44px;
+  min-height: 40px;
+}
+.message-menu :deep(.v-list-item-title) {
+  font-size: 0.875rem;
+}
+.message-menu :deep(.v-list-item__prepend > .v-icon) {
+  font-size: 20px;
+}
+.message-menu :deep(.v-list-item__spacer) {
+  width: 14px !important;
 }
 </style>

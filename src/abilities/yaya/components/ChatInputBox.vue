@@ -227,9 +227,10 @@ defineExpose({ focus: () => textarea.value?.focus() })
           variant="tonal"
           prepend-icon="mdi-stop"
           class="send-btn"
+          :aria-label="t('yaya.stop', '停止')"
           @click="emit('abort')"
         >
-          {{ t('yaya.stop', '停止') }}
+          <span class="btn-text">{{ t('yaya.stop', '停止') }}</span>
         </v-btn>
         <v-btn
           v-else
@@ -238,9 +239,10 @@ defineExpose({ focus: () => textarea.value?.focus() })
           prepend-icon="mdi-arrow-up"
           class="send-btn"
           :disabled="!canSend"
+          :aria-label="t('yaya.send', '发送')"
           @click="send"
         >
-          {{ t('yaya.send', '发送') }}
+          <span class="btn-text">{{ t('yaya.send', '发送') }}</span>
         </v-btn>
       </div>
     </div>
@@ -412,6 +414,46 @@ defineExpose({ focus: () => textarea.value?.focus() })
   }
   .att {
     max-width: 100%;
+  }
+}
+
+@container yaya (max-width: 600px) {
+  .input-card {
+    padding: 6px 8px 4px;
+    border-radius: 16px;
+  }
+  .input-textarea :deep(textarea) {
+    font-size: 0.9rem;
+    padding: 4px 4px 2px;
+  }
+  .input-tools {
+    min-height: 36px;
+    gap: 4px;
+  }
+  .hint {
+    display: none;
+  }
+  .wf-pick {
+    min-height: 30px;
+    max-width: 130px;
+    padding: 2px 6px 2px 8px;
+    font-size: 0.75rem;
+  }
+  .att {
+    min-height: 40px;
+  }
+}
+/* 很窄时发送 / 停止只留图标（保留 aria-label） */
+@container yaya (max-width: 420px) {
+  .send-btn .btn-text {
+    display: none;
+  }
+  .send-btn {
+    min-width: 44px !important;
+    padding-inline: 10px !important;
+  }
+  .send-btn :deep(.v-btn__prepend) {
+    margin-inline: 0 !important;
   }
 }
 </style>

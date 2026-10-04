@@ -37,12 +37,17 @@ import type { LoopContext, WorkflowSnapshot, WorkflowStatus } from './types'
 
 const log = makeLogger('yaya-loop')
 
+interface ApprovalDecision {
+  approved: boolean
+  reason?: string
+}
+
 /** 用户主动停止时写进 message.error 的标记，界面据此显示「已停止」而不是错误横幅 */
 export const ABORTED_MARK = 'aborted'
 
 export class WorkflowRunner {
   private ctx: LoopContext
-  private approvalResolver: ((approved: boolean) => void) | null = null
+  private approvalResolver: ((decision: ApprovalDecision) => void) | null = null
   private abortController = new AbortController()
   private readonly startedAt = Date.now()
   private bufferedContent = ''
@@ -99,9 +104,10 @@ export class WorkflowRunner {
     this.emitSnapshot()
   }
 
-  resolveApproval(approved: boolean): void {
+  /** 用户对挂起工具调用的决定；拒绝时可附理由（会作为工具结果回传给模型） */
+  resolveApproval(approved: boolean, reason?: string): void {
     if (this.approvalResolver) {
-      this.approvalResolver(approved)
+      this.approvalResolver({ approved, reason: reason?.trim().slice(0, 2000) || undefined })
       this.approvalResolver = null
     }
   }
@@ -402,24 +408,30 @@ export class WorkflowRunner {
         continue
       }
 
-      if (toolNeedsApproval(def, args) && !this.ctx.config.autoApproveTools) {
+      if (toolNeedsApproval(def, args, this.ctx.config)) {
         call.status = 'awaiting_approval'
         this.ctx.pendingApprovalTool = call
         updateMessage(assistantMsgId, { toolCalls, status: 'waiting_approval' })
         this.setStatus('waiting_approval')
 
-        const approved = await new Promise<boolean>((resolve) => {
+        const decision = await new Promise<ApprovalDecision>((resolve) => {
           this.approvalResolver = resolve
         })
         this.ctx.pendingApprovalTool = undefined
         updateMessage(assistantMsgId, { status: 'tool_executing' })
-        if (!approved) {
-          fail(
-            call,
-            this.aborted
-              ? t('yaya.err.aborted_before_tool', '用户停止，未执行')
-              : t('yaya.err.rejected', '用户拒绝了执行该工具')
-          )
+        if (!decision.approved) {
+          if (this.aborted) fail(call, t('yaya.err.aborted_before_tool', '用户停止，未执行'))
+          else if (decision.reason) {
+            call.rejectReason = decision.reason
+            fail(
+              call,
+              te(
+                'yaya.err.rejected_reason',
+                { reason: decision.reason },
+                '用户拒绝了执行该工具，理由：{reason}'
+              )
+            )
+          } else fail(call, t('yaya.err.rejected', '用户拒绝了执行该工具'))
           continue
         }
       }

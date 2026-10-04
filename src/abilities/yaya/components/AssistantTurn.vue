@@ -24,7 +24,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'switchBranch', messageId: string): void
-  (e: 'approve', approved: boolean): void
+  (e: 'approve', approved: boolean, reason?: string): void
   (e: 'regenerate', fromMessageId: string): void
   (e: 'menu', req: MessageMenuRequest): void
 }>()
@@ -148,7 +148,7 @@ async function copyTurn(): Promise<void> {
           v-if="pendingCall"
           :call="pendingCall"
           :awaiting-approval="true"
-          @approve="(ok) => emit('approve', ok)"
+          @approve="(ok: boolean, reason?: string) => emit('approve', ok, reason)"
         />
 
         <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
@@ -542,6 +542,32 @@ async function copyTurn(): Promise<void> {
 .md-body :deep(.hljs-built_in) {
   color: rgb(var(--v-theme-info));
 }
+.md-body :deep(.md-math-display) {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0.4em 0 0.75em;
+  padding: 2px 0;
+}
+.md-body :deep(.md-math-display .katex-display) {
+  margin: 0;
+}
+.md-body :deep(.katex) {
+  font-size: 1.1em;
+}
+/* 长行内公式：可横向滚动的小盒子，窄屏不撑破气泡 */
+.md-body :deep(.md-math-wide) {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
+.md-body :deep(.md-math-src) {
+  font-family: ui-monospace, monospace;
+  font-size: 0.86em;
+  opacity: 0.75;
+}
 .md-body :deep(.hljs-deletion) {
   color: rgb(var(--v-theme-error));
 }
@@ -553,6 +579,59 @@ async function copyTurn(): Promise<void> {
   .bubble {
     padding: 12px 14px;
     border-radius: 16px;
+  }
+}
+
+@container yaya (max-width: 600px) {
+  .assistant-turn {
+    gap: 0;
+  }
+  .avatar {
+    display: none;
+  }
+  .turn-col {
+    gap: 4px;
+  }
+  .turn-head {
+    min-height: 28px;
+  }
+  .turn-name {
+    font-size: 0.82rem;
+  }
+  .bubble {
+    padding: 10px 12px;
+    gap: 10px;
+    border-radius: 14px;
+  }
+  .md-body {
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .md-body :deep(table) {
+    font-size: 0.82rem;
+  }
+  .md-body :deep(th),
+  .md-body :deep(td) {
+    padding: 4px 8px;
+  }
+  .md-body :deep(pre) {
+    padding: 8px 10px;
+    font-size: 0.8rem;
+  }
+  .turn-actions {
+    min-height: 36px;
+    margin-left: -6px;
+  }
+  .turn-actions :deep(.v-btn) {
+    width: 34px;
+    height: 34px;
+  }
+  .turn-actions :deep(.v-icon) {
+    font-size: 18px;
+  }
+  .usage {
+    font-size: 0.72rem;
+    margin-left: 4px;
   }
 }
 </style>

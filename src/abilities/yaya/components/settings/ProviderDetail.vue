@@ -151,11 +151,7 @@ const filteredModels = computed(() => {
         </v-btn>
       </div>
       <div v-else-if="confirmClearKey" class="d-flex align-center ga-1 flex-shrink-0 key-side">
-        <v-btn
-          variant="text"
-          color="error"
-          @click="doClearKey"
-        >
+        <v-btn variant="text" color="error" @click="doClearKey">
           {{ t('yaya.settings.api_key_clear_confirm', '确定清除？') }}
         </v-btn>
         <v-btn variant="text" @click="confirmClearKey = false">
