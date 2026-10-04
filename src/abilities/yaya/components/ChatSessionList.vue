@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useI18n } from '@ui/i18n'
 import type { Session } from '../types'
@@ -54,11 +54,72 @@ const vFocus = {
   }
 }
 
-const filteredSessions = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  if (!q) return props.sessions
-  return props.sessions.filter((s) => s.title.toLowerCase().includes(q))
+// ---- 搜索：标题本地过滤 + 消息正文由主进程检索（防抖，≥ 2 个字符才查） ----
+interface ContentHit {
+  sessionId: string
+  messageId: string
+  role: 'user' | 'assistant'
+  snippet: string
+  matches: number
+}
+const contentHits = ref<Map<string, ContentHit>>(new Map())
+const searching = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSeq = 0
+watch(search, (value) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = (value ?? '').trim()
+  if (q.length < 2) {
+    contentHits.value = new Map()
+    searching.value = false
+    return
+  }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq
+    try {
+      const hits = (await window.cockpit.command('yaya.sessions-search', {
+        query: q,
+        limit: 50
+      })) as ContentHit[]
+      if (seq === searchSeq) contentHits.value = new Map(hits.map((h) => [h.sessionId, h]))
+    } catch {
+      if (seq === searchSeq) contentHits.value = new Map()
+    } finally {
+      if (seq === searchSeq) searching.value = false
+    }
+  }, 250)
 })
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+const filteredSessions = computed(() => {
+  const q = (search.value ?? '').trim().toLowerCase()
+  if (!q) return props.sessions
+  return props.sessions.filter(
+    (s) => s.title.toLowerCase().includes(q) || contentHits.value.has(s.id)
+  )
+})
+
+/** 片段按关键词切开，命中部分用 <mark>（纯文本拼接，不用 v-html） */
+function highlight(text: string): { text: string; hit: boolean }[] {
+  const q = (search.value ?? '').trim()
+  if (!q) return [{ text, hit: false }]
+  const out: { text: string; hit: boolean }[] = []
+  const lower = text.toLowerCase()
+  const needle = q.toLowerCase()
+  let i = 0
+  for (;;) {
+    const at = lower.indexOf(needle, i)
+    if (at < 0) break
+    if (at > i) out.push({ text: text.slice(i, at), hit: false })
+    out.push({ text: text.slice(at, at + q.length), hit: true })
+    i = at + q.length
+  }
+  if (i < text.length) out.push({ text: text.slice(i), hit: false })
+  return out
+}
 
 interface SessionGroup {
   label: string
@@ -162,7 +223,6 @@ function doDelete(): void {
       <v-spacer />
       <v-btn
         icon="mdi-import"
-        size="small"
         variant="text"
         density="comfortable"
         :title="t('yaya.sessions.import', '导入 ChatGPT 记录')"
@@ -179,7 +239,8 @@ function doDelete(): void {
       v-model="search"
       class="session-search flex-shrink-0 mb-2"
       prepend-inner-icon="mdi-magnify"
-      :placeholder="t('yaya.sessions.search', '搜索会话...')"
+      :placeholder="t('yaya.sessions.search_content', '搜索标题或内容…')"
+      :loading="searching"
       density="compact"
       variant="outlined"
       hide-details
@@ -240,11 +301,29 @@ function doDelete(): void {
               <v-list-item-title class="text-body-2 font-weight-medium text-truncate">
                 {{ s.title }}
               </v-list-item-title>
+              <div v-if="contentHits.get(s.id)" class="session-hit text-medium-emphasis">
+                <span
+                  v-for="(part, pi) in highlight(contentHits.get(s.id)!.snippet)"
+                  :key="pi"
+                  :class="{ 'hit-mark': part.hit }"
+                  >{{ part.text }}</span
+                >
+              </div>
               <v-list-item-subtitle
                 class="text-caption text-medium-emphasis d-flex align-center ga-1"
               >
                 <span>{{ formatRelative(s.updatedAt) }}</span>
                 <span v-if="isRunning(s.id)">{{ t('yaya.sessions.running', '生成中') }}</span>
+                <span v-if="(contentHits.get(s.id)?.matches ?? 0) > 1">
+                  ·
+                  {{
+                    te(
+                      'yaya.sessions.matches',
+                      { n: String(contentHits.get(s.id)!.matches) },
+                      '{n} 处匹配'
+                    )
+                  }}
+                </span>
               </v-list-item-subtitle>
             </template>
 
@@ -333,6 +412,24 @@ function doDelete(): void {
   background: transparent;
 }
 
+/* Vuetify 的 .v-input 自带 flex: 1 1 auto，放在纵向 flex 列里会被撑满整列 */
+.session-search {
+  flex: 0 0 auto !important;
+}
+.session-hit {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin: 2px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.hit-mark {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+}
 .session-search :deep(.v-field) {
   border-radius: 8px;
 }

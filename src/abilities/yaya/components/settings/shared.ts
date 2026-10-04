@@ -14,6 +14,15 @@ export interface ProviderDraft {
   models: string[]
 }
 
+/** 外壳注入给各分区的保存接口（配置改为「改了即保存」） */
+export interface YayaSettingsSaveApi {
+  /** 立刻保存一次：密钥写入等不适合走防抖的字段用 */
+  saveNow: () => void
+}
+
+/** provide / inject 的 key：由 YayaSettingsSection.vue 提供，分区组件按需取用 */
+export const YAYA_SAVE_API_KEY = 'yaya:settings-save'
+
 /** 协议类型下拉项（标题走翻译，由各传入自己的 t） */
 export function providerTypeItems(
   t: (key: string, fallback?: string) => string

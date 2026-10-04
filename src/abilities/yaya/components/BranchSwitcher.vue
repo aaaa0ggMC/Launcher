@@ -23,7 +23,6 @@ const index = computed(() => Math.max(0, props.ids.indexOf(props.current)))
     <v-btn
       icon="mdi-chevron-left"
       variant="text"
-      size="small"
       density="comfortable"
       :disabled="index <= 0"
       :title="t('yaya.branch_prev', '上一个分支')"
@@ -34,7 +33,6 @@ const index = computed(() => Math.max(0, props.ids.indexOf(props.current)))
     <v-btn
       icon="mdi-chevron-right"
       variant="text"
-      size="small"
       density="comfortable"
       :disabled="index >= ids.length - 1"
       :title="t('yaya.branch_next', '下一个分支')"
@@ -52,7 +50,7 @@ const index = computed(() => Math.max(0, props.ids.indexOf(props.current)))
   color: rgba(var(--v-theme-on-surface), 0.7);
 }
 .branch-index {
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
   min-width: 3em;
   text-align: center;

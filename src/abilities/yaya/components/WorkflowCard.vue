@@ -138,7 +138,7 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
       <v-progress-circular v-if="live" indeterminate size="16" width="2" color="primary" />
       <v-icon
         v-else
-        size="18"
+        size="20"
         :icon="
           status === 'error'
             ? 'mdi-alert-circle-outline'
@@ -262,7 +262,7 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 42px;
+  min-height: 46px;
   padding: 8px 12px;
   border: none;
   background: none;
@@ -293,7 +293,7 @@ const md = (text: string): string => renderMarkdown(text, labels.value)
 }
 .wf-meta {
   flex-shrink: 0;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: rgba(var(--v-theme-on-surface), 0.6);
   font-variant-numeric: tabular-nums;
 }

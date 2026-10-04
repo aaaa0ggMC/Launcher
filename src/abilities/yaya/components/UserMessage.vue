@@ -152,17 +152,17 @@ onMounted(async () => {
         <v-btn
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
           :aria-label="t('yaya.copy', '复制')"
           @click="copy"
         >
-          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="18" />
+          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="20" />
         </v-btn>
         <v-btn
           icon="mdi-pencil-outline"
           variant="text"
-          size="small"
+          density="comfortable"
           :disabled="busy"
           :title="t('yaya.edit', '编辑并重新发送')"
           :aria-label="t('yaya.edit', '编辑并重新发送')"
@@ -171,7 +171,7 @@ onMounted(async () => {
         <v-btn
           icon="mdi-dots-horizontal"
           variant="text"
-          size="small"
+          density="comfortable"
           :title="t('yaya.more', '更多')"
           :aria-label="t('yaya.more', '更多')"
           @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
@@ -233,7 +233,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 2px;
-  min-height: 32px;
+  min-height: 44px;
   opacity: 0;
   transition: opacity 0.15s;
 }

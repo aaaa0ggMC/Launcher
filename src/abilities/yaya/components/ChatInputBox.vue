@@ -164,7 +164,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           v-if="canExpand"
           :icon="expanded ? 'mdi-arrow-collapse' : 'mdi-arrow-expand'"
           variant="text"
-          size="small"
+          density="comfortable"
           class="expand-btn"
           :title="expanded ? t('yaya.input.collapse', '收起') : t('yaya.input.expand', '展开编辑')"
           :aria-label="
@@ -178,7 +178,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
         <v-btn
           icon="mdi-paperclip"
           variant="text"
-          size="small"
+          density="comfortable"
           :disabled="importing"
           :title="t('yaya.input.attach', '添加附件')"
           :aria-label="t('yaya.input.attach', '添加附件')"

@@ -442,3 +442,67 @@ export function findLatestLeaf(nodeId: string): string {
     curr = row.id
   }
 }
+
+export interface SessionSearchHit {
+  sessionId: string
+  messageId: string
+  role: 'user' | 'assistant'
+  /** 命中位置附近的一小段文字 */
+  snippet: string
+  /** 该会话内命中的消息条数 */
+  matches: number
+}
+
+/**
+ * 全文检索消息内容（user / assistant 正文，不含工具输出）。每个会话只返回最近的一条命中 +
+ * 命中条数，按会话更新时间倒序。LIKE + 转义，几万条消息内是毫秒级；调用方自行防抖。
+ */
+export function searchSessionMessages(query: string, limit = 50): SessionSearchHit[] {
+  const q = query.trim()
+  if (!q) return []
+  const pattern = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+  const rows = getYayaDb()
+    .prepare(
+      `SELECT m.id, m.session_id, m.role, m.content, cnt.n AS matches
+       FROM messages m
+       JOIN (
+         SELECT session_id, MAX(created_at) AS last, COUNT(*) AS n
+         FROM messages
+         WHERE role IN ('user', 'assistant') AND content LIKE ? ESCAPE '\\'
+         GROUP BY session_id
+       ) cnt ON cnt.session_id = m.session_id AND cnt.last = m.created_at
+       JOIN sessions s ON s.id = m.session_id
+       WHERE m.role IN ('user', 'assistant') AND m.content LIKE ? ESCAPE '\\'
+       ORDER BY s.updated_at DESC
+       LIMIT ?`
+    )
+    .all(pattern, pattern, limit) as unknown as {
+    id: string
+    session_id: string
+    role: 'user' | 'assistant'
+    content: string
+    matches: number
+  }[]
+  const seen = new Set<string>()
+  const lower = q.toLowerCase()
+  const out: SessionSearchHit[] = []
+  for (const r of rows) {
+    if (seen.has(r.session_id)) continue
+    seen.add(r.session_id)
+    const text = r.content.replace(/\s+/g, ' ')
+    const at = Math.max(0, text.toLowerCase().indexOf(lower))
+    const start = Math.max(0, at - 24)
+    const snippet =
+      (start > 0 ? '…' : '') +
+      text.slice(start, at + q.length + 56) +
+      (at + q.length + 56 < text.length ? '…' : '')
+    out.push({
+      sessionId: r.session_id,
+      messageId: r.id,
+      role: r.role,
+      snippet,
+      matches: r.matches
+    })
+  }
+  return out
+}

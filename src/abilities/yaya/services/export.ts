@@ -173,7 +173,8 @@ function renderMessageMarkdown(
   if (msg.role === 'tool' && ctx.consumed.has(msg.id)) return ''
 
   const out: string[] = []
-  out.push(`## ${index}. ${roleLabel(msg.role, ctx.assistantName)}`)
+  const model = msg.role === 'assistant' && msg.meta?.model ? ` · \`${msg.meta.model}\`` : ''
+  out.push(`## ${index}. ${roleLabel(msg.role, ctx.assistantName)}${model}`)
   if (msg.createdAt) out.push(`_${formatTime(msg.createdAt)}_`)
 
   // 工作流里不进对话的子 Agent 输出（如规划结果）放在回答前，折叠显示

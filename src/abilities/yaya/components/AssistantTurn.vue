@@ -67,6 +67,18 @@ const stoppedByUser = computed(
   () => problem.value?.status === 'interrupted' && problem.value.error === 'aborted'
 )
 
+/** 实际生成本轮回答的模型（取最后一步；中途换过模型时以最后一步为准） */
+const modelUsed = computed(() => {
+  for (let i = props.turn.steps.length - 1; i >= 0; i--) {
+    const m = props.turn.steps[i].meta?.model
+    if (m) return m
+  }
+  return ''
+})
+const providerUsed = computed(
+  () => props.turn.steps.find((s) => s.meta?.provider)?.meta?.provider ?? ''
+)
+
 const usage = computed(() => {
   if (props.turn.workflow?.tokens) return props.turn.workflow.tokens
   return props.turn.steps.reduce((n, s) => n + (s.usage?.total ?? 0), 0)
@@ -104,7 +116,7 @@ async function copyTurn(): Promise<void> {
 <template>
   <div class="assistant-turn">
     <div class="avatar" aria-hidden="true">
-      <v-icon icon="mdi-robot-happy-outline" size="18" />
+      <v-icon icon="mdi-robot-happy-outline" size="22" />
     </div>
 
     <div class="turn-col">
@@ -184,35 +196,39 @@ async function copyTurn(): Promise<void> {
         <v-btn
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
           :aria-label="t('yaya.copy', '复制')"
           @click="copyTurn"
         >
-          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="18" />
+          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="20" />
         </v-btn>
         <v-btn
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="t('yaya.regenerate', '重新生成')"
           :aria-label="t('yaya.regenerate', '重新生成')"
           @click="emit('regenerate', turn.firstId)"
         >
-          <v-icon icon="mdi-refresh" size="18" />
+          <v-icon icon="mdi-refresh" size="20" />
         </v-btn>
         <v-btn
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="t('yaya.more', '更多')"
           :aria-label="t('yaya.more', '更多')"
           @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
         >
-          <v-icon icon="mdi-dots-horizontal" size="18" />
+          <v-icon icon="mdi-dots-horizontal" size="20" />
         </v-btn>
-        <span v-if="usage" class="usage text-disabled">
-          {{ te('yaya.tokens', { n: usage.toLocaleString() }, '{n} tokens') }}
+        <span v-if="modelUsed || usage" class="usage text-medium-emphasis" :title="providerUsed">
+          <span v-if="modelUsed" class="usage-model">{{ modelUsed }}</span>
+          <span v-if="modelUsed && usage"> · </span>
+          <span v-if="usage">{{
+            te('yaya.tokens', { n: usage.toLocaleString() }, '{n} tokens')
+          }}</span>
         </span>
       </div>
     </div>
@@ -226,9 +242,9 @@ async function copyTurn(): Promise<void> {
   min-width: 0;
 }
 .avatar {
-  width: 32px;
-  height: 32px;
-  margin-top: 2px;
+  width: 38px;
+  height: 38px;
+  margin-top: 0;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -247,11 +263,11 @@ async function copyTurn(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
+  min-height: 38px;
 }
 .turn-name {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.95rem;
 }
 /* 助手气泡：玻璃底 + 细边框，压在背景图上也读得清；左上角收成小圆角指向头像 */
 .bubble {
@@ -342,9 +358,10 @@ async function copyTurn(): Promise<void> {
 .turn-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
-  min-height: 36px;
-  margin-left: -6px;
+  min-height: 44px;
+  margin-left: -8px;
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -359,8 +376,12 @@ async function copyTurn(): Promise<void> {
   }
 }
 .usage {
-  font-size: 0.75rem;
-  margin-left: 6px;
+  font-size: 0.8rem;
+  margin-left: 8px;
+  min-width: 0;
+}
+.usage-model {
+  font-family: ui-monospace, monospace;
 }
 
 /* ---- Markdown 正文 ---- */

@@ -16,7 +16,8 @@ import {
   getMessageSiblings,
   updateSession,
   findLatestLeaf,
-  deleteMessageSubtree
+  deleteMessageSubtree,
+  searchSessionMessages
 } from './services/db'
 import {
   startWorkflow,
@@ -57,6 +58,16 @@ const commands: CommandSpec[] = [
     run: async (ctx) => {
       const activeSession = ctx.named.activeSession as string | undefined
       return listSessions(activeSession)
+    }
+  },
+
+  {
+    name: 'yaya.sessions-search',
+    description: '按内容检索会话（匹配用户 / 助手消息正文，每个会话返回一条命中片段与命中数）',
+    usage: 'yaya.sessions-search --query <text> [--limit 50]',
+    run: async (ctx) => {
+      const limit = Math.min(200, Math.max(1, Number(ctx.named.limit) || 50))
+      return searchSessionMessages(String(ctx.named.query ?? ''), limit)
     }
   },
 

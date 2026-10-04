@@ -608,7 +608,7 @@ watch(isRunning, (now, before) => {
         <v-btn
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="t('yaya.toggle_sessions', '会话列表')"
           :aria-label="t('yaya.toggle_sessions', '会话列表')"
           @click="toggleSidebar"
@@ -645,7 +645,7 @@ watch(isRunning, (now, before) => {
           v-if="activeSessionId"
           icon
           variant="text"
-          size="small"
+          density="comfortable"
           :title="t('yaya.new_chat', '新对话')"
           :aria-label="t('yaya.new_chat', '新对话')"
           @click="newChat"
@@ -659,7 +659,7 @@ watch(isRunning, (now, before) => {
               v-bind="menuProps"
               icon
               variant="text"
-              size="small"
+              density="comfortable"
               :title="t('yaya.more', '更多')"
               :aria-label="t('yaya.more', '更多')"
             >
@@ -678,11 +678,6 @@ watch(isRunning, (now, before) => {
               :title="t('yaya.export_jsonl', '导出为 JSONL')"
               :disabled="!activeSessionId"
               @click="exportSession('jsonl')"
-            />
-            <v-list-item
-              prepend-icon="mdi-import"
-              :title="t('yaya.import_chatgpt', '导入 ChatGPT 记录')"
-              @click="handleImport"
             />
             <v-divider class="my-1" />
             <v-list-item
@@ -763,7 +758,7 @@ watch(isRunning, (now, before) => {
             v-if="!stickToBottom && turns.length > 0"
             class="jump-btn"
             icon
-            size="small"
+            density="comfortable"
             variant="elevated"
             :title="t('yaya.jump_bottom', '回到底部')"
             :aria-label="t('yaya.jump_bottom', '回到底部')"

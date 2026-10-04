@@ -268,6 +268,10 @@ export class WorkflowRunner {
     }
     this.ctx.assistantMessageId = messageId
     this.parentId = messageId
+    // 先记下本步用的模型：失败 / 中止的回答也能看出是哪个模型给的
+    updateMessage(messageId, {
+      meta: { ...getMessage(messageId)?.meta, model: this.model, provider: this.ctx.provider.id }
+    })
     this.bufferedContent = ''
     this.bufferedReasoning = ''
 
@@ -280,6 +284,7 @@ export class WorkflowRunner {
           ? t('yaya.wf.step.think', '思考与调用工具')
           : t('yaya.wf.step.answer', '生成回答')),
       messageId,
+      model: this.model,
       status: 'running'
     })
     this.setStatus('streaming')
@@ -327,7 +332,8 @@ export class WorkflowRunner {
       reasoningContent: reasoning || undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       status: toolCalls.length > 0 ? 'tool_executing' : 'completed',
-      usage: result.usage
+      usage: result.usage,
+      meta: { ...getMessage(messageId)?.meta, model: this.model, provider: this.ctx.provider.id }
     })
     this.endStep(step, 'ok', result.usage?.total)
     return { messageId, content, toolCalls }
@@ -339,6 +345,7 @@ export class WorkflowRunner {
       agent: opts.agent,
       kind: 'subagent',
       label: opts.label,
+      model: this.model,
       status: 'running'
     })
     this.setStatus('streaming')

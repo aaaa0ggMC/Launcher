@@ -3,6 +3,7 @@ import { useI18n } from '@ui/i18n'
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { ProviderConfig } from '../../types'
+import { YAYA_SAVE_API_KEY, type YayaSettingsSaveApi } from './shared'
 import { providerTypeItems } from './shared'
 
 defineOptions({ name: 'cockpit-yaya-settings-provider-detail' })
@@ -32,10 +33,27 @@ const emit = defineEmits<{
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t, te } = useI18n(lang)
 
+/** 外壳注入的保存接口：密钥失焦即存，不走防抖 */
+const saveApi = inject<YayaSettingsSaveApi | null>(YAYA_SAVE_API_KEY, null)
+
 const providerTypes = computed(() => providerTypeItems(t))
 
 // 删除：行内二次确认（不用原生 confirm）
 const confirmDelete = ref(false)
+
+// 清除密钥：行内二次确认（没有保存按钮可以反悔）
+const confirmClearKey = ref(false)
+
+// 密钥草稿：只留在本地，失焦 / 回车才写回 provider.apiKey 并立刻保存
+const keyDraft = ref('')
+
+function commitKeyDraft(): void {
+  const value = keyDraft.value.trim()
+  keyDraft.value = ''
+  if (!value) return
+  props.provider.apiKey = value
+  saveApi?.saveNow()
+}
 
 // 模型列表搜索
 const modelQuery = ref('')
@@ -101,10 +119,10 @@ const filteredModels = computed(() => {
       variant="outlined"
     />
 
-    <!-- 密钥：只写不回显 -->
-    <div class="d-flex align-start ga-2">
+    <!-- 密钥：本地草稿，失焦 / 回车才写回并立刻保存（不随打字保存） -->
+    <div class="key-row d-flex align-start ga-2 flex-wrap">
       <v-text-field
-        v-model="provider.apiKey"
+        v-model="keyDraft"
         v-agent-forbidden
         :label="t('yaya.settings.api_key', 'API Key')"
         type="password"
@@ -112,25 +130,40 @@ const filteredModels = computed(() => {
           pendingClearKey
             ? t('yaya.settings.api_key_will_clear', '将在保存后清除')
             : provider.apiKeySet
-              ? t('yaya.settings.api_key_set_placeholder', '已设置（留空则不修改）')
+              ? t('yaya.settings.api_key_draft_placeholder', '已设置（输入新值才会替换）')
               : t('yaya.settings.api_key_placeholder', '输入 API Key（sk-...）')
         "
         variant="outlined"
-        class="flex-grow-1"
+        class="key-field flex-grow-1"
+        @blur="commitKeyDraft"
+        @keydown.enter.prevent="commitKeyDraft"
       />
-      <v-btn
-        v-if="provider.apiKeySet || pendingClearKey"
-        variant="text"
-        color="error"
-        class="key-clear-btn flex-shrink-0 mt-1"
-        @click="pendingClearKey ? emit('undoClearKey', provider.id) : emit('clearKey', provider.id)"
-      >
-        {{
-          pendingClearKey
-            ? t('yaya.settings.api_key_undo_clear', '撤销')
-            : t('yaya.settings.api_key_clear', '清除')
-        }}
-      </v-btn>
+
+      <div v-if="pendingClearKey" class="d-flex align-center ga-1 flex-shrink-0 key-side">
+        <v-btn variant="text" @click="emit('undoClearKey', provider.id)">
+          {{ t('yaya.settings.api_key_undo_clear', '撤销') }}
+        </v-btn>
+      </div>
+      <div v-else-if="confirmClearKey" class="d-flex align-center ga-1 flex-shrink-0 key-side">
+        <v-btn
+          variant="text"
+          color="error"
+          @click="
+            confirmClearKey = false
+            emit('clearKey', provider.id)
+          "
+        >
+          {{ t('yaya.settings.api_key_clear_confirm', '确定清除？') }}
+        </v-btn>
+        <v-btn variant="text" @click="confirmClearKey = false">
+          {{ t('yaya.settings.cancel', '取消') }}
+        </v-btn>
+      </div>
+      <div v-else-if="provider.apiKeySet" class="flex-shrink-0 key-side">
+        <v-btn variant="text" color="error" @click="confirmClearKey = true">
+          {{ t('yaya.settings.api_key_clear', '清除') }}
+        </v-btn>
+      </div>
     </div>
 
     <v-divider />
@@ -237,9 +270,24 @@ const filteredModels = computed(() => {
   overflow-wrap: anywhere;
 }
 
+.key-field {
+  min-width: 0;
+}
+
+.key-side {
+  margin-top: 8px;
+}
+
+/* 窄屏（手机 ≤720px）：密钥输入框独占一行，操作按钮跟在下一行 */
 @media (max-width: 720px) {
-  .key-clear-btn {
+  .key-row {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  .key-side {
     margin-top: 0;
+    justify-content: flex-start;
   }
 }
 </style>

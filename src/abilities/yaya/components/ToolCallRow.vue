@@ -59,7 +59,7 @@ const duration = computed(() => {
       @click="open = !open"
     >
       <v-progress-circular v-if="running" indeterminate size="16" width="2" color="primary" />
-      <v-icon v-else :icon="statusIcon.icon" :color="statusIcon.color" size="18" />
+      <v-icon v-else :icon="statusIcon.icon" :color="statusIcon.color" size="20" />
       <span class="tool-name">{{ call.name }}</span>
       <span class="tool-summary text-medium-emphasis">{{ summary }}</span>
       <span v-if="duration" class="tool-ms text-disabled">{{ duration }}</span>
@@ -120,7 +120,7 @@ const duration = computed(() => {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 12px;
   background: none;
   border: none;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '@ui/i18n'
-import { inject, ref } from 'vue'
+import { inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { YayaConfig } from '../../types'
 
@@ -10,12 +10,31 @@ defineOptions({ name: 'cockpit-yaya-settings-policy' })
 // 外壳统一保存，故关闭「不要修改 props」检查。
 /* eslint-disable vue/no-mutating-props */
 
-defineProps<{
+const props = defineProps<{
   config: YayaConfig
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t } = useI18n(lang)
+
+// 最大步数：用本地草稿输入，失焦 / 回车才夹取（1–100）写回 config，
+// 避免输入过程中的空值 / 超范围值被自动保存
+const stepsDraft = ref('')
+
+watch(
+  () => props.config.maxLoopSteps,
+  (v) => {
+    stepsDraft.value = v === undefined || v === null ? '' : String(v)
+  },
+  { immediate: true }
+)
+
+function commitSteps(): void {
+  const parsed = Number.parseInt(stepsDraft.value, 10)
+  const clamped = Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) : 10
+  stepsDraft.value = String(clamped)
+  props.config.maxLoopSteps = clamped
+}
 </script>
 
 <template>
@@ -59,7 +78,7 @@ const { t } = useI18n(lang)
     </div>
 
     <v-text-field
-      v-model.number="config.maxLoopSteps"
+      v-model="stepsDraft"
       :label="t('yaya.settings.max_loop_steps', '最大循环步数')"
       :hint="t('yaya.settings.max_loop_steps_hint', '单次任务中最多连续执行的步数（1–100）')"
       persistent-hint
@@ -69,6 +88,8 @@ const { t } = useI18n(lang)
       step="1"
       variant="outlined"
       class="max-w-field mt-4"
+      @blur="commitSteps"
+      @keydown.enter.prevent="commitSteps"
     />
   </div>
 </template>

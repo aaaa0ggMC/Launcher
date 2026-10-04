@@ -70,6 +70,9 @@ export interface MessageNode {
 
 export interface MessageMeta {
   workflow?: WorkflowRecord
+  /** 生成这条 assistant 回答时实际使用的模型 / 服务商 id（会话中途换模型也能追溯） */
+  model?: string
+  provider?: string
   [key: string]: unknown
 }
 
@@ -85,6 +88,8 @@ export interface WorkflowStepRecord {
   /** 子 Agent 输出 / 说明正文（Markdown） */
   detail?: string
   messageId?: string
+  /** 这一步调用的模型 */
+  model?: string
   status: 'running' | 'ok' | 'error'
   startedAt: number
   ms?: number
