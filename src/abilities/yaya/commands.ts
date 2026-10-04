@@ -5,28 +5,40 @@
 import { randomUUID } from 'node:crypto'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
+import { SCOPE_EXEC } from '../../main/process/privacy'
 import {
   listSessions,
   getSession,
+  getMessage,
   createSession,
   deleteSession,
-  getMessageBranch,
+  getMessageBranchWithSiblings,
   getMessageSiblings,
-  updateSession
+  updateSession,
+  findLatestLeaf
 } from './services/db'
 import {
   startWorkflow,
+  regenerateWorkflow,
   abortWorkflow,
   approveToolCall,
   getWorkflowSnapshot,
-  reconcileInterruptedWorkflows
+  reconcileInterruptedWorkflows,
+  overlayLiveBuffer,
+  runningSessionIds
 } from './services/loop/manager'
-import { loadYayaConfig, saveYayaConfig } from './services/config'
-import { saveAsset } from './services/assets'
-import { importOpenAiConversations } from './services/importers/openai'
-import type { MessageAttachment, YayaConfig, Session, ProviderConfig } from './types'
-
+import {
+  loadYayaConfig,
+  saveYayaConfig,
+  publicYayaConfig,
+  mergeIncomingYayaConfig
+} from './services/config'
+import { saveAsset, importAssetFromPath, assetDataUrl } from './services/assets'
+import { listToolInfo } from './services/tools/registry'
+import { ioCommands } from './services/io-commands'
+import type { MessageAttachment, YayaConfig, Session, ProviderConfig, ProviderType } from './types'
 import { fetchModelsFromEndpoint } from './services/models'
+import './jobs'
 
 // 系统启动时恢复异常中断的工作流状态
 registerStartupHook(() => {
@@ -82,6 +94,7 @@ const commands: CommandSpec[] = [
     usage: 'yaya.session-delete --id <sessionId>',
     run: async (ctx) => {
       const id = String(ctx.named.id)
+      abortWorkflow(id)
       deleteSession(id)
       return { ok: true, id }
     }
@@ -97,7 +110,7 @@ const commands: CommandSpec[] = [
       const session = getSession(sessionId)
       if (!session) return []
       const leafId = (ctx.named.leaf as string) || session.activeLeafId
-      return getMessageBranch(leafId)
+      return overlayLiveBuffer(sessionId, getMessageBranchWithSiblings(leafId))
     }
   },
 
@@ -115,11 +128,14 @@ const commands: CommandSpec[] = [
   // 7. 切换当前会话的活跃叶子节点（切换分支）
   {
     name: 'yaya.session-switch-leaf',
-    description: '切换会话当前指向的消息分支叶子节点',
-    usage: 'yaya.session-switch-leaf --session <sessionId> --leaf <leafId>',
+    description:
+      '切换到某个消息节点所在的分支（自动沿该节点走到它最近更新的叶子，不会截断后续对话）',
+    usage: 'yaya.session-switch-leaf --session <sessionId> --leaf <messageId>',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
-      const leafId = String(ctx.named.leaf)
+      const node = getMessage(String(ctx.named.leaf))
+      if (!node || node.sessionId !== sessionId) throw new Error('message not in session')
+      const leafId = findLatestLeaf(node.id)
       updateSession(sessionId, { activeLeafId: leafId })
       return { ok: true, sessionId, leafId }
     }
@@ -154,6 +170,27 @@ const commands: CommandSpec[] = [
       const attachments = ctx.named.attachments as MessageAttachment[] | undefined
       return startWorkflow(sessionId, prompt, attachments, parentMessageId)
     }
+  },
+
+  {
+    name: 'yaya.workflow-regenerate',
+    description: '从指定消息往上找到用户提问，重新生成一个新的回答分支（旧回答保留为兄弟分支）',
+    usage: 'yaya.workflow-regenerate --session <sessionId> --message <messageId>',
+    run: async (ctx) => regenerateWorkflow(String(ctx.named.session), String(ctx.named.message))
+  },
+
+  {
+    name: 'yaya.workflow-running',
+    description: '列出当前正在运行工作流的会话 id',
+    usage: 'yaya.workflow-running',
+    run: async () => runningSessionIds()
+  },
+
+  {
+    name: 'yaya.tools-list',
+    description: '列出智能体可用的工具（含是否需要确认、是否被禁用）',
+    usage: 'yaya.tools-list',
+    run: async () => listToolInfo(loadYayaConfig().disabledTools)
   },
 
   // 9. 中止当前运行中的工作流
@@ -194,8 +231,20 @@ const commands: CommandSpec[] = [
 
   // 12. 保存多模态文件资产
   {
+    name: 'yaya.asset-import',
+    description: '把宿主上的文件复制进会话资产目录，返回可作为附件发送的 MessageAttachment',
+    usage: 'yaya.asset-import --session <sessionId> --path <file>',
+    run: async (ctx) => importAssetFromPath(String(ctx.named.session), String(ctx.named.path))
+  },
+  {
+    name: 'yaya.asset-preview',
+    description: '读取图片附件的 data URL（用于界面缩略图，> 4MB 或非图片返回 null）',
+    usage: 'yaya.asset-preview --uri <yaya-asset://…>',
+    run: async (ctx) => assetDataUrl(String(ctx.named.uri))
+  },
+  {
     name: 'yaya.asset-save',
-    description: '将用户上传的图片/文件存储到会话本地资产目录',
+    description: '将 base64 数据存入会话资产目录（--session --name --mimeType --dataBase64）',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
       const name = String(ctx.named.name)
@@ -209,10 +258,8 @@ const commands: CommandSpec[] = [
   // 13. 获取全局配置
   {
     name: 'yaya.config-get',
-    description: '读取 YAYA 全局配置（模型、端点、系统提示词等）',
-    run: async () => {
-      return loadYayaConfig()
-    }
+    description: '读取 YAYA 全局配置（模型、端点、系统提示词等；密钥只返回 apiKeySet）',
+    run: async () => publicYayaConfig(loadYayaConfig())
   },
 
   // 14. 保存全局配置
@@ -221,20 +268,9 @@ const commands: CommandSpec[] = [
     description: '保存 YAYA 全局配置',
     run: async (ctx) => {
       const config = ctx.named.config as YayaConfig
-      saveYayaConfig(config)
+      if (!config || !Array.isArray(config.providers)) throw new Error('invalid config')
+      saveYayaConfig(mergeIncomingYayaConfig(config))
       return { ok: true }
-    }
-  },
-
-  // 15. 导入 ChatGPT 历史会话 (conversations.json)
-  {
-    name: 'yaya.import-openai',
-    description: '将导出的 ChatGPT 会话数据导入 YAYA 消息树',
-    run: async (ctx) => {
-      const raw = String(ctx.named.jsonContent)
-      const parsed = JSON.parse(raw)
-      const list = Array.isArray(parsed) ? parsed : [parsed]
-      return importOpenAiConversations(list)
     }
   },
 
@@ -248,8 +284,7 @@ const commands: CommandSpec[] = [
       const providerId = ctx.named.providerId as string | undefined
       let baseUrl = ctx.named.baseUrl as string | undefined
       let apiKey = ctx.named.apiKey as string | undefined
-      let type = ctx.named.type as
-        'openai' | 'codex-proxy' | 'anthropic' | 'gemini' | 'ollama' | undefined
+      let type = ctx.named.type as ProviderType | undefined
 
       const cfg = loadYayaConfig()
       let targetProvider: ProviderConfig | undefined
@@ -274,7 +309,25 @@ const commands: CommandSpec[] = [
 
       return res
     }
-  }
+  },
+
+  ...ioCommands
 ]
+
+/**
+ * 隐私声明：工作流里的工具能执行 shell / 写文件 → 等同 system.exec；
+ * 配置里有密钥、自动审批开关 → 只许用户本人改。
+ */
+const PRIVACY: Record<string, CommandSpec['privacy']> = {
+  'yaya.workflow-start': { requires: [SCOPE_EXEC] },
+  'yaya.workflow-regenerate': { requires: [SCOPE_EXEC] },
+  'yaya.workflow-approve': { agent: 'deny' },
+  'yaya.config-save': { agent: 'deny' },
+  'yaya.asset-import': { requires: [SCOPE_EXEC] },
+  'yaya.provider-fetch-models': { agent: 'deny' }
+}
+for (const c of commands) {
+  if (PRIVACY[c.name] && !c.privacy) c.privacy = PRIVACY[c.name]
+}
 
 export default commands

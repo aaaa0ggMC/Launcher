@@ -4,11 +4,12 @@
  */
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { runCommand, listCommands } from '../../../../main/process/commands/registry'
-import type { ToolDefinition, ToolExecutionContext } from '../../types'
-import { getSession } from '../db'
+import type { ToolDefinition, ToolInfo } from '../../types'
 
 const execAsync = promisify(exec)
 
@@ -24,6 +25,36 @@ export function unregisterTool(name: string): void {
 
 export function getAllTools(): ToolDefinition[] {
   return Array.from(toolMap.values())
+}
+
+/** 按配置过滤掉被禁用的工具 */
+export function getEnabledTools(disabled: string[] | undefined): ToolDefinition[] {
+  const off = new Set(disabled ?? [])
+  return getAllTools().filter((t) => !off.has(t.name))
+}
+
+export function listToolInfo(disabled: string[] | undefined): ToolInfo[] {
+  const off = new Set(disabled ?? [])
+  return getAllTools().map((t) => ({
+    name: t.name,
+    description: t.description,
+    requiresApproval: t.requiresApproval === true || typeof t.requiresApproval === 'function',
+    source: t.source ?? 'builtin',
+    enabled: !off.has(t.name)
+  }))
+}
+
+/** 本次调用是否需要人工确认（`requiresApproval` 可以按参数动态判断） */
+export function toolNeedsApproval(tool: ToolDefinition, args: Record<string, unknown>): boolean {
+  const r = tool.requiresApproval
+  return typeof r === 'function' ? r(args) : r === true
+}
+
+/** 工具结果回传给模型前的长度上限，避免一次工具输出撑爆上下文 */
+export const MAX_TOOL_RESULT_CHARS = 32_000
+
+function clip(text: string, max = MAX_TOOL_RESULT_CHARS): string {
+  return text.length > max ? `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]` : text
 }
 
 export function getTool(name: string): ToolDefinition | undefined {
@@ -73,9 +104,17 @@ registerTool({
     }
   },
   source: 'builtin',
+  // 有授权要求（system.exec / control 等）或只许用户本人调用的命令，执行前要人工确认
+  requiresApproval: (args) => {
+    const spec = listCommands().find((c) => c.name === String(args.command))
+    return !spec || Boolean(spec.privacy?.requires?.length) || spec.privacy?.agent === 'deny'
+  },
   handler: async (args) => {
     const cmd = String(args.command)
     const cmdArgs = (args.args as Record<string, unknown>) || {}
+    // 不允许智能体再驱动自己（递归启动工作流 / 改自己的配置）
+    if (cmd.startsWith('yaya.'))
+      return { ok: false, error: 'yaya.* commands are not available to the agent' }
     try {
       const res = await runCommand(cmd, cmdArgs)
       return { ok: true, data: res }
@@ -95,10 +134,11 @@ registerTool({
   },
   source: 'builtin',
   handler: async () => {
-    const cmds = listCommands()
+    const cmds = listCommands().filter((c) => !c.name.startsWith('yaya.'))
     return cmds.map((c) => ({
       name: c.name,
-      description: c.description
+      description: c.description,
+      usage: c.usage
     }))
   }
 })
@@ -106,13 +146,14 @@ registerTool({
 // 4. 读取本地文件
 registerTool({
   name: 'read_file',
-  description: '读取本机指定路径的文本文件内容。',
+  description: '读取本机文本文件（可分段：offset + maxLines）；路径是目录时列出目录内容。',
   parameters: {
     type: 'object',
     required: ['path'],
     properties: {
       path: { type: 'string', description: '绝对路径' },
-      maxLines: { type: 'number', description: '最多读取行数，默认 200' }
+      offset: { type: 'number', description: '起始行（0 起），默认 0' },
+      maxLines: { type: 'number', description: '最多读取行数，默认 400' }
     }
   },
   source: 'builtin',
@@ -121,14 +162,25 @@ registerTool({
     if (!existsSync(filePath)) {
       return { error: `File not found: ${filePath}` }
     }
-    const maxLines = typeof args.maxLines === 'number' ? args.maxLines : 200
+    const st = await stat(filePath)
+    if (st.isDirectory()) {
+      const entries = await readdir(filePath, { withFileTypes: true })
+      return {
+        directory: filePath,
+        entries: entries.slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)),
+        isTruncated: entries.length > 500
+      }
+    }
+    const offset = typeof args.offset === 'number' ? Math.max(0, Math.floor(args.offset)) : 0
+    const maxLines =
+      typeof args.maxLines === 'number' ? Math.max(1, Math.floor(args.maxLines)) : 400
     const content = await readFile(filePath, 'utf8')
     const lines = content.split('\n')
-    const truncated = lines.slice(0, maxLines).join('\n')
     return {
       totalLines: lines.length,
-      isTruncated: lines.length > maxLines,
-      content: truncated
+      offset,
+      isTruncated: offset + maxLines < lines.length,
+      content: clip(lines.slice(offset, offset + maxLines).join('\n'))
     }
   }
 })
@@ -150,6 +202,7 @@ registerTool({
   handler: async (args) => {
     const filePath = String(args.path)
     const content = String(args.content)
+    await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, 'utf8')
     return { ok: true, path: filePath, bytesWritten: Buffer.byteLength(content) }
   }
@@ -170,47 +223,72 @@ registerTool({
     }
   },
   source: 'builtin',
-  handler: async (args) => {
+  handler: async (args, ctx) => {
     const cmd = String(args.command)
-    const cwd = args.cwd ? String(args.cwd) : process.cwd()
+    const cwd = args.cwd ? String(args.cwd) : homedir()
     const timeout = typeof args.timeoutMs === 'number' ? args.timeoutMs : 30_000
     try {
-      const { stdout, stderr } = await execAsync(cmd, { cwd, timeout })
-      return { ok: true, stdout, stderr }
+      const { stdout, stderr } = await execAsync(cmd, {
+        cwd,
+        timeout,
+        maxBuffer: 8 * 1024 * 1024,
+        signal: ctx.signal
+      })
+      return { ok: true, stdout: clip(stdout), stderr: clip(stderr, 8000) }
     } catch (e: unknown) {
-      const err = e as { message?: string; stdout?: string; stderr?: string }
-      return { ok: false, error: err.message || String(e), stdout: err.stdout, stderr: err.stderr }
+      const err = e as { message?: string; stdout?: string; stderr?: string; code?: number }
+      return {
+        ok: false,
+        exitCode: err.code,
+        error: err.message || String(e),
+        stdout: clip(err.stdout ?? ''),
+        stderr: clip(err.stderr ?? '', 8000)
+      }
     }
   }
 })
 
-// 7. 在会话附件中语义检索文档片段
+// 7. 抓取网页 / HTTP 资源
 registerTool({
-  name: 'search_document',
-  description: '检索当前对话中上传的文件/文档内容，根据关键词获取最相关的段落。',
+  name: 'fetch_url',
+  description: '以 GET 请求抓取 http(s) URL，返回状态码与正文文本（HTML 会去掉标签，长文本截断）。',
   parameters: {
     type: 'object',
-    required: ['query'],
+    required: ['url'],
     properties: {
-      query: { type: 'string', description: '搜索关键词或问题' },
-      assetUri: { type: 'string', description: '可选，限定特定附件的 URI' }
+      url: { type: 'string', description: '完整的 http(s) URL' },
+      maxChars: { type: 'number', description: '正文最多返回字符数，默认 20000' }
     }
   },
   source: 'builtin',
-  handler: async (args, ctx: ToolExecutionContext) => {
-    const query = String(args.query).toLowerCase()
-    const session = getSession(ctx.sessionId)
-    if (!session) return { results: [] }
-
-    // 这里实现一个简单高效的本地关键词匹配搜索
-    return {
-      query,
-      results: [
-        {
-          relevance: 0.95,
-          snippet: `匹配到关于 "${query}" 的文档段落...`
-        }
-      ]
+  handler: async (args, ctx) => {
+    const url = String(args.url)
+    if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'only http(s) URLs are supported' }
+    const maxChars = typeof args.maxChars === 'number' ? Math.max(500, args.maxChars) : 20_000
+    const timeout = AbortSignal.timeout(20_000)
+    const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout
+    const res = await fetch(url, { signal, redirect: 'follow' })
+    const type = res.headers.get('content-type') ?? ''
+    if (!/text|json|xml|javascript/i.test(type)) {
+      return { ok: res.ok, status: res.status, contentType: type, note: 'non-text body omitted' }
     }
+    let text = await res.text()
+    if (/html/i.test(type)) text = htmlToText(text)
+    return { ok: res.ok, status: res.status, contentType: type, content: clip(text, maxChars) }
   }
 })
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>|<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n\n')
+    .trim()
+}

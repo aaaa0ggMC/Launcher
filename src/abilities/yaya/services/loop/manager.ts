@@ -4,8 +4,10 @@
  */
 import { randomUUID } from 'node:crypto'
 import { makeLogger } from '../../../../main/process/logger'
-import type { MessageAttachment } from '../../types'
-import { getSession, insertMessage, getYayaDb, getMessage } from '../db'
+import { getBroadcast } from '../../../../main/process/broadcast'
+import { t } from '../../../../main/process/i18n'
+import type { MessageAttachment, MessageNode } from '../../types'
+import { getSession, insertMessage, updateMessage, getYayaDb, getMessage } from '../db'
 import { loadYayaConfig } from '../config'
 import { getProviderInstance } from '../providers/factory'
 import { WorkflowRunner } from './runner'
@@ -30,24 +32,8 @@ export function getWorkflowSnapshot(sessionId: string): WorkflowSnapshot | null 
   const leafMsg = getMessage(session.activeLeafId)
   if (!leafMsg) return null
 
-  if (leafMsg.status === 'waiting_approval') {
-    const pendingTool = leafMsg.toolCalls?.find(
-      (t) => t.status === 'pending' || t.status === 'executing'
-    )
-    return {
-      sessionId,
-      messageId: leafMsg.id,
-      status: 'waiting_approval',
-      currentStep: 1,
-      maxSteps: 25,
-      pendingApprovalTool: pendingTool,
-      bufferedTokens: leafMsg.content,
-      bufferedReasoning: leafMsg.reasoningContent || '',
-      startedAt: leafMsg.createdAt
-    }
-  }
-
-  if (leafMsg.status === 'interrupted') {
+  // 没有活跃 Runner 时，待审批 / 中断都只能重新生成（审批的 Promise 已随进程消失）
+  if (leafMsg.status === 'interrupted' || leafMsg.status === 'waiting_approval') {
     return {
       sessionId,
       messageId: leafMsg.id,
@@ -69,45 +55,67 @@ export async function startWorkflow(
   attachments?: MessageAttachment[],
   parentMessageId?: string | null
 ): Promise<{ userMessageId: string; assistantMessageId: string }> {
-  // 如果当前会话已有任务在跑，先中止旧任务
-  const existing = activeRunners.get(sessionId)
-  if (existing) {
-    existing.abort()
-    activeRunners.delete(sessionId)
-  }
-
   const session = getSession(sessionId)
   if (!session) throw new Error(`Session ${sessionId} not found`)
+  stopExisting(sessionId)
 
-  let effectiveParentId = parentMessageId !== undefined ? parentMessageId : session.activeLeafId
-  if (effectiveParentId) {
-    const leaf = getMessage(effectiveParentId)
-    // 若当前叶节点是失败/未产生任何内容的 Assistant 消息，自动回溯到该 Assistant 的父节点（即用户提问节点），
-    // 使得重试或追问从正常节点分叉，而不是挂接在坏死节点下方
+  let parentId = parentMessageId !== undefined ? parentMessageId : session.activeLeafId
+  if (parentId) {
+    const leaf = getMessage(parentId)
+    // 叶子是失败 / 未产生内容的 assistant 节点时回溯到它的父节点，不在坏死节点下继续接
     if (
       leaf &&
       leaf.role === 'assistant' &&
       !leaf.content?.trim() &&
       (!leaf.toolCalls || leaf.toolCalls.length === 0)
     ) {
-      effectiveParentId = leaf.parentId ?? null
+      parentId = leaf.parentId ?? null
     }
   }
 
-  // 1. 插入用户消息
   const userMsgId = randomUUID()
   insertMessage({
     id: userMsgId,
     sessionId,
-    parentId: effectiveParentId ?? null,
+    parentId: parentId ?? null,
     role: 'user',
     content: userPrompt,
     attachments,
     status: 'completed',
     createdAt: Date.now()
   })
+  const assistantMessageId = launchRunner(sessionId, userMsgId)
+  return { userMessageId: userMsgId, assistantMessageId }
+}
 
-  // 2. 预插入 Assistant 消息节点
+/**
+ * 重新生成：从指定节点往上找到最近的 user 节点，在它下面开一个新的 assistant 分支
+ * （旧回答保留为兄弟分支，可用 `< i/n >` 切回）。
+ */
+export function regenerateWorkflow(
+  sessionId: string,
+  fromMessageId: string
+): { userMessageId: string; assistantMessageId: string } {
+  let node = getMessage(fromMessageId)
+  while (node && node.role !== 'user') node = node.parentId ? getMessage(node.parentId) : null
+  if (!node || node.sessionId !== sessionId) {
+    throw new Error(`no user message above ${fromMessageId}`)
+  }
+  stopExisting(sessionId)
+  const assistantMessageId = launchRunner(sessionId, node.id)
+  return { userMessageId: node.id, assistantMessageId }
+}
+
+function stopExisting(sessionId: string): void {
+  const existing = activeRunners.get(sessionId)
+  if (existing) {
+    existing.abort()
+    activeRunners.delete(sessionId)
+  }
+}
+
+function launchRunner(sessionId: string, userMsgId: string): string {
+  const session = getSession(sessionId)!
   const assistantMsgId = randomUUID()
   insertMessage({
     id: assistantMsgId,
@@ -119,37 +127,61 @@ export async function startWorkflow(
     createdAt: Date.now()
   })
 
-  // 3. 构建 Loop 上下文
   const config = loadYayaConfig()
   const providerConfig =
     config.providers.find((p) => p.id === (session.providerId || config.activeProviderId)) ||
+    config.providers.find((p) => p.enabled) ||
     config.providers[0]
-  const provider = getProviderInstance(providerConfig)
+  if (!providerConfig) {
+    updateMessage(assistantMsgId, {
+      status: 'error',
+      error: t('yaya.err.no_provider', '没有可用的服务商，请先在设置里添加并启用')
+    })
+    return assistantMsgId
+  }
 
   const runner = new WorkflowRunner({
     sessionId,
     userMessageId: userMsgId,
     assistantMessageId: assistantMsgId,
     config,
-    provider,
+    provider: getProviderInstance(providerConfig),
     tools: [],
     step: 0,
-    maxSteps: config.maxLoopSteps || 25,
+    maxSteps: Math.min(100, Math.max(1, config.maxLoopSteps || 25)),
     status: 'pending',
     ringBuffer: []
   })
-
   activeRunners.set(sessionId, runner)
-
-  // 异步在后台启动任务
   runner
     .run()
     .catch((e) => log.error('Workflow background run failed', { error: String(e) }))
     .finally(() => {
-      activeRunners.delete(sessionId)
+      if (activeRunners.get(sessionId) === runner) activeRunners.delete(sessionId)
+      getBroadcast()('cockpit:yaya-running', { sessionIds: runningSessionIds() })
     })
+  getBroadcast()('cockpit:yaya-running', { sessionIds: runningSessionIds() })
+  return assistantMsgId
+}
 
-  return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
+export function runningSessionIds(): string[] {
+  return [...activeRunners.keys()]
+}
+
+/** 把进行中节点的内存缓冲叠加到从 DB 读出的分支上 */
+export function overlayLiveBuffer(sessionId: string, branch: MessageNode[]): MessageNode[] {
+  const runner = activeRunners.get(sessionId)
+  if (!runner) return branch
+  const live = runner.liveBuffer()
+  return branch.map((m) =>
+    m.id === live.messageId && (m.status === 'streaming' || m.status === 'pending')
+      ? {
+          ...m,
+          content: live.content.length >= m.content.length ? live.content : m.content,
+          reasoningContent: live.reasoning || m.reasoningContent
+        }
+      : m
+  )
 }
 
 export function abortWorkflow(sessionId: string): boolean {
@@ -157,6 +189,7 @@ export function abortWorkflow(sessionId: string): boolean {
   if (!runner) return false
   runner.abort()
   activeRunners.delete(sessionId)
+  getBroadcast()('cockpit:yaya-running', { sessionIds: runningSessionIds() })
   return true
 }
 
@@ -176,9 +209,9 @@ export function reconcileInterruptedWorkflows(): void {
     db.prepare(
       `UPDATE messages SET
         status = 'interrupted',
-        error = '工作流因主进程重启或意外中断而暂停'
-       WHERE status IN ('streaming', 'pending', 'tool_executing')`
-    ).run()
+        error = ?
+       WHERE status IN ('streaming', 'pending', 'tool_executing', 'waiting_approval')`
+    ).run(t('yaya.err.restarted', '工作流因程序重启或意外退出而中断'))
     log.info('Reconciled interrupted workflow messages on startup')
   } catch (e) {
     log.warn('Failed to reconcile interrupted messages', { error: String(e) })

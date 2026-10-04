@@ -1,193 +1,326 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { Ref } from 'vue'
+import { useI18n } from '@ui/i18n'
 import type { Session } from '../types'
 
 const props = defineProps<{
+  /** 已按 updatedAt 倒序，分组只切段不重新排序 */
   sessions: Session[]
   activeSessionId: string | null
+  /** 正在生成的会话 id，条目上显示脉冲点 */
+  runningSessionIds: string[]
 }>()
 
 const emit = defineEmits<{
   (e: 'selectSession', id: string): void
   (e: 'createSession'): void
   (e: 'deleteSession', id: string): void
-  (e: 'importOpenAi', jsonText: string): void
+  (e: 'renameSession', id: string, title: string): void
+  (e: 'import'): void
 }>()
+
+const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
+const { t, te } = useI18n(lang)
 
 const search = ref('')
 const deleteDialog = ref(false)
 const sessionToDelete = ref<string | null>(null)
-const importDialog = ref(false)
-const importJsonText = ref('')
+
+// 行内重命名：editingId = 正在编辑的会话 id（空 = 无编辑）
+const editingId = ref<string | null>(null)
+const editingTitle = ref('')
+
+// 相对时间依赖时钟，列表存活期间定时刷新 now
+const now = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  tickTimer = setInterval(() => {
+    now.value = Date.now()
+  }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (tickTimer !== null) clearInterval(tickTimer)
+})
+
+// v-text-field 聚焦后全选，方便直接覆盖输入
+const vFocus = {
+  mounted(el: HTMLElement): void {
+    const input = el.querySelector('input')
+    if (input instanceof HTMLInputElement) {
+      input.focus()
+      input.select()
+    }
+  }
+}
 
 const filteredSessions = computed(() => {
-  if (!search.value.trim()) return props.sessions
-  const q = search.value.toLowerCase()
+  const q = search.value.trim().toLowerCase()
+  if (!q) return props.sessions
   return props.sessions.filter((s) => s.title.toLowerCase().includes(q))
 })
 
-function confirmDelete(id: string, ev: Event): void {
-  ev.stopPropagation()
+interface SessionGroup {
+  label: string
+  items: Session[]
+}
+
+const sessionGroups = computed<SessionGroup[]>(() => {
+  const buckets: SessionGroup[] = [
+    { label: t('yaya.sessions.group.today', '今天'), items: [] },
+    { label: t('yaya.sessions.group.yesterday', '昨天'), items: [] },
+    { label: t('yaya.sessions.group.week', '7 天内'), items: [] },
+    { label: t('yaya.sessions.group.month', '30 天内'), items: [] },
+    { label: t('yaya.sessions.group.earlier', '更早'), items: [] }
+  ]
+  const day = 86_400_000
+  const today = startOfDay(now.value)
+  const yesterday = today - day
+  const week = today - 6 * day
+  const month = today - 29 * day
+  for (const s of filteredSessions.value) {
+    const d = startOfDay(s.updatedAt)
+    if (d >= today) buckets[0].items.push(s)
+    else if (d >= yesterday) buckets[1].items.push(s)
+    else if (d >= week) buckets[2].items.push(s)
+    else if (d >= month) buckets[3].items.push(s)
+    else buckets[4].items.push(s)
+  }
+  return buckets.filter((b) => b.items.length > 0)
+})
+
+function startOfDay(ts: number): number {
+  const d = new Date(ts)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function formatRelative(ts: number): string {
+  const diff = Math.max(0, now.value - ts)
+  if (diff < 60_000) return t('yaya.sessions.time.now', '刚刚')
+  if (diff < 3_600_000) {
+    return te('yaya.sessions.time.minutes', { n: String(Math.floor(diff / 60_000)) }, '{n} 分钟前')
+  }
+  if (diff < 86_400_000) {
+    return te('yaya.sessions.time.hours', { n: String(Math.floor(diff / 3_600_000)) }, '{n} 小时前')
+  }
+  const d = new Date(ts)
+  return te(
+    'yaya.sessions.time.date',
+    { m: String(d.getMonth() + 1), d: String(d.getDate()) },
+    '{m}/{d}'
+  )
+}
+
+function isRunning(id: string): boolean {
+  return props.runningSessionIds.includes(id)
+}
+
+function onItemClick(s: Session): void {
+  if (editingId.value === s.id) return
+  if (editingId.value) commitRename()
+  emit('selectSession', s.id)
+}
+
+function startRename(s: Session): void {
+  editingId.value = s.id
+  editingTitle.value = s.title
+}
+
+function commitRename(): void {
+  const id = editingId.value
+  const title = editingTitle.value.trim()
+  editingId.value = null
+  if (!id || !title) return
+  if (props.sessions.find((s) => s.id === id)?.title === title) return
+  emit('renameSession', id, title)
+}
+
+function cancelRename(): void {
+  editingId.value = null
+}
+
+function confirmDelete(id: string): void {
   sessionToDelete.value = id
   deleteDialog.value = true
 }
 
 function doDelete(): void {
-  if (sessionToDelete.value) {
-    emit('deleteSession', sessionToDelete.value)
-    sessionToDelete.value = null
-  }
+  const id = sessionToDelete.value
+  sessionToDelete.value = null
   deleteDialog.value = false
-}
-
-function doImport(): void {
-  if (importJsonText.value.trim()) {
-    emit('importOpenAi', importJsonText.value)
-    importJsonText.value = ''
-  }
-  importDialog.value = false
-}
-
-function formatTime(ts: number): string {
-  const now = Date.now()
-  const diff = now - ts
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`
-  const d = new Date(ts)
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  if (id) emit('deleteSession', id)
 }
 </script>
 
 <template>
   <div class="session-drawer-content d-flex flex-column h-100 pa-3">
-    <!-- 头部：标题与操作 -->
-    <div class="d-flex align-center justify-space-between mb-3 flex-shrink-0">
-      <div class="d-flex align-center ga-2">
-        <v-icon icon="mdi-chat-processing-outline" color="primary" size="20" />
-        <span class="text-subtitle-2 font-weight-bold">对话记录</span>
-      </div>
-
-      <div class="d-flex ga-1">
-        <v-btn
-          icon="mdi-import"
-          size="small"
-          variant="text"
-          title="导入 ChatGPT 历史会话"
-          aria-label="导入 ChatGPT 历史会话"
-          @click="importDialog = true"
-        />
-        <v-btn
-          color="primary"
-          size="small"
-          variant="tonal"
-          prepend-icon="mdi-plus"
-          @click="emit('createSession')"
-        >
-          新建
-        </v-btn>
-      </div>
-    </div>
-
-    <!-- 搜索框 (明确限制高度与 flex) -->
-    <div class="search-box-wrap mb-3 flex-shrink-0">
-      <v-text-field
-        v-model="search"
-        prepend-inner-icon="mdi-magnify"
-        placeholder="搜索对话..."
-        density="compact"
-        variant="outlined"
-        hide-details
-        clearable
-        class="session-search-input"
+    <!-- 头部：标题 + 导入 / 新建 -->
+    <div class="d-flex align-center ga-2 flex-shrink-0 pb-3">
+      <v-icon icon="mdi-chat-processing-outline" color="primary" size="20" />
+      <span class="text-subtitle-2 font-weight-bold">{{ t('yaya.sessions.title', '会话') }}</span>
+      <v-spacer />
+      <v-btn
+        icon="mdi-import"
+        size="small"
+        variant="text"
+        density="comfortable"
+        :title="t('yaya.sessions.import', '导入 ChatGPT 记录')"
+        :aria-label="t('yaya.sessions.import', '导入 ChatGPT 记录')"
+        @click="emit('import')"
       />
+      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="emit('createSession')">
+        {{ t('yaya.sessions.new', '新建') }}
+      </v-btn>
     </div>
 
-    <!-- 会话列表滚动区 -->
+    <!-- 搜索框 -->
+    <v-text-field
+      v-model="search"
+      class="session-search flex-shrink-0 mb-2"
+      prepend-inner-icon="mdi-magnify"
+      :placeholder="t('yaya.sessions.search', '搜索会话...')"
+      density="compact"
+      variant="outlined"
+      hide-details
+      clearable
+    />
+
+    <!-- 按时间分组的会话列表，只有这一区滚动 -->
     <div class="session-scroll-list flex-grow-1 overflow-y-auto">
-      <v-list density="comfortable" nav class="pa-0 bg-transparent">
-        <v-list-item
-          v-for="s in filteredSessions"
-          :key="s.id"
-          :active="s.id === activeSessionId"
-          color="primary"
-          rounded="lg"
-          class="mb-1 session-item"
-          @click="emit('selectSession', s.id)"
-        >
-          <template #prepend>
-            <v-icon
-              :icon="s.id === activeSessionId ? 'mdi-message-text' : 'mdi-message-text-outline'"
-              size="18"
-              class="mr-2"
-            />
-          </template>
+      <v-list nav density="comfortable" class="session-list pa-0 bg-transparent">
+        <template v-for="(group, gi) in sessionGroups" :key="group.label">
+          <div
+            class="session-group-label text-caption font-weight-medium text-medium-emphasis"
+            :class="{ 'session-group-first': gi === 0 }"
+          >
+            {{ group.label }}
+          </div>
 
-          <v-list-item-title class="text-body-2 font-weight-medium text-truncate">
-            {{ s.title }}
-          </v-list-item-title>
+          <v-list-item
+            v-for="s in group.items"
+            :key="s.id"
+            :active="s.id === activeSessionId"
+            color="primary"
+            rounded="lg"
+            class="session-item"
+            @click="onItemClick(s)"
+          >
+            <template #prepend>
+              <span
+                v-if="isRunning(s.id)"
+                class="session-running-dot mr-3"
+                :title="t('yaya.sessions.running', '生成中')"
+                :aria-label="t('yaya.sessions.running', '生成中')"
+              />
+              <v-icon
+                v-else
+                :icon="s.id === activeSessionId ? 'mdi-message-text' : 'mdi-message-text-outline'"
+                size="18"
+                class="mr-2"
+              />
+            </template>
 
-          <v-list-item-subtitle class="text-caption text-medium-emphasis">
-            {{ formatTime(s.updatedAt) }}
-          </v-list-item-subtitle>
+            <template v-if="editingId === s.id">
+              <v-text-field
+                v-model="editingTitle"
+                v-focus
+                class="session-rename-field"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :placeholder="t('yaya.sessions.renamePlaceholder', '会话标题')"
+                @keyup.enter="commitRename"
+                @keyup.esc="cancelRename"
+                @blur="commitRename"
+                @click.stop
+              />
+            </template>
+            <template v-else>
+              <v-list-item-title class="text-body-2 font-weight-medium text-truncate">
+                {{ s.title }}
+              </v-list-item-title>
+              <v-list-item-subtitle
+                class="text-caption text-medium-emphasis d-flex align-center ga-1"
+              >
+                <span>{{ formatRelative(s.updatedAt) }}</span>
+                <span v-if="isRunning(s.id)">{{ t('yaya.sessions.running', '生成中') }}</span>
+              </v-list-item-subtitle>
+            </template>
 
-          <template #append>
-            <v-btn
-              icon="mdi-delete-outline"
-              size="small"
-              variant="text"
-              density="comfortable"
-              class="delete-btn opacity-0"
-              title="删除会话"
-              aria-label="删除会话"
-              @click="(ev) => confirmDelete(s.id, ev)"
-            />
-          </template>
-        </v-list-item>
-
-        <div
-          v-if="filteredSessions.length === 0"
-          class="text-center py-8 text-caption text-medium-emphasis"
-        >
-          暂无对话记录
-        </div>
+            <template #append>
+              <v-menu
+                v-if="editingId !== s.id"
+                location="bottom end"
+                :close-on-content-click="true"
+              >
+                <template #activator="{ props: menuProps }">
+                  <v-btn
+                    v-bind="menuProps"
+                    icon="mdi-dots-vertical"
+                    size="small"
+                    variant="text"
+                    density="comfortable"
+                    class="session-menu-btn"
+                    :title="t('yaya.sessions.menu', '会话操作')"
+                    :aria-label="t('yaya.sessions.menu', '会话操作')"
+                    @click.stop
+                  />
+                </template>
+                <v-list density="compact" min-width="176" class="py-1">
+                  <v-list-item
+                    prepend-icon="mdi-pencil-outline"
+                    :title="t('yaya.sessions.rename', '重命名')"
+                    @click="startRename(s)"
+                  />
+                  <v-list-item
+                    prepend-icon="mdi-delete-outline"
+                    base-color="error"
+                    :title="t('yaya.sessions.delete', '删除')"
+                    @click="confirmDelete(s.id)"
+                  />
+                </v-list>
+              </v-menu>
+            </template>
+          </v-list-item>
+        </template>
       </v-list>
+
+      <!-- 空状态：整个列表为空 / 搜索无结果 -->
+      <div
+        v-if="sessions.length === 0"
+        class="session-empty text-caption text-medium-emphasis text-center"
+      >
+        <v-icon icon="mdi-chat-plus-outline" size="28" class="mb-2" />
+        <div>{{ t('yaya.sessions.empty', '暂无会话，点右上角「新建」开始对话') }}</div>
+      </div>
+      <div
+        v-else-if="sessionGroups.length === 0"
+        class="session-empty text-caption text-medium-emphasis text-center"
+      >
+        <v-icon icon="mdi-magnify" size="28" class="mb-2" />
+        <div>{{ t('yaya.sessions.emptySearch', '没有匹配的会话') }}</div>
+      </div>
     </div>
 
-    <!-- 删除确认对话框 -->
+    <!-- 删除确认 -->
     <v-dialog v-model="deleteDialog" max-width="400">
       <v-card class="pa-4">
-        <v-card-title class="px-0 pt-0 text-h6">删除会话</v-card-title>
+        <v-card-title class="px-0 pt-0 text-h6">
+          {{ t('yaya.sessions.deleteTitle', '删除会话') }}
+        </v-card-title>
         <v-card-text class="px-0 py-3 text-body-2 text-medium-emphasis">
-          确定要彻底删除该会话及其所有分支吗？此操作不可恢复。
+          {{
+            t('yaya.sessions.deleteBody', '确定要彻底删除该会话及其所有分支吗？此操作不可恢复。')
+          }}
         </v-card-text>
         <v-card-actions class="px-0 pb-0 ga-2 justify-end">
-          <v-btn variant="text" @click="deleteDialog = false">取消</v-btn>
-          <v-btn color="error" variant="elevated" @click="doDelete">删除</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- 导入 ChatGPT 对话框 -->
-    <v-dialog v-model="importDialog" max-width="500">
-      <v-card class="pa-4">
-        <v-card-title class="px-0 pt-0 text-h6">导入 ChatGPT 对话记录</v-card-title>
-        <v-card-text class="px-0 py-3">
-          <div class="text-body-2 text-medium-emphasis mb-2">
-            请粘贴导出的 conversations.json 文件内容：
-          </div>
-          <v-textarea
-            v-model="importJsonText"
-            rows="6"
-            variant="outlined"
-            placeholder="[{ id: '...', mapping: { ... } }]"
-            hide-details
-            font-monospace
-          />
-        </v-card-text>
-        <v-card-actions class="px-0 pb-0 ga-2 justify-end">
-          <v-btn variant="text" @click="importDialog = false">取消</v-btn>
-          <v-btn color="primary" variant="elevated" @click="doImport">开始导入</v-btn>
+          <v-btn variant="text" @click="deleteDialog = false">
+            {{ t('yaya.sessions.cancel', '取消') }}
+          </v-btn>
+          <v-btn color="error" variant="elevated" @click="doDelete">
+            {{ t('yaya.sessions.delete', '删除') }}
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -196,23 +329,64 @@ function formatTime(ts: number): string {
 
 <style scoped>
 .session-drawer-content {
-  background: rgba(var(--v-theme-surface), 0.95);
-  backdrop-filter: blur(16px);
+  /* 底色由外层抽屉提供，这里保持全透明 */
+  background: transparent;
 }
 
-.search-box-wrap {
-  height: 40px;
-}
-
-.session-search-input :deep(.v-field) {
+.session-search :deep(.v-field) {
   border-radius: 8px;
-}
-
-.session-item:hover .delete-btn {
-  opacity: 1 !important;
 }
 
 .session-scroll-list {
   min-height: 0;
+}
+
+.session-group-label {
+  padding: 14px 4px 4px;
+}
+
+.session-group-first {
+  padding-top: 2px;
+}
+
+/* 生成中会话的脉冲指示点 */
+.session-running-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--v-theme-primary));
+  animation: session-dot-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes session-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-running-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* 手机抽屉约 85vw：加大行高与菜单热区，别挤 */
+@media (max-width: 720px) {
+  .session-item {
+    min-height: 56px;
+  }
+
+  .session-menu-btn {
+    width: 40px !important;
+    height: 40px !important;
+  }
 }
 </style>

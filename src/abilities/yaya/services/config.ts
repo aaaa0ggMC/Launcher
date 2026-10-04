@@ -7,15 +7,19 @@ import { dirname } from 'node:path'
 import { abilityConfigPath } from '../../../main/process/paths'
 import { decryptSecret, encryptSecret, isEncryptedSecret } from '../../../main/process/encrypt'
 import { makeLogger } from '../../../main/process/logger'
-import type { YayaConfig } from '../types'
+import { getBroadcast } from '../../../main/process/broadcast'
+import type { ProviderConfig, YayaConfig } from '../types'
 
 const log = makeLogger('yaya-config')
 
+export const DEFAULT_ASSISTANT_NAME = 'YAYA'
+
 export const DEFAULT_YAYA_CONFIG: YayaConfig = {
+  assistantName: DEFAULT_ASSISTANT_NAME,
   activeProviderId: 'codex-proxy',
   activeModel: 'gpt-5.5',
   systemPrompt:
-    'You are YAYA (Yet Another Yes Agent), an intelligent personal assistant and autonomous agent running inside Linux System Cockpit. You are helpful, precise, and capable of executing tools to assist the user.',
+    'You are {name}, an intelligent personal assistant and autonomous agent running inside Linux System Cockpit. You are helpful, precise, and capable of executing tools to assist the user.',
   autoApproveTools: false,
   maxLoopSteps: 25,
   streamOutput: true,
@@ -74,7 +78,7 @@ export function loadYayaConfig(): YayaConfig {
   if (cachedConfig) return cachedConfig
   const file = getYayaConfigPath()
   if (!existsSync(file)) {
-    cachedConfig = { ...DEFAULT_YAYA_CONFIG }
+    cachedConfig = structuredClone(DEFAULT_YAYA_CONFIG)
     saveYayaConfig(cachedConfig)
     return cachedConfig
   }
@@ -93,6 +97,7 @@ export function loadYayaConfig(): YayaConfig {
         ? parsed.mcpServers
         : DEFAULT_YAYA_CONFIG.mcpServers
     }
+    cfg.assistantName = normalizeAssistantName(cfg.assistantName)
 
     // 解密 Provider 中的 apiKey
     for (const p of cfg.providers) {
@@ -110,7 +115,7 @@ export function loadYayaConfig(): YayaConfig {
     return cfg
   } catch (err) {
     log.error('Failed to read YAYA config, using defaults', { error: String(err) })
-    cachedConfig = { ...DEFAULT_YAYA_CONFIG }
+    cachedConfig = structuredClone(DEFAULT_YAYA_CONFIG)
     return cachedConfig
   }
 }
@@ -131,7 +136,55 @@ export function saveYayaConfig(config: YayaConfig): void {
     }
   }
 
+  for (const p of toSave.providers) {
+    delete p.apiKeySet
+    delete p.clearApiKey
+  }
+
   writeFileSync(file, JSON.stringify(toSave, null, 2), 'utf8')
   cachedConfig = JSON.parse(JSON.stringify(config)) // 内存中保持明文
   log.info('YAYA config saved')
+  getBroadcast()('cockpit:yaya-config-changed', publicYayaConfig(cachedConfig!))
+}
+
+export function normalizeAssistantName(name: unknown): string {
+  const s = typeof name === 'string' ? name.trim().slice(0, 32) : ''
+  return s || DEFAULT_ASSISTANT_NAME
+}
+
+/** 系统提示词：`{name}` 替换为助手名 */
+export function resolveSystemPrompt(prompt: string, config: YayaConfig): string {
+  return prompt.split('{name}').join(normalizeAssistantName(config.assistantName))
+}
+
+/** 给渲染端 / agent 的配置视图：去掉密钥明文，只给 apiKeySet */
+export function publicYayaConfig(config: YayaConfig): YayaConfig {
+  const out: YayaConfig = JSON.parse(JSON.stringify(config))
+  out.providers = out.providers.map((p: ProviderConfig) => {
+    const rest = { ...p }
+    delete rest.clearApiKey
+    return { ...rest, apiKey: '', apiKeySet: Boolean(p.apiKey) }
+  })
+  return out
+}
+
+/**
+ * 合并渲染端提交的配置：密钥字段为空 = 沿用旧值（config-get 不回传明文），
+ * `clearApiKey: true` 才清空。
+ */
+export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
+  const current = loadYayaConfig()
+  const next: YayaConfig = JSON.parse(JSON.stringify(incoming))
+  next.assistantName = normalizeAssistantName(next.assistantName)
+  next.providers = (next.providers ?? []).map((p) => {
+    const prev = current.providers.find((c) => c.id === p.id)
+    let apiKey = p.apiKey
+    if (p.clearApiKey) apiKey = ''
+    else if (!apiKey) apiKey = prev?.apiKey ?? ''
+    const rest = { ...p }
+    delete rest.apiKeySet
+    delete rest.clearApiKey
+    return { ...rest, apiKey }
+  })
+  return next
 }

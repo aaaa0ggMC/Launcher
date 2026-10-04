@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path'
 import { USER_CONFIG_DIR } from '../../../main/process/paths'
 import { makeLogger } from '../../../main/process/logger'
 import type { Session, MessageNode } from '../types'
+import { deleteSessionAssets } from './assets'
 
 const log = makeLogger('yaya-db')
 
@@ -227,6 +228,7 @@ export function deleteSession(id: string): void {
   const d = getYayaDb()
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+  deleteSessionAssets(id)
 }
 
 export function insertMessage(msg: MessageNode): void {
@@ -333,13 +335,55 @@ export function getMessageSiblings(messageId: string): { siblings: string[]; ind
 export function getMessageBranch(leafId: string | null | undefined): MessageNode[] {
   if (!leafId) return []
   const branch: MessageNode[] = []
+  const seen = new Set<string>()
   let currId: string | null = leafId
 
-  while (currId) {
+  while (currId && !seen.has(currId)) {
+    seen.add(currId)
     const msg = getMessage(currId)
     if (!msg) break
     branch.unshift(msg)
     currId = msg.parentId
   }
   return branch
+}
+
+/** 当前分支 + 每个节点的同级分支 id（给界面的 `< i/n >` 翻页器，一次查询代替逐条请求） */
+export function getMessageBranchWithSiblings(leafId: string | null | undefined): MessageNode[] {
+  const branch = getMessageBranch(leafId)
+  if (branch.length === 0) return branch
+  const d = getYayaDb()
+  const rows = d
+    .prepare('SELECT id, parent_id FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+    .all(branch[0].sessionId) as unknown as { id: string; parent_id: string | null }[]
+  const byParent = new Map<string, string[]>()
+  for (const r of rows) {
+    const key = r.parent_id ?? ''
+    const list = byParent.get(key)
+    if (list) list.push(r.id)
+    else byParent.set(key, [r.id])
+  }
+  return branch.map((m) => {
+    const sib = byParent.get(m.parentId ?? '') ?? [m.id]
+    return sib.length > 1 ? { ...m, siblingIds: sib } : m
+  })
+}
+
+/**
+ * 从某节点往下走到「最近更新」的叶子：切换分支时用，
+ * 否则直接把 activeLeaf 设成兄弟节点会把该分支后续的对话截掉。
+ */
+export function findLatestLeaf(nodeId: string): string {
+  const d = getYayaDb()
+  const stmt = d.prepare(
+    'SELECT id FROM messages WHERE parent_id = ? ORDER BY created_at DESC LIMIT 1'
+  )
+  let curr = nodeId
+  const seen = new Set<string>([curr])
+  for (;;) {
+    const row = stmt.get(curr) as unknown as { id: string } | undefined
+    if (!row || seen.has(row.id)) return curr
+    seen.add(row.id)
+    curr = row.id
+  }
 }

@@ -2,14 +2,14 @@
  * OpenAI 及其兼容端点（Codex-Proxy, DeepSeek, Ollama, vLLM 等）Provider 实现
  */
 import OpenAI from 'openai'
-import type { ProviderConfig, ToolDefinition, ToolCallItem } from '../../types'
+import type { ProviderConfig, ToolDefinition, ToolCallItem, MessageAttachment } from '../../types'
 import type {
   AIProvider,
   ProviderGenerateOptions,
   ProviderGenerateResult,
   ProviderMessage
 } from './types'
-import { readAssetData } from '../assets'
+import { readAssetData, resolveAssetLocalPath, isTextMime } from '../assets'
 import { makeLogger } from '../../../../main/process/logger'
 
 const log = makeLogger('yaya-provider-openai')
@@ -215,22 +215,7 @@ export class OpenAICompatibleProvider implements AIProvider {
           }
 
           for (const att of m.attachments) {
-            if (att.mimeType.startsWith('image/')) {
-              const data = await readAssetData(att.assetPath)
-              if (data) {
-                const base64 = data.toString('base64')
-                parts.push({
-                  type: 'image_url',
-                  image_url: { url: `data:${att.mimeType};base64,${base64}` }
-                })
-              }
-            } else if (att.summary) {
-              // 非图片超长文档：注入摘要与索引提示
-              parts.push({
-                type: 'text',
-                text: `\n[附件文档 "${att.name}" 大纲]:\n${att.summary}`
-              })
-            }
+            parts.push(...(await attachmentParts(att)))
           }
 
           out.push({ role: 'user', content: parts })
@@ -242,6 +227,43 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     return out
   }
+}
+
+/** 文本附件内联上限：再大就只告诉模型路径，让它用 read_file 按需读 */
+const INLINE_TEXT_LIMIT = 200 * 1024
+
+async function attachmentParts(
+  att: MessageAttachment
+): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
+  const localPath = resolveAssetLocalPath(att.assetPath) ?? att.assetPath
+  if (att.mimeType.startsWith('image/')) {
+    const data = await readAssetData(att.assetPath)
+    if (data) {
+      return [
+        {
+          type: 'image_url',
+          image_url: { url: `data:${att.mimeType};base64,${data.toString('base64')}` }
+        }
+      ]
+    }
+  } else if (isTextMime(att.mimeType) && att.size <= INLINE_TEXT_LIMIT) {
+    const data = await readAssetData(att.assetPath)
+    if (data) {
+      return [
+        {
+          type: 'text',
+          text: `<attachment name="${att.name}" path="${localPath}">\n${data.toString('utf8')}\n</attachment>`
+        }
+      ]
+    }
+  }
+  const summary = att.summary ? ` summary="${att.summary}"` : ''
+  return [
+    {
+      type: 'text',
+      text: `<attachment name="${att.name}" mime="${att.mimeType}" size="${att.size}" path="${localPath}"${summary} />（内容未内联，需要时用 read_file 读取该路径）`
+    }
+  ]
 }
 
 function toOpenAiTool(t: ToolDefinition): OpenAI.Chat.Completions.ChatCompletionTool {

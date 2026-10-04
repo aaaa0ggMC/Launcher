@@ -11,13 +11,13 @@ export default {
   settings: [
     {
       key: 'yaya',
-      label: 'YAYA Agent',
+      label: 'YAYA',
       icon: 'mdi-robot-outline',
-      description: 'YAYA 智能体端点、模型参数与 MCP 工具服务配置',
+      description: '助手名称、服务商与模型、工具权限',
       items: [
         {
           key: 'general',
-          label: 'YAYA 配置',
+          label: '智能体配置',
           fullWidth: true,
           component: defineAsyncComponent(() => import('./components/YayaSettingsSection.vue'))
         }

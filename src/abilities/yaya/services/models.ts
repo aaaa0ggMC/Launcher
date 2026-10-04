@@ -3,13 +3,14 @@
  * 支持 OpenAI 兼容端点 (/v1/models)、Ollama (/api/tags) 等动态发现模型。
  */
 import { makeLogger } from '../../../main/process/logger'
+import type { ProviderType } from '../types'
 
 const log = makeLogger('yaya-models')
 
 export interface FetchModelsOptions {
   baseUrl?: string
   apiKey?: string
-  type?: 'openai' | 'codex-proxy' | 'anthropic' | 'gemini' | 'ollama'
+  type?: ProviderType
   timeoutMs?: number
 }
 
