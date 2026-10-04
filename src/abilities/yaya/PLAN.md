@@ -259,3 +259,51 @@
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
 2. **中期**：MCP 客户端（stdio / SSE）→ 动态挂载外部工具（设置的工具页已按来源分组 + 搜索，可直接容纳）；长文档 Slot（摘要 + 检索工具）；更多工作流。
 3. **长期**：Claude / DeepSeek 等导入器；输出小部件沙箱。
+
+
+---
+
+## 五、 第二阶段（Era 2）：Plugin 架构 —— 工具 / MCP / Skill 统一为插件
+
+> 2026-10-04 立项。参考 `aaaa0ggMC/codex-proxy-node` 的插件分层（plugin = tools + instructions + fences + contribute），
+> 但 YAYA 掌握对话存储与渲染端，所以「富文本变换」只发生在**显示层**：数据库永远存模型的原文，
+> 发给模型的历史与上一次逐字节相同 → 提示词缓存不受影响，也不需要 codex-proxy 那套 restoreText。
+
+### 5.1 概念
+
+| 概念 | 含义 |
+| :--- | :--- |
+| **Plugin** | 前后端结合的扩展单元。后端：0..n 个 tools、`instructions`（拼进系统提示词的片段）、生命周期（连接 / 释放）；前端（可选）：代码块渲染器（fences）、工具结果视图（toolViews）。 |
+| **Tool** | 属于某个插件。对模型暴露的名字 = wire name（内置 `system` 插件不加前缀以兼容旧会话；其余 `<插件>_<工具>`，超 64 字符截断 + 稳定哈希）。可单独开关、单独设置审批（ask / auto / 跟随提供方默认）。 |
+| **MCP** | 一种动态插件：每个 MCP 服务器 = 一个插件，tools 来自 `tools/list`。传输 Streamable HTTP / SSE，可配置自定义 Header（值加密存储、不下发渲染端）。 |
+| **Skill** | 一种动态插件：`~/.config/LinuxCockpit/yaya/skills/<名字>/SKILL.md`（frontmatter `name` / `description` + 正文，可带附属文件）。按「渐进披露」：系统提示词只列名字与描述，模型需要时调用 `skill_load` / `skill_read_file` 取正文与附件。 |
+| **Cockpit 插件** | 内置插件，把 Cockpit 自己的 agent 工具表（`commands_list` / `command_run` / `ui_*` …）在进程内直接暴露给 YAYA，`ui_*` 直接操作当前界面；结果用专门的视图优雅展示（截图、命令表、无障碍树）。 |
+
+### 5.2 安全边界（重要）
+
+- YAYA 的工具调用此前继承 `ui` 来源，等于用户亲手操作，**绕过了隐私 SDK**。新增来源 `local-agent`（进程内 LLM agent，属于 agent 来源）：
+  工具执行一律 `withOrigin({ kind: 'local-agent', session: 'yaya:<会话>', client: <助手名> })`，脱敏 / 授权窗口 / `agent: 'deny'` 自动生效。
+- YAYA 运行工作流时注册为 agent 会话（`sessions.ts`，transport `local`）：标题栏 AgentBar 出现它的小动物头像，描边提示「AI 正在操作」。
+- **人机共用界面时的中途叫停**：点击 YAYA 的头像 → 暂停 / 继续 / 停止。宿主在每步开始、每次工具调用前检查暂停闸门；另提供「暂停所有 AI 操作」全局快捷键（默认不绑定）。会话控制做成通用接口（`setSessionControl`），以后 MCP 会话也能用。
+
+### 5.3 打断不回滚（steer）
+
+运行中输入框保持可用：发送 = 停止当前运行（保留已生成的内容与已执行的工具结果）+ 以新消息继续。
+宿主组装历史时修复悬空的 tool_calls（缺结果的调用补「已中断」结果），保证不触发 400。
+
+### 5.4 工作包
+
+| 包 | 内容 | 负责 |
+| :--- | :--- | :--- |
+| A1 | 插件 SDK 契约与注册表（后端）、内置 `system` 插件迁移、tool 结果规范化（文本 / 图片 → 资产）、`yaya.plugins-list` | 副总监 |
+| A2 | `local-agent` 来源、agent 会话注册、会话控制（暂停 / 继续 / 停止）+ AgentBar 弹层、宿主暂停闸门 | 副总监 |
+| A3 | 渲染端插件 UI 契约：`plugins/<id>/ui.ts`（fences / toolViews），Markdown 分段渲染 | 副总监 |
+| A4 | 打断不回滚：历史修复 + 运行中可发送 | 副总监 |
+| B1 | MCP 插件提供方（Streamable HTTP / SSE、Header、连接状态、测试 / 刷新命令） | Step |
+| B2 | Skill 插件提供方（扫描、解析、`skill_load` / `skill_read_file`、导入） | Step |
+| B3 | 设置 → 插件页（插件 / MCP / Skills 三个分页、插件详情含工具开关与审批、MCP 编辑器、Skill 列表） | Step |
+| B4 | Cockpit 插件（包装 agent 工具表、zod → JSON Schema、截图 / 命令表 / 快照视图） | Step（依赖 A2） |
+
+### 5.5 进度
+
+- [ ] A1　- [ ] A2　- [ ] A3　- [ ] A4　- [ ] B1　- [ ] B2　- [ ] B3　- [ ] B4
