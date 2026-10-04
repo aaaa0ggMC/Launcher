@@ -11,6 +11,7 @@ import { resolveWindowView } from './windows'
 import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 import { vPrivacy, vPrivacyAction, vAgentForbidden } from './privacy'
 import { installViewportVar } from './viewport'
+import { installTouchGuard } from './touch-guard'
 
 const vuetify = createVuetify({
   components,
@@ -107,6 +108,7 @@ async function mountRoot(): Promise<void> {
     .directive('agent-forbidden', vAgentForbidden)
     .mount('#app')
   installViewportVar()
+  installTouchGuard()
 }
 
 void mountRoot()

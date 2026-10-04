@@ -399,6 +399,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
   - **Vuetify 工具类（`.flex-wrap` / `.flex-nowrap` / `.justify-center` …）都带 `!important`**：窄屏要覆盖它们，规则也必须 `!important`（靠 scoped 属性选择器的特异性取胜），否则「看起来写了、实际没生效」。
   - 居中列里「宽度由内容决定」的盒子，子元素别写 `width: 100%` / `min(…, 100%)`（循环依赖，会被解成很小的值——播放器封面曾因此变成细长药丸）；先让父盒子 `width: 100%`。
   - 触屏没有悬停 / 右键 / HTML5 拖拽：关键信息别只放 tooltip；右键菜单补长按（`@ui/directives/long-press`（`src/main/ui/directives/long-press.ts`），只在粗指针设备上写 `user-select:none`）；拖拽排序补上下移按钮。点按之后浏览器会补发合成的 `mousemove` / `click`，手势逻辑要在 `pointerdown` 那一刻记录状态，并忽略触屏产生的合成 click。
+  - **滑块防误触**（`src/main/ui/touch-guard.ts`，`main.ts` 全局安装）：触控输入下 `v-slider` / `v-range-slider` 只接受按住圆点拖动，点轨道不跳值（划页面时擦到也不会改值）；按每次输入判断（`touchstart` / 触控补发的 `mousedown`），鼠标点轨道照旧。圆点触摸热区在 `(pointer: coarse)` 下放大到 48px。自己写的进度条 / 拖动条也要遵守：触控时只认拖动手柄，不要「点哪跳哪」。
   - 自定义玻璃面板（半透明底 + `backdrop-filter`）的背景透明度写 `rgba(var(--v-theme-…), var(--glass-a, 原值))`；「模糊效果」关闭时 `html.no-blur` 把 `--glass-a` 拉到 0.94，并统一关掉 `backdrop-filter`。Vuetify 叠层（对话框 / 菜单 / 底部弹层）由 `global.css` 的通用规则处理。
   - `.page-menu-pop`（aidj 页面菜单 / 播放器菜单 / yarj 菜单共用类名）、`.v-dialog` 的宽度 / 高度夹取都在 `global.css` 里统一处理，别在组件里各写各的。
   - 网页静态资源带 `COOP: same-origin` + `COEP: credentialless`（掌机 mGBA 要 `SharedArrayBuffer`；需要安全上下文：https 或 localhost）。

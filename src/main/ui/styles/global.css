@@ -580,3 +580,11 @@ body.win-rounded-body .v-overlay__scrim {
   min-height: 24px;
   height: auto;
 }
+
+/* 触控：滑块只能按住圆点拖动（见 touch-guard.ts），把圆点的触摸热区放大到 48px */
+@media (pointer: coarse) {
+  .v-slider-thumb__surface::after {
+    width: 48px;
+    height: 48px;
+  }
+}
