@@ -35,6 +35,9 @@ src/abilities/claudeadv/
 # 掌机（mGBA wasm，独立私有仓库 aaaa0ggMC/launcher-gameboy）
 src/abilities/gameboy/
 
+# 模组管理（mo-linux 图形界面，独立私有仓库 aaaa0ggMC/launcher-modorg）
+src/abilities/modorg/
+
 # 内核防线（独立公开仓库 aaaa0ggMC/launcher-kerneldef）
 src/abilities/kerneldef/
 

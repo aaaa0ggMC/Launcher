@@ -1,0 +1,345 @@
+/**
+ * YAYA Session & Message Database
+ * 基于 node:sqlite (DatabaseSync) 实现树状消息流持久化。
+ * 纯 Node 内置，零原生编译依赖。
+ */
+import { DatabaseSync } from 'node:sqlite'
+import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { USER_CONFIG_DIR } from '../../../main/process/paths'
+import { makeLogger } from '../../../main/process/logger'
+import type { Session, MessageNode } from '../types'
+
+const log = makeLogger('yaya-db')
+
+let db: DatabaseSync | null = null
+
+export function getYayaDbPath(): string {
+  return join(USER_CONFIG_DIR, 'yaya', 'yaya.db')
+}
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS sessions (
+  id              TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  active_leaf_id  TEXT,
+  model           TEXT,
+  provider_id     TEXT,
+  system_prompt   TEXT,
+  meta            TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id                TEXT PRIMARY KEY,
+  session_id        TEXT NOT NULL,
+  parent_id         TEXT,
+  role              TEXT NOT NULL,
+  content           TEXT NOT NULL,
+  reasoning_content TEXT,
+  tool_calls        TEXT,
+  tool_call_id      TEXT,
+  name              TEXT,
+  attachments       TEXT,
+  status            TEXT NOT NULL DEFAULT 'completed',
+  error             TEXT,
+  created_at        INTEGER NOT NULL,
+  usage             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages (session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages (parent_id);
+`
+
+export function getYayaDb(): DatabaseSync {
+  if (db) return db
+  const path = getYayaDbPath()
+  mkdirSync(dirname(path), { recursive: true })
+  const d = new DatabaseSync(path)
+  d.exec('PRAGMA journal_mode = WAL')
+  d.exec(SCHEMA)
+  db = d
+  log.info('YAYA database initialized at', { path })
+  return db
+}
+
+interface SessionRow {
+  id: string
+  title: string
+  created_at: number
+  updated_at: number
+  active_leaf_id: string | null
+  model: string | null
+  provider_id: string | null
+  system_prompt: string | null
+  meta: string
+}
+
+function parseSessionRow(row: SessionRow): Session {
+  return {
+    id: row.id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    activeLeafId: row.active_leaf_id,
+    model: row.model ?? undefined,
+    providerId: row.provider_id ?? undefined,
+    systemPrompt: row.system_prompt ?? undefined,
+    meta: row.meta ? JSON.parse(row.meta) : {}
+  }
+}
+
+interface MessageRow {
+  id: string
+  session_id: string
+  parent_id: string | null
+  role: string
+  content: string
+  reasoning_content: string | null
+  tool_calls: string | null
+  tool_call_id: string | null
+  name: string | null
+  attachments: string | null
+  status: string
+  error: string | null
+  created_at: number
+  usage: string | null
+}
+
+function parseMessageRow(row: MessageRow): MessageNode {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    parentId: row.parent_id,
+    role: row.role as MessageNode['role'],
+    content: row.content,
+    reasoningContent: row.reasoning_content ?? undefined,
+    toolCalls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
+    toolCallId: row.tool_call_id ?? undefined,
+    name: row.name ?? undefined,
+    attachments: row.attachments ? JSON.parse(row.attachments) : undefined,
+    status: row.status as MessageNode['status'],
+    error: row.error ?? undefined,
+    createdAt: row.created_at,
+    usage: row.usage ? JSON.parse(row.usage) : undefined
+  }
+}
+
+export function cleanEmptySessions(keepSessionId?: string): void {
+  const d = getYayaDb()
+  if (keepSessionId) {
+    d.prepare(
+      `DELETE FROM sessions WHERE id != ? AND id NOT IN (SELECT DISTINCT session_id FROM messages)`
+    ).run(keepSessionId)
+  } else {
+    d.prepare(
+      `DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)`
+    ).run()
+  }
+}
+
+export function listSessions(keepSessionId?: string): Session[] {
+  const d = getYayaDb()
+  cleanEmptySessions(keepSessionId)
+  const rows = d
+    .prepare('SELECT * FROM sessions ORDER BY updated_at DESC')
+    .all() as unknown as SessionRow[]
+  return rows.map(parseSessionRow)
+}
+
+export function getSession(id: string): Session | null {
+  const d = getYayaDb()
+  const row = d.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as unknown as
+    SessionRow | undefined
+  return row ? parseSessionRow(row) : null
+}
+
+export function createSession(s: Partial<Session> & { id: string; title: string }): Session {
+  const d = getYayaDb()
+  const now = Date.now()
+  const session: Session = {
+    id: s.id,
+    title: s.title,
+    createdAt: s.createdAt ?? now,
+    updatedAt: s.updatedAt ?? now,
+    activeLeafId: s.activeLeafId ?? null,
+    model: s.model,
+    providerId: s.providerId,
+    systemPrompt: s.systemPrompt,
+    meta: s.meta ?? {}
+  }
+
+  d.prepare(
+    `INSERT INTO sessions (id, title, created_at, updated_at, active_leaf_id, model, provider_id, system_prompt, meta)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    session.id,
+    session.title,
+    session.createdAt,
+    session.updatedAt,
+    session.activeLeafId ?? null,
+    session.model ?? null,
+    session.providerId ?? null,
+    session.systemPrompt ?? null,
+    JSON.stringify(session.meta)
+  )
+
+  return session
+}
+
+export function updateSession(id: string, updates: Partial<Session>): void {
+  const d = getYayaDb()
+  const current = getSession(id)
+  if (!current) return
+
+  const updated: Session = {
+    ...current,
+    ...updates,
+    updatedAt: updates.updatedAt ?? Date.now()
+  }
+
+  d.prepare(
+    `UPDATE sessions SET
+      title = ?,
+      updated_at = ?,
+      active_leaf_id = ?,
+      model = ?,
+      provider_id = ?,
+      system_prompt = ?,
+      meta = ?
+     WHERE id = ?`
+  ).run(
+    updated.title,
+    updated.updatedAt,
+    updated.activeLeafId ?? null,
+    updated.model ?? null,
+    updated.providerId ?? null,
+    updated.systemPrompt ?? null,
+    JSON.stringify(updated.meta),
+    id
+  )
+}
+
+export function deleteSession(id: string): void {
+  const d = getYayaDb()
+  d.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
+  d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}
+
+export function insertMessage(msg: MessageNode): void {
+  const d = getYayaDb()
+  d.prepare(
+    `INSERT INTO messages (
+      id, session_id, parent_id, role, content, reasoning_content,
+      tool_calls, tool_call_id, name, attachments, status, error, created_at, usage
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    msg.id,
+    msg.sessionId,
+    msg.parentId,
+    msg.role,
+    msg.content,
+    msg.reasoningContent ?? null,
+    msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
+    msg.toolCallId ?? null,
+    msg.name ?? null,
+    msg.attachments ? JSON.stringify(msg.attachments) : null,
+    msg.status ?? 'completed',
+    msg.error ?? null,
+    msg.createdAt,
+    msg.usage ? JSON.stringify(msg.usage) : null
+  )
+
+  // Update session active_leaf_id and updated_at
+  updateSession(msg.sessionId, { activeLeafId: msg.id, updatedAt: msg.createdAt })
+}
+
+export function updateMessage(id: string, updates: Partial<MessageNode>): void {
+  const d = getYayaDb()
+  const current = getMessage(id)
+  if (!current) return
+
+  const updated: MessageNode = { ...current, ...updates }
+
+  d.prepare(
+    `UPDATE messages SET
+      content = ?,
+      reasoning_content = ?,
+      tool_calls = ?,
+      attachments = ?,
+      status = ?,
+      error = ?,
+      usage = ?
+     WHERE id = ?`
+  ).run(
+    updated.content,
+    updated.reasoningContent ?? null,
+    updated.toolCalls ? JSON.stringify(updated.toolCalls) : null,
+    updated.attachments ? JSON.stringify(updated.attachments) : null,
+    updated.status ?? 'completed',
+    updated.error ?? null,
+    updated.usage ? JSON.stringify(updated.usage) : null,
+    id
+  )
+}
+
+export function getMessage(id: string): MessageNode | null {
+  const d = getYayaDb()
+  const row = d.prepare('SELECT * FROM messages WHERE id = ?').get(id) as unknown as
+    MessageRow | undefined
+  return row ? parseMessageRow(row) : null
+}
+
+export function getSessionMessages(sessionId: string): MessageNode[] {
+  const d = getYayaDb()
+  const rows = d
+    .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+    .all(sessionId) as unknown as MessageRow[]
+  return rows.map(parseMessageRow)
+}
+
+/**
+ * 获取某个节点的同级分支数量及索引（兄弟节点集合）
+ */
+export function getMessageSiblings(messageId: string): { siblings: string[]; index: number } {
+  const msg = getMessage(messageId)
+  if (!msg) return { siblings: [messageId], index: 0 }
+  const d = getYayaDb()
+  let rows: { id: string }[]
+  if (msg.parentId === null) {
+    rows = d
+      .prepare(
+        'SELECT id FROM messages WHERE session_id = ? AND parent_id IS NULL ORDER BY created_at ASC'
+      )
+      .all(msg.sessionId) as unknown as { id: string }[]
+  } else {
+    rows = d
+      .prepare(
+        'SELECT id FROM messages WHERE session_id = ? AND parent_id = ? ORDER BY created_at ASC'
+      )
+      .all(msg.sessionId, msg.parentId) as unknown as { id: string }[]
+  }
+  const siblings = rows.map((r) => r.id)
+  const index = siblings.indexOf(messageId)
+  return { siblings, index: Math.max(0, index) }
+}
+
+/**
+ * 从叶子节点回溯至根节点，生成当前分支线性对话链
+ */
+export function getMessageBranch(leafId: string | null | undefined): MessageNode[] {
+  if (!leafId) return []
+  const branch: MessageNode[] = []
+  let currId: string | null = leafId
+
+  while (currId) {
+    const msg = getMessage(currId)
+    if (!msg) break
+    branch.unshift(msg)
+    currId = msg.parentId
+  }
+  return branch
+}

@@ -23,7 +23,7 @@ and try again. Everything else works out of the box.
 | 秒数与时长转换     | Duration Converter    | Seconds to d/h/m/s and an ISO 8601 duration                                                                                  |
 | 特殊时间戳转换     | Timestamp Formats     | Windows FILETIME, .NET ticks, WebKit, Excel OADate, Discord Snowflake, hex Unix time                                         |
 | 世界时钟           | World Clock           | The same instant across multiple IANA zones                                                                                  |
-| 汇率换算           | Currency Converter    | Convert amounts with live public rates, several targets at once (the only online tool; rates cached 1 hour)                 |
+| 汇率换算           | Currency Converter    | Convert amounts with live public rates, several targets at once (the only online tool; rates cached 1 hour)                  |
 
 ## Developer (20)
 
