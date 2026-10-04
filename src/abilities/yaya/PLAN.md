@@ -383,7 +383,12 @@
   - Skill：把该 Skill 的说明随这条消息加载（等价于替模型调了一次 `skill_load`）；
   - MCP / 工具类插件：本会话起加入工具表。
 - **界面**：提及以标签显示在输入框和用户气泡里（可删除）；候选框键盘上下选、回车确认、Esc 关闭；移动端用底部弹层，并在工具栏放一个 `@` 按钮（触屏不方便打字时也能点）。数据库里的消息保存提及的结构化信息（id + 显示名），导出时还原为 `@名字`。
-- **SDK**：插件可声明提及时的行为（附注文本 / 加载的内容 / 额外工具），缺省按类型处理。
+- **SDK（系统提供，三种来源共用）**：MCP / Skill / 内置插件在注册表里都是 `YayaPlugin`，提及是插件层的统一能力，不按来源各写一套：
+  - 契约：`YayaPlugin.mention?: (ctx: { sessionId, toolName? }) => MentionEffect | Promise<MentionEffect>`，
+    `MentionEffect = { note?: string; content?: ToolContentPart[]; enable?: 'plugin' | string[] }`，分别是拼进这条用户消息的附注、随消息加载的内容（文本 / 图片，走同一套结果规范化），以及本会话起启用整个插件还是指定工具。
+  - 默认实现由来源提供，插件可覆盖：内置插件缺省 `enable: 'plugin'`；Skill 提供方缺省 `content = SKILL.md 正文`（等价一次 `skill_load`）；MCP 提供方缺省 `enable: 'plugin'` + 附注列出可用工具名；显示类插件缺省只给附注（「可以用 xx 代码块」）。
+  - 宿主统一执行：候选列表来自注册表（`listPluginInfo` 的插件 + 工具两级，按类型分组：插件 / MCP / Skill），提及解析、`session.meta.mentions` 覆盖、附注与内容的拼接位置（只进新消息，不动前缀）、启用后的工具表追加顺序（稳定、只追加）都在 runner / registry 里做一次。新来源（以后的其它 provider）只要实现 `mention` 或沿用默认就自动可被 `@`。
+  - 命令：`yaya.mention-candidates [--query]`（候选，给输入框）与 `yaya.session-mentions --id [--remove]`（查看 / 撤销）。
 
 ### 6.3 其它候选
 - 第一个能力悬浮窗（如 AIDJ 迷你播放器），验证 Outsider SDK 的能力注入与设置页权限。
