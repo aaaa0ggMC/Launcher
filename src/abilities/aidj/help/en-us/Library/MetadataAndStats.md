@@ -1,6 +1,6 @@
 # Library & Metadata
 
-> Last updated: 2026-10-03
+> Last updated: 2026-10-06
 
 This page covers AI DJ's back office: how the library is scanned, where the metadata (language / mood /
 genre / loudness / review) comes from, where play frequency and listening time are stored, and how a
@@ -55,6 +55,23 @@ AI DJ page menu → **Update MetaData** starts the "AIDJ Metadata Sync" backgrou
    `loudness` and `review` — which are written to the current write slot.
 4. When it finishes the page shows "Metadata sync finished: N" or "No new metadata written", and the
    background panel shows per-song progress.
+
+### Measured loudness
+
+Sync also measures each new song with `ffprobe` and writes two optional fields next to the metadata:
+`loudness_lufs` (EBU R128 integrated loudness, LUFS) and `loudness_peak_db` (true peak, dBFS). They are a
+long-term reference: the extraction model uses them to decide `loudness` (soft / medium / loud), and the
+picking AI sees the numbers too. Without ffmpeg, or when a song can't be measured, the fields stay empty and
+nothing else changes.
+
+Older songs synced before this have no such fields; backfill them from the CLI:
+
+```
+background.job --name aidj.loudness-backfill --args {}
+```
+
+It only fills missing fields (`{"force":true}` re-measures everything), measures 2 songs at a time, can be
+stopped from the background panel, and merges the results into the current write slot.
 
 Related settings, all under **Settings → AI DJ**:
 
