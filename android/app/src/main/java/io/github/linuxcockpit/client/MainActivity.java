@@ -14,11 +14,14 @@ import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
@@ -29,6 +32,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.ProgressBar;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -82,6 +88,40 @@ public class MainActivity extends Activity {
     private String sharedText = "";
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
+    /** 探测 / 页面加载时的原生转圈（盖在网页加载之上，用户看得到"在连"） */
+    private ProgressBar spinner;
+    /** 连接尝试代号：新的一次尝试让旧探测的回调作废（用户换了目标 / 打开连接页 / 页面销毁） */
+    private int probeSeq = 0;
+    /** 正在探测的目标签名（url + token）：同一目标不重复连接 */
+    private String pendingConnect;
+    /** 最近一次「静止」时量到的 IME 高度，>0 = 键盘弹着（API 30+ 以 isVisible 为准） */
+    private int imeRestBottom = 0;
+    /** 键盘动画进行中：这期间不改 padding，只平移 WebView */
+    private boolean imeAnimating = false;
+
+    /** 关网页弹窗 / 菜单：找到一个激活的 overlay，朝当前焦点发 Escape */
+    private static final String JS_DISMISS_OVERLAY =
+            "(function(){var o=document.querySelectorAll('.v-overlay--active:not(.v-snackbar):not(.v-tooltip)');"
+                    + "if(!o.length)return false;var t=document.activeElement||document.body;"
+                    + "t.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',keyCode:27,bubbles:true}));"
+                    + "return true})()";
+
+    /**
+     * 系统栏跟随网页主题：MutationObserver 盯 class/style，用 requestAnimationFrame 合并
+     * （一帧最多通知一次），替换原来的 setInterval(…, 1000) 每秒轮询。
+     * 5 秒的慢同步只是兜底（主题变了却没碰 html/body 属性时补上）。
+     */
+    private static final String JS_THEME_OBSERVER =
+            "(function(){if(window.__cockpitBar)return;window.__cockpitBar=1;var last='',raf=0;"
+                    + "function send(){raf=0;try{var c=getComputedStyle(document.documentElement).backgroundColor;"
+                    + "if(c&&c!==last){last=c;CockpitAndroid.setBarColor(c)}}catch(e){}}"
+                    + "function tick(){if(raf)return;raf=requestAnimationFrame(send)}"
+                    + "new MutationObserver(tick).observe(document.documentElement,"
+                    + "{attributes:true,attributeFilter:['class','style']});"
+                    + "new MutationObserver(tick).observe(document.body,"
+                    + "{attributes:true,attributeFilter:['class','style']});"
+                    + "setInterval(tick,5000);send()})()";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -90,13 +130,20 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(0x12, 0x12, 0x12));
         setContentView(root);
         setupInsets();
+        createSpinner();
         createWebView();
 
+        boolean restored = false;
         if (savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
+            // 恢复上次的页面回来。**恢复不能吞掉本次启动带来的深链接 / 分享**：
+            // 它们照常在下面 handleIntent 里处理（深链接直接开连接页，分享等页面 ready 再交）。
             hostOrigin = originOf(prefs.getString("url", DEFAULT_URL));
-            return;
+            pageReady = false;
+            restored = true;
         }
-        if (!handleIntent(getIntent())) {
+        setupBackHandling();
+        boolean handled = handleIntent(getIntent());
+        if (!handled && !restored) {
             if (!prefs.getString("url", "").isEmpty()) connect();
             else showConnect("");
         }
@@ -105,6 +152,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
         handleIntent(intent);
     }
 
@@ -122,14 +170,17 @@ public class MainActivity extends Activity {
             } catch (JSONException ignored) {
             }
             showConnect("");
+            setIntent(new Intent(this, MainActivity.class));
             return true;
         }
         if ("io.github.linuxcockpit.client.CONNECT_SETTINGS".equals(intent.getAction())) {
             showConnect("");
+            setIntent(new Intent(this, MainActivity.class));
             return true;
         }
         if (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
             collectShare(intent);
+            setIntent(new Intent(this, MainActivity.class));
             // 不占用这次启动：照常连接；页面就绪后再交给它（已就绪则立刻交）
             if (pageReady) deliverShare();
             return false;
@@ -183,18 +234,137 @@ public class MainActivity extends Activity {
 
     private void setupInsets() {
         Window w = getWindow();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制），自己按系统栏 + 键盘留白：
-            // WebView 的可见区域就是真正能用的区域，网页里的 --app-vh 量到的也是它
-            w.setDecorFitsSystemWindows(false);
-            root.setOnApplyWindowInsetsListener((v, insets) -> {
-                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                Insets ime = insets.getInsets(WindowInsets.Type.ime());
-                v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
-                return WindowInsets.CONSUMED;
-            });
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+            return; // Android 8–10：系统自己留出系统栏，adjustResize 处理键盘
+        // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制），自己按系统栏 + 键盘留白：
+        // WebView 的可见区域就是真正能用的区域，网页里的 --app-vh 量到的也是它
+        w.setDecorFitsSystemWindows(false);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            // Apply the final layout before onStart; progress only transforms the WebView.
+            if (!imeAnimating) applySettledInsets(insets);
+            return WindowInsets.CONSUMED;
+        });
+        // Android 11+：键盘弹起 / 收起走 WindowInsetsAnimationCallback——动画中只平移 WebView
+        // （translation，不重排），动画结束（含取消 / 被打断 / 旋转）才把最终 padding 落下去再清零。
+        root.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_STOP) {
+            /** 动画开始时 root 的底 padding，即内容的起始底边 */
+            private int startPadding;
+            private int endPadding;
+            private WindowInsetsAnimation activeIme;
+
+            @Override
+            public void onPrepare(WindowInsetsAnimation animation) {
+                if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
+                activeIme = animation;
+                imeAnimating = false;
+                startPadding = root.getPaddingBottom();
+            }
+
+            @Override
+            public WindowInsetsAnimation.Bounds onStart(WindowInsetsAnimation animation,
+                    WindowInsetsAnimation.Bounds bounds) {
+                if (animation != activeIme) return bounds;
+                imeAnimating = true;
+                endPadding = root.getPaddingBottom();
+                web.setTranslationY(endPadding - startPadding);
+                return bounds;
+            }
+
+            @Override
+            public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> running) {
+                boolean hasIme = false;
+                for (WindowInsetsAnimation a : running)
+                    if (a == activeIme) hasIme = true;
+                if (hasIme) {
+                    int cur = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                    int bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()).bottom;
+                    // 目标底边 = 窗口底 - max(系统栏, 当前键盘高度)；现在底边 = 窗口底 - startPadding
+                    web.setTranslationY(endPadding - Math.max(bars, cur));
+                }
+                return insets;
+            }
+
+            @Override
+            public void onEnd(WindowInsetsAnimation animation) {
+                if (animation != activeIme) return;
+                activeIme = null;
+                imeAnimating = false;
+                WindowInsets finalInsets = root.getRootWindowInsets();
+                if (finalInsets != null) applySettledInsets(finalInsets);
+                web.setTranslationY(0f);
+                root.requestApplyInsets(); // 用静止下来的最终 inset 重算 padding
+            }
+        });
+    }
+
+    /** 键盘没动的时候：按系统栏 + 当前键盘高度设置 root padding（也是动画结束后的最终态） */
+    private void applySettledInsets(WindowInsets insets) {
+        Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+        Insets ime = insets.getInsets(WindowInsets.Type.ime());
+        imeRestBottom = ime.bottom;
+        root.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+    }
+
+    // ---------------------------------------------------------------- 加载指示
+
+    /** 原生转圈：探测 /api/info 与宿主页面加载期间显示，用户知道"正在连"而不是白屏 */
+    private void createSpinner() {
+        if (spinner != null) return;
+        spinner = new ProgressBar(this);
+        spinner.setContentDescription(getString(R.string.loading));
+        spinner.setVisibility(View.GONE);
+        root.addView(spinner, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+    }
+
+    void showLoading(boolean on) {
+        if (spinner != null) spinner.setVisibility(on ? View.VISIBLE : View.GONE);
+    }
+
+    // ---------------------------------------------------------------- 返回键
+
+    /** Android 13+ 用 OnBackInvokedCallback；旧系统走 {@link #onBackPressed()} */
+    private void setupBackHandling() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            OnBackInvokedCallback cb = this::onBack;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb);
         }
-        // Android 8–10：系统自己留出系统栏，adjustResize 处理键盘
+    }
+
+    /**
+     * 返回键：先收键盘（键盘开着就只收，不让网页收到 Escape），
+     * 再关网页弹窗 / 菜单，再后退，最后退到后台（连接不断）。
+     */
+    void onBack() {
+        if (imeVisible()) {
+            hideIme();
+            return;
+        }
+        web.evaluateJavascript(JS_DISMISS_OVERLAY, handled -> {
+            if ("true".equals(handled)) return;
+            if (web.canGoBack()) web.goBack();
+            else moveTaskToBack(true);
+        });
+    }
+
+    private boolean imeVisible() {
+        WindowInsets ri = root.getRootWindowInsets();
+        if (ri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            return ri.isVisible(WindowInsets.Type.ime());
+        return imeRestBottom > 0;
+    }
+
+    private void hideIme() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) c.hide(WindowInsets.Type.ime());
+            return;
+        }
+        View focus = getCurrentFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(
+                (focus != null ? focus : web).getWindowToken(), 0);
     }
 
     /** 系统栏跟随网页背景色（主题），浅色背景用深色图标 */
@@ -231,7 +401,8 @@ public class MainActivity extends Activity {
             web.destroy();
         }
         web = new WebView(this);
-        root.addView(web, new FrameLayout.LayoutParams(
+        // index 0：转圈进度条（createSpinner 加的）永远盖在网页上面
+        root.addView(web, 0, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG); // chrome://inspect 做性能分析
 
@@ -243,6 +414,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         // 布局按网页自己的缩放设置，不吃系统字体放大
         s.setTextZoom(100);
+        // 页面缩放保持关闭：捏合手势留给网页自己的画布（ft 等），WebView 不抢
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
         s.setAllowFileAccess(false);
@@ -273,22 +445,22 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-            // 页面（重新）加载：等新页面的 shim 再调 ready 才发事件
+            if (url.startsWith(CONNECT_PAGE)) return;
+            // 页面（重新）加载：等新页面的 shim 再调 ready 才发事件，期间显示原生转圈
             pageReady = false;
+            showLoading(true);
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            showLoading(false);
             if (url.startsWith(CONNECT_PAGE)) {
                 applyBarColor(Color.rgb(0x12, 0x12, 0x12));
                 return;
             }
-            // 主题会在运行中切换：每秒看一次根元素背景色，变了才通知原生
-            view.evaluateJavascript(
-                    "(function(){if(window.__cockpitBar)return;window.__cockpitBar=1;var last='';"
-                            + "function tick(){try{var c=getComputedStyle(document.documentElement).backgroundColor;"
-                            + "if(c&&c!==last){last=c;CockpitAndroid.setBarColor(c)}}catch(e){}}"
-                            + "tick();setInterval(tick,1000)})()", null);
+            // 主题在运行中切换：MutationObserver 看 class/style 变更 + requestAnimationFrame
+            // 合并（一帧最多通知一次），不再每秒轮询。兜底的低频慢同步留给不用属性变更的改法。
+            view.evaluateJavascript(JS_THEME_OBSERVER, null);
         }
 
         @Override
@@ -349,6 +521,9 @@ public class MainActivity extends Activity {
         pendingError = error == null ? "" : error;
         hostOrigin = "";
         pageReady = false;
+        probeSeq++; // 让还在探测中的回调作废（它属于上一次尝试）
+        pendingConnect = null;
+        showLoading(false);
         web.loadUrl(CONNECT_PAGE);
     }
 
@@ -356,11 +531,19 @@ public class MainActivity extends Activity {
     void connect() {
         final String base = trimSlash(prefs.getString("url", DEFAULT_URL));
         final String token = prefs.getString("token", "");
+        final String sig = base + "\n" + token;
+        if (sig.equals(pendingConnect)) return; // 同一目标正在探测：不重复连接
+        pendingConnect = sig;
+        final int seq = ++probeSeq;
+        showLoading(true);
         if (prefs.getBoolean("keepAlive", true)) startKeepAlive();
         else stopService(new Intent(this, KeepAliveService.class));
         new Thread(() -> {
             String err = probe(base, token);
             runOnUiThread(() -> {
+                if (seq != probeSeq) return; // 用户换了目标 / 打开连接页 / 页面已销毁：过期结果丢弃
+                pendingConnect = null;
+                showLoading(false);
                 if (err != null) {
                     showConnect(err);
                     return;
@@ -368,7 +551,7 @@ public class MainActivity extends Activity {
                 hostOrigin = originOf(base);
                 pageReady = false;
                 String q = token.isEmpty() ? "" : "/?token=" + enc(token);
-                web.loadUrl(base + q);
+                web.loadUrl(base + q); // 真正的加载进度接着由 onPageStarted / onPageFinished 显示
             });
         }).start();
     }
@@ -425,26 +608,21 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        probeSeq++; // 丢弃还没回来的探测结果，别让它动已销毁的界面
+        pendingConnect = null;
+        showLoading(false);
         stopService(new Intent(this, KeepAliveService.class));
         io.shutdownNow();
         web.destroy();
         super.onDestroy();
     }
 
-    /** 返回键：先关网页里的弹窗 / 菜单（发一个 Escape），再后退，最后退到后台（不断开连接） */
+    /** Android 12 及以下的返回键（13+ 由 setupBackHandling 注册的 OnBackInvokedCallback 处理） */
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        web.evaluateJavascript(
-                "(function(){var o=document.querySelectorAll('.v-overlay--active:not(.v-snackbar):not(.v-tooltip)');"
-                        + "if(!o.length)return false;var t=document.activeElement||document.body;"
-                        + "t.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',keyCode:27,bubbles:true}));"
-                        + "return true})()",
-                handled -> {
-                    if ("true".equals(handled)) return;
-                    if (web.canGoBack()) web.goBack();
-                    else moveTaskToBack(true);
-                });
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return;
+        onBack();
     }
 
     // ---------------------------------------------------------------- 原生调用（RPC）

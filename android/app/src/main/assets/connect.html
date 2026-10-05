@@ -11,23 +11,30 @@
   html, body { margin: 0; background: var(--bg); color: var(--fg);
                font: 15px/1.55 system-ui, -apple-system, "Noto Sans CJK SC", sans-serif; }
   main { max-width: 520px; margin: 0 auto; padding: 32px 20px 40px; display: flex; flex-direction: column; gap: 20px; }
-  header { display: flex; align-items: center; gap: 14px; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   header h1 { font-size: 1.35rem; margin: 0; font-weight: 600; }
   header small { color: var(--dim); }
   .card { background: var(--card); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
   label { display: flex; flex-direction: column; gap: 8px; font-size: .9rem; color: var(--dim); }
-  .row { display: flex; gap: 8px; }
+  /* token 行：窄屏时按钮换到下一行并平分宽度，不再挤成一团 */
+  .row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .row input { flex: 1 1 200px; min-width: 0; }
+  .row button { flex: 0 1 auto; min-width: 92px; }
   input[type=text], input[type=password], input[type=url] {
     flex: 1; min-width: 0; min-height: 48px; padding: 10px 14px; border-radius: 12px;
-    border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--fg); font-size: 1rem; }
+    border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--fg); font-size: 1rem;
+    touch-action: manipulation; }
   input:focus { outline: 2px solid var(--pri); outline-offset: -1px; }
+  input[aria-invalid="true"] { border-color: var(--err); outline-color: var(--err); }
   button { min-height: 48px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--line);
-           background: transparent; color: var(--fg); font-size: .95rem; cursor: pointer; }
+           background: transparent; color: var(--fg); font-size: .95rem; cursor: pointer;
+           touch-action: manipulation; }
   button.primary { background: var(--pri); color: #0b2228; border: none; font-weight: 600; }
   button:disabled { opacity: .55; }
   .check { flex-direction: row; align-items: center; gap: 12px; color: var(--fg); min-height: 48px; }
   .check input { width: 22px; height: 22px; accent-color: var(--pri); }
   .check span small { display: block; color: var(--dim); }
+  .hint { color: var(--dim); font-size: .82rem; min-height: 1em; }
   .error { background: rgba(239,108,108,.12); color: var(--err); border-radius: 12px; padding: 12px 14px; }
   .help { color: var(--dim); font-size: .88rem; display: flex; flex-direction: column; gap: 10px; }
   .help h2 { font-size: .95rem; color: var(--fg); margin: 0; font-weight: 600; }
@@ -37,6 +44,14 @@
         white-space: pre-wrap; word-break: break-all; font-size: .82rem; }
   .actions { display: flex; justify-content: flex-end; }
   .actions button { min-width: 140px; }
+  /* 窄屏手机：表单单列、按钮撑满、连接按钮整行 */
+  @media (max-width: 420px) {
+    main { padding: 24px 16px 32px; gap: 16px; }
+    .card { padding: 16px; }
+    .row input { flex-basis: 100%; }
+    .row button { flex: 1 1 0; min-width: 0; }
+    .actions button { width: 100%; min-width: 0; }
+  }
 </style>
 </head>
 <body>
@@ -48,15 +63,16 @@
     </div>
   </header>
 
-  <div id="error" class="error" hidden></div>
+  <div id="error" class="error" role="alert" hidden></div>
 
-  <form class="card" id="form">
+  <form novalidate class="card" id="form">
     <label><span data-t="url"></span>
-      <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <input id="url" type="url" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <span class="hint" id="hint" aria-live="polite" hidden></span>
     </label>
     <label><span data-t="token"></span>
       <div class="row">
-        <input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <input id="token" type="password" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button type="button" id="show" data-t="show"></button>
         <button type="button" id="paste" data-t="paste"></button>
       </div>
@@ -84,13 +100,18 @@ node headless/index.js</pre>
   const T = zh ? {
     title: '连接 Cockpit 宿主', url: '宿主地址', token: 'Token', show: '显示', hide: '隐藏', paste: '粘贴',
     keep: '后台保持运行', keepHint: '常驻通知，切到后台时播放器和连接不断', connect: '连接', connecting: '正在连接…',
+    errUrl: '请填一个 http(s) 的宿主地址，例如 http://127.0.0.1:47810',
+    hintPrefix: '将连接到 ', errTimeout: '连接超时：确认地址、宿主已启动后重试',
     helpTitle: '怎么用', help1: '先在 Termux 里启动无头宿主（默认监听 127.0.0.1:47810）：', or: '或者用打包好的版本：',
     help2: 'Token 在宿主上这个文件里，复制后点「粘贴」：',
     help3: '连上之后界面全部来自宿主，宿主更新后不用重装这个应用。之后想换宿主：长按桌面图标 →「连接设置」。'
   } : {
     title: 'Connect to Cockpit host', url: 'Host URL', token: 'Token', show: 'Show', hide: 'Hide', paste: 'Paste',
     keep: 'Keep running in background', keepHint: 'Ongoing notification keeps playback and the connection alive',
-    connect: 'Connect', connecting: 'Connecting…', helpTitle: 'How to use',
+    connect: 'Connect', connecting: 'Connecting…',
+    errUrl: 'Enter an http(s) host URL, e.g. http://127.0.0.1:47810',
+    hintPrefix: 'Will connect to ', errTimeout: 'Timed out. Check the address, make sure the host is running, then retry.',
+    helpTitle: 'How to use',
     help1: 'Start the headless host in Termux first (listens on 127.0.0.1:47810 by default):', or: 'or the packed build:',
     help2: 'The token is in this file on the host — copy it, then tap “Paste”:',
     help3: 'Once connected, the whole UI comes from the host, so host updates need no app reinstall. To switch hosts later: long-press the app icon → “Connection settings”.'
@@ -116,14 +137,57 @@ node headless/index.js</pre>
     const v = A ? A.pasteText().trim() : ''
     if (v) $('token').value = v
   }
+
+  /** 补上协议并按 URL 解析，失败 / 非 http(s) 视为无效 */
+  function normalize() {
+    let url = $('url').value.trim()
+    if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'http://' + url
+    return url
+  }
+  function validate() {
+    if (!$('url').value.trim()) return T.errUrl
+    let u = null
+    try { u = new URL(normalize()) } catch (e) { return T.errUrl }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return T.errUrl
+    if (!u.hostname) return T.errUrl
+    return ''
+  }
+  function showError(msg, field) {
+    $('error').textContent = msg
+    $('error').hidden = !msg
+    if (field) { field.setAttribute('aria-invalid', 'true'); field.focus() }
+  }
+
+  // 输入时清掉错误，并提示补协议后真正会连的地址
+  $('url').addEventListener('input', () => {
+    $('url').removeAttribute('aria-invalid')
+    const raw = $('url').value.trim()
+    const h = $('hint')
+    h.textContent = raw && !/^https?:\/\//i.test(raw) ? T.hintPrefix + normalize() : ''
+    h.hidden = !h.textContent
+  })
+
+  let submitting = false
   $('form').onsubmit = (e) => {
     e.preventDefault()
-    let url = $('url').value.trim()
-    if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url
+    if (submitting) return // 提交中：按钮已禁用，双保险防重复连接
+    const err = validate()
+    if (err) { showError(err, $('url')); return }
+    submitting = true
     $('go').disabled = true
     $('go').textContent = T.connecting
+    $('form').setAttribute('aria-busy', 'true')
     $('error').hidden = true
-    A && A.connect(url, $('token').value.trim(), $('keep').checked)
+    A && A.connect(normalize(), $('token').value.trim(), $('keep').checked)
+    // 兜底：原生一直没把页面带走（探测卡住 / 桥没反应）时恢复表单，别把用户晾在禁用状态
+    setTimeout(() => {
+      if (!submitting) return
+      submitting = false
+      $('go').disabled = false
+      $('go').textContent = T.connect
+      $('form').removeAttribute('aria-busy')
+      showError(T.errTimeout)
+    }, 20000)
   }
 </script>
 </body>
