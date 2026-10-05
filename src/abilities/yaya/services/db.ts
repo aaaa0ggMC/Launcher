@@ -10,6 +10,7 @@ import { USER_CONFIG_DIR } from '../../../main/process/paths'
 import { makeLogger } from '../../../main/process/logger'
 import type { Session, MessageNode } from '../types'
 import { deleteSessionAssets } from './assets'
+import { getBroadcast } from '../../../main/process/broadcast'
 
 const log = makeLogger('yaya-db')
 
@@ -138,25 +139,33 @@ function parseMessageRow(row: MessageRow): MessageNode {
   }
 }
 
+/** 空会话（还没发过消息）超过这么久才删除：期间可能正被另一个客户端（另一个标签页 / 手机）打开着 */
+const EMPTY_SESSION_TTL_MS = 60 * 60 * 1000
+
+/**
+ * 清理空会话。只删「足够旧」的：多个客户端同时连同一个宿主时，别的客户端刚「新建」、
+ * 还没发消息的会话不能因为这边刷新了列表就被删掉。
+ */
 export function cleanEmptySessions(keepSessionId?: string): void {
-  const d = getYayaDb()
-  if (keepSessionId) {
-    d.prepare(
-      `DELETE FROM sessions WHERE id != ? AND id NOT IN (SELECT DISTINCT session_id FROM messages)`
-    ).run(keepSessionId)
-  } else {
-    d.prepare(
-      `DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)`
-    ).run()
-  }
+  getYayaDb()
+    .prepare(
+      `DELETE FROM sessions WHERE id != ? AND created_at < ?
+         AND id NOT IN (SELECT DISTINCT session_id FROM messages)`
+    )
+    .run(keepSessionId ?? '', Date.now() - EMPTY_SESSION_TTL_MS)
 }
 
+/** 会话列表：空会话只给正打开着它的那个客户端看（keepSessionId），别人的空会话不显示 */
 export function listSessions(keepSessionId?: string): Session[] {
   const d = getYayaDb()
   cleanEmptySessions(keepSessionId)
   const rows = d
-    .prepare('SELECT * FROM sessions ORDER BY updated_at DESC')
-    .all() as unknown as SessionRow[]
+    .prepare(
+      `SELECT * FROM sessions
+        WHERE id = ? OR id IN (SELECT DISTINCT session_id FROM messages)
+        ORDER BY updated_at DESC`
+    )
+    .all(keepSessionId ?? '') as unknown as SessionRow[]
   return rows.map(parseSessionRow)
 }
 
@@ -165,6 +174,21 @@ export function getSession(id: string): Session | null {
   const row = d.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as unknown as
     SessionRow | undefined
   return row ? parseSessionRow(row) : null
+}
+
+/**
+ * 会话列表变了（新建 / 改名 / 新消息顶到最前 / 删除）：通知所有客户端刷新列表。
+ * 多个客户端（浏览器标签页、安卓 App）连同一个宿主时，一边的改动另一边也要看到。
+ * 流式期间 updateSession 很频繁，合并成 300ms 一次。
+ */
+let sessionsChangedTimer: ReturnType<typeof setTimeout> | null = null
+function noteSessionsChanged(): void {
+  if (sessionsChangedTimer) return
+  sessionsChangedTimer = setTimeout(() => {
+    sessionsChangedTimer = null
+    getBroadcast()('cockpit:yaya-sessions-changed', {})
+  }, 300)
+  sessionsChangedTimer.unref?.()
 }
 
 export function createSession(s: Partial<Session> & { id: string; title: string }): Session {
@@ -196,7 +220,7 @@ export function createSession(s: Partial<Session> & { id: string; title: string 
     session.systemPrompt ?? null,
     JSON.stringify(session.meta)
   )
-
+  noteSessionsChanged()
   return session
 }
 
@@ -231,6 +255,7 @@ export function updateSession(id: string, updates: Partial<Session>): void {
     JSON.stringify(updated.meta),
     id
   )
+  noteSessionsChanged()
 }
 
 export function deleteSession(id: string): void {
@@ -238,6 +263,7 @@ export function deleteSession(id: string): void {
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
   deleteSessionAssets(id)
+  noteSessionsChanged()
 }
 
 /**
