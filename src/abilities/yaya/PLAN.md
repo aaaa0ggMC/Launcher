@@ -222,7 +222,7 @@
 | **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[x]` | `plugins/documents/`：超过内联上限的文本 / PDF 只给 id + 开头摘要（`attachmentRefNote`），模型用 `docs_list` / `docs_search`（BM25，中英文）/ `docs_read`（按行）按需取；只读本会话附件，无需 exec 授权；PDF 走本机 `pdftotext` |
 | **输出渲染 Slot** | Markdown 代码块高亮 + 复制 | `[x]` | `components/markdown.ts`（highlight.js 按需加载，配色跟主题） |
 | | Mermaid 渲染 | `[x]` | `plugins/mermaid/`（6.2，渲染端按需加载 mermaid，`securityLevel: 'strict'`，配色跟主题） |
-| | SVG / HTML 小部件沙箱 | `[-]` | SVG 已做：`plugins/svg/`（净化后 data URL `<img>`）；HTML 小部件待做 |
+| | SVG / HTML 小部件沙箱 | `[x]` | SVG：`plugins/svg/`（净化后 data URL `<img>`）；HTML：`plugins/widget/`，```widget 代码块点击运行，`sandbox="allow-scripts"` iframe + 外壳页自带 CSP（无网络 / 无存储 / 拿不到父页面，Electron 与网页模式实测） |
 
 ---
 
@@ -260,7 +260,7 @@
 
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
 2. ~~**中期**：Anthropic / Gemini 原生 Provider；长文档 Slot；更多工作流；`yaya-asset://` 协议。~~（已完成）
-3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~（已完成）；HTML 小部件沙箱；Android Controller 插件。
+3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~、~~HTML 小部件沙箱~~（已完成）；Android Controller 插件。
 
 
 ---

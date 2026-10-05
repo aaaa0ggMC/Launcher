@@ -4,6 +4,7 @@
  *
  * - 路径解析复用 `resolveAssetLocalPath`（只认两段普通文件名，防 `../` 越界）；
  * - 只提供图片 / 音视频（界面只需要这些）；其它类型 403，避免把任意附件当网页渲染；
+ * - 保留地址 `yaya-asset://.widget/frame` 是 HTML 小部件的沙箱外壳页（`plugins/widget/frame.ts`）；
  * - 支持 Range（视频 / 大图）；无头宿主经 `/_p/yaya-asset/…` 路由转到同一个处理器。
  * 特权（secure / fetch / stream / CORS）在 `src/main/index.ts` 的 registerSchemesAsPrivileged 里声明。
  */
@@ -13,6 +14,7 @@ import { stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { resolveAssetLocalPath } from './assets'
+import { WIDGET_FRAME_URI, widgetFrameResponse } from '../plugins/widget/frame'
 
 export const ASSET_SCHEME = 'yaya-asset'
 
@@ -47,6 +49,8 @@ function toWeb(s: NodeJS.ReadableStream): ReadableStream {
 export async function handleAssetRequest(request: Request): Promise<Response> {
   // 去掉查询串 / 片段（界面可能加 ?v= 破缓存）
   const uri = request.url.split(/[?#]/)[0]
+  // 保留地址：HTML 小部件的沙箱外壳页（见 plugins/widget/frame.ts）
+  if (uri === WIDGET_FRAME_URI) return widgetFrameResponse()
   const local = resolveAssetLocalPath(decodeURIComponent(uri))
   if (!local) return new Response(null, { status: 400 })
   const mime = assetMime(local)

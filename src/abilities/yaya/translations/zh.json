@@ -708,5 +708,15 @@
   "yaya.io.import_default_title_claude": "导入的 Claude 会话",
   "yaya.io.import_default_title_deepseek": "导入的 DeepSeek 会话",
   "yaya.io.import_default_title_rikkahub": "导入的 Rikkahub 会话",
-  "yaya.sessions.import_any": "导入聊天记录（ChatGPT / Claude / DeepSeek / Rikkahub）"
+  "yaya.sessions.import_any": "导入聊天记录（ChatGPT / Claude / DeepSeek / Rikkahub）",
+  "yaya.plugin.widget.label": "HTML 小部件",
+  "yaya.plugin.widget.desc": "```widget 代码块点击后在隔离沙箱里运行（无网络、无法访问 Cockpit），只影响显示",
+  "yaya.plugin.widget.mention": "可以输出 ```widget 代码块（自包含的 HTML / CSS / JS），界面会在沙箱里运行它",
+  "yaya.widget.run": "运行小部件",
+  "yaya.widget.show_source": "停止并查看源码",
+  "yaya.widget.rerun": "重新运行",
+  "yaya.widget.streaming": "生成中，代码块闭合后可以运行",
+  "yaya.widget.too_large": "小部件超过 500KB，仅显示源码",
+  "yaya.widget.sandbox_hint": "在隔离沙箱里运行：没有网络，无法访问 Cockpit",
+  "yaya.widget.frame_title": "HTML 小部件"
 }
