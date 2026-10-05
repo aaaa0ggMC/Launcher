@@ -2,6 +2,8 @@
 defineOptions({ name: 'cockpit-yarj-map-sources' })
 
 import { ref, computed, onMounted, inject } from 'vue'
+import { useAutoSave } from '@ui/composables/autoSave'
+import AutoSaveHint from '@ui/components/AutoSaveHint.vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import type { TileCacheStats, ProviderItem } from '../types'
@@ -87,7 +89,11 @@ async function refresh(): Promise<void> {
   enableCache.value = cfg.enableTileCache !== false
   maxCacheMb.value = typeof cfg.maxTileCacheMb === 'number' ? cfg.maxTileCacheMb : 1024
   mapLanguage.value = cfg.mapLanguage ?? 'auto'
+  await refreshDerived()
+}
 
+/** 只刷新由配置派生的列表（图源可用性 / 地图文件 / 缓存），不回填输入框——自动保存时用户可能还在打字。 */
+async function refreshDerived(): Promise<void> {
   const pRes = (await window.cockpit.command('yarj.providers')) as {
     activeId: string
     providers: ProviderItem[]
@@ -131,7 +137,8 @@ async function onCacheQuotaChange(quota: number): Promise<void> {
   await refresh()
 }
 
-async function saveKeys(): Promise<void> {
+/** 密钥 / 模版 / 缓存开关：改完即保存（输入停顿后自动保存，开关立即保存），与 AIDJ 设置一致。 */
+const keysSave = useAutoSave(async () => {
   await window.cockpit.command('yarj.save-config', {
     patch: {
       googleApiKey: googleKey.value.trim(),
@@ -142,8 +149,11 @@ async function saveKeys(): Promise<void> {
       mapLanguage: mapLanguage.value
     }
   })
-  showSnack(t('yarj.settings.saved', '设置已保存'))
-  await refresh()
+  await refreshDerived()
+})
+
+function saveKeys(): void {
+  void keysSave.flush()
 }
 
 function getProviderName(id: string): string {
@@ -340,6 +350,7 @@ defineExpose({
               placeholder="AIzaSy..."
               class="max-w-lg"
               @click:append-inner="showGoogleKey = !showGoogleKey"
+              @update:model-value="keysSave.schedule"
               @change="saveKeys"
             />
             <div class="text-caption on-surface-variant mt-1">
@@ -364,6 +375,7 @@ defineExpose({
               hide-details
               placeholder="天地图服务密钥"
               class="max-w-lg"
+              @update:model-value="keysSave.schedule"
               @change="saveKeys"
             />
           </div>
@@ -379,6 +391,7 @@ defineExpose({
               hide-details
               placeholder="https://{s}.domain.com/{z}/{x}/{y}.png"
               class="max-w-lg"
+              @update:model-value="keysSave.schedule"
               @change="saveKeys"
             />
             <div class="text-caption on-surface-variant mt-1">
@@ -391,11 +404,7 @@ defineExpose({
             </div>
           </div>
 
-          <div class="pt-2">
-            <v-btn color="primary" variant="flat" height="40" class="px-5" @click="saveKeys">
-              {{ t('yarj.settings.saveBtn', '保存配置') }}
-            </v-btn>
-          </div>
+          <AutoSaveHint :status="keysSave.status.value" :error="keysSave.error.value" />
         </div>
       </v-card-text>
     </v-card>
