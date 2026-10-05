@@ -357,6 +357,27 @@
 
 这类插件只改显示（数据库与发给模型的历史仍是原文），不加 instructions、不加工具，所以不影响提示词缓存。用真实插件把 SDK 的缺口逼出来。
 
+#### 完成情况（2026-10-05，显示类插件 mermaid + svg 已落地）
+
+**已做**
+- **依赖**：mermaid 加进 yaya 能力自己的 `package.json`（`pnpm add mermaid --filter @cockpit/yaya`），渲染端按需动态 `import('mermaid')`（独立 chunk，不进首屏）。
+- **插件 A：mermaid**（`plugins/mermaid/`）：后端 `YayaPlugin`（`tools: () => []`、**无 instructions**、`mention` 给一句附注）；`ui.ts` 接 `fences.mermaid`；`MermaidView.vue`：流式中只显示源码，闭合后渲染；`securityLevel: 'strict'` + `htmlLabels: false`；配色跟随主题（读 `--v-theme-*` CSS 变量换算 themeVariables，`cockpit:config-changed` 后比签名重渲染）；结果 SVG 做成 data URL 用 `<img>` 显示；按「源码 + 主题」哈希缓存（模块级 Map，限 100 条），渲染可取消（单调 seq，source 变化 / 卸载即丢弃）。
+- **插件 B：svg**（`plugins/svg/`）：后端插件（`tools: () => []` + `mention`）；`ui.ts` 只接 `svg` 语言（`fences` 只能按语言接管，「xml 代码块里恰好是 `<svg…>`」要改 markdown.ts 的分段逻辑，**没做**）；`SvgView.vue`：DOMParser（XML）→ 删 `script` / `foreignObject` / 所有 `on*` 属性 / 非 `#` 开头的 `href` / `xlink:href` → XMLSerializer，再走 data URL `<img>`；超 200KB 只显示源码并提示；流式只显示源码。净化逻辑在 `plugins/svg/sanitize.ts`（`sanitizeElement` 纯规则 + `sanitizeSvg` 注入 `SvgDom`），单测 `sanitize.test.ts` 用手写最小 DOM + 极简 XML 解析跑字符串级规则（**没有引入 jsdom / xmldom**）。
+- **SDK 缺口**：
+  - 显示类插件以后端 `tools: []` 插件拿到设置页启用开关（沿用现有机制，没有另造「仅 ui」插件登记）；
+  - `plugin-ui-registry.ts` 的 `fenceLangs` / `fenceViewFor` / `toolViewFor` 只算**已启用**插件的（插件被禁用 → 代码块按普通代码块显示、工具结果走默认视图）；插件表还没拉到 / 命令失败时放行，避免整个功能失效；同一语言多个插件接管按插件 id 字母序取第一个（注释说明，逐插件优先级留待以后）；
+  - 公共查看组件 `components/plugin-kit/`（`DiagramFrame.vue` 图 / 源码切换 + 复制 + 导出 SVG / PNG + 放大 + 错误回退；`ZoomDialog.vue` 全屏放大，滚轮 / 双指缩放、拖动平移，高度走 `var(--app-vh)`）；容器 < 520px 工具栏收进「⋯」菜单；导出走现有 `pickSaveFile` + `playground.download-url`（`downloadTextToLocal` 增加了 boolean 返回值与可选 filters），网页模式没有 `file.save` 时退回复制源码；
+  - `mention` 附注走主进程 `t()`，新键在 yaya 的 zh / en-US 翻译里。
+- **流式约定**落实在视图里：`streaming` 为 true 只显示源码，不渲染、不净化。
+
+**没做 / 待办**
+- mermaid 主题、最大尺寸等插件自己的配置项（6.4 的 configSchema 已具备，显示类插件还没有用上）；
+- `renderSegments` 的未闭合 / 嵌套代码块用例补强；插件 ui 的单测脚手架（SVG 净化已有单测）；
+- 「告诉 AI」的稳定系统提示词开关（当前只有 @ 点名附注这一条路径）；
+- 导出 PNG 白底 2x、超大 SVG 的尺寸夹取策略没有实机调过。
+
+原计划与设计：
+
 **插件 A：mermaid → 渲染图**（`plugins/mermaid/ui.ts`，fences: `mermaid`）
 - mermaid 作为 yaya 依赖，渲染端按需动态加载（代码分割，不进首屏）；`securityLevel: 'strict'`。
 - 流式中只显示源码，代码块闭合（`streaming=false`）后才渲染；渲染失败回退显示源码与错误信息。

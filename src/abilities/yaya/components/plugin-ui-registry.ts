@@ -2,6 +2,10 @@
  * 渲染端插件 UI 注册表：收集 `plugins/<id>/ui.ts`，把工具的 wire name 映射回插件 / 裸工具名，
  * 给 ToolCallRow / AssistantTurn 查自定义视图与代码块渲染器，
  * 也给插件详情页查自定义配置界面（settingsView）。
+ *
+ * 插件启用状态：`fenceLangs` / `fenceViewFor` / `toolViewFor` 只算**已启用**插件的
+ * （插件在设置里被禁用 → 代码块 / 工具结果按默认方式渲染）。`settingsViewFor` 不设门控：
+ * 用户正在插件详情页里操作，那里的启用开关自己也要能点。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
 import type { PluginUi } from './plugin-ui'
@@ -18,6 +22,8 @@ interface ToolRef {
 
 /** wire name → 插件 / 裸工具名（来自 yaya.plugins-list） */
 const wireMap = ref(new Map<string, ToolRef>())
+/** 插件 id → 是否启用（同样来自 yaya.plugins-list；命令失败时保持上一次的值） */
+const pluginOn = ref(new Map<string, boolean>())
 let loading: Promise<void> | null = null
 let subscribed = false
 
@@ -26,10 +32,14 @@ export function refreshPluginMap(): Promise<void> {
     try {
       const list = (await window.cockpit.command('yaya.plugins-list')) as PluginInfo[]
       const map = new Map<string, ToolRef>()
-      for (const p of list)
+      const on = new Map<string, boolean>()
+      for (const p of list) {
+        on.set(p.id, p.enabled)
         for (const t of p.tools)
           map.set(t.wireName, { pluginId: p.id, kind: p.kind, toolName: t.name })
+      }
       wireMap.value = map
+      pluginOn.value = on
     } catch {
       /* 拿不到就只用默认视图 */
     }
@@ -60,6 +70,16 @@ function uiFor(pluginId: string, kind?: PluginKind): PluginUi | undefined {
   return uis.find((u) => u.pluginId === pluginId) ?? uis.find((u) => u.pluginId === `kind:${kind}`)
 }
 
+/**
+ * 这个渲染端注册对应的插件此刻是否启用。`kind:<mcp|skill>` 是「同来源共用一份视图」，
+ * 没有单一插件可关，永远放行；其余按插件 id 查启用表。查不到有两种情况：插件表还没拉到
+ * （首次渲染）或命令失败——这时放行，宁可多渲染一次，也别让所有代码块退化成普通代码块。
+ */
+function uiEnabled(ui: PluginUi): boolean {
+  if (ui.pluginId.startsWith('kind:')) return true
+  return pluginOn.value.get(ui.pluginId) ?? true
+}
+
 /** 插件详情页的自定义配置界面（没有返回 null，走 schema 自动生成的表单） */
 export function settingsViewFor(pluginId: string, kind?: PluginKind): Component | null {
   const ui = uiFor(pluginId, kind)
@@ -78,6 +98,8 @@ export interface ResolvedToolView {
 export function toolViewFor(wireName: string): ResolvedToolView | null {
   const ref = wireMap.value.get(wireName)
   if (!ref) return null
+  // 插件被用户禁用 → 工具结果走默认字段视图
+  if (pluginOn.value.get(ref.pluginId) === false) return null
   const ui = uiFor(ref.pluginId, ref.kind)
   const loader = ui?.toolViews?.[ref.toolName]
   if (!loader) return null
@@ -88,16 +110,25 @@ export function toolViewFor(wireName: string): ResolvedToolView | null {
   }
 }
 
-/** 已注册了渲染器的代码块语言（小写） */
+/** 已注册了渲染器的代码块语言（小写；只算已启用插件的） */
 export const fenceLangs = computed(() => {
   const set = new Set<string>()
-  for (const u of uis) for (const lang of Object.keys(u.fences ?? {})) set.add(lang.toLowerCase())
+  for (const u of uis) {
+    if (!uiEnabled(u)) continue
+    for (const lang of Object.keys(u.fences ?? {})) set.add(lang.toLowerCase())
+  }
   return set
 })
 
+/**
+ * 某种语言代码块的视图组件（插件被禁用 → null，按普通代码块渲染）。
+ * 同一语言多个插件接管时按插件 id 字母序取第一个——后续需要逐插件优先级时再改这里。
+ */
 export function fenceViewFor(lang: string): Component | null {
   const key = lang.toLowerCase()
-  for (const u of uis) {
+  const sorted = [...uis].sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+  for (const u of sorted) {
+    if (!uiEnabled(u)) continue
     const loader = u.fences?.[key]
     if (loader) return lazy(`fence:${u.pluginId}:${key}`, loader)
   }

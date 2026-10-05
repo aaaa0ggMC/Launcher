@@ -89,21 +89,23 @@ export async function downloadUrlToLocal(
 export async function downloadTextToLocal(
   text: string,
   defaultName = 'response.txt',
-  title?: string
-): Promise<void> {
+  title?: string,
+  filters?: { name: string; extensions: string[] }[]
+): Promise<boolean> {
   try {
     const path = await window.cockpit.pickSaveFile({
       title: title ?? 'Download to local',
       defaultPath: defaultName,
-      filters: [{ name: 'Text', extensions: ['txt', 'log', 'json'] }]
+      filters: filters ?? [{ name: 'Text', extensions: ['txt', 'log', 'json'] }]
     })
-    if (!path) return
+    if (!path) return false
     await window.cockpit.command('playground.download-url', {
       url: '',
       path,
       text
     })
+    return true
   } catch {
-    // ignore
+    return false
   }
 }
