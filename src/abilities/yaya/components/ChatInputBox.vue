@@ -12,6 +12,7 @@ import {
 import { useI18n } from '../../../main/ui/i18n'
 import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
+import { assetUrl } from './asset-url'
 import { ensurePluginMap, inputExtensions } from './plugin-ui-registry'
 import { matchInputTrigger, type PluginInputContext, type PluginInputHooks } from './plugin-input'
 
@@ -324,15 +325,7 @@ function readAsBase64(file: File): Promise<string> {
 async function addAttachment(att: MessageAttachment): Promise<void> {
   if (attachments.value.some((a) => a.id === att.id)) return
   attachments.value.push(att)
-  if (!att.mimeType.startsWith('image/')) return
-  try {
-    const url = (await window.cockpit.command('yaya.asset-preview', {
-      uri: att.assetPath
-    })) as string | null
-    if (url) previews.value[att.id] = url
-  } catch {
-    /* 预览失败：退回文件 chip */
-  }
+  if (att.mimeType.startsWith('image/')) previews.value[att.id] = assetUrl(att.assetPath)
 }
 
 /** 粘贴：有图片文件时按附件导入，纯文本保持默认行为 */

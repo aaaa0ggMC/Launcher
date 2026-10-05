@@ -7,6 +7,7 @@ import type { ApprovalScope } from './types'
 import { normalizeEffort } from './services/providers/reasoning'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
+import { registerYayaAssetProtocol } from './services/asset-protocol'
 import { currentOrigin, SCOPE_EXEC } from '../../main/process/privacy'
 import { registerPreRunHook } from '../../main/process/commands/registry'
 import { getBroadcast } from '../../main/process/broadcast'
@@ -194,6 +195,7 @@ for (const [file, plugin] of Object.entries(builtinPlugins)) {
 
 // 系统启动时恢复异常中断的工作流状态、按配置建立插件表
 registerStartupHook(() => {
+  registerYayaAssetProtocol()
   reconcileInterruptedWorkflows()
   refreshPlugins(loadYayaConfig())
 })

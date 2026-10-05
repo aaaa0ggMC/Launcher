@@ -3,6 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useI18n } from '@ui/i18n'
 import type { ToolViewProps } from '../../components/plugin-ui'
+import { assetUrl } from '../../components/asset-url'
 
 defineOptions({ name: 'cockpit-yaya-tool-image-result' })
 
@@ -34,15 +35,14 @@ function labelOf(i: number): string {
   return frameLabels()[i] || te('yaya.plugin.cockpit.image_n', { n: String(i + 1) }, '图片 {n}')
 }
 
-async function loadPreviews(): Promise<void> {
+/** 加载失败（文件已删等）：退回占位图标 */
+function dropPreview(uri: string): void {
+  delete previews.value[uri]
+}
+
+function loadPreviews(): void {
   for (const uri of uris.value) {
-    if (previews.value[uri]) continue
-    try {
-      const url = (await window.cockpit.command('yaya.asset-preview', { uri })) as string | null
-      if (url) previews.value[uri] = url
-    } catch {
-      /* 预览失败：保留占位图标 */
-    }
+    if (!previews.value[uri]) previews.value[uri] = assetUrl(uri)
   }
 }
 
@@ -106,7 +106,14 @@ onBeforeUnmount(() => {
         "
         @click="zoom = i"
       >
-        <img v-if="previews[uri]" :src="previews[uri]" :alt="labelOf(i)" class="img-thumb" />
+        <img
+          v-if="previews[uri]"
+          :src="previews[uri]"
+          :alt="labelOf(i)"
+          class="img-thumb"
+          loading="lazy"
+          @error="dropPreview(uri)"
+        />
         <span v-else class="img-missing">
           <v-icon icon="mdi-image-off-outline" size="20" />
         </span>

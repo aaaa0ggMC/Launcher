@@ -113,7 +113,9 @@ function rewriteUrls(v: unknown): unknown {
 let protocolFetch: ((scheme: string, req: Request) => Promise<Response> | null) | null = null
 
 async function serveProtocol(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const m = /^\/_p\/(cockpit-(?:icon|audio|tile))\/(.*)$/s.exec(req.url ?? '')
+  // yaya-asset 不进 rewriteUrls（命令结果里的 assetPath 是资产标识，要原样回传给宿主），
+  // 只由渲染端经 hostUrl() 改写后从这里取
+  const m = /^\/_p\/(cockpit-(?:icon|audio|tile)|yaya-asset)\/(.*)$/s.exec(req.url ?? '')
   const handler = m
     ? protocolFetch
       ? (r: Request) => protocolFetch!(m[1], r) as Promise<Response>

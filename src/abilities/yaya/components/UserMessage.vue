@@ -5,6 +5,7 @@ import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/lon
 import type { MessageNode } from '../types'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
+import { assetUrl } from './asset-url'
 
 const props = defineProps<{
   message: MessageNode
@@ -87,19 +88,16 @@ async function copy(): Promise<void> {
   setTimeout(() => (copied.value = false), 1500)
 }
 
-onMounted(async () => {
+onMounted(() => {
   for (const att of props.message.attachments ?? []) {
-    if (!att.mimeType.startsWith('image/')) continue
-    try {
-      const url = (await window.cockpit.command('yaya.asset-preview', {
-        uri: att.assetPath
-      })) as string | null
-      if (url) previews.value[att.id] = url
-    } catch {
-      /* 缩略图失败时退回文件名 chip */
-    }
+    if (att.mimeType.startsWith('image/')) previews.value[att.id] = assetUrl(att.assetPath)
   }
 })
+
+/** 缩略图加载失败（文件已删等）：退回文件名 chip */
+function dropPreview(id: string): void {
+  delete previews.value[id]
+}
 
 /** 图片（已有预览）= 缩略图网格，点击看大图；其余 = 文件 chip */
 const imageAttachments = computed(() =>
@@ -156,7 +154,12 @@ function openPreview(id: string): void {
           :aria-label="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
           @click="openPreview(att.id)"
         >
-          <img :src="previews[att.id]" :alt="att.name" loading="lazy" />
+          <img
+            :src="previews[att.id]"
+            :alt="att.name"
+            loading="lazy"
+            @error="dropPreview(att.id)"
+          />
         </button>
         <div v-for="att in fileAttachments" :key="att.id" class="file-chip" :title="att.name">
           <v-icon icon="mdi-file-outline" size="16" />

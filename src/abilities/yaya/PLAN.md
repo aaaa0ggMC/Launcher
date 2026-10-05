@@ -218,7 +218,7 @@
 | **附件** | 选文件 → 复制进会话资产目录 | `[x]` | `yaya.asset-import`（≤ 25MB，网页模式同样可用） |
 | | 图片 → Vision；文本 ≤ 200KB 内联；其余给路径让模型用 `read_file` | `[x]` | `providers/openai.ts` `attachmentParts` |
 | | 缩略图预览 | `[x]` | `yaya.asset-preview`（data URL，≤ 4MB） |
-| | `yaya-asset://` 协议 | `[ ]` | 目前只做路径解析（已防 `../` 越界） |
+| | `yaya-asset://` 协议 | `[x]` | `services/asset-protocol.ts`（只给图片 / 音视频、支持 Range、防越界）；界面缩略图 / 工具截图直接 `<img loading="lazy">`，不再走 data URL；网页模式经 `/_p/yaya-asset/…`。Electron 与网页模式都实测加载成功 |
 | **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[x]` | `plugins/documents/`：超过内联上限的文本 / PDF 只给 id + 开头摘要（`attachmentRefNote`），模型用 `docs_list` / `docs_search`（BM25，中英文）/ `docs_read`（按行）按需取；只读本会话附件，无需 exec 授权；PDF 走本机 `pdftotext` |
 | **输出渲染 Slot** | Markdown 代码块高亮 + 复制 | `[x]` | `components/markdown.ts`（highlight.js 按需加载，配色跟主题） |
 | | Mermaid 渲染 | `[x]` | `plugins/mermaid/`（6.2，渲染端按需加载 mermaid，`securityLevel: 'strict'`，配色跟主题） |
@@ -340,7 +340,7 @@
 ### 6.1 长会话滑动窗口加载（已做第一版，2026-10-05）
 
 **已完成**：`yaya.messages-branch --limit N [--before id]`（`getMessageBranchWindow`：轻量查询走路径、按用户消息边界截窗口、只给窗口内节点查兄弟分支）；页面先加载最后 20 轮，滚到顶部 / 点「加载更早的消息」向上翻页并保持位置；运行中只刷新最后两轮（`refreshTail`），未变化的节点 / 轮次复用旧对象（`mergeNodes` / `buildTurnsReusing`）不重渲染；token 每 50ms 合并写入；Markdown 按顶层空行分块缓存（流式只重渲染最后一块）；轮次 `content-visibility: auto`；滚动按方向判断用户意图（上翻立即停止跟随）。网页版 SSE 断线自动重连 + 重连 / 回到前台 / 切回页面时重新同步。
-**还没做**：搜索命中 / 用量统计跳转到窗口外的消息；工具图片缩略图懒加载。
+**还没做**：搜索命中 / 用量统计跳转到窗口外的消息。（工具图片缩略图懒加载已随 `yaya-asset://` 协议完成。）
 
 原计划：
 
