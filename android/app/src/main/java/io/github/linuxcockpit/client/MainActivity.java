@@ -706,6 +706,22 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> media.update(args));
                     reply(id, true, new JSONObject());
                     return;
+                case "clipboard.get": {
+                    // 读系统剪贴板文本（移动剪贴板历史用）。Android 10+ 仅前台应用可读，读不到给空串。
+                    JSONObject o = new JSONObject();
+                    o.put("text", clipboardText());
+                    reply(id, true, o);
+                    return;
+                }
+                case "clipboard.set": {
+                    final String text = args.optString("text", "");
+                    runOnUiThread(() -> {
+                        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(ClipData.newPlainText("Cockpit", text));
+                    });
+                    reply(id, true, new JSONObject());
+                    return;
+                }
                 default:
                     reply(id, false, errorJson("unknown method: " + method));
             }
@@ -945,11 +961,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String pasteText() {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            ClipData clip = cm.getPrimaryClip();
-            if (clip == null || clip.getItemCount() == 0) return "";
-            CharSequence t = clip.getItemAt(0).coerceToText(MainActivity.this);
-            return t == null ? "" : t.toString();
+            return clipboardText();
         }
 
         @JavascriptInterface
@@ -977,6 +989,19 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- 小工具
+
+    /** 读系统剪贴板文本；Android 10+ 仅前台应用可读，读不到 / 异常返回空串。 */
+    private String clipboardText() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence t = clip.getItemAt(0).coerceToText(this);
+            return t == null ? "" : t.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
     static String trimSlash(String s) {
         while (s.endsWith("/")) s = s.substring(0, s.length() - 1);

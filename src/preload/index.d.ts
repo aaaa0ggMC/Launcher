@@ -140,6 +140,8 @@ export interface CockpitApi {
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<string | null>
   copyText: (text: string) => Promise<void>
+  /** 读取系统剪贴板文本（Electron 主进程 / 安卓原生 / 浏览器 navigator）；读不到返回空串。 */
+  readText: () => Promise<string>
   openExternal: (url: string) => Promise<void>
   /** Privacy consent window only (other senders get an empty result). */
   privacyPending: () => Promise<unknown[]>

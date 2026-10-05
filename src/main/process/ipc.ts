@@ -236,6 +236,10 @@ export function registerIpc(): void {
     clipboard.writeText(text ?? '')
   })
 
+  // Clipboard read (mobile clipboard history; desktop fallback when the renderer
+  // has no navigator.clipboard). Always returns a string — '' when empty.
+  ipcMain.handle('clipboard:read', () => clipboard.readText() ?? '')
+
   // Open external URL in default browser.
   ipcMain.handle('shell:open-external', (_e, url: string) => {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {

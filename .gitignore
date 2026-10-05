@@ -44,5 +44,8 @@ src/abilities/kerneldef/
 # 折光航标（独立公开仓库 aaaa0ggMC/launcher-refraction）
 src/abilities/refraction/
 
+# 移动剪贴板（独立公开仓库 aaaa0ggMC/launcher-mobile-clipboard）
+src/abilities/launcher-mobile-clipboard/
+
 # 能力开关（个人文件，见 AGENTS.md「toggle.json」）
 src/abilities/toggle.json

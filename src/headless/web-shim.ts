@@ -34,6 +34,8 @@ const authHeaders = { authorization: `Bearer ${token}` }
  */
 interface AndroidBridge {
   copyText(text: string): void
+  /** 直接读系统剪贴板（老版本也有的 @JavascriptInterface；新版本优先走 client.call('clipboard.get')） */
+  pasteText?(): string
   openExternal(url: string): void
   openConnect(): void
   version(): string
@@ -335,6 +337,29 @@ const cockpit = createCockpit({
         if (android) android.copyText(String(args[0] ?? ''))
         else await navigator.clipboard?.writeText(String(args[0] ?? ''))
         return
+      case 'clipboard:read': {
+        // 安卓客户端优先走原生（WebView 在 http 下没有 navigator.clipboard）
+        if (nativeClient) {
+          try {
+            const r = await nativeClient.call<{ text?: string }>('clipboard.get')
+            if (typeof r?.text === 'string') return r.text
+          } catch {
+            /* 老版本 App 没有 clipboard.get：退回下面的直连桥 */
+          }
+        }
+        if (android?.pasteText) {
+          try {
+            return String(android.pasteText() ?? '')
+          } catch {
+            /* ignore */
+          }
+        }
+        try {
+          return (await navigator.clipboard?.readText()) ?? ''
+        } catch {
+          return ''
+        }
+      }
       case 'shell:open-external':
         if (android) android.openExternal(String(args[0] ?? ''))
         else window.open(String(args[0] ?? ''), '_blank', 'noopener')

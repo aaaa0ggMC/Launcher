@@ -19,7 +19,7 @@ export type HostCap = 'native' | 'web' | 'none'
  * 页面判断 `window.cockpit.client` 是否存在即可，不要自己猜是不是在 App 里。
  *
  * - `call(method, args)`：异步调用原生方法（`info` / `settings.set` / `openConnect` / `pickFiles` /
- *   `pickDirectory` / `media.update` …），失败 reject；
+ *   `pickDirectory` / `media.update` / `clipboard.get`（→ `{ text }`）/ `clipboard.set { text }` …），失败 reject；
  * - 原生推来的事件经 `window.cockpit.on('cockpit:client-<事件名>', cb)` 收：
  *   `upload-progress`（{index,total,pct,name,call}）、`shared`（别的应用分享进来：{paths,text,error?}）、
  *   `media-action`（系统媒体按钮：{action, position?}）。
@@ -238,6 +238,12 @@ export function createCockpit(t: CockpitTransport) {
       filters?: { name: string; extensions: string[] }[]
     }): Promise<string | null> => t.invoke('dialog:save-file', opts),
     copyText: (text: string): Promise<void> => t.invoke('clipboard:write', text),
+    /**
+     * 读取宿主系统剪贴板文本：Electron 走主进程 `clipboard`；安卓 App 走原生桥
+     * （WebView 里 `navigator.clipboard` 在 http 下不可用、且需要前台授权）；浏览器走
+     * `navigator.clipboard.readText()`。宿主读不到时返回空串（不抛错）。
+     */
+    readText: (): Promise<string> => t.invoke('clipboard:read'),
     /** 同步系统级全局快捷键（仅用户界面；返回每个 id 的注册结果） */
     syncGlobalShortcuts: (
       entries: { id: string; combo: string }[]
