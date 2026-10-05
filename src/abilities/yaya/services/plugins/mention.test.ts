@@ -52,14 +52,17 @@ function setup(): YayaConfig {
   return config
 }
 
-it('候选包含全局禁用的插件与工具，可按名字过滤', () => {
+it('候选只有插件（含全局禁用的），按工具名也能搜到所属插件', () => {
   const config = setup()
   const all = mention.mentionCandidates(config)
-  assert.ok(all.some((c) => c.ref === 'beta' && !c.enabled))
-  assert.ok(all.some((c) => c.ref === 'tool:beta_two' && c.plugin === 'Beta'))
+  assert.deepEqual(
+    all.map((c) => c.ref),
+    ['alpha', 'beta', 'chart']
+  )
+  assert.ok(all.some((c) => c.ref === 'beta' && !c.enabled && c.tools === 2))
   assert.deepEqual(
     mention.mentionCandidates(config, 'three').map((c) => c.ref),
-    ['tool:beta_three']
+    ['beta']
   )
 })
 
@@ -70,8 +73,12 @@ it('点名插件：启用整个插件 + 附注；显示类插件只给附注不�
     r.records.map((x) => x.ref),
     ['beta', 'chart']
   )
-  assert.deepEqual(r.enable, ['beta'])
+  assert.deepEqual(
+    r.enable.map((x) => x.ref),
+    ['beta']
+  )
   assert.match(r.note, /Beta/)
+  assert.match(r.note, /beta_two, beta_three/)
   assert.match(r.note, /you may draw charts/)
 })
 
@@ -85,18 +92,38 @@ it('点名的工具追加在工具表末尾，常规工具前缀不变', async (
   assert.deepEqual(forced, ['alpha_one', 'beta_three', 'beta_two'])
 })
 
+it('旧格式 tool: 点名归到所属插件；requires 连带启用', async () => {
+  const config = setup()
+  registry.registerPlugin({
+    id: 'guide',
+    kind: 'skill',
+    label: 'Guide',
+    description: 'skill-like',
+    tools: () => [],
+    mention: () => ({ note: 'read me', requires: ['alpha'] })
+  })
+  registry.refreshPlugins(config)
+  const r = await mention.resolveMentions(['tool:beta_three', 'beta', 'guide'], 's1')
+  assert.deepEqual(
+    r.records.map((x) => x.ref),
+    ['beta', 'guide']
+  )
+  assert.deepEqual(
+    r.enable.map((x) => x.ref),
+    ['beta', 'alpha']
+  )
+})
+
 it('会话点名列表去重并保持先后顺序', () => {
-  const recs = [
-    { ref: 'beta', label: 'Beta', kind: 'builtin' as const },
-    { ref: 'tool:alpha_one', label: 'alpha_one', kind: 'tool' as const }
-  ]
   const merged = mention.mergeSessionMentions(
     [{ ref: 'beta', label: 'Beta', kind: 'builtin' }],
-    recs,
-    ['tool:alpha_one', 'beta']
+    [
+      { ref: 'alpha', label: 'Alpha', kind: 'builtin' },
+      { ref: 'beta', label: 'Beta', kind: 'builtin' }
+    ]
   )
   assert.deepEqual(
     merged.map((m) => m.ref),
-    ['beta', 'tool:alpha_one']
+    ['beta', 'alpha']
   )
 })

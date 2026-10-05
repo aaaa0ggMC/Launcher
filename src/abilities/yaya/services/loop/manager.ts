@@ -71,11 +71,7 @@ export async function startWorkflow(
   // @ 点名：附注存进这条用户消息，启用记进会话（运行器解析工具表时追加在末尾）
   const mentioned = mentions.length ? await resolveMentions(mentions, sessionId) : null
   if (mentioned?.enable.length) {
-    const merged = mergeSessionMentions(
-      sessionMentions(session.meta),
-      mentioned.records,
-      mentioned.enable
-    )
+    const merged = mergeSessionMentions(sessionMentions(session.meta), mentioned.enable)
     updateSession(sessionId, { meta: { ...(session.meta ?? {}), mentions: merged } })
   }
 

@@ -13,7 +13,8 @@ export interface MentionItem {
   description: string
   icon?: string
   enabled: boolean
-  plugin?: string
+  /** 工具数（点名后全部注入） */
+  tools?: number
 }
 
 const props = defineProps<{
@@ -29,7 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const lang = inject('cockpit:lang', ref('zh'))
-const { t } = useI18n(lang)
+const { t, te } = useI18n(lang)
 
 const KIND_LABEL = computed<Record<MentionItem['kind'], string>>(() => ({
   builtin: t('yaya.mention.kind_plugin', '插件'),
@@ -87,11 +88,7 @@ watch(
         @mouseenter="emit('hover', i)"
         @click="emit('select', item)"
       >
-        <v-icon
-          :icon="item.kind === 'tool' ? 'mdi-wrench-outline' : item.icon || 'mdi-puzzle-outline'"
-          size="20"
-          class="mention-icon"
-        />
+        <v-icon :icon="item.icon || 'mdi-puzzle-outline'" size="20" class="mention-icon" />
         <span class="mention-text">
           <span class="mention-label">
             {{ item.label }}
@@ -101,7 +98,10 @@ watch(
             </span>
           </span>
           <span class="mention-desc text-medium-emphasis">
-            {{ item.plugin ? `${item.plugin} · ` : '' }}{{ item.description }}
+            <template v-if="item.tools">
+              {{ te('yaya.mention.tools_count', { n: String(item.tools) }, '{n} 个工具') }} ·
+            </template>
+            {{ item.description }}
           </span>
         </span>
       </button>

@@ -356,7 +356,9 @@ function skillPlugin(entry: SkillEntry): YayaPlugin {
         { name: entry.name },
         '以下是 Skill「{name}」的完整说明，按它做；附属文件用 skill_read_file 读取'
       ),
-      content: [{ type: 'text', text: entry.body }]
+      content: [{ type: 'text', text: entry.body }],
+      // 附属文件要用枢纽插件的 skill_read_file
+      requires: ['skills']
     })
   }
 }
