@@ -35,6 +35,11 @@ function openSanitize(): void {
   menuOpen.value = false
   sanitizeOpen.value = true
 }
+function openStats(): void {
+  // 聊天区现在只是隐藏（v-show），菜单不收起的话回来时还开着
+  menuOpen.value = false
+  statsOpen.value = true
+}
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
 const mode = ref<'dbus' | 'web'>('dbus')
 let modeUnsub: (() => void) | null = null
@@ -574,7 +579,9 @@ defineExpose({ toMarkdown })
   <div class="aidj-shell">
     <ListeningStatsView v-if="statsOpen" @close="statsOpen = false" />
     <SanitizeView v-else-if="sanitizeOpen" @close="sanitizeOpen = false" />
-    <template v-else>
+    <!-- 聊天区只隐藏不卸载（v-show）：切到听歌统计 / 标签整理再回来，正在进行的会话、
+         流式回复与工作流卡片都还在。之前是 v-if，切走就整个 ChatView 销毁重建。 -->
+    <div v-show="!statsOpen && !sanitizeOpen" class="aidj-main">
       <ChatView ref="chatRef" />
 
       <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
@@ -630,7 +637,7 @@ defineExpose({ toMarkdown })
                 <span>{{ t('aidj.subpage.bili_download', 'Bilibili 视频下载') }}</span>
                 <v-icon size="16" class="ml-auto">mdi-chevron-right</v-icon>
               </div>
-              <div class="menu-item" @click="statsOpen = true">
+              <div class="menu-item" @click="openStats">
                 <v-icon size="18">mdi-calendar-month</v-icon>
                 <span>{{ t('aidj.subpage.listening_stats', '听歌时长统计') }}</span>
               </div>
@@ -798,7 +805,7 @@ defineExpose({ toMarkdown })
           </div>
         </Transition>
       </div>
-    </template>
+    </div>
 
     <Teleport to="body">
       <Transition name="ctx">
@@ -878,6 +885,10 @@ defineExpose({ toMarkdown })
   position: absolute;
   inset: 0;
   overflow: hidden;
+}
+.aidj-main {
+  position: absolute;
+  inset: 0;
 }
 
 .page-menu {
