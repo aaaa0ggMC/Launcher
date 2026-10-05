@@ -403,6 +403,8 @@ function walkEl(ctx: SnapCtx, el: Element, depth: number, scope: string | null):
     return
   }
   if (isHidden(el)) return
+  // 悬浮层（Outsider）对 AI 不可见、点击穿透：整层略过。它铺满全屏，报成禁区会让 AI 以为整页都不能操作
+  if (el.hasAttribute('data-outsider-layer')) return
   if (el.getAttribute('data-agent') === 'forbidden') {
     push(ctx, depth, 'region [forbidden]')
     return
@@ -991,6 +993,9 @@ async function doScreenshot(args: BridgeArgs): Promise<Reply> {
   for (const el of Array.from(
     document.querySelectorAll('[data-privacy],[data-agent="forbidden"],input[type="password"]')
   )) {
+    // 悬浮层不进图（见 filter），也就不用遮——它铺满全屏，涂黑会把整屏盖掉
+    if (el.closest('[data-outsider-layer]')) continue
+    if (isHidden(el)) continue
     const forbidden = el.getAttribute('data-agent') === 'forbidden'
     if (forbidden && !maskForbidden) continue
     const scope = el.getAttribute('data-privacy') || (forbidden ? 'forbidden' : 'secret')

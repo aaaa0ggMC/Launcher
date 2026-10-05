@@ -132,7 +132,9 @@ export const playbackCommands: CommandSpec[] = [
   },
   {
     name: 'aidj.send',
-    description: '发送歌单到播放器',
+    description:
+      '把歌曲文件发给当前播放器并开始播放（内置播放器 / DBus 播放器都适用）；--path 可重复，取 aidj.generate 返回的 playlist[].path；--append true 追加到队尾而不是替换',
+    related: ['aidj.generate'],
     usage: 'aidj.send [--path <filepath>]... [--append <true|false>]',
     run: async (ctx) => {
       const backend = await getActiveBackend()

@@ -364,6 +364,8 @@ interface Mark {
   scroll?: string
   /** <canvas>：无障碍树里通常没有语义，但游戏 / 图表需要按坐标操作，单独给 ref */
   canvas?: boolean
+  /** 悬浮层（Outsider）：对 AI 不可见、点击穿透——快照里整层略过，不当成禁区 */
+  outsider?: boolean
 }
 
 const INTERACTIVE = new Set([
@@ -420,7 +422,7 @@ const SKIP_ROLES = new Set(['InlineTextBox', 'LineBreak'])
 /** ref → backendDOMNodeId（每次 snapshot 重建；页面变化后旧 ref 可能失效）。 */
 
 const MARK_SELECTOR =
-  '[data-privacy],[data-privacy-action],[data-agent="forbidden"],input[type="password"],[data-cockpit-scroll],canvas'
+  '[data-privacy],[data-privacy-action],[data-agent="forbidden"],input[type="password"],[data-cockpit-scroll],canvas,[data-outsider-layer]'
 
 /** 页面端：给当前可滚动的容器打上 data-cockpit-scroll（位置信息），供快照标注。 */
 const TAG_SCROLLABLES_JS = `(() => {
@@ -460,7 +462,8 @@ async function collectMarks(cdp: Cdp): Promise<Map<number, Mark>> {
       forbidden: attrs.get('data-agent') === 'forbidden',
       password: node.nodeName === 'INPUT' && attrs.get('type') === 'password',
       scroll: attrs.get('data-cockpit-scroll'),
-      canvas: node.nodeName === 'CANVAS'
+      canvas: node.nodeName === 'CANVAS',
+      outsider: attrs.has('data-outsider-layer')
     })
   }
   return marks
@@ -757,6 +760,8 @@ export async function snapshot(opts: SnapshotOptions = {}): Promise<SnapshotResu
   ): void => {
     if (!n || truncated) return
     const mark = n.backendDOMNodeId ? marks.get(n.backendDOMNodeId) : undefined
+    // 悬浮层整层是禁区，但它铺满全屏、点击穿透，报成 region [forbidden] 会让 AI 以为整页都不能操作
+    if (mark?.outsider) return
     if (mark?.forbidden && reader) {
       emit(depth, 'region [forbidden]')
       return
@@ -2093,6 +2098,8 @@ const OVERLAY_JS = (cleared: string[], maskForbidden: boolean): string => `(() =
   const seen = new Set()
   const shown = new Set()
   for (const el of document.querySelectorAll('[data-privacy],[data-agent="forbidden"],input[type="password"]')) {
+    // 悬浮层：截图前已对 AI 隐藏（不进图），且铺满全屏——当禁区涂黑会把整屏盖掉
+    if (el.closest('[data-outsider-layer]')) continue
     const forbidden = el.getAttribute('data-agent') === 'forbidden'
     if (forbidden && !${maskForbidden}) continue
     const scope = el.getAttribute('data-privacy') || (forbidden ? 'forbidden' : 'secret')

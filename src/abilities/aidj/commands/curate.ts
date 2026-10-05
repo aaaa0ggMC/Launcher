@@ -39,8 +39,11 @@ import { workflowHistoryLine } from '../loop/agent/workflow'
 export const curateCommands: CommandSpec[] = [
   {
     name: 'aidj.generate',
-    description: 'AI 生成歌单',
+    description:
+      'AI 生成歌单（与 AIDJ 聊天框发一句话等价）：会跑一整轮 DJ 智能体（检索曲库 → 子 Agent 挑歌 → 排序写 DJ 词），通常 30 秒到几分钟，期间命令不返回；进度用 aidj.stream-status 看。只返回歌单与 DJ 词，**不会自动播放**——要播放再调 aidj.send（--path 可重复）或用播放器命令。同时只能有一个生成，aidj.abort 可中止',
     usage: 'aidj.generate --prompt <text>',
+    ui: ['AIDJ 聊天框发送消息'],
+    related: ['aidj.stream-status', 'aidj.abort', 'aidj.send'],
     run: async (ctx) => {
       const prompt = (ctx.named.prompt as string) || ctx.positional.join(' ')
       const { session, config } = await ensureInit()
