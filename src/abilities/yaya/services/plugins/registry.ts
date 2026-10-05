@@ -309,7 +309,45 @@ export interface ResolvedTool {
  * **与 `pluginConfig` 的取值无关**——换了引擎、改了密钥都不改变工具名与描述，
  * 插件自己的配置经 `ToolRunContext.config` 在运行时读取。
  */
-export async function resolveTools(config: YayaConfig): Promise<ResolvedTool[]> {
+/**
+ * 本次运行可用的工具。`forced` = 本会话被 `@` 点名强制启用的（插件 id / `tool:<wire name>`，
+ * 见 mention.ts）：即使全局禁用也提供，**追加在常规工具之后**、按点名先后排——
+ * 点名前的工具表前缀不变，提示词缓存只在点名后的请求起变化一次。分组不可用的工具照样不给。
+ */
+export async function resolveTools(
+  config: YayaConfig,
+  forced: readonly string[] = []
+): Promise<ResolvedTool[]> {
+  const out = await resolveEnabledTools(config)
+  const have = new Set(out.map((r) => r.wireName))
+  for (const ref of forced) {
+    const wanted = ref.startsWith('tool:') ? ref.slice(5) : null
+    const plugins = wanted ? current : current.filter((p) => p.id === ref)
+    for (const plugin of plugins) {
+      // 点名整个插件时先启动：MCP 这类动态插件连上之前工具列表是空的
+      if (wanted && !plugin.tools().some((tool) => wireName(plugin, tool) === wanted)) continue
+      try {
+        await ensureStarted(plugin)
+      } catch (e) {
+        log.warn('mentioned plugin unavailable, its tools are skipped', {
+          plugin: plugin.id,
+          error: String(e)
+        })
+        continue
+      }
+      const tools = plugin.tools().filter((tool) => !wanted || wireName(plugin, tool) === wanted)
+      for (const tool of tools) {
+        const name = wireName(plugin, tool)
+        if (have.has(name) || !groupAvailableForTool(plugin, tool, config)) continue
+        have.add(name)
+        out.push({ wireName: name, plugin, tool })
+      }
+    }
+  }
+  return out
+}
+
+async function resolveEnabledTools(config: YayaConfig): Promise<ResolvedTool[]> {
   const off = new Set(config.disabledTools ?? [])
   const out: ResolvedTool[] = []
   for (const plugin of current) {

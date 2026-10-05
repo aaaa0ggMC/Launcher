@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
+import MentionPicker, { type MentionItem } from './MentionPicker.vue'
 
 const props = defineProps<{
   isRunning: boolean
@@ -14,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'send', prompt: string, attachments: MessageAttachment[]): void
+  (e: 'send', prompt: string, attachments: MessageAttachment[], mentions: string[]): void
   (e: 'abort'): void
 }>()
 
@@ -61,10 +62,116 @@ const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)
 const canSend = computed(
   () =>
     // 运行中也能发：= 打断当前运行（已生成的内容和已执行的工具结果都保留）+ 以这条消息继续
-    !importing.value && (!!draft.value.trim() || attachments.value.length > 0)
+    !importing.value &&
+    (!!draft.value.trim() || attachments.value.length > 0 || mentions.value.length > 0)
 )
 
+// ---- @ 点名（PLAN 6.3）：输入 @ 或点工具栏 @ 按钮弹出候选；选中的以标签显示，随消息发送 ----
+const mentions = ref<MentionItem[]>([])
+const picker = ref<{ query: string; manual: boolean } | null>(null)
+const pickerItems = ref<MentionItem[]>([])
+const pickerActive = ref(0)
+const pickerLoading = ref(false)
+let pickerSeq = 0
+let pickerTimer: ReturnType<typeof setTimeout> | null = null
+
+function nativeTextarea(): HTMLTextAreaElement | null {
+  const el = (textarea.value as unknown as { $el?: HTMLElement } | null)?.$el
+  return el?.querySelector('textarea') ?? null
+}
+
+function loadCandidates(query: string): void {
+  if (pickerTimer) clearTimeout(pickerTimer)
+  pickerTimer = setTimeout(async () => {
+    const seq = ++pickerSeq
+    pickerLoading.value = true
+    try {
+      const list = (await window.cockpit.command('yaya.mention-candidates', {
+        query
+      })) as MentionItem[]
+      if (seq !== pickerSeq) return
+      pickerItems.value = list.filter((c) => !mentions.value.some((m) => m.ref === c.ref))
+      pickerActive.value = 0
+    } catch {
+      if (seq === pickerSeq) pickerItems.value = []
+    } finally {
+      if (seq === pickerSeq) pickerLoading.value = false
+    }
+  }, 120)
+}
+
+/** 光标前是否正在输入 `@xxx`（行首或空白后） */
+function atQuery(): string | null {
+  const el = nativeTextarea()
+  if (!el) return null
+  const before = draft.value.slice(0, el.selectionStart ?? draft.value.length)
+  const m = /(^|\s)@([^\s@]{0,32})$/.exec(before)
+  return m ? m[2] : null
+}
+
+function onInput(): void {
+  const q = atQuery()
+  if (q === null) {
+    if (picker.value && !picker.value.manual) picker.value = null
+    return
+  }
+  picker.value = { query: q, manual: false }
+  loadCandidates(q)
+}
+
+function openPicker(): void {
+  picker.value = { query: '', manual: true }
+  loadCandidates('')
+  textarea.value?.focus()
+}
+
+function closePicker(): void {
+  picker.value = null
+}
+
+function pickMention(item: MentionItem): void {
+  // 去掉光标前输入的 `@xxx`
+  const el = nativeTextarea()
+  if (picker.value && !picker.value.manual && el) {
+    const pos = el.selectionStart ?? draft.value.length
+    const before = draft.value.slice(0, pos).replace(/@[^\s@]{0,32}$/, '')
+    draft.value = before + draft.value.slice(pos)
+  }
+  if (!mentions.value.some((m) => m.ref === item.ref)) mentions.value.push(item)
+  picker.value = null
+  textarea.value?.focus()
+}
+
+function removeMention(ref: string): void {
+  mentions.value = mentions.value.filter((m) => m.ref !== ref)
+}
+
+onBeforeUnmount(() => pickerTimer && clearTimeout(pickerTimer))
+
 function onKeyDown(e: KeyboardEvent): void {
+  if (picker.value) {
+    const n = pickerItems.value.length
+    if (e.key === 'ArrowDown' && n) {
+      e.preventDefault()
+      pickerActive.value = (pickerActive.value + 1) % n
+      return
+    }
+    if (e.key === 'ArrowUp' && n) {
+      e.preventDefault()
+      pickerActive.value = (pickerActive.value - 1 + n) % n
+      return
+    }
+    if ((e.key === 'Enter' || e.key === 'Tab') && !e.isComposing && n) {
+      e.preventDefault()
+      pickMention(pickerItems.value[pickerActive.value])
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      closePicker()
+      return
+    }
+  }
   if (e.key === 'Escape' && expanded.value) {
     expanded.value = false
     return
@@ -91,8 +198,15 @@ const currentWorkflow = computed(
 
 function send(): void {
   if (!canSend.value) return
-  emit('send', draft.value.trim(), JSON.parse(JSON.stringify(attachments.value)))
+  emit(
+    'send',
+    draft.value.trim(),
+    JSON.parse(JSON.stringify(attachments.value)),
+    mentions.value.map((m) => m.ref)
+  )
   draft.value = ''
+  mentions.value = []
+  picker.value = null
   expanded.value = false
   attachments.value = []
   previews.value = {}
@@ -289,6 +403,34 @@ defineExpose({ focus: () => textarea.value?.focus() })
 <template>
   <div class="input-wrap" :class="{ 'is-expanded': expanded }">
     <div class="input-card" @dragover.prevent="onDragOver" @drop.prevent="onDrop">
+      <MentionPicker
+        v-if="picker"
+        :items="pickerItems"
+        :active="pickerActive"
+        :loading="pickerLoading"
+        :query="picker.query"
+        @select="pickMention"
+        @hover="(i: number) => (pickerActive = i)"
+        @close="closePicker"
+      />
+      <div v-if="mentions.length" class="mention-row">
+        <span v-for="m in mentions" :key="m.ref" class="mention-chip" :title="m.description">
+          <v-icon
+            :icon="m.kind === 'tool' ? 'mdi-wrench-outline' : m.icon || 'mdi-puzzle-outline'"
+            size="16"
+          />
+          <span class="text-truncate">@{{ m.label }}</span>
+          <button
+            type="button"
+            class="mention-chip-x"
+            :title="t('yaya.mention.remove', '取消点名')"
+            :aria-label="`${t('yaya.mention.remove', '取消点名')}: ${m.label}`"
+            @click="removeMention(m.ref)"
+          >
+            <v-icon icon="mdi-close" size="14" />
+          </button>
+        </span>
+      </div>
       <div v-if="attachments.length || importing" class="att-row">
         <div v-for="att in imageAttachments" :key="att.id" class="att-img">
           <button
@@ -352,6 +494,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           hide-details
           class="input-textarea"
           @keydown="onKeyDown"
+          @input="onInput"
           @paste="onPaste"
         />
         <v-btn
@@ -377,6 +520,15 @@ defineExpose({ focus: () => textarea.value?.focus() })
           :title="t('yaya.input.attach', '添加附件')"
           :aria-label="t('yaya.input.attach', '添加附件')"
           @click="attach"
+        />
+        <v-btn
+          icon="mdi-at"
+          variant="text"
+          density="comfortable"
+          :title="t('yaya.mention.button', '点名插件 / 工具（本对话启用）')"
+          :aria-label="t('yaya.mention.button', '点名插件 / 工具（本对话启用）')"
+          @mousedown.prevent
+          @click="openPicker"
         />
         <v-menu v-if="workflows.length > 1" location="top start">
           <template #activator="{ props: menuProps }">
@@ -495,6 +647,8 @@ defineExpose({ focus: () => textarea.value?.focus() })
   margin: 0 auto;
 }
 .input-card {
+  /* @ 候选框相对它定位 */
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 10px 12px 8px;
@@ -608,6 +762,39 @@ defineExpose({ focus: () => textarea.value?.focus() })
 }
 .send-btn {
   border-radius: 999px;
+}
+.mention-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+.mention-chip-x {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mention-chip-x:hover {
+  background: rgba(var(--v-theme-primary), 0.16);
 }
 .att-row {
   display: flex;

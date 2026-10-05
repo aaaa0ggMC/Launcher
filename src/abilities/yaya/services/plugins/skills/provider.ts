@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import { isAbsolute, dirname, join, resolve, sep } from 'node:path'
 import { USER_CONFIG_DIR } from '../../../../../main/process/paths'
 import { makeLogger } from '../../../../../main/process/logger'
-import { t } from '../../../../../main/process/i18n'
+import { t, te } from '../../../../../main/process/i18n'
 import { isPluginEnabled, registerPluginProvider } from '../registry'
 import type { PluginProvider, PluginTool, ToolContentResult, YayaPlugin } from '../types'
 import type { YayaConfig } from '../../../types'
@@ -348,7 +348,16 @@ function skillPlugin(entry: SkillEntry): YayaPlugin {
     // 给人看的文档 = SKILL.md 正文
     docs: entry.body,
     // skill 本身不带工具，工具集中在 skills 枢纽插件上
-    tools: () => []
+    tools: () => [],
+    // @ 点名：随这条消息加载 SKILL.md 正文（等价于替模型调了一次 skill_load）
+    mention: () => ({
+      note: te(
+        'yaya.skill.mention_note',
+        { name: entry.name },
+        '以下是 Skill「{name}」的完整说明，按它做；附属文件用 skill_read_file 读取'
+      ),
+      content: [{ type: 'text', text: entry.body }]
+    })
   }
 }
 

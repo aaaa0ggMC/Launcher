@@ -377,7 +377,11 @@
 - **测试**：`renderSegments` 补未闭合 / 嵌套代码块用例；插件 ui 的单测脚手架。
 - **安全**：所有显示类插件按不可信输入处理，遵守 CSP；结果视图里的隐私标签规范照旧。
 
-### 6.3 Mention：输入 `@` 点名插件 / Skill / 工具
+### 6.3 Mention：输入 `@` 点名插件 / Skill / 工具（已完成第一版，2026-10-05）
+
+**实际做法**：`services/plugins/mention.ts`（候选 / 解析 / 会话列表合并）；附注存在用户消息 `meta.mentionNote`，`sanitizeHistory` 发给模型时拼在该消息后（前缀不变）；`session.meta.mentions` 记本会话强制启用的插件 / `tool:<wire>`，`resolveTools(config, forced)` 把它们追加在工具表末尾；Skill 点名随消息加载 SKILL.md 正文；输入框 `@` / 工具栏 @ 按钮弹候选（键盘上下 / 回车 / Esc），点名以标签显示在输入框与用户气泡；右上角菜单可撤销本会话的点名；导出 Markdown 还原为 `@名字`。命令 `yaya.mention-candidates` / `yaya.session-mentions`，`yaya.workflow-start --mentions`。**没做**：MCP 提供方的「附注列出可用工具名」（目前缺省只启用插件 + 一句点名附注）；图片类 mention content（只取文本）。
+
+原计划：
 
 聊天输入框里随时输入 `@` 弹出候选框（插件、Skill、MCP 服务器、单个工具，可搜索），选中后插入一个提及标签，如 `@mermaid`。效果：**从这条消息起，本会话强制启用它**。
 

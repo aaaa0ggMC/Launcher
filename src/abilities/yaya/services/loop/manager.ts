@@ -8,7 +8,15 @@ import { makeLogger } from '../../../../main/process/logger'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, MessageNode } from '../../types'
-import { getSession, insertMessage, updateMessage, getYayaDb, getMessage } from '../db'
+import {
+  getSession,
+  insertMessage,
+  updateMessage,
+  updateSession,
+  getYayaDb,
+  getMessage
+} from '../db'
+import { mergeSessionMentions, resolveMentions, sessionMentions } from '../plugins/mention'
 import { loadYayaConfig } from '../config'
 import { getProviderInstance } from '../providers/factory'
 import { WorkflowRunner } from './runner'
@@ -54,11 +62,22 @@ export async function startWorkflow(
   sessionId: string,
   userPrompt: string,
   attachments?: MessageAttachment[],
-  parentMessageId?: string | null
+  parentMessageId?: string | null,
+  mentions: string[] = []
 ): Promise<{ userMessageId: string; assistantMessageId: string }> {
   const session = getSession(sessionId)
   if (!session) throw new Error(`Session ${sessionId} not found`)
   stopExisting(sessionId)
+  // @ 点名：附注存进这条用户消息，启用记进会话（运行器解析工具表时追加在末尾）
+  const mentioned = mentions.length ? await resolveMentions(mentions, sessionId) : null
+  if (mentioned?.enable.length) {
+    const merged = mergeSessionMentions(
+      sessionMentions(session.meta),
+      mentioned.records,
+      mentioned.enable
+    )
+    updateSession(sessionId, { meta: { ...(session.meta ?? {}), mentions: merged } })
+  }
 
   let parentId = parentMessageId !== undefined ? parentMessageId : session.activeLeafId
   if (parentId) {
@@ -83,7 +102,15 @@ export async function startWorkflow(
     content: userPrompt,
     attachments,
     status: 'completed',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    ...(mentioned?.records.length
+      ? {
+          meta: {
+            mentions: mentioned.records,
+            ...(mentioned.note ? { mentionNote: mentioned.note } : {})
+          }
+        }
+      : {})
   })
   const assistantMessageId = launchRunner(sessionId, userMsgId)
   return { userMessageId: userMsgId, assistantMessageId }

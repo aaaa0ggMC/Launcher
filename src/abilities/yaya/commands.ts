@@ -71,6 +71,7 @@ import {
   registerPlugin,
   restartPlugin
 } from './services/plugins/registry'
+import { mentionCandidates, sessionMentions } from './services/plugins/mention'
 import type { PluginConfigField, PluginGroup, YayaPlugin } from './services/plugins/types'
 // 动态插件来源：导入即注册（registerPluginProvider）
 import './services/plugins/mcp/provider'
@@ -345,13 +346,49 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.workflow-start',
     description: '向指定会话发送提示词并启动智能体思考与工具调用循环',
-    usage: 'yaya.workflow-start --session <sessionId> --prompt <text> [--parent <messageId>]',
+    usage:
+      'yaya.workflow-start --session <sessionId> --prompt <text> [--parent <messageId>] [--mentions <插件 id 或 tool:<工具名>，逗号分隔>]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
-      const prompt = String(ctx.named.prompt)
+      const prompt = String(ctx.named.prompt ?? '')
       const parentMessageId = ctx.named.parent as string | undefined
       const attachments = ctx.named.attachments as MessageAttachment[] | undefined
-      return startWorkflow(sessionId, prompt, attachments, parentMessageId)
+      const raw = ctx.named.mentions
+      const mentions = (Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : [])
+        .map((x) => String(x).trim())
+        .filter(Boolean)
+      return startWorkflow(sessionId, prompt, attachments, parentMessageId, mentions)
+    }
+  },
+
+  {
+    name: 'yaya.mention-candidates',
+    description:
+      '输入框 @ 的候选：全部插件（内置 / MCP / Skill，含全局禁用的）与单个工具，按名字 / 描述过滤',
+    usage: 'yaya.mention-candidates [--query <文本>]',
+    ui: ['YAYA 输入框输入 @ / 工具栏 @ 按钮'],
+    related: ['yaya.workflow-start', 'yaya.session-mentions'],
+    run: (ctx) => mentionCandidates(loadYayaConfig(), String(ctx.named.query ?? ''))
+  },
+
+  {
+    name: 'yaya.session-mentions',
+    description:
+      '本会话被 @ 点名强制启用的插件 / 工具；--remove <ref> 撤销一项（下一次运行起生效）',
+    usage: 'yaya.session-mentions --id <sessionId> [--remove <插件 id 或 tool:<工具名>>]',
+    ui: ['YAYA 右上角菜单 → 本对话点名的插件'],
+    run: (ctx) => {
+      const id = String(ctx.named.id)
+      const session = getSession(id)
+      if (!session) throw new Error(`Session ${id} not found`)
+      let list = sessionMentions(session.meta)
+      const remove = ctx.named.remove ? String(ctx.named.remove) : ''
+      if (remove) {
+        list = list.filter((m) => m.ref !== remove)
+        updateSession(id, { meta: { ...(session.meta ?? {}), mentions: list } })
+        getBroadcast()('cockpit:yaya-sessions-changed', {})
+      }
+      return list
     }
   },
 

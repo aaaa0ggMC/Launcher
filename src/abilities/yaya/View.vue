@@ -405,7 +405,11 @@ async function ensureSession(): Promise<string> {
 }
 
 // ---- 发送 / 控制 ----
-async function handleSend(prompt: string, attachments: MessageAttachment[]): Promise<void> {
+async function handleSend(
+  prompt: string,
+  attachments: MessageAttachment[],
+  mentions: string[] = []
+): Promise<void> {
   try {
     const firstMessage = !activeSessionId.value || messages.value.length === 0
     const id = await ensureSession()
@@ -420,7 +424,8 @@ async function handleSend(prompt: string, attachments: MessageAttachment[]): Pro
     await window.cockpit.command('yaya.workflow-start', {
       session: id,
       prompt,
-      attachments
+      attachments,
+      ...(mentions.length ? { mentions } : {})
     })
     markRunning(id)
     await refreshTail()
@@ -437,7 +442,9 @@ async function handleEdit(message: MessageNode, text: string): Promise<void> {
       session: activeSessionId.value,
       prompt: text,
       attachments: JSON.parse(JSON.stringify(message.attachments ?? [])),
-      parent: message.parentId
+      parent: message.parentId,
+      // 编辑重发保留原消息的 @ 点名
+      mentions: messageMentionRefs(message)
     })
     markRunning(activeSessionId.value)
     await loadMessages()
@@ -481,6 +488,30 @@ async function handleApprove(
     ...(reason ? { reason } : {}),
     ...(scope ? { scope } : {})
   })
+}
+
+function messageMentionRefs(message: MessageNode): string[] {
+  const list = message.meta?.mentions
+  return Array.isArray(list)
+    ? list
+        .map((m) => (m as { ref?: unknown }).ref)
+        .filter((r): r is string => typeof r === 'string')
+    : []
+}
+
+/** 本对话被 @ 点名强制启用的插件 / 工具 */
+const sessionMentionList = computed(() => {
+  const list = activeSession.value?.meta?.mentions
+  return Array.isArray(list) ? (list as { ref: string; label: string }[]) : []
+})
+async function removeSessionMention(ref: string): Promise<void> {
+  const s = activeSession.value
+  if (!s) return
+  const list = (await window.cockpit.command('yaya.session-mentions', {
+    id: s.id,
+    remove: ref
+  })) as unknown[]
+  s.meta = { ...(s.meta ?? {}), mentions: list }
 }
 
 /** 本对话「都允许」免确认的工具 */
@@ -970,6 +1001,28 @@ watch(isRunning, (now, before) => {
               :subtitle="approvedTools.join('、')"
               @click="clearApprovedTools"
             />
+            <v-list-group v-if="sessionMentionList.length" value="mentions">
+              <template #activator="{ props: groupProps }">
+                <v-list-item
+                  v-bind="groupProps"
+                  prepend-icon="mdi-at"
+                  :title="
+                    te(
+                      'yaya.mention.session_title',
+                      { n: String(sessionMentionList.length) },
+                      '本对话点名启用（{n}）'
+                    )
+                  "
+                />
+              </template>
+              <v-list-item
+                v-for="m in sessionMentionList"
+                :key="m.ref"
+                :title="`@${m.label}`"
+                :subtitle="t('yaya.mention.session_remove', '点击撤销（下一次运行起生效）')"
+                @click="removeSessionMention(m.ref)"
+              />
+            </v-list-group>
             <v-list-item
               prepend-icon="mdi-chart-box-outline"
               :title="t('yaya.usage.title', '用量统计')"

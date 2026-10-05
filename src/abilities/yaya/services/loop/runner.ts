@@ -47,6 +47,7 @@ import {
 } from '../plugins/registry'
 import type { ProviderMessage, ProviderTool } from '../providers/types'
 import type { ToolSessionContext } from '../plugins/types'
+import { sessionMentions } from '../plugins/mention'
 import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
 import { currentBrowserClient, withBrowserClient } from '../../../../main/process/browser-ui'
 import {
@@ -295,7 +296,9 @@ export class WorkflowRunner {
     )
 
     try {
-      this.tools = workflow.usesTools ? await resolveTools(this.ctx.config) : []
+      // 本会话被 @ 点名强制启用的插件 / 工具（追加在工具表末尾，见 mention.ts）
+      const forced = sessionMentions(this.session?.meta).map((m) => m.ref)
+      this.tools = workflow.usesTools ? await resolveTools(this.ctx.config, forced) : []
       await workflow.run(this.buildContext(workflow))
       if (this.aborted) return
       this.closeOpenNode()
@@ -745,7 +748,8 @@ export function sanitizeHistory(nodes: import('../../types').MessageNode[]): Pro
   const kept = nodes.filter((n) => {
     const hasText = Boolean(n.content?.trim())
     if (n.role === 'assistant') return hasText || Boolean(n.toolCalls?.length)
-    if (n.role === 'user') return hasText || Boolean(n.attachments?.length)
+    if (n.role === 'user')
+      return hasText || Boolean(n.attachments?.length) || typeof n.meta?.mentionNote === 'string'
     if (n.role === 'tool') return hasText || Boolean(n.attachments?.length)
     return false
   })
@@ -775,9 +779,12 @@ export function sanitizeHistory(nodes: import('../../types').MessageNode[]): Pro
       continue
     }
     flushMissing()
+    // @ 点名的附注存在用户消息上，发给模型时拼在它后面（只影响这条及之后，前缀不变）
+    const note =
+      n.role === 'user' && typeof n.meta?.mentionNote === 'string' ? n.meta.mentionNote : ''
     out.push({
       role: n.role,
-      content: n.content,
+      content: note ? `${n.content}\n\n${note}` : n.content,
       name: n.name,
       toolCallId: n.toolCallId,
       toolCalls: n.toolCalls,

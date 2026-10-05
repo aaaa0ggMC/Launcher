@@ -195,7 +195,15 @@ function renderMessageMarkdown(
     }
   }
 
-  const body = msg.content?.trim() ? msg.content.trim() : t('yaya.io.empty_message', '（空消息）')
+  // @ 点名还原成 `@名字` 放在正文前（数据库里存的是结构化记录，见 plugins/mention.ts）
+  const mentioned = Array.isArray(msg.meta?.mentions)
+    ? (msg.meta.mentions as { label?: unknown }[])
+        .map((m) => (typeof m.label === 'string' ? `@${m.label}` : ''))
+        .filter(Boolean)
+        .join(' ')
+    : ''
+  const text = [mentioned, msg.content?.trim()].filter(Boolean).join(' ')
+  const body = text || t('yaya.io.empty_message', '（空消息）')
   out.push('', body)
 
   if (msg.reasoningContent?.trim()) {

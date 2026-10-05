@@ -64,6 +64,12 @@ function onLongPress(p: LongPressPoint): void {
   openMenu(p.clientX, p.clientY)
 }
 
+/** 这条消息里的 @ 点名（只显示；附注 mentionNote 只给模型看） */
+const mentionList = computed(() => {
+  const list = props.message.meta?.mentions
+  return Array.isArray(list) ? (list as { ref: string; label: string; kind: string }[]) : []
+})
+
 function submitEdit(): void {
   const text = draft.value.trim()
   if (!text) return
@@ -158,6 +164,12 @@ function openPreview(id: string): void {
           <span class="text-truncate">{{ att.name }}</span>
         </div>
       </div>
+      <div v-if="mentionList.length" class="mentions">
+        <span v-for="m in mentionList" :key="m.ref" class="mention-tag">
+          <v-icon :icon="m.kind === 'tool' ? 'mdi-wrench-outline' : 'mdi-at'" size="14" />
+          {{ m.label }}
+        </span>
+      </div>
       <div
         v-if="message.content"
         v-long-press="onLongPress"
@@ -209,6 +221,26 @@ function openPreview(id: string): void {
 </template>
 
 <style scoped>
+.mentions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+.mention-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.12);
+  word-break: break-all;
+}
 .user-msg {
   display: flex;
   flex-direction: column;
