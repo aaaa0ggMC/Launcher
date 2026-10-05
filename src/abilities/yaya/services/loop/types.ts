@@ -26,6 +26,18 @@ export interface WorkflowSnapshot {
   bufferedTokens: string
   bufferedReasoning: string
   startedAt: number
+  /** 模型请求出错、正在等待自动重试（重试成功或放弃后清掉） */
+  retry?: WorkflowRetry
+}
+
+export interface WorkflowRetry {
+  /** 第几次重试（从 1 开始） */
+  attempt: number
+  max: number
+  /** 预计什么时候重试（ms 时间戳） */
+  at: number
+  /** 出错原因（简短） */
+  error: string
 }
 
 export interface LoopContext {

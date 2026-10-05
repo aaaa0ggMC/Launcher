@@ -121,6 +121,8 @@
   "yaya.more": "More",
   "yaya.new_chat": "New chat",
   "yaya.no_model": "No model selected",
+  "yaya.retry_wait": "Request failed, retrying in {s}s ({n}/{max})",
+  "yaya.retry_now": "Retrying ({n}/{max})…",
   "yaya.paused_hint": "{name} is paused and will not take further steps",
   "yaya.regenerate": "Regenerate",
   "yaya.resume": "Resume",

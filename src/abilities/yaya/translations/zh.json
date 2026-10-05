@@ -121,6 +121,8 @@
   "yaya.more": "更多",
   "yaya.new_chat": "新对话",
   "yaya.no_model": "未选择模型",
+  "yaya.retry_wait": "请求出错，{s} 秒后自动重试（{n}/{max}）",
+  "yaya.retry_now": "正在重试（{n}/{max}）…",
   "yaya.paused_hint": "{name} 已暂停，不会再执行新的步骤",
   "yaya.regenerate": "重新生成",
   "yaya.resume": "继续",
