@@ -205,7 +205,7 @@
 | | `read_file`（分段 / 目录列表）/ `write_file` / `run_bash` | `[x]` | 结果统一截断，`run_bash` 可被「停止」中断 |
 | | `fetch_url`（HTML 去标签、超时） | `[x]` | 同上 |
 | | 工具逐个启用 / 禁用 | `[x]` | `disabledTools` + `yaya.tools-list`，设置页「工具」 |
-| | ~~`search_document`~~ | 移除 | 原为返回固定字符串的假工具；等长文档 Slot 真正实现再加 |
+| | ~~`search_document`~~ | 移除 | 原为返回固定字符串的假工具；已由长文档检索插件 `docs_search` 取代 |
 | **安全与授权** | 工具调用内联审批（参数预览 + 允许 / 拒绝） | `[x]` | `ToolCallRow.vue`；重启后挂起的审批收敛为中断 |
 | **外部生态** | MCP 客户端 | `[x]` | Era 2 B1：`services/plugins/mcp/*`（Streamable HTTP / SSE、请求头加密、状态、失败不重放），每个服务器 = 一个插件 |
 
@@ -219,7 +219,7 @@
 | | 图片 → Vision；文本 ≤ 200KB 内联；其余给路径让模型用 `read_file` | `[x]` | `providers/openai.ts` `attachmentParts` |
 | | 缩略图预览 | `[x]` | `yaya.asset-preview`（data URL，≤ 4MB） |
 | | `yaya-asset://` 协议 | `[ ]` | 目前只做路径解析（已防 `../` 越界） |
-| **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[ ]` | |
+| **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[x]` | `plugins/documents/`：超过内联上限的文本 / PDF 只给 id + 开头摘要（`attachmentRefNote`），模型用 `docs_list` / `docs_search`（BM25，中英文）/ `docs_read`（按行）按需取；只读本会话附件，无需 exec 授权；PDF 走本机 `pdftotext` |
 | **输出渲染 Slot** | Markdown 代码块高亮 + 复制 | `[x]` | `components/markdown.ts`（highlight.js 按需加载，配色跟主题） |
 | | Mermaid 渲染 | `[x]` | `plugins/mermaid/`（6.2，渲染端按需加载 mermaid，`securityLevel: 'strict'`，配色跟主题） |
 | | SVG / HTML 小部件沙箱 | `[-]` | SVG 已做：`plugins/svg/`（净化后 data URL `<img>`）；HTML 小部件待做 |
