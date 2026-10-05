@@ -91,6 +91,7 @@ final class MediaBridge {
             clear();
             return;
         }
+        act.ensureNotifyPermission();
         if (a.has("artwork")) art = decode(a.optString("artwork", ""));
 
         boolean playing = "playing".equals(state);
@@ -130,6 +131,7 @@ final class MediaBridge {
                 .setLargeIcon(art)
                 .setContentIntent(session.getController().getSessionActivity())
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setCategory(Notification.CATEGORY_TRANSPORT)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setOngoing(playing);
