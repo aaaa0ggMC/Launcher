@@ -23,7 +23,8 @@
     "build:headless": "node scripts/build-headless.mjs",
     "start:headless": "node out/headless/index.js",
     "dev:web": "node scripts/build-headless.mjs && node out/headless/index.js",
-    "pack:headless": "node scripts/build-headless.mjs --pack"
+    "pack:headless": "node scripts/build-headless.mjs --pack",
+    "test:web": "node scripts/smoke-web.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

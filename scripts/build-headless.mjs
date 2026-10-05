@@ -11,6 +11,7 @@ import { build, loadConfigFromFile } from 'vite'
 //                   help / privacy / agent / inspector / cli / logs）总会保留，否则依赖
 //                   background-tasks 的能力会被加载器判定为缺少能力而禁用
 //   --pack          额外生成 out/cockpit-headless.tgz
+//   --out <dir>     输出目录（缺省 out/）：冒烟测试构建到临时目录，不覆盖正在使用的 out/
 const argv = process.argv.slice(2)
 const BASE_ABILITIES = [
   'settings',
@@ -31,6 +32,8 @@ if (onlyIdx >= 0 && argv[onlyIdx + 1]) {
 }
 
 const root = resolve(import.meta.dirname, '..')
+const outIdx = argv.indexOf('--out')
+const outDir = outIdx >= 0 && argv[outIdx + 1] ? resolve(argv[outIdx + 1]) : resolve(root, 'out')
 const loaded = await loadConfigFromFile(
   { command: 'build', mode: 'production' },
   resolve(root, 'electron.vite.config.ts'),
@@ -64,7 +67,7 @@ await build({
   ssr: { noExternal: true, external: external.filter((e) => typeof e === 'string') },
   build: {
     ssr: resolve(root, 'src/headless/index.ts'),
-    outDir: resolve(root, 'out/headless'),
+    outDir: resolve(outDir, 'headless'),
     emptyOutDir: true,
     target: 'node22',
     minify: false,
@@ -95,7 +98,7 @@ await build({
   resolve: cfg.renderer.resolve,
   define: cfg.renderer.define,
   build: {
-    outDir: resolve(root, 'out/web'),
+    outDir: resolve(outDir, 'web'),
     emptyOutDir: true,
     target: 'esnext',
     reportCompressedSize: false,
@@ -109,17 +112,17 @@ await build({
 if (process.argv.includes('--pack')) {
   const { cpSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs')
   const { execFileSync } = await import('node:child_process')
-  const bundled = readFileSync(resolve(root, 'out/headless/index.js'), 'utf8')
+  const bundled = readFileSync(resolve(outDir, 'headless/index.js'), 'utf8')
   const used = Object.keys(pkg.dependencies ?? {}).filter(
     (d) => !NOT_EXTERNAL.has(d) && bundled.includes(`require("${d}`)
   )
   // 原生 / 平台相关的做成可选依赖：装不上也不影响启动（对应能力自行降级）
   const OPTIONAL = new Set(['esbuild', 'dbus-next'])
-  const dest = resolve(root, 'out/pack/cockpit-headless')
-  rmSync(resolve(root, 'out/pack'), { recursive: true, force: true })
+  const dest = resolve(outDir, 'pack/cockpit-headless')
+  rmSync(resolve(outDir, 'pack'), { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
-  cpSync(resolve(root, 'out/headless'), resolve(dest, 'headless'), { recursive: true })
-  cpSync(resolve(root, 'out/web'), resolve(dest, 'web'), { recursive: true })
+  cpSync(resolve(outDir, 'headless'), resolve(dest, 'headless'), { recursive: true })
+  cpSync(resolve(outDir, 'web'), resolve(dest, 'web'), { recursive: true })
   writeFileSync(
     resolve(dest, 'package.json'),
     JSON.stringify(
@@ -142,9 +145,9 @@ if (process.argv.includes('--pack')) {
   )
   execFileSync('tar', [
     'czf',
-    resolve(root, 'out/cockpit-headless.tgz'),
+    resolve(outDir, 'cockpit-headless.tgz'),
     '-C',
-    resolve(root, 'out/pack'),
+    resolve(outDir, 'pack'),
     'cockpit-headless'
   ])
   console.log('packed → out/cockpit-headless.tgz  deps:', used.join(', '))
