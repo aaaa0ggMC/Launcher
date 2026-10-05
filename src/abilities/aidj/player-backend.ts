@@ -3,7 +3,7 @@ import { getBroadcast } from '../../main/process/broadcast'
 import { listTasks, stopTask } from '../../main/process/background-tasks'
 import { setAbilityEnabled } from '../../main/process/ability-runtime'
 import { audioUrl } from '../../main/process/audio-protocol'
-import { basename } from 'path'
+import { basename, join } from 'path'
 import {
   DBusManager,
   getDbusManager,
@@ -12,16 +12,24 @@ import {
   loadAidjConfig,
   saveAidjConfig,
   loadLibrary,
-  analyzeLoudness,
   VolBal,
   bumpFrequency,
-  findEqProfile
+  findEqProfile,
+  AIDJ_DIR
 } from './service'
 import { EQ_BAND_COUNT } from './types'
 import type { PlayerStatus } from './types'
 import { recordSongTimeline } from './song-timeline'
+import { LoudnessStore } from './services/loudness-store'
+import type { LoudnessInfo } from './types'
 
 const log = makeLogger('aidj-player')
+
+let _loudnessStore: LoudnessStore | null = null
+function getLoudnessStore(): LoudnessStore {
+  if (!_loudnessStore) _loudnessStore = new LoudnessStore(join(AIDJ_DIR, 'loudness-cache.json'))
+  return _loudnessStore
+}
 
 /**
  * Playback backend abstraction (docs/abilities/aidj/player-backend-plan.md M1).
@@ -233,7 +241,7 @@ export class WebPlayerBackend implements PlayerBackend {
 
   // -- continuous-playback auxiliaries (mirror `aidj.continuous` semantics) ---
   private volbal = new VolBal({
-    measure: (path) => analyzeLoudness(path),
+    measure: (path) => this.measureLoudness(path),
     setVolume: (v) => void this.setVolume(v),
     log: (level, msg, data) => {
       if (level === 'warn') log.warn(msg, data)
@@ -403,8 +411,49 @@ export class WebPlayerBackend implements PlayerBackend {
       if (this.recordFreq && state.track) {
         void bumpFrequency([state.track]).catch(() => {})
       }
-      if (this.volbal.isEnabled) void this.volbal.apply(path)
+      if (this.volbal.isEnabled) {
+        void this.volbal.apply(path)
+        this.prefetchNextLoudness()
+      }
     }
+  }
+
+  /** Loudness for volbal: the library's measured LUFS when present (instant),
+   *  else the persistent measurement store (ffmpeg once per file, ever). */
+  private async measureLoudness(path: string): Promise<LoudnessInfo | null> {
+    if (this.volbal.state().method === 'lufs') {
+      const lufs = await this.libraryLufs(path)
+      if (lufs != null) return { integrated_lufs: lufs, rms_db: null, peak_db: null }
+    }
+    return getLoudnessStore().get(path)
+  }
+
+  private lufsIndex: { paths: Map<string, string>; byPath: Map<string, string> } | null = null
+
+  /** `loudness_lufs` from the library metadata (written by sync / backfill). */
+  private async libraryLufs(path: string): Promise<number | null> {
+    const lib = await loadLibrary().catch(() => null)
+    if (!lib) return null
+    if (this.lufsIndex?.paths !== lib.musicPaths) {
+      const byPath = new Map<string, string>()
+      for (const [name, p] of lib.musicPaths) byPath.set(p, name)
+      this.lufsIndex = { paths: lib.musicPaths, byPath }
+    }
+    const name = this.lufsIndex.byPath.get(path)
+    const lufs = name ? lib.metadata.get(name)?.loudness_lufs : undefined
+    return typeof lufs === 'number' && Number.isFinite(lufs) ? lufs : null
+  }
+
+  /** Measure the NEXT queued track in the background so its balanced volume
+   *  is ready the moment it starts (cache hit instead of a fresh decode). */
+  private prefetchNextLoudness(): void {
+    const next = this.queue[this.queueIndex + 1]
+    if (!next?.path) return
+    void (async () => {
+      if (this.volbal.state().method === 'lufs' && (await this.libraryLufs(next.path)) != null)
+        return
+      getLoudnessStore().prefetch(next.path)
+    })()
   }
 
   /** Volbal state snapshot for the player page. */
