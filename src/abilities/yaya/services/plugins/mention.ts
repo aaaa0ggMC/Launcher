@@ -15,7 +15,7 @@
 import { makeLogger } from '../../../../main/process/logger'
 import { t, te } from '../../../../main/process/i18n'
 import type { YayaConfig } from '../../types'
-import { isPluginEnabled, listPlugins, wireName } from './registry'
+import { isPluginEnabled, listPlugins, tryStartPlugin, wireName } from './registry'
 import type { MentionEffect, YayaPlugin } from './types'
 
 const log = makeLogger('yaya-mention')
@@ -121,9 +121,14 @@ export async function resolveMentions(
     seen.add(plugin.id)
     const label = pluginLabel(plugin)
     out.records.push({ ref: plugin.id, label, kind: plugin.kind })
+    // 先启动：MCP 这类动态插件连上之前工具列表是空的（全局禁用的从来没连过）
+    const startError = plugin.start ? await tryStartPlugin(plugin) : null
+    if (startError)
+      log.warn('mentioned plugin failed to start', { plugin: plugin.id, error: startError })
     const tools = safeTools(plugin)
+    /** 有工具，或是动态插件（这次没连上也记为启用，之后的运行会重试） */
     const enable = (p: YayaPlugin): void => {
-      if (safeTools(p).length && !out.enable.some((x) => x.ref === p.id))
+      if ((safeTools(p).length || p.start) && !out.enable.some((x) => x.ref === p.id))
         out.enable.push({ ref: p.id, label: pluginLabel(p), kind: p.kind })
     }
     enable(plugin)
@@ -138,7 +143,15 @@ export async function resolveMentions(
       if (dep) enable(dep)
     }
     const parts = [te('yaya.mention.note_plugin', { name: label }, '用户点名使用「{name}」')]
-    if (tools.length) {
+    if (startError)
+      parts.push(
+        te(
+          'yaya.mention.note_unavailable',
+          { error: startError.slice(0, 200) },
+          '（这个插件现在连不上：{error}；它的工具暂时不可用）'
+        )
+      )
+    else if (tools.length) {
       const names = tools.slice(0, MAX_NOTE_TOOLS).map((tool) => wireName(plugin, tool))
       if (tools.length > MAX_NOTE_TOOLS) names.push('…')
       parts.push(

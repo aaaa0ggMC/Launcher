@@ -127,3 +127,38 @@ it('会话点名列表去重并保持先后顺序', () => {
     ['beta', 'alpha']
   )
 })
+
+it('点名未连接的动态插件（MCP）：先启动再列工具；连不上也记为启用并告诉模型', async () => {
+  const config = setup()
+  let connected = false
+  registry.registerPlugin({
+    id: 'mcp-demo',
+    kind: 'mcp',
+    label: 'Demo MCP',
+    description: 'tools appear after start',
+    defaultEnabled: false,
+    start: async () => {
+      connected = true
+    },
+    tools: () => (connected ? [tool('video')] : [])
+  })
+  registry.registerPlugin({
+    id: 'mcp-down',
+    kind: 'mcp',
+    label: 'Down MCP',
+    description: 'cannot connect',
+    defaultEnabled: false,
+    start: async () => {
+      throw new Error('ECONNREFUSED')
+    },
+    tools: () => []
+  })
+  registry.refreshPlugins(config)
+  const r = await mention.resolveMentions(['mcp-demo', 'mcp-down'], 's1')
+  assert.deepEqual(
+    r.enable.map((x) => x.ref),
+    ['mcp-demo', 'mcp-down']
+  )
+  assert.match(r.note, /mcp-demo_video/)
+  assert.match(r.note, /ECONNREFUSED/)
+})

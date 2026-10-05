@@ -251,6 +251,16 @@ async function ensureStarted(plugin: YayaPlugin): Promise<void> {
   await p
 }
 
+/** 启动插件（MCP 等动态插件连上之后才有工具）；失败返回错误文本，不抛 */
+export async function tryStartPlugin(plugin: YayaPlugin): Promise<string | null> {
+  try {
+    await ensureStarted(plugin)
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+}
+
 async function stopPlugin(plugin: YayaPlugin): Promise<void> {
   const pending = stopping.get(plugin)
   if (pending) return pending
