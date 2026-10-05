@@ -32,12 +32,25 @@ function quickRoots(): FsListing['roots'] {
   // Termux：`termux-setup-storage` 之后 ~/storage/shared 指向手机存储
   const shared = join(home, 'storage', 'shared')
   if (existsSync(shared)) roots.push({ label: 'storage', path: shared })
+  // 没建软链接时共享存储本体也能直接访问（安卓 app 给了权限 / 桌面 Linux 无视）
+  else if (existsSync('/storage/emulated/0'))
+    roots.push({ label: 'sdcard', path: '/storage/emulated/0' })
   roots.push({ label: 'root', path: resolve('/') })
   return roots
 }
 
+/** 用户手输的路径：`~` 展开 + 归一化（重复斜杠、尾斜杠、相对路径） */
+function normalize(raw: unknown): string {
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!text) return homedir()
+  const home = homedir()
+  // `~` 或 `~/…`：Termux 用户习惯这么写
+  const expanded = text === '~' || text.startsWith('~/') ? home + text.slice(1) : text
+  return resolve(expanded)
+}
+
 async function list(dirArg: unknown): Promise<FsListing> {
-  const path = resolve(typeof dirArg === 'string' && dirArg ? dirArg : homedir())
+  const path = normalize(dirArg)
   const base = { path, parent: dirname(path) === path ? null : dirname(path), roots: quickRoots() }
   try {
     const names = await readdir(path, { withFileTypes: true })
@@ -67,7 +80,7 @@ async function list(dirArg: unknown): Promise<FsListing> {
 const commands: CommandSpec[] = [
   {
     name: 'host.fs.list',
-    description: '列出宿主机目录（网页端文件选择器用）；缺省为家目录',
+    description: '列出宿主机目录（网页端文件选择器用）；缺省为家目录，`~` 会展开',
     usage: 'host.fs.list [--path <dir>]',
     privacy: { agent: 'deny' },
     ui: ['网页模式下的文件 / 文件夹选择对话框'],

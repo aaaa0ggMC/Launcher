@@ -14,6 +14,8 @@ import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -40,6 +42,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -67,6 +70,7 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 1;
     private static final int REQ_NOTIFY = 2;
     private static final int REQ_PICK = 3;
+    private static final int REQ_DIR = 4;
 
     private FrameLayout root;
     private WebView web;
@@ -83,6 +87,8 @@ public class MainActivity extends Activity {
     private final List<String[]> pendingEvents = new ArrayList<>();
     /** 进行中的 pickFiles 调用 id（一次只允许一个） */
     private String pickCallId;
+    /** 进行中的 pickDirectory 调用 id（与 pickFiles 互斥） */
+    private String dirCallId;
     /** 别的应用「分享」进来、还没交给页面的内容 */
     private final List<Uri> sharedUris = new ArrayList<>();
     private String sharedText = "";
@@ -497,6 +503,10 @@ public class MainActivity extends Activity {
             onPicked(resultCode, data);
             return;
         }
+        if (requestCode == REQ_DIR) {
+            onPickedDir(resultCode, data);
+            return;
+        }
         if (requestCode != REQ_FILE || fileCallback == null) {
             super.onActivityResult(requestCode, resultCode, data);
             return;
@@ -672,6 +682,9 @@ public class MainActivity extends Activity {
                 case "pickFiles":
                     runOnUiThread(() -> startPick(id, args.optBoolean("multiple", false)));
                     return;
+                case "pickDirectory":
+                    runOnUiThread(() -> startPickDir(id, args.optString("initial", "")));
+                    return;
                 default:
                     reply(id, false, errorJson("unknown method: " + method));
             }
@@ -695,6 +708,91 @@ public class MainActivity extends Activity {
         } catch (ActivityNotFoundException e) {
             pickCallId = null;
             reply(id, false, errorJson("no file picker"));
+        }
+    }
+
+    /**
+     * 目录选择：系统目录选择器（SAF）。宿主（Termux）是另一进程、按真实路径读盘，
+     * 所以要把 SAF 树映射回文件系统路径（{@link #treeToPath}）——映射不了的
+     * （网盘 / Downloads 之类）直接失败，页面退回手动输入。
+     */
+    private void startPickDir(String id, String initial) {
+        if (pickCallId != null || dirCallId != null) {
+            reply(id, false, errorJson("busy"));
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        Uri initialUri = pathToTreeUri(initial);
+        if (initialUri != null) intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri);
+        dirCallId = id;
+        try {
+            startActivityForResult(intent, REQ_DIR);
+        } catch (ActivityNotFoundException e) {
+            dirCallId = null;
+            reply(id, false, errorJson("no directory picker"));
+        }
+    }
+
+    /** 取消了就回空对象（页面当作「没选」）；拿到树但映射不出路径 = 明确失败 */
+    private void onPickedDir(int resultCode, Intent data) {
+        final String id = dirCallId;
+        dirCallId = null;
+        if (id == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            reply(id, true, new JSONObject());
+            return;
+        }
+        String path = treeToPath(data.getData());
+        if (path == null) {
+            reply(id, false, errorJson("unsupported folder"));
+            return;
+        }
+        try {
+            reply(id, true, new JSONObject().put("path", path));
+        } catch (JSONException ignored) {
+        }
+    }
+
+    /**
+     * SAF 的文档 / 树 URI → 文件系统路径。
+     * 只认外部存储提供者的 {@code primary} 卷（手机内置存储）：宿主持有的是真实路径，
+     * 必须给出同一条路径才算选对了。SD 卡 / Downloads / 网盘这些卷给不出确定路径，
+     * 一律返回 null 让调用方明确报错——猜一条路只会让用户以为选好了。
+     */
+    private String treeToPath(Uri uri) {
+        if (uri == null) return null;
+        try {
+            String docId;
+            try {
+                docId = DocumentsContract.getTreeDocumentId(uri);
+            } catch (IllegalArgumentException notATree) {
+                // 个别系统挑具体目录时给的是 /document/… 而不是 /tree/…
+                docId = DocumentsContract.getDocumentId(uri);
+            }
+            if (docId == null || !docId.startsWith("primary:")) return null;
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext == null) return null;
+            final String root = ext.getAbsolutePath();
+            final String rel = docId.substring("primary:".length());
+            return rel.isEmpty() ? root : root + "/" + rel;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 反一下：宿主路径 → 系统选择器的初始目录（只在手机内置存储下有意义，别的返回 null） */
+    private static Uri pathToTreeUri(String path) {
+        if (path == null || path.isEmpty()) return null;
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext == null) return null;
+            final String root = ext.getAbsolutePath();
+            if (!path.equals(root) && !path.startsWith(root + "/")) return null;
+            final String rel = path.equals(root) ? "" : path.substring(root.length() + 1);
+            return DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents", "primary:" + rel);
+        } catch (Exception e) {
+            return null;
         }
     }
 

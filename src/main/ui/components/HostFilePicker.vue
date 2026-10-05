@@ -201,6 +201,38 @@ function useUploaded(): void {
   finish(multi.value ? paths : (paths[0] ?? null))
 }
 
+/**
+ * 从“设备/浏览器”里选文件夹（仅目录模式 + 承载页面的原生客户端提供时可用）。
+ *
+ * Android 用系统目录选择器（`ACTION_OPEN_DOCUMENT_TREE`）拿到 SAF 树，再映射成宿主上的
+ * 真实路径返回；浏览器没有等价 API，所以这条入口只在 App 里出现。
+ */
+const canSysDir = computed(() => wantsDir.value && !!window.cockpit.client)
+/** 系统目录选择器失败的原因（取不到 / 没安装），显示在快捷入口下方 */
+const sysDirError = ref('')
+const sysDirBusy = ref(false)
+async function pickDirFromSystem(): Promise<void> {
+  const client = window.cockpit.client
+  if (!client || sysDirBusy.value) return
+  sysDirBusy.value = true
+  sysDirError.value = ''
+  try {
+    const r = (await client.call('pickDirectory', { initial: pathInput.value.trim() })) as {
+      path?: string
+    }
+    const p = typeof r?.path === 'string' ? r.path.trim() : ''
+    if (p) await go(p) // 列出选到的目录，用户确认后再交出去
+  } catch (e) {
+    console.warn('[hostpick] native directory pick failed', e)
+    sysDirError.value = String((e as Error | null)?.message ?? e)
+  } finally {
+    sysDirBusy.value = false
+  }
+}
+
+/** 目录模式 + 浏览器（没有原生客户端）：按钮给出明确说明，而不是点了没反应 */
+const cannotSysDir = computed(() => wantsDir.value && !window.cockpit.client)
+
 const title = computed(
   () =>
     opts.value.title ||
@@ -248,6 +280,21 @@ async function go(dir?: string): Promise<void> {
   }
 }
 
+/**
+ * 路径框的回车：跳到输入的目录。手机软键盘有的只给 keydown、有的只给 keyup，
+ * 两个都接；同一路径 500ms 内的重复提交直接忽略（同一次回车会被两个事件各触发一遍）。
+ */
+let lastSubmit = ''
+let lastSubmitAt = 0
+function submitPath(): void {
+  const typed = pathInput.value.trim()
+  const now = Date.now()
+  if (typed === lastSubmit && now - lastSubmitAt < 500) return
+  lastSubmit = typed
+  lastSubmitAt = now
+  void go(typed)
+}
+
 function join(dir: string, name: string): string {
   return dir.endsWith(sep.value) ? dir + name : dir + sep.value + name
 }
@@ -260,6 +307,7 @@ function onRequest(ev: Event): void {
   showAll.value = false
   picked.value = []
   filename.value = ''
+  sysDirError.value = ''
   let start: string | undefined
   const dp = detail.opts?.defaultPath
   if (dp) {
@@ -294,13 +342,25 @@ const canConfirm = computed(() => {
   return !!selected.value || !!opts.value.any
 })
 
-function confirm(): void {
+async function confirm(): Promise<void> {
   const l = listing.value
   if (!l || !canConfirm.value) return
+  if (wantsDir.value) {
+    // 目录模式：路径框里改了路径但没按回车时，输入框才算用户的选择——
+    // 先跳到那里列出内容（读不了就地报错，不当成选中），Termux 家目录这类
+    // 空输入照旧确认“当前列出的目录”
+    const typed = pathInput.value.trim()
+    if (!typed) return finish(l.path)
+    if (typed === l.path) return finish(l.path)
+    await go(typed)
+    const nl = listing.value
+    if (!nl || nl.error) return
+    return finish(nl.path)
+  }
   if (mode.value === 'save') return finish(join(l.path, filename.value.trim()))
   if (multi.value) return finish([...picked.value])
   if (selected.value) return finish(join(l.path, selected.value))
-  finish(l.path) // 文件夹模式 / any 模式下没选文件 = 选当前目录
+  finish(l.path) // any 模式下没选文件 = 选当前目录
 }
 
 function fullPath(e: Listing['entries'][number]): string {
@@ -358,7 +418,8 @@ function size(n?: number): string {
           variant="outlined"
           hide-details
           :aria-label="t('hostpick.path', '路径')"
-          @keydown.enter="go(pathInput)"
+          @keyup.enter="submitPath"
+          @keydown.enter="submitPath"
         />
       </div>
 
@@ -386,6 +447,26 @@ function size(n?: number): string {
         >
           {{ t('hostpick.fromDevice', '从此设备选择') }}
         </v-chip>
+        <!-- 目录模式：安卓 App 用系统目录选择器；浏览器给不了宿主持有路径，只说明 -->
+        <v-chip
+          v-if="canSysDir"
+          class="py-1"
+          style="min-height: 24px"
+          label
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-folder-open"
+          :disabled="sysDirBusy"
+          @click="pickDirFromSystem"
+        >
+          {{ t('hostpick.fromSystemDir', '从设备选择文件夹') }}
+        </v-chip>
+        <span v-else-if="cannotSysDir" class="text-caption text-medium-emphasis align-self-center">
+          {{ t('hostpick.noSystemDir', '浏览器拿不到宿主持有的目录路径，请浏览或在上方输入') }}
+        </span>
+        <span v-if="sysDirError" class="text-error text-body-2">
+          {{ t('hostpick.dirPickFailed', '系统选择器没能返回目录，请浏览或在上方输入') }}
+        </span>
         <input
           ref="fileInput"
           type="file"
@@ -504,7 +585,7 @@ function size(n?: number): string {
         <span v-if="multi && picked.length" class="text-caption text-medium-emphasis">
           {{ te('hostpick.picked', { n: String(picked.length) }, '已选 {n} 个') }}
         </span>
-        <v-btn color="primary" variant="flat" :disabled="!canConfirm" @click="confirm">
+        <v-btn color="primary" variant="flat" :disabled="!canConfirm || loading" @click="confirm">
           <template v-if="mode === 'save'">{{ t('hostpick.save', '保存') }}</template>
           <template v-else-if="multi">
             {{ te('hostpick.select_multi', { n: String(picked.length) }, '选择（{n}）') }}
