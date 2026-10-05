@@ -64,5 +64,8 @@
   "ft.mdPreset": "预设: {name}",
   "ft.mdVectors": "矢量",
   "ft.mdStatic": "静态",
-  "ft.mdPerRound": "圈"
+  "ft.mdPerRound": "圈",
+  "ft.ctrl.touchRotateOn": "触屏旋转：开（单指拖动旋转视角）",
+  "ft.ctrl.touchRotateOff": "触屏旋转：关（单指拖动平移，双指拖动旋转）",
+  "ft.ctrl.touchRotate": "触屏旋转"
 }

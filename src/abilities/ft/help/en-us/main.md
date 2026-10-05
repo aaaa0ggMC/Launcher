@@ -30,7 +30,7 @@ directly.
 | Area             | Where                              | Description                                                       |
 | ---------------- | ---------------------------------- | ----------------------------------------------------------------- |
 | Canvas           | Left side (about 2/3 of the width) | Main view, origin centered; the chain and track render here       |
-| Floating toolbar | Top-left of the canvas             | 5 icon buttons (below); hover shows each name                     |
+| Floating toolbar | Top-left of the canvas             | Icon buttons (below; a Touch rotate icon joins them in 3D)             |
 | Right panel      | Right side, ~312px wide            | Title "Fourier Transform" + collapse button + 4 sections          |
 | Collapse button  | Far right of the panel title row   | Chevron icon; collapses to a single chevron and the canvas widens |
 
@@ -43,6 +43,7 @@ The floating toolbar at the top-left of the canvas, left to right:
 | **Reset view**      | Restore the default framing and zoom (pan / orbit reset too)                |
 | **Follow tip**      | Lock the camera onto the chain's tip (primary color when on)                |
 | **3D view**         | Toggle 2D / 3D (cube icon, primary color, in 3D)                            |
+| **Touch rotate**    | 3D only: single-finger drag rotates instead of panning (primary color when on) |
 
 The right panel holds four sections: **Info**, **Controls**, **Vectors**, **Samples**; Info and
 Controls are expanded by default, and clicking a title bar expands / collapses any section.
@@ -67,6 +68,20 @@ Every control is explained in [Panels explained](Panels/PanelsExplained.md).
 - **Mouse wheel**: zoom in / out (2D dolly, 3D orbit radius; the range is clamped).
 - **Left-drag**: pan the view (2D and 3D; disabled while Follow tip is on).
 - **Right-drag**: orbit the view (3D only; the canvas context menu is suppressed).
+- **Touch** (finger / stylus — no left/right buttons, so the finger count decides):
+
+  | Gesture                | 2D   | 3D                             |
+  | ---------------------- | ---- | ------------------------------ |
+  | One-finger drag        | pan  | pan (orbit with Touch rotate)  |
+  | Two-finger drag        | pan  | orbit                          |
+  | Two-finger pinch/spread| zoom | zoom                           |
+
+- **Touch rotate** (the rotate icon that appears in the floating toolbar in 3D only):
+  when on, a single-finger drag ROTATES instead of panning, so orbiting is reachable
+  without a right mouse button; click again to return to one-finger panning. A
+  two-finger drag always orbits in 3D, so you can rotate either way. The toggle is
+  not persisted — it resets when the page reloads.
+- Three or more fingers freeze the gesture until the extras lift; the view never jumps.
 - **Reset view**: back to the default framing; with Follow tip on, the camera tracks the tip.
 
 ### Use presets
@@ -145,6 +160,12 @@ doesn't advance); it resumes when you come back. If it stays stuck, click **Play
 200–8000 under Controls → Track limit); older points are dropped to save memory.
 
 **Right-drag does nothing in 3D?** Orbit only works with **3D view** on — enable it first.
+On touch there is no right button: a two-finger drag orbits, or turn on **Touch rotate**
+in the floating toolbar to orbit with a single finger.
+
+**Gestures feel stuck / the view stops responding?** Holding three or more fingers pauses
+the gesture — lift the extras; switching to another ability page and back also clears any
+half-finished gesture.
 
 **Follow tip is on but panning stopped working?** Follow tip locks the camera to the tip and
 disables panning; turn it off or click **Reset view**.

@@ -14,6 +14,8 @@ import {
 } from 'vue'
 import type { Ref } from 'vue'
 import { FtEngine } from './engine'
+import { FtGestures } from './gestures'
+import type { FtGestureIntent } from './gestures'
 import { FtScene, paletteFromTheme } from './scene'
 import type { FtUiState, FtVector } from './types'
 import { useTheme } from 'vuetify'
@@ -78,11 +80,17 @@ let fpsCount = 0
 let fpsStart = 0
 let statsLast = 0
 let watchdog: number | null = null
-let dragButton = -1
-let lastX = 0
-let lastY = 0
 let currentChain: ReturnType<FtEngine['computeChain']> | null = null
 let ro: ResizeObserver | null = null
+
+/**
+ * Touch-only toggle: when on, a single-finger drag ROTATES the view (3D)
+ * instead of panning, so orbiting is reachable without a right mouse button.
+ * In-memory only (not persisted) — the toolbar shows it in 3D.
+ */
+const touchRotate = ref(false)
+/** Per-pointer gesture state machine (pure logic lives in ./gestures). */
+let gestures: FtGestures | null = null
 
 // ---------------------------------------------------------------------------
 // Preset loading (CLI-first: goes through the main-process command registry)
@@ -249,38 +257,82 @@ function toggleMode(): void {
 
 // ---------------------------------------------------------------------------
 // Pointer / wheel interactions on the main view
-//  - left drag  → pan along the camera's view plane (world-space screen plane)
-//  - right drag → rotate the view direction (orbit) — 3D only
+//  - left drag        → pan along the camera's view plane (screen plane)
+//  - right drag       → rotate the view direction (orbit) — 3D only
+//  - one finger       → pan; orbit in 3D when the touch-rotate toggle is on
+//  - two fingers      → centroid drag (orbit in 3D / pan in 2D) + pinch zoom
+// All per-pointer bookkeeping (baselines, capture cleanup, 1→2→1 transitions)
+// lives in ./gestures; it is pure and unit-tested.
 // ---------------------------------------------------------------------------
 function onWheel(e: WheelEvent): void {
   const factor = Math.pow(1.1, e.deltaY / 100)
   scene?.zoomBy(factor)
 }
 
-function onPointerDown(e: PointerEvent): void {
-  if (e.button !== 0 && e.button !== 2) return
-  dragButton = e.button
-  lastX = e.clientX
-  lastY = e.clientY
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+/** Lazily (re)create the gesture machine and point it at the live scene. */
+function ensureGestures(): void {
+  if (gestures) return
+  gestures = new FtGestures({
+    emit: (intent: FtGestureIntent) => {
+      if (!scene) return
+      if (intent.kind === 'pan') scene.panBy(intent.dx, intent.dy)
+      else if (intent.kind === 'orbit') scene.orbitBy(intent.dx, intent.dy)
+      else scene.zoomBy(intent.factor)
+    },
+    mode: () => state.mode,
+    touchRotate: () => touchRotate.value
+  })
 }
 
-function onPointerMove(e: PointerEvent): void {
-  if (dragButton < 0) return
-  const dx = e.clientX - lastX
-  const dy = e.clientY - lastY
-  lastX = e.clientX
-  lastY = e.clientY
-  if (!scene) return
-  if (dragButton === 2) {
-    scene.orbitBy(dx, dy)
-  } else {
-    scene.panBy(dx, dy)
+function onPointerDown(e: PointerEvent): void {
+  ensureGestures()
+  gestures?.down({
+    pointerId: e.pointerId,
+    x: e.clientX,
+    y: e.clientY,
+    button: e.button,
+    pointerType: e.pointerType
+  })
+  // Capture this pointer on the host so a drag that wanders off the canvas
+  // keeps tracking (each pointer gets its own capture — one global capture
+  // cannot represent two fingers).
+  try {
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  } catch {
+    // Pointer already gone (fast flick): nothing to capture.
   }
 }
 
-function onPointerUp(): void {
-  dragButton = -1
+function onPointerMove(e: PointerEvent): void {
+  gestures?.move({
+    pointerId: e.pointerId,
+    x: e.clientX,
+    y: e.clientY,
+    button: e.button,
+    buttons: e.buttons,
+    pointerType: e.pointerType
+  })
+}
+
+function onPointerUp(e: PointerEvent): void {
+  releaseCapture(e)
+  gestures?.up(e.pointerId)
+}
+
+function onPointerCancel(e: PointerEvent): void {
+  releaseCapture(e)
+  gestures?.up(e.pointerId)
+}
+
+/** Capture was taken away (host re-rendered / another element grabbed it):
+ *  drop that pointer's gesture instead of leaving it stuck. */
+function onLostCapture(e: PointerEvent): void {
+  gestures?.lostCapture(e.pointerId)
+}
+
+function releaseCapture(e: PointerEvent): void {
+  const el = e.currentTarget as HTMLElement | null
+  if (el?.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId)
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +360,8 @@ onMounted(async () => {
 
   ro = new ResizeObserver(() => scene?.resize())
   ro.observe(host)
+
+  ensureGestures()
 
   // Start the loop here as well (not only in onActivated) so a mount that the
   // keep-alive/transition layer fails to "activate" still steps the sim —
@@ -337,12 +391,17 @@ onActivated(() => {
 
 onDeactivated(() => {
   stopLoop()
+  // The page is leaving the screen: drop any half-finished gesture so a
+  // cancelled pointer cannot keep panning when we come back.
+  gestures?.reset()
 })
 
 onBeforeUnmount(() => {
   stopLoop()
   document.removeEventListener('visibilitychange', onVisibility)
   ro?.disconnect()
+  gestures?.reset()
+  gestures = null
   scene?.dispose()
   scene = null
   engine = null
@@ -368,6 +427,7 @@ async function initScene(): Promise<void> {
   scene.setFollow(state.follow)
   ro = new ResizeObserver(() => scene?.resize())
   ro.observe(host)
+  ensureGestures()
   await loadPreset(state.currentPreset || 'circle')
 }
 
@@ -474,7 +534,8 @@ defineExpose({ toMarkdown })
       @pointerdown.prevent="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
+      @pointercancel="onPointerCancel"
+      @lostpointercapture="onLostCapture"
       @contextmenu.prevent
     />
 
@@ -512,6 +573,22 @@ defineExpose({ toMarkdown })
         @click="toggleMode"
       >
         <v-icon>{{ state.mode === '3d' ? 'mdi-cube' : 'mdi-square-rounded' }}</v-icon>
+      </v-btn>
+      <!-- touch-only escape hatch: orbit without a right mouse button (3D) -->
+      <v-btn
+        v-if="state.mode === '3d'"
+        icon
+        variant="tonal"
+        :color="touchRotate ? 'primary' : ''"
+        :aria-label="t('ft.ctrl.touchRotate', '触屏旋转')"
+        :title="
+          touchRotate
+            ? t('ft.ctrl.touchRotateOn', '触屏旋转：开（单指拖动旋转视角）')
+            : t('ft.ctrl.touchRotateOff', '触屏旋转：关（单指拖动平移，双指拖动旋转）')
+        "
+        @click="touchRotate = !touchRotate"
+      >
+        <v-icon>mdi-rotate-3d-variant</v-icon>
       </v-btn>
     </div>
 

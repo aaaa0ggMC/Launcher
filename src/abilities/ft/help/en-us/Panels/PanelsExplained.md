@@ -26,6 +26,7 @@ basic flow.
 | Crosshairs        | Reset view   | Default framing: target back to origin, zoom back to default, 3D azimuth back to 45° / elevation ~31° |
 | Target            | Follow tip   | Lock the camera onto the pen; panning is disabled while on (button turns primary color)               |
 | Square / cube     | 3D view      | Toggle 2D / 3D; in 3D you can right-drag to orbit                                                     |
+| Rotate 3D         | Touch rotate | 3D only: single-finger drag rotates instead of panning — orbit without a right mouse button          |
 
 ## Info section
 

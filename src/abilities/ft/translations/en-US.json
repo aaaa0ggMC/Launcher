@@ -64,5 +64,8 @@
   "ft.mdPreset": "Preset: {name}",
   "ft.mdVectors": "Vectors",
   "ft.mdStatic": "static",
-  "ft.mdPerRound": "round"
+  "ft.mdPerRound": "round",
+  "ft.ctrl.touchRotateOn": "Touch rotation on: drag one finger to rotate",
+  "ft.ctrl.touchRotateOff": "Touch rotation off: drag one finger to pan, two fingers to rotate",
+  "ft.ctrl.touchRotate": "Touch rotation"
 }
