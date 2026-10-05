@@ -702,68 +702,78 @@ const hasTrack = computed(() => track.value !== '')
       </div>
 
       <div class="d-flex align-center ga-2">
-        <v-btn
-          icon
-          variant="flat"
-          class="ab-loop-fab"
-          :class="{ 'is-on': loopA != null }"
-          :disabled="mode !== 'web'"
-          :title="t('aidj.player.ab_hint_a', '在当前进度设置循环起点 A，再次点击清除循环')"
-          @click="toggleAbloop('a')"
-        >
-          <span class="ab-letter">A</span>
-        </v-btn>
-        <v-btn
-          icon
-          variant="flat"
-          class="ab-loop-fab"
-          :class="{ 'is-on': loopB != null }"
-          :disabled="mode !== 'web'"
-          :title="t('aidj.player.ab_hint_b', '在当前进度设置循环终点 B，再次点击清除循环')"
-          @click="toggleAbloop('b')"
-        >
-          <span class="ab-letter">B</span>
-        </v-btn>
-
-        <v-menu v-model="volumeMenu" :close-on-content-click="false" offset="8">
-          <template #activator="{ props: mp }">
-            <v-btn
-              v-bind="mp"
-              icon
-              variant="flat"
-              class="volume-fab"
-              :title="t('aidj.volume.desc', '音量')"
-            >
-              <v-icon
-                :icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
-                size="20"
-              />
-            </v-btn>
-          </template>
-          <v-card width="240" rounded="lg">
-            <v-card-text class="pa-4">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <span class="text-caption text-medium-emphasis">
-                  {{ t('aidj.player.volume', '音量') }}
-                </span>
-                <span class="text-body-2 tabular-nums font-weight-medium">{{ tmpVolume }}%</span>
-              </div>
-              <v-slider
-                :model-value="tmpVolume"
-                :min="0"
-                :max="100"
-                :step="1"
-                color="primary"
-                thumb-label
-                @update:model-value="onVolumeChanging($event as number)"
-                @end="commitVolume(tmpVolume)"
-              />
-              <div class="text-caption text-medium-emphasis">
-                {{ t('aidj.player.volume_hint', '松手后重新校准响度基准') }}
-              </div>
-            </v-card-text>
-          </v-card>
-        </v-menu>
+        <div class="tool-item">
+          <v-btn
+            icon
+            variant="flat"
+            class="ab-loop-fab"
+            :class="{ 'is-on': loopA != null }"
+            :disabled="mode !== 'web'"
+            :title="t('aidj.player.ab_hint_a', '在当前进度设置循环起点 A，再次点击清除循环')"
+            @click="toggleAbloop('a')"
+          >
+            <span class="ab-letter">A</span>
+          </v-btn>
+          <span class="tool-cap">{{ t('aidj.player.ab_cap_a', '起点') }}</span>
+        </div>
+        <div class="tool-item">
+          <v-btn
+            icon
+            variant="flat"
+            class="ab-loop-fab"
+            :class="{ 'is-on': loopB != null }"
+            :disabled="mode !== 'web'"
+            :title="t('aidj.player.ab_hint_b', '在当前进度设置循环终点 B，再次点击清除循环')"
+            @click="toggleAbloop('b')"
+          >
+            <span class="ab-letter">B</span>
+          </v-btn>
+          <span class="tool-cap">{{ t('aidj.player.ab_cap_b', '终点') }}</span>
+        </div>
+        <div class="tool-item">
+          <v-menu v-model="volumeMenu" :close-on-content-click="false" offset="8">
+            <template #activator="{ props: mp }">
+              <v-btn
+                v-bind="mp"
+                icon
+                variant="flat"
+                class="volume-fab"
+                :title="t('aidj.volume.desc', '音量')"
+              >
+                <v-icon
+                  :icon="volume != null && volume < 0.01 ? 'mdi-volume-off' : 'mdi-volume-high'"
+                  size="20"
+                />
+              </v-btn>
+            </template>
+            <v-card width="240" rounded="lg">
+              <v-card-text class="pa-4">
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <span class="text-caption text-medium-emphasis">
+                    {{ t('aidj.player.volume', '音量') }}
+                  </span>
+                  <span class="text-body-2 tabular-nums font-weight-medium">{{ tmpVolume }}%</span>
+                </div>
+                <v-slider
+                  :model-value="tmpVolume"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                  color="primary"
+                  thumb-label
+                  @update:model-value="onVolumeChanging($event as number)"
+                  @end="commitVolume(tmpVolume)"
+                />
+                <div class="text-caption text-medium-emphasis">
+                  {{ t('aidj.player.volume_hint', '松手后重新校准响度基准') }}
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-menu>
+          <span class="tool-cap tabular-nums">{{
+            volume != null ? `${Math.round(volume * 100)}%` : t('aidj.player.volume', '音量')
+          }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -877,6 +887,13 @@ const hasTrack = computed(() => track.value !== '')
    窄屏（≤720px：弹出式侧栏下的页面容器宽度 ≈ 手机 360–430px）。
    桌面宽度下这些规则不生效，外观与行为与改动前完全一致。
    --------------------------------------------------------------------------- */
+/* 宽屏：分组恢复原样，小字只在窄屏出现 */
+.tool-item {
+  display: contents;
+}
+.tool-cap {
+  display: none;
+}
 @media (max-width: 720px) {
   .player-body {
     padding-inline: 16px;
@@ -893,15 +910,77 @@ const hasTrack = computed(() => track.value !== '')
     height: auto;
     aspect-ratio: 1 / 1;
   }
-  /* 底栏一行塞不下「两枚 chip + A / B / 音量」：换行而不是把按钮挤出屏幕 */
+  /* 底栏：五个控件一行均分居中，统一成「44px 圆形按钮 + 下方小字」。
+     两个分组在窄屏下 display:contents，让五个控件直接参与同一行的均分。
+     Vuetify 的 d-flex / justify-* 带 !important，覆盖也必须 !important。 */
   .volume-footer {
-    flex-wrap: wrap;
-    row-gap: 8px;
+    justify-content: space-evenly !important;
+    align-items: flex-start !important;
+    flex-wrap: nowrap;
+    padding: 8px 4px 12px !important;
+  }
+  .volume-footer > div {
+    display: contents !important;
+  }
+  .tool-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 56px;
+  }
+  .tool-cap {
+    display: block;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    color: rgb(var(--v-theme-on-surface-variant));
+    white-space: nowrap;
   }
   .ab-loop-fab,
   .volume-fab {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
+  }
+  /* chip 拆成「图标圆 + 文字」的竖排，与 A / B / 音量 同一套样子；选中态只体现在圆上 */
+  .volbal-chip {
+    height: auto !important;
+    min-width: 56px;
+    padding: 0 !important;
+    background: none !important;
+    border: none !important;
+    overflow: visible;
+  }
+  .volbal-chip :deep(.v-chip__overlay),
+  .volbal-chip :deep(.v-chip__underlay) {
+    display: none;
+  }
+  .volbal-chip :deep(.v-chip__content) {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .volbal-chip :deep(.v-icon) {
+    /* v-icon 的 size 写在行内样式里，覆盖要 !important */
+    margin: 0 !important;
+    width: 44px !important;
+    height: 44px !important;
+    font-size: 20px !important;
+    border-radius: 50%;
+    color: rgb(var(--v-theme-on-surface-variant));
+    background: rgba(var(--v-theme-surface-bright), 0.1);
+    border: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  }
+  .volbal-chip.is-on :deep(.v-icon) {
+    color: rgb(var(--v-theme-primary));
+    background: rgba(var(--v-theme-primary), 0.1);
+    border-color: rgba(var(--v-theme-primary), 0.45);
+  }
+  .volbal-value {
+    font-size: 0.72rem;
+    line-height: 1.2;
+    color: rgb(var(--v-theme-on-surface-variant));
+  }
+  .volbal-chip.is-on .volbal-value {
+    color: rgb(var(--v-theme-primary));
   }
 }
 </style>

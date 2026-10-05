@@ -952,7 +952,11 @@ defineExpose({ toMarkdown })
           <div v-if="state.artist || state.album" class="lyrics-track-sub">
             {{ [state.artist, state.album].filter(Boolean).join(' · ') }}
           </div>
-          <div v-if="state.player" class="lyrics-player-sub">
+          <div
+            v-if="state.player"
+            class="lyrics-player-sub"
+            :class="{ 'is-builtin': backendMode === 'web' }"
+          >
             <v-icon size="14">mdi-music-box-multiple-outline</v-icon>
             <span>{{ state.player }}</span>
           </div>
@@ -1565,8 +1569,15 @@ defineExpose({ toMarkdown })
     flex: 1 1 100%;
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     flex-wrap: wrap;
+  }
+  .lyrics-controls > .d-flex {
+    gap: 16px !important;
+  }
+  /* 手机上只有内置播放器（web），「web」这行来源说明没有信息量 */
+  .lyrics-player-sub.is-builtin {
+    display: none;
   }
   .lyrics-player-select {
     flex: 1 1 140px;

@@ -192,6 +192,8 @@
   "aidj.player.eq_save": "Save",
   "aidj.player.spectrum": "Spectrum",
   "aidj.player.web_remote": "LAN remote",
+  "aidj.player.ab_cap_a": "Loop A",
+  "aidj.player.ab_cap_b": "Loop B",
   "aidj.player.crossfade": "Crossfade",
   "aidj.player.crossfade_hint": "Toggle fade between tracks",
   "aidj.player.ab_hint_a": "Set loop start A at the current position; click again to clear the loop",

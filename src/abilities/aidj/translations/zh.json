@@ -192,6 +192,8 @@
   "aidj.player.eq_save": "保存",
   "aidj.player.spectrum": "频谱",
   "aidj.player.web_remote": "局域网遥控",
+  "aidj.player.ab_cap_a": "起点",
+  "aidj.player.ab_cap_b": "终点",
   "aidj.player.crossfade": "淡入淡出",
   "aidj.player.crossfade_hint": "点击切换曲间淡入淡出",
   "aidj.player.ab_hint_a": "在当前进度设置循环起点 A，再次点击清除循环",
