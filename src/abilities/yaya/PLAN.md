@@ -3,7 +3,7 @@
 > **项目代号**：`yaya` (Yet Another Yes Agent)  
 > **所属架构**：Linux System Cockpit 下游智能体应用 / 独立公开子项目  
 > **设计基线**：Electron + Vue 3 + Vuetify 3 (Material 3) + TypeScript + SQLite  
-> **当前状态**：Phase 1–3 闭环可用（会话树 / 多服务商 / 工具循环 + 审批），Phase 4 附件已接通，输出 Slot 与 MCP 待做
+> **当前状态**：Phase 1–5 闭环可用（会话树 / 多服务商 / 工具循环 + 审批 / 附件 / 插件：MCP、Skill、Mermaid、SVG、搜索、Mention），Era 2 插件架构已落地；剩余项见第三节的 `[ ]` 与第六节
 
 ---
 
@@ -207,7 +207,7 @@
 | | 工具逐个启用 / 禁用 | `[x]` | `disabledTools` + `yaya.tools-list`，设置页「工具」 |
 | | ~~`search_document`~~ | 移除 | 原为返回固定字符串的假工具；等长文档 Slot 真正实现再加 |
 | **安全与授权** | 工具调用内联审批（参数预览 + 允许 / 拒绝） | `[x]` | `ToolCallRow.vue`；重启后挂起的审批收敛为中断 |
-| **外部生态** | MCP 客户端 | `[ ]` | `mcpServers` 配置字段已有，客户端未实现 |
+| **外部生态** | MCP 客户端 | `[x]` | Era 2 B1：`services/plugins/mcp/*`（Streamable HTTP / SSE、请求头加密、状态、失败不重放），每个服务器 = 一个插件 |
 
 ---
 
@@ -221,8 +221,8 @@
 | | `yaya-asset://` 协议 | `[ ]` | 目前只做路径解析（已防 `../` 越界） |
 | **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[ ]` | |
 | **输出渲染 Slot** | Markdown 代码块高亮 + 复制 | `[x]` | `components/markdown.ts`（highlight.js 按需加载，配色跟主题） |
-| | Mermaid 渲染 | `[ ]` | 需要新依赖，待定 |
-| | SVG / HTML 小部件沙箱 | `[ ]` | |
+| | Mermaid 渲染 | `[x]` | `plugins/mermaid/`（6.2，渲染端按需加载 mermaid，`securityLevel: 'strict'`，配色跟主题） |
+| | SVG / HTML 小部件沙箱 | `[-]` | SVG 已做：`plugins/svg/`（净化后 data URL `<img>`）；HTML 小部件待做 |
 
 ---
 
@@ -256,9 +256,11 @@
 
 ## 四、 后续开发路线与近期优先级 (Next Action Items)
 
+> 2026-10-05 核对：MCP 客户端、Mermaid / SVG、GenericSearch、Mention、插件配置与子分组都已完成（见第五、六节），原来的「中期 / 长期」只剩下面几项。
+
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
-2. **中期**：MCP 客户端（stdio / SSE）→ 动态挂载外部工具（设置的工具页已按来源分组 + 搜索，可直接容纳）；长文档 Slot（摘要 + 检索工具）；更多工作流。
-3. **长期**：Claude / DeepSeek 等导入器；输出小部件沙箱。
+2. **中期**：Anthropic / Gemini 原生 Provider；长文档 Slot（摘要 + 检索工具）；更多工作流；`yaya-asset://` 协议。
+3. **长期**：Claude / DeepSeek / Rikkahub 导入器；HTML 小部件沙箱；Android Controller 插件。
 
 
 ---
@@ -373,7 +375,7 @@
 **没做 / 待办**
 - mermaid 主题、最大尺寸等插件自己的配置项（6.4 的 configSchema 已具备，显示类插件还没有用上）；
 - `renderSegments` 的未闭合 / 嵌套代码块用例补强；插件 ui 的单测脚手架（SVG 净化已有单测）；
-- 「告诉 AI」的稳定系统提示词开关（当前只有 @ 点名附注这一条路径）；
+- ~~「告诉 AI」的稳定系统提示词开关~~ 已改为插件启用即带一段固定英文 instructions（`plugins/mermaid/index.ts` / `plugins/svg/index.ts`，见 AGENTS.md「显示类插件必须写」）；
 - 导出 PNG 白底 2x、超大 SVG 的尺寸夹取策略没有实机调过。
 
 原计划与设计：
@@ -400,7 +402,7 @@
 
 ### 6.3 Mention：输入 `@` 点名插件 / Skill / 工具（已完成第一版，2026-10-05）
 
-**实际做法**：`services/plugins/mention.ts`（候选 / 解析 / 会话列表合并）；附注存在用户消息 `meta.mentionNote`，`sanitizeHistory` 发给模型时拼在该消息后（前缀不变）；`session.meta.mentions` 记本会话强制启用的插件 / `tool:<wire>`，`resolveTools(config, forced)` 把它们追加在工具表末尾；Skill 点名随消息加载 SKILL.md 正文；输入框 `@` / 工具栏 @ 按钮弹候选（键盘上下 / 回车 / Esc），点名以标签显示在输入框与用户气泡；右上角菜单可撤销本会话的点名；导出 Markdown 还原为 `@名字`。命令 `yaya.mention-candidates` / `yaya.session-mentions`，`yaya.workflow-start --mentions`。**没做**：MCP 提供方的「附注列出可用工具名」（目前缺省只启用插件 + 一句点名附注）；图片类 mention content（只取文本）。
+**实际做法**：`services/plugins/mention.ts`（候选 / 解析 / 会话列表合并）；附注存在用户消息 `meta.mentionNote`，`sanitizeHistory` 发给模型时拼在该消息后（前缀不变）；`session.meta.mentions` 记本会话强制启用的插件 / `tool:<wire>`，`resolveTools(config, forced)` 把它们追加在工具表末尾；Skill 点名随消息加载 SKILL.md 正文；输入框 `@` / 工具栏 @ 按钮弹候选（键盘上下 / 回车 / Esc），点名以标签显示在输入框与用户气泡；右上角菜单可撤销本会话的点名；导出 Markdown 还原为 `@名字`。命令 `yaya.mention-candidates` / `yaya.session-mentions`，`yaya.workflow-start --mentions`。附注对所有来源（含 MCP）统一列出本会话起可用的工具名（`resolveMentions`）。**没做**：图片类 mention content（只取文本）。
 
 原计划：
 
@@ -433,7 +435,9 @@
 - 设置页：`PluginDetail.vue` 的「分组」区（名称 / 说明 / 状态点 + 不可用原因 / 开关）与「配置」区；`PluginConfigForm.vue` 按 schema 生成表单（secret 走 `v-agent-forbidden` + 密码框 + 清除，保存按钮 + `SaveStatusText`，容器 <640px 转单列标签在上）；`PluginUi.settingsView` + `plugin-ui-registry.settingsViewFor` 让插件整块替换表单；`PluginToolsList.vue` 按 `tool.group` 分组小标题。
 - 测试：`services/plugins/plugin-config.test.ts`（默认值 / 夹取、secret 密文落盘与解密、publicYayaConfig 只给 secretsSet、空串沿用与 clear、分组过滤、ctx.config）。
 
-### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）
+### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）【已完成】
+
+**实际做法**：`plugins/search/`（引擎 Tavily / Brave / Bing / SearXNG / Google / Grok，每个引擎一个子分组放凭据；单引擎或联合模式），引擎实现与合并去重在框架共用模块 `src/main/process/web-search.ts`，AIDJ 的 `web_search` 也已改用它。
 
 - 引擎：Tavily / Bing / Brave / SearXNG / Grok（xAI，带引用的回答引擎）/ Google CSE …，各自密钥与参数在插件配置里（`secret` 加密）。
 - 模式：指定单个引擎，或多引擎联合（并发，按 URL 去重合并，多引擎同时命中的排前，标注来源引擎；单个引擎失败不影响整体）。回答引擎归一成「摘要 + 引用列表」。
