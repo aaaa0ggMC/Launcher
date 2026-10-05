@@ -10,6 +10,8 @@ export interface MessageMenuRequest {
   text: string
   /** 打开菜单时选中的文字（没有则为空串） */
   selection: string
+  /** assistant：含思考与工具调用的完整过程（Markdown） */
+  fullText?: string
 }
 
 export interface MessageMenuItem {

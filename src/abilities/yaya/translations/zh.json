@@ -653,5 +653,17 @@
   "yaya.plugin.search.group.google_desc": "Google 的凭据",
   "yaya.plugin.search.engine.grok": "Grok (xAI)",
   "yaya.plugin.search.group.grok": "Grok (xAI)",
-  "yaya.plugin.search.group.grok_desc": "Grok (xAI) 的凭据"
+  "yaya.plugin.search.group.grok_desc": "Grok (xAI) 的凭据",
+  "yaya.menu.copy_full": "复制完整过程（含思考与工具调用）",
+  "yaya.menu.select_text": "选择文字",
+  "yaya.copy_full.thinking": "思考",
+  "yaya.copy_full.tool": "工具调用",
+  "yaya.copy_full.args": "参数",
+  "yaya.copy_full.result": "结果",
+  "yaya.copy_full.error": "出错",
+  "yaya.select_text.title": "选择文字",
+  "yaya.select_text.answer": "回答",
+  "yaya.select_text.full": "完整过程",
+  "yaya.select_text.hint": "长按或拖动选择任意一段，用系统菜单复制",
+  "yaya.select_text.copy_all": "全部复制"
 }

@@ -253,3 +253,44 @@ export function turnText(turn: AssistantTurn): string {
     .filter(Boolean)
     .join('\n\n')
 }
+
+/**
+ * 本轮回答的完整过程（Markdown）：思考（引用块）、AI 中途说的话、每次工具调用（参数 + 结果，
+ * 过长截断）与最终回答，按发生顺序。「复制完整过程」用；`labels` 由调用方给翻译后的小标题。
+ */
+export function turnFullMarkdown(
+  turn: AssistantTurn,
+  labels: { thinking: string; tool: string; args: string; result: string; error: string }
+): string {
+  const MAX = 4000
+  const clip = (s: string): string => (s.length > MAX ? `${s.slice(0, MAX)}\n…` : s)
+  const fence = (s: string, lang = ''): string => {
+    const ticks = s.includes('```') ? '````' : '```'
+    return `${ticks}${lang}\n${s}\n${ticks}`
+  }
+  const show = (v: unknown): string =>
+    typeof v === 'string' ? v : (JSON.stringify(v, null, 2) ?? String(v))
+  const out: string[] = []
+  for (const step of turn.steps) {
+    const reasoning = step.reasoningContent?.trim()
+    if (reasoning)
+      out.push(
+        `> **${labels.thinking}**\n>\n` +
+          clip(reasoning)
+            .split('\n')
+            .map((l) => `> ${l}`)
+            .join('\n')
+      )
+    const text = step.content?.trim()
+    if (text) out.push(text)
+    for (const call of step.toolCalls ?? []) {
+      const parts = [`**${labels.tool}：\`${call.name}\`**`]
+      parts.push(`${labels.args}：\n${fence(clip(show(call.args)), 'json')}`)
+      if (call.error) parts.push(`${labels.error}：${clip(call.error)}`)
+      else if (call.result !== undefined)
+        parts.push(`${labels.result}：\n${fence(clip(show(call.result)))}`)
+      out.push(parts.join('\n\n'))
+    }
+  }
+  return out.join('\n\n')
+}

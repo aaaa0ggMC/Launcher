@@ -4,7 +4,7 @@ import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import type { ApprovalScope, ToolCallItem } from '../types'
 import type { AssistantTurn } from './turns'
-import { answerStep, hasProcess, turnSegments, turnText } from './turns'
+import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
 import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
 import type { MessageMenuRequest } from './message-menu'
@@ -123,7 +123,14 @@ function openMenu(x: number, y: number): void {
     kind: 'assistant',
     messageId: props.turn.firstId,
     text: turnText(props.turn),
-    selection: window.getSelection()?.toString() ?? ''
+    selection: window.getSelection()?.toString() ?? '',
+    fullText: turnFullMarkdown(props.turn, {
+      thinking: t('yaya.copy_full.thinking', '思考'),
+      tool: t('yaya.copy_full.tool', '工具调用'),
+      args: t('yaya.copy_full.args', '参数'),
+      result: t('yaya.copy_full.result', '结果'),
+      error: t('yaya.copy_full.error', '出错')
+    })
   })
 }
 function onContextMenu(ev: MouseEvent): void {

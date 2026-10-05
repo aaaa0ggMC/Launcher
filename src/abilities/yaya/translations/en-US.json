@@ -653,5 +653,17 @@
   "yaya.plugin.search.group.google_desc": "Credentials for Google",
   "yaya.plugin.search.engine.grok": "Grok (xAI)",
   "yaya.plugin.search.group.grok": "Grok (xAI)",
-  "yaya.plugin.search.group.grok_desc": "Credentials for Grok (xAI)"
+  "yaya.plugin.search.group.grok_desc": "Credentials for Grok (xAI)",
+  "yaya.menu.copy_full": "Copy full process (thinking & tool calls)",
+  "yaya.menu.select_text": "Select text",
+  "yaya.copy_full.thinking": "Thinking",
+  "yaya.copy_full.tool": "Tool call",
+  "yaya.copy_full.args": "Arguments",
+  "yaya.copy_full.result": "Result",
+  "yaya.copy_full.error": "Error",
+  "yaya.select_text.title": "Select text",
+  "yaya.select_text.answer": "Answer",
+  "yaya.select_text.full": "Full process",
+  "yaya.select_text.hint": "Long-press or drag to select any part, then copy from the system menu",
+  "yaya.select_text.copy_all": "Copy all"
 }

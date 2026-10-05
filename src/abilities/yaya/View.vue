@@ -30,6 +30,7 @@ import ModelSelectDialog from './components/ModelSelectDialog.vue'
 import MessageMenu from './components/MessageMenu.vue'
 import UsageDialog from './components/UsageDialog.vue'
 import ConversationTree from './components/tree/ConversationTree.vue'
+import SelectTextDialog from './components/SelectTextDialog.vue'
 import type { TreeTurn } from './types'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
@@ -51,6 +52,8 @@ const draft = ref('')
 const showModelSelect = ref(false)
 const showUsage = ref(false)
 const showTree = ref(false)
+/** 「选择文字」弹窗（手机上长按被菜单占用，在这里自由选择一段复制） */
+const selectText = ref<{ text: string; fullText?: string } | null>(null)
 const loadingMessages = ref(false)
 const notice = ref<{ text: string; error?: boolean } | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
@@ -694,6 +697,17 @@ const menuItems = computed<MessageMenuItem[]>(() => {
     label:
       req.kind === 'user' ? t('yaya.copy', '复制') : t('yaya.menu.copy_markdown', '复制 Markdown')
   })
+  if (req.kind === 'assistant' && req.fullText && req.fullText !== req.text)
+    items.push({
+      key: 'copy-full',
+      icon: 'mdi-content-copy',
+      label: t('yaya.menu.copy_full', '复制完整过程（含思考与工具调用）')
+    })
+  items.push({
+    key: 'select-text',
+    icon: 'mdi-format-text',
+    label: t('yaya.menu.select_text', '选择文字')
+  })
   if (req.kind === 'user') {
     items.push({
       key: 'edit',
@@ -733,6 +747,12 @@ async function onMenuSelect(key: string): Promise<void> {
       break
     case 'copy':
       await window.cockpit.copyText(req.text)
+      break
+    case 'copy-full':
+      await window.cockpit.copyText(req.fullText ?? req.text)
+      break
+    case 'select-text':
+      selectText.value = { text: req.text, fullText: req.fullText }
       break
     case 'edit':
       editingId.value = req.messageId
@@ -1273,6 +1293,12 @@ watch(isRunning, (now, before) => {
       </v-card>
     </v-dialog>
 
+    <SelectTextDialog
+      :model-value="selectText !== null"
+      :text="selectText?.text ?? ''"
+      :full-text="selectText?.fullText"
+      @update:model-value="(v: boolean) => !v && (selectText = null)"
+    />
     <ConversationTree
       v-model="showTree"
       :session-id="activeSessionId || ''"

@@ -9,9 +9,11 @@ import {
   hasProcess,
   processSteps,
   summarizeArgs,
+  turnFullMarkdown,
   turnSegments,
   turnText
 } from './turns'
+import type { AssistantTurn } from './turns'
 
 let clock = 0
 function node(partial: Partial<MessageNode> & Pick<MessageNode, 'id' | 'role'>): MessageNode {
@@ -245,4 +247,46 @@ it('buildTurnsReusing keeps unchanged turn objects and mergeNodes keeps unchange
   assert.equal(t2[1], t1[1])
   assert.equal(t2[2], t1[2])
   assert.notEqual(t2[3], t1[3])
+})
+
+it('turnFullMarkdown 按顺序包含思考、说的话、工具调用与回答', () => {
+  const steps = [
+    {
+      id: 'a',
+      sessionId: 's',
+      parentId: 'u',
+      role: 'assistant',
+      content: '先查一下',
+      reasoningContent: '想想\n再想想',
+      toolCalls: [{ id: 'c', name: 'read_file', args: { path: '/x' }, result: { ok: true } }],
+      createdAt: 0
+    },
+    { id: 'b', sessionId: 's', parentId: 'a', role: 'assistant', content: '答案', createdAt: 1 }
+  ] as MessageNode[]
+  const turn = buildTurns([
+    { id: 'u', sessionId: 's', parentId: null, role: 'user', content: 'q', createdAt: 0 },
+    ...steps
+  ])[1] as AssistantTurn
+  const md = turnFullMarkdown(turn, {
+    thinking: 'T',
+    tool: 'Tool',
+    args: 'Args',
+    result: 'Res',
+    error: 'Err'
+  })
+  const order = [
+    '> **T**',
+    '> 想想',
+    '先查一下',
+    'Tool：`read_file`',
+    '"path": "/x"',
+    'Res：',
+    '答案'
+  ]
+  let at = -1
+  for (const piece of order) {
+    const i = md.indexOf(piece)
+    assert.ok(i > at, `${piece} 顺序不对：\n${md}`)
+    at = i
+  }
 })
