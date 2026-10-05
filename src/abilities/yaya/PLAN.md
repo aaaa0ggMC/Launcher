@@ -260,7 +260,7 @@
 
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
 2. ~~**中期**：Anthropic / Gemini 原生 Provider；长文档 Slot；更多工作流；`yaya-asset://` 协议。~~（已完成）
-3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~、~~HTML 小部件沙箱~~（已完成）；Android Controller 插件。
+3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~、~~HTML 小部件沙箱~~（已完成）；Android Controller 插件（Termux 后端已做、待真机验证；自有 App 原生通道未做）。
 
 
 ---
@@ -445,6 +445,8 @@
 - 网络走主进程 `net.fetch`（系统代理）；AIDJ 现有的 Tavily `web_search`（`aidj/agent/web-search.ts`）抽成共用模块，两边复用。
 
 ### 6.6 Android Controller 插件（安卓附加能力）
+
+**进度（2026-10-05）**：Termux 后端已做成内置插件 `plugins/android/`（子分组 Termux:API / Shizuku（`rish`，默认关闭）；21 个工具，改变状态的 `guard(SCOPE_CONTROL)`，定位 / 相机 / 剪贴板 / 屏幕是 `yaya` 的 sensitive scope，Shell 走 `system.exec` + 每次确认；短信 / 电话 / 通讯录不提供）。不在安卓上分组显示「不可用」、默认不启用、不加 instructions。**未在真机上验证**（命令行参数按 termux-api 文档写，单测用桩脚本）。自有 App 的 nodejs-mobile 原生通道还没做（现在的 App 是连 Termux 宿主的 WebView 壳，Node 侧调不到 Java）。
 
 分层（**直接做成插件，不走 MCP**；全程进程内通信，无网络）：
 ```

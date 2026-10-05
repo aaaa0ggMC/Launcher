@@ -721,5 +721,19 @@
   "yaya.widget.frame_title": "HTML 小部件",
   "yaya.usage.jump": "在对话中定位",
   "yaya.jump_not_found": "找不到这条消息，可能已被删除",
-  "yaya.usage.chart_hint": "点柱子可定位到那次调用"
+  "yaya.usage.chart_hint": "点柱子可定位到那次调用",
+  "yaya.plugin.android.label": "安卓控制",
+  "yaya.plugin.android.desc": "宿主在手机 Termux 里时操作这台手机（Termux:API / Shizuku）",
+  "yaya.plugin.android.group_termux": "Termux:API",
+  "yaya.plugin.android.group_termux_desc": "电量、通知、震动、手电筒、音量、亮度、朗读、剪贴板、定位、拍照",
+  "yaya.plugin.android.group_shizuku": "Shizuku",
+  "yaya.plugin.android.group_shizuku_desc": "adb 级权限：截屏、点按 / 滑动 / 输入、启动应用、Shell（危险，默认关闭）",
+  "yaya.privacy.android_location": "手机定位",
+  "yaya.privacy.android_location_desc": "YAYA 读取手机当前的 GPS / 网络定位",
+  "yaya.privacy.android_camera": "手机相机",
+  "yaya.privacy.android_camera_desc": "YAYA 用手机相机拍照",
+  "yaya.privacy.android_clipboard": "手机剪贴板",
+  "yaya.privacy.android_clipboard_desc": "YAYA 读取手机剪贴板（可能含密码、验证码）",
+  "yaya.privacy.android_screen": "手机屏幕",
+  "yaya.privacy.android_screen_desc": "YAYA 截取手机屏幕"
 }

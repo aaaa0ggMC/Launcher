@@ -721,5 +721,19 @@
   "yaya.widget.frame_title": "HTML widget",
   "yaya.usage.jump": "Show in conversation",
   "yaya.jump_not_found": "Can't find this message — it may have been deleted",
-  "yaya.usage.chart_hint": "Click a bar to jump to that call"
+  "yaya.usage.chart_hint": "Click a bar to jump to that call",
+  "yaya.plugin.android.label": "Android control",
+  "yaya.plugin.android.desc": "Operate the phone when the host runs in Termux on it (Termux:API / Shizuku)",
+  "yaya.plugin.android.group_termux": "Termux:API",
+  "yaya.plugin.android.group_termux_desc": "Battery, notifications, vibration, flashlight, volume, brightness, speech, clipboard, location, camera",
+  "yaya.plugin.android.group_shizuku": "Shizuku",
+  "yaya.plugin.android.group_shizuku_desc": "adb-level access: screenshots, tap / swipe / type, launch apps, shell (dangerous, off by default)",
+  "yaya.privacy.android_location": "Phone location",
+  "yaya.privacy.android_location_desc": "YAYA reads the phone's current GPS / network location",
+  "yaya.privacy.android_camera": "Phone camera",
+  "yaya.privacy.android_camera_desc": "YAYA takes photos with the phone camera",
+  "yaya.privacy.android_clipboard": "Phone clipboard",
+  "yaya.privacy.android_clipboard_desc": "YAYA reads the phone clipboard (may contain passwords or codes)",
+  "yaya.privacy.android_screen": "Phone screen",
+  "yaya.privacy.android_screen_desc": "YAYA takes screenshots of the phone screen"
 }
