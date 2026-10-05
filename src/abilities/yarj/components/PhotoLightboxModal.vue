@@ -10,6 +10,7 @@ import { translate } from '@ui/i18n'
 import type { Photo, GuessedGps } from '../types'
 import { isVideoFile, photoThumbUrl } from '../types'
 import PhotoLightboxInfoPanel from './PhotoLightboxInfoPanel.vue'
+import { useYarjCompact } from '../composables/useYarjCompact'
 
 const props = defineProps<{
   open: boolean
@@ -29,8 +30,10 @@ const emit = defineEmits<{
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
+const compact = useYarjCompact()
 const currentIndex = ref(props.initialIndex ?? 0)
-const showInfo = ref(true)
+// 窄屏下信息面板是盖在照片上的底部面板，默认收起
+const showInfo = ref(!compact.value)
 
 // 变换状态：缩放、拖拽平移、旋转
 const scale = ref(1)
@@ -42,6 +45,15 @@ const isDragging = ref(false)
 const dragStartX = ref(0)
 const dragStartY = ref(0)
 let pointerDownPos = { x: 0, y: 0 }
+/** 触屏：双指缩放；未放大时单指左右滑动切换上一张 / 下一张。 */
+const activePointers = new Map<number, { x: number; y: number }>()
+let pinch: { dist: number; scale: number } | null = null
+let swipeStart: { x: number; y: number } | null = null
+
+function pointersDistance(): number {
+  const [a, b] = [...activePointers.values()]
+  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0
+}
 
 const currentPhoto = computed<Photo | null>(() => {
   if (!props.photos.length) return null
@@ -64,6 +76,7 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
+      if (compact.value) showInfo.value = false
       currentIndex.value = Math.max(0, Math.min(props.initialIndex, props.photos.length - 1))
       resetTransform()
       loadCurrentPhotoData()
@@ -167,25 +180,69 @@ function onPointerDown(e: PointerEvent): void {
   ) {
     return
   }
-  isDragging.value = true
-  pointerDownPos = { x: e.clientX, y: e.clientY }
-  dragStartX.value = e.clientX - translateX.value
-  dragStartY.value = e.clientY - translateY.value
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
   const currentTarget = e.currentTarget as HTMLElement
   try {
     currentTarget.setPointerCapture(e.pointerId)
   } catch {
     /* ignore */
   }
+  if (activePointers.size === 2) {
+    pinch = { dist: pointersDistance(), scale: scale.value }
+    isDragging.value = false
+    swipeStart = null
+    // 双指不算点击背景，别退出
+    pointerDownPos = { x: -1e4, y: -1e4 }
+    return
+  }
+  if (activePointers.size > 2) return
+  isDragging.value = true
+  pointerDownPos = { x: e.clientX, y: e.clientY }
+  dragStartX.value = e.clientX - translateX.value
+  dragStartY.value = e.clientY - translateY.value
+  swipeStart =
+    e.pointerType !== 'mouse' && scale.value <= 1.05 && props.photos.length > 1
+      ? { x: e.clientX, y: e.clientY }
+      : null
 }
 
 function onPointerMove(e: PointerEvent): void {
+  if (activePointers.has(e.pointerId)) {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  }
+  if (pinch) {
+    const d = pointersDistance()
+    if (pinch.dist > 0 && d > 0) {
+      scale.value = Math.max(0.5, Math.min(10, +((pinch.scale * d) / pinch.dist).toFixed(3)))
+    }
+    return
+  }
   if (!isDragging.value) return
+  if (swipeStart) {
+    // 未放大时只跟手横移，松手后决定是否翻页
+    translateX.value = e.clientX - swipeStart.x
+    return
+  }
   translateX.value = e.clientX - dragStartX.value
   translateY.value = e.clientY - dragStartY.value
 }
 
 function onPointerUp(e: PointerEvent): void {
+  activePointers.delete(e.pointerId)
+  if (pinch) {
+    if (activePointers.size < 2) pinch = null
+    if (scale.value < 1) scale.value = 1
+  } else if (swipeStart) {
+    const dx = e.clientX - swipeStart.x
+    const dy = e.clientY - swipeStart.y
+    swipeStart = null
+    translateX.value = 0
+    translateY.value = 0
+    if (e.type === 'pointerup' && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) nextPhoto()
+      else prevPhoto()
+    }
+  }
   isDragging.value = false
   const target = e.currentTarget as HTMLElement
   try {
@@ -269,9 +326,16 @@ onBeforeUnmount(() => {
   <Transition name="fade">
     <div v-if="open && currentPhoto" class="yarj-lightbox-overlay" @click.self="emit('close')">
       <!-- 顶部快捷控制条 -->
-      <div class="lightbox-topbar d-flex align-center justify-space-between px-5 py-3">
-        <div class="d-flex align-center ga-3 min-w-0 flex-grow-1 mr-4">
+      <div
+        class="lightbox-topbar d-flex align-center justify-space-between"
+        :class="compact ? 'px-3 py-2' : 'px-5 py-3'"
+      >
+        <div
+          class="d-flex align-center min-w-0 flex-grow-1"
+          :class="compact ? 'ga-2 mr-2' : 'ga-3 mr-4'"
+        >
           <v-btn
+            v-if="!compact"
             variant="tonal"
             prepend-icon="mdi-arrow-left"
             :title="t('yarj.lightbox.back', '返回地图 (Esc)')"
@@ -279,7 +343,7 @@ onBeforeUnmount(() => {
           >
             {{ t('yarj.lightbox.back', '返回地图') }}
           </v-btn>
-          <v-chip variant="tonal" color="primary" class="photo-top-chip">
+          <v-chip v-if="!compact" variant="tonal" color="primary" class="photo-top-chip">
             {{ currentIndex + 1 }} / {{ photos.length }}
           </v-chip>
           <span class="text-body-2 font-weight-bold text-truncate" :title="currentPhoto.path">
@@ -287,8 +351,10 @@ onBeforeUnmount(() => {
           </span>
         </div>
 
-        <div class="d-flex align-center ga-2">
+        <div class="d-flex align-center flex-shrink-0" :class="compact ? 'ga-1' : 'ga-2'">
+          <!-- 窄屏：放大缩小靠双指 / 双击，旋转只留顺时针，「在文件夹中打开」在手机上没有意义 -->
           <v-btn
+            v-if="!compact"
             icon
             size="small"
             variant="text"
@@ -298,6 +364,7 @@ onBeforeUnmount(() => {
             <v-icon size="20">mdi-magnify-plus-outline</v-icon>
           </v-btn>
           <v-btn
+            v-if="!compact"
             icon
             size="small"
             variant="text"
@@ -316,6 +383,7 @@ onBeforeUnmount(() => {
             <v-icon size="20">mdi-fit-to-screen-outline</v-icon>
           </v-btn>
           <v-btn
+            v-if="!compact"
             icon
             size="small"
             variant="text"
@@ -344,6 +412,7 @@ onBeforeUnmount(() => {
             <v-icon size="20">mdi-information-outline</v-icon>
           </v-btn>
           <v-btn
+            v-if="!compact"
             icon
             size="small"
             variant="text"
@@ -366,7 +435,10 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 中间主内容区：图像/视频舞台与右侧信息侧栏并排 -->
-      <div class="lightbox-content d-flex flex-grow-1 min-h-0 position-relative">
+      <div
+        class="lightbox-content d-flex flex-grow-1 min-h-0 position-relative"
+        :class="{ 'is-compact': compact }"
+      >
         <div
           class="lightbox-stage"
           :class="{ 'is-dragging': isDragging }"
@@ -375,6 +447,7 @@ onBeforeUnmount(() => {
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
           @dblclick="onDoubleClick"
         >
           <!-- 媒体加载中旋转指示器（在加载完成前转圈，加载后淡入显示） -->
@@ -456,7 +529,7 @@ onBeforeUnmount(() => {
           />
 
           <!-- 画面下方悬浮居中切换控制条（上一张 / 计数 / 下一张） -->
-          <div v-if="photos.length > 1" class="lightbox-bottom-nav">
+          <div v-if="photos.length > 1 && !(compact && showInfo)" class="lightbox-bottom-nav">
             <v-btn
               variant="tonal"
               icon="mdi-chevron-left"
@@ -489,6 +562,7 @@ onBeforeUnmount(() => {
         <Transition name="drawer-slide">
           <PhotoLightboxInfoPanel
             v-if="showInfo && currentPhoto"
+            :class="{ 'is-compact': compact }"
             :photo="currentPhoto"
             :guessed-gps-map="props.guessedGpsMap"
             @locate="(c) => emit('locate', c)"
@@ -637,6 +711,21 @@ onBeforeUnmount(() => {
   letter-spacing: 0.5px;
 }
 
+/* 窄屏：舞台留白收小，照片尽量占满 */
+.is-compact .lightbox-stage {
+  padding: 8px 8px 72px;
+}
+
+.is-compact .lightbox-img,
+.is-compact .lightbox-video-container {
+  max-width: 100%;
+  max-height: calc(100% - 16px);
+}
+
+.is-compact .lightbox-bottom-nav {
+  bottom: 16px;
+}
+
 /* 过渡动画 */
 .drawer-slide-enter-active,
 .drawer-slide-leave-active {
@@ -651,6 +740,12 @@ onBeforeUnmount(() => {
   transform: translateX(420px);
   margin-right: -420px;
   opacity: 0;
+}
+
+.drawer-slide-enter-from.is-compact,
+.drawer-slide-leave-to.is-compact {
+  transform: translateY(100%);
+  margin-right: 0;
 }
 
 .fade-enter-active,

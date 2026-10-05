@@ -94,9 +94,20 @@ export async function writeCachedTile(
     const langSub = lang ? lang : 'default'
     const dir = join(tileCacheBaseDir(), providerId, langSub, String(z), String(x))
     await mkdir(dir, { recursive: true })
+    const prevSize = usage
+      ? await stat(p).then(
+          (st) => st.size,
+          () => -1
+        )
+      : -1
     await writeFile(p, buf)
+    if (usage) {
+      const u = providerUsage(providerId)
+      u.bytes += buf.length - Math.max(0, prevSize)
+      if (prevSize < 0) u.count += 1
+    }
 
-    // 定期（每 60 秒或写入积累时）异步检查并执行 LRU 淘汰
+    // 定期（每 60 秒）检查配额；用量已在内存里记账，只有真超额才去遍历目录做 LRU 淘汰
     const now = Date.now()
     if (maxCacheMb && maxCacheMb > 0 && now - lastPruneTime > 60_000) {
       lastPruneTime = now
@@ -111,27 +122,99 @@ interface FileEntry {
   path: string
   size: number
   mtime: number
+  provider: string
 }
 
-async function collectFiles(dir: string, list: FileEntry[]): Promise<void> {
+type Usage = Map<string, { bytes: number; count: number }>
+
+/**
+ * 各图源的缓存用量（字节 / 文件数）。第一次需要时遍历一遍目录，之后随写入 / 淘汰 / 清空在内存里记账，
+ * 统计和配额检查都不用再扫盘——缓存动辄几十万个小文件，逐个 stat 一遍要好几秒。
+ */
+let usage: Usage | null = null
+let usageLoading: Promise<Usage> | null = null
+/** 清空缓存时 +1，让清空前就开始的那次遍历结果作废。 */
+let usageGen = 0
+
+function providerUsage(providerId: string): { bytes: number; count: number } {
+  let u = usage!.get(providerId)
+  if (!u) {
+    u = { bytes: 0, count: 0 }
+    usage!.set(providerId, u)
+  }
+  return u
+}
+
+function usageFromFiles(files: FileEntry[]): Usage {
+  const u: Usage = new Map()
+  for (const f of files) {
+    const e = u.get(f.provider) ?? { bytes: 0, count: 0 }
+    e.bytes += f.size
+    e.count += 1
+    u.set(f.provider, e)
+  }
+  return u
+}
+
+function totalBytes(u: Usage): number {
+  let n = 0
+  for (const e of u.values()) n += e.bytes
+  return n
+}
+
+/** 递归收集文件；同一目录内的条目并发 stat（顺序 await 时几十万个文件要好几秒）。 */
+async function collectFiles(dir: string, provider: string, list: FileEntry[]): Promise<void> {
+  let entries
   try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const ent of entries) {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return /* dir not exist */
+  }
+  await Promise.all(
+    entries.map(async (ent) => {
       const full = join(dir, ent.name)
       if (ent.isDirectory()) {
-        await collectFiles(full, list)
+        await collectFiles(full, provider, list)
       } else if (ent.isFile()) {
         try {
           const st = await stat(full)
-          list.push({ path: full, size: st.size, mtime: st.mtimeMs })
+          list.push({ path: full, size: st.size, mtime: st.mtimeMs, provider })
         } catch {
           /* ignore */
         }
       }
-    }
+    })
+  )
+}
+
+async function collectAllFiles(): Promise<FileEntry[]> {
+  const base = tileCacheBaseDir()
+  const files: FileEntry[] = []
+  let providers: string[] = []
+  try {
+    providers = (await readdir(base, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
   } catch {
-    /* dir not exist */
+    /* base not exist */
   }
+  for (const p of providers) await collectFiles(join(base, p), p, files)
+  return files
+}
+
+function ensureUsage(): Promise<Usage> {
+  if (usage) return Promise.resolve(usage)
+  if (!usageLoading) {
+    const gen = usageGen
+    usageLoading = collectAllFiles()
+      .then((files) => {
+        const u = usageFromFiles(files)
+        if (gen === usageGen) usage = u
+        return u
+      })
+      .finally(() => (usageLoading = null))
+  }
+  return usageLoading
 }
 
 async function cleanEmptyDirs(dir: string): Promise<void> {
@@ -161,12 +244,15 @@ export async function pruneTileCacheLRU(
   pruneInProgress = true
 
   try {
-    const base = tileCacheBaseDir()
-    const files: FileEntry[] = []
-    await collectFiles(base, files)
+    if (totalBytes(await ensureUsage()) <= maxBytes) {
+      return { prunedBytes: 0, prunedCount: 0 }
+    }
 
-    let totalBytes = files.reduce((s, f) => s + f.size, 0)
-    if (totalBytes <= maxBytes) {
+    const base = tileCacheBaseDir()
+    const files = await collectAllFiles()
+    let total = files.reduce((s, f) => s + f.size, 0)
+    if (total <= maxBytes) {
+      usage = usageFromFiles(files)
       return { prunedBytes: 0, prunedCount: 0 }
     }
 
@@ -176,25 +262,28 @@ export async function pruneTileCacheLRU(
 
     let prunedBytes = 0
     let prunedCount = 0
+    let scanned = 0
 
     for (const f of files) {
-      if (totalBytes <= targetBytes) break
+      if (total <= targetBytes) break
       try {
         await rm(f.path, { force: true })
-        totalBytes -= f.size
+        total -= f.size
         prunedBytes += f.size
         prunedCount++
       } catch {
         /* ignore */
       }
+      scanned++
     }
+    usage = usageFromFiles(files.slice(scanned))
 
     // 清理空目录
     await cleanEmptyDirs(base)
     log.info('tile cache pruned via LRU', {
       prunedBytes,
       prunedCount,
-      remainingBytes: totalBytes,
+      remainingBytes: total,
       quota: maxBytes
     })
     return { prunedBytes, prunedCount }
@@ -203,37 +292,9 @@ export async function pruneTileCacheLRU(
   }
 }
 
-/** 递归统计目录大小与文件数。 */
-async function walkDir(dir: string): Promise<{ bytes: number; count: number }> {
-  let bytes = 0
-  let count = 0
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const ent of entries) {
-      const full = join(dir, ent.name)
-      if (ent.isDirectory()) {
-        const sub = await walkDir(full)
-        bytes += sub.bytes
-        count += sub.count
-      } else if (ent.isFile()) {
-        try {
-          const st = await stat(full)
-          bytes += st.size
-          count += 1
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  } catch {
-    /* dir might not exist yet */
-  }
-  return { bytes, count }
-}
-
-/** 获取瓦片缓存统计。 */
+/** 获取瓦片缓存统计（首次遍历目录，之后读内存记账）。 */
 export async function getTileCacheStats(maxMb?: number): Promise<TileCacheStats> {
-  const base = tileCacheBaseDir()
+  const u = await ensureUsage()
   const result: TileCacheStats = {
     totalBytes: 0,
     tileCount: 0,
@@ -241,19 +302,11 @@ export async function getTileCacheStats(maxMb?: number): Promise<TileCacheStats>
     maxBytes: (maxMb ?? 1024) > 0 ? (maxMb ?? 1024) * 1024 * 1024 : undefined,
     byProvider: {}
   }
-  try {
-    const entries = await readdir(base, { withFileTypes: true })
-    for (const ent of entries) {
-      if (ent.isDirectory()) {
-        const pDir = join(base, ent.name)
-        const sub = await walkDir(pDir)
-        result.byProvider[ent.name] = sub
-        result.totalBytes += sub.bytes
-        result.tileCount += sub.count
-      }
-    }
-  } catch {
-    /* base not exist */
+  for (const [p, e] of u) {
+    if (!e.count) continue
+    result.byProvider[p] = { bytes: e.bytes, count: e.count }
+    result.totalBytes += e.bytes
+    result.tileCount += e.count
   }
   return result
 }
@@ -270,6 +323,12 @@ export async function clearTileCache(providerId?: string): Promise<void> {
   const target = providerId ? join(tileCacheBaseDir(), providerId) : tileCacheBaseDir()
   try {
     await rm(target, { recursive: true, force: true })
+    if (usage) {
+      if (providerId) usage.delete(providerId)
+      else usage.clear()
+    } else {
+      usageGen++
+    }
     log.info('cleared tile cache', { target })
   } catch (err) {
     log.warn('clearTileCache failed', { target, error: String(err) })

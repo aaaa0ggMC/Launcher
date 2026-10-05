@@ -8,6 +8,8 @@ import type { Photo, GuessedGps } from '../types'
 import { filterPhotosWithQuery } from '../search-parser'
 import SearchHelpDialog from './SearchHelpDialog.vue'
 import PhotoCardItem from './PhotoCardItem.vue'
+import { useYarjCompact } from '../composables/useYarjCompact'
+import { useSwipeDismiss } from '../composables/useSwipeDismiss'
 
 const props = defineProps<{
   open: boolean
@@ -30,6 +32,11 @@ const emit = defineEmits<{
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const compact = useYarjCompact()
+const swipe = useSwipeDismiss(
+  computed(() => props.open),
+  () => emit('close')
+)
 
 const filterQuery = ref('')
 const searchHelpOpen = ref(false)
@@ -149,7 +156,15 @@ function formatCoords(coords: [number, number] | null): string {
 
 <template>
   <Transition name="drawer-slide">
-    <div v-if="open" v-privacy="'yarj.location'" class="yarj-photo-drawer">
+    <div
+      v-if="open"
+      v-privacy="'yarj.location'"
+      class="yarj-photo-drawer"
+      :class="{ 'is-compact': compact }"
+      :style="swipe.style.value"
+      v-on="swipe.handlers"
+      @click.capture="swipe.onClickCapture"
+    >
       <!-- 抽屉顶部栏 -->
       <div class="drawer-header d-flex align-center justify-space-between px-4 py-3">
         <div class="d-flex align-center ga-3 min-w-0 flex-grow-1 mr-2">
@@ -193,7 +208,19 @@ function formatCoords(coords: [number, number] | null): string {
             <v-icon v-else size="20">mdi-map-marker-distance</v-icon>
           </v-btn>
           <v-btn
-            v-if="photos.length > 0"
+            v-if="photos.length > 0 && compact"
+            icon
+            size="small"
+            variant="tonal"
+            color="primary"
+            class="mr-1"
+            :title="t('yarj.exploration.title', '我的探索')"
+            @click="emit('explore', filteredPhotos.length ? filteredPhotos : photos)"
+          >
+            <v-icon size="18">mdi-compass-outline</v-icon>
+          </v-btn>
+          <v-btn
+            v-else-if="photos.length > 0"
             variant="tonal"
             color="primary"
             class="mr-1"
@@ -334,7 +361,7 @@ function formatCoords(coords: [number, number] | null): string {
   right: 16px;
   bottom: 16px;
   width: 420px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 32px);
   z-index: 25;
   display: flex;
   flex-direction: column;
@@ -348,6 +375,16 @@ function formatCoords(coords: [number, number] | null): string {
   user-select: none;
 }
 
+.yarj-photo-drawer.is-compact {
+  /* 让出顶部菜单的下拉把手 */
+  top: 32px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: auto;
+  max-width: none;
+  touch-action: pan-y;
+}
 .drawer-header {
   flex-shrink: 0;
   background: rgba(var(--v-theme-surface), 0.4);

@@ -3,6 +3,9 @@ defineOptions({ name: 'cockpit-yarj-route-playback-bar' })
 
 import { ref } from 'vue'
 import type { Route, RouteSplit } from '../types'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 const props = withDefaults(
   defineProps<{
@@ -75,11 +78,14 @@ function cycleOtherRoutesMode(): void {
 </script>
 
 <template>
-  <div class="yarj-route-playback-bar" :class="{ 'has-drawer-open': photosDrawerOpen }">
+  <div
+    class="yarj-route-playback-bar"
+    :class="{ 'has-drawer-open': photosDrawerOpen, 'is-compact': compact }"
+  >
     <div class="playback-card d-flex flex-column ga-3">
       <!-- 1. 顶部行：航线标题、实时运动指标与右侧动作 -->
       <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
-        <div class="d-flex align-center ga-2 min-w-0 flex-grow-1">
+        <div class="d-flex align-center ga-2 min-w-0 flex-grow-1 playback-title">
           <v-avatar color="primary" size="32" variant="tonal" class="flex-shrink-0">
             <v-icon size="18">
               {{
@@ -135,9 +141,29 @@ function cycleOtherRoutesMode(): void {
         </div>
 
         <!-- 右侧动作组 -->
-        <div class="d-flex align-center ga-2 flex-shrink-0">
-          <!-- 周围时刻图片侧栏切换开关 -->
+        <div class="d-flex align-center ga-2 flex-shrink-0 playback-actions">
+          <!-- 周围时刻图片侧栏切换开关（窄屏只留图标 + 角标） -->
           <v-btn
+            v-if="compact"
+            :color="photosDrawerOpen ? 'primary' : undefined"
+            :variant="photosDrawerOpen ? 'flat' : 'tonal'"
+            size="small"
+            icon
+            title="周围时刻照片"
+            @click="emit('togglePhotosDrawer')"
+          >
+            <v-badge
+              v-if="currentPhotosCount > 0"
+              color="primary"
+              :content="currentPhotosCount"
+              floating
+            >
+              <v-icon size="18">mdi-camera-timer</v-icon>
+            </v-badge>
+            <v-icon v-else size="18">mdi-camera-timer</v-icon>
+          </v-btn>
+          <v-btn
+            v-else
             :color="photosDrawerOpen ? 'primary' : undefined"
             :variant="photosDrawerOpen ? 'flat' : 'tonal'"
             prepend-icon="mdi-camera-timer"
@@ -275,10 +301,11 @@ function cycleOtherRoutesMode(): void {
           </v-btn>
 
           <!-- 时间颗粒度跳转按钮组 -->
-          <div class="d-flex align-center ga-2 ml-1 flex-wrap">
+          <div class="d-flex align-center ml-1 flex-wrap" :class="compact ? 'ga-1' : 'ga-2'">
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="后退 5 分钟"
               @click="emit('jumpTime', -300)"
             >
@@ -287,6 +314,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="后退 1 分钟"
               @click="emit('jumpTime', -60)"
             >
@@ -295,6 +323,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="前进 1 分钟"
               @click="emit('jumpTime', 60)"
             >
@@ -303,6 +332,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="前进 5 分钟"
               @click="emit('jumpTime', 300)"
             >
@@ -319,6 +349,17 @@ function cycleOtherRoutesMode(): void {
           >
             <template #activator="{ props: menuProps }">
               <v-btn
+                v-if="compact"
+                v-bind="menuProps"
+                variant="tonal"
+                icon
+                size="small"
+                title="分公里里程"
+              >
+                <v-icon size="18">mdi-map-marker-path</v-icon>
+              </v-btn>
+              <v-btn
+                v-else
                 v-bind="menuProps"
                 variant="tonal"
                 prepend-icon="mdi-map-marker-path"
@@ -361,7 +402,8 @@ function cycleOtherRoutesMode(): void {
 
         <!-- 右侧：倍速切换选择器 -->
         <div class="d-flex align-center ga-1">
-          <span class="text-caption text-medium-emphasis mr-1">播放速率：</span>
+          <span v-if="!compact" class="text-caption text-medium-emphasis mr-1">播放速率：</span>
+          <v-icon v-else size="16" class="text-medium-emphasis mr-1">mdi-speedometer</v-icon>
           <v-chip
             v-for="s in speedOptions"
             :key="s"
@@ -385,7 +427,8 @@ function cycleOtherRoutesMode(): void {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: calc(100% - 48px);
+  /* 两侧各留出右下按钮列的宽度，居中时不压住按钮 */
+  width: calc(100% - 144px);
   max-width: 860px;
   z-index: 20;
   pointer-events: none;
@@ -403,6 +446,37 @@ function cycleOtherRoutesMode(): void {
   max-width: calc(100% - 380px - 48px);
 }
 
+.yarj-route-playback-bar.is-compact,
+.yarj-route-playback-bar.is-compact.has-drawer-open {
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: auto;
+  max-width: none;
+  transform: none;
+}
+
+.is-compact .playback-card {
+  padding: 12px 14px;
+  gap: 10px !important;
+}
+
+/* 窄屏：标题和实时指标占满第一行（指标换行），操作按钮单独一行 */
+.is-compact .playback-title {
+  flex-basis: 100%;
+  flex-wrap: wrap;
+}
+
+.is-compact .playback-title > .text-truncate {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.is-compact .playback-actions {
+  flex-basis: 100%;
+  justify-content: space-between;
+}
+
 .playback-card {
   pointer-events: auto;
   background: rgba(var(--v-theme-surface), var(--glass-a, 0.88));
@@ -412,6 +486,11 @@ function cycleOtherRoutesMode(): void {
   border-radius: 18px;
   padding: 16px 20px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.compact-jump {
+  min-width: 0 !important;
+  padding-inline: 10px !important;
 }
 
 .slider-wrap {

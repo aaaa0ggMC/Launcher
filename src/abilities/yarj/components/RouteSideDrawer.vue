@@ -4,6 +4,8 @@ defineOptions({ name: 'cockpit-yarj-route-side-drawer' })
 import { ref, computed } from 'vue'
 import type { Route } from '../types'
 import { isRouteIntersectingCircle } from '../route-parser'
+import { useYarjCompact } from '../composables/useYarjCompact'
+import { useSwipeDismiss } from '../composables/useSwipeDismiss'
 
 const props = defineProps<{
   modelValue: boolean
@@ -18,6 +20,12 @@ const emit = defineEmits<{
   (e: 'toggleActive', routeId: string): void
   (e: 'deleteRoute', route: Route): void
 }>()
+
+const compact = useYarjCompact()
+const swipe = useSwipeDismiss(
+  computed(() => props.modelValue),
+  () => emit('update:modelValue', false)
+)
 
 const searchQuery = ref('')
 const selectedActivity = ref<string>('all')
@@ -101,7 +109,15 @@ function onRouteClick(route: Route): void {
 
 <template>
   <Transition name="drawer-slide">
-    <div v-if="modelValue" v-privacy="'yarj.location'" class="yarj-route-drawer">
+    <div
+      v-if="modelValue"
+      v-privacy="'yarj.location'"
+      class="yarj-route-drawer"
+      :class="{ 'is-compact': compact }"
+      :style="swipe.style.value"
+      v-on="swipe.handlers"
+      @click.capture="swipe.onClickCapture"
+    >
       <!-- 抽屉头部 -->
       <div class="pa-4 pb-2 border-b d-flex align-center justify-space-between flex-shrink-0">
         <div class="d-flex align-center ga-2">
@@ -127,7 +143,7 @@ function onRouteClick(route: Route): void {
           class="mb-2"
         />
 
-        <div class="d-flex align-center justify-space-between ga-1">
+        <div class="d-flex align-center justify-space-between flex-wrap ga-1">
           <v-chip-group
             v-model="selectedActivity"
             mandatory
@@ -325,7 +341,7 @@ function onRouteClick(route: Route): void {
   right: 16px;
   bottom: 16px;
   width: 420px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 32px);
   z-index: 25;
   display: flex;
   flex-direction: column;
@@ -337,6 +353,17 @@ function onRouteClick(route: Route): void {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   user-select: none;
+}
+
+.yarj-route-drawer.is-compact {
+  /* 让出顶部菜单的下拉把手 */
+  top: 32px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: auto;
+  max-width: none;
+  touch-action: pan-y;
 }
 
 .route-list-body {

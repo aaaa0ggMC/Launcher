@@ -4,6 +4,9 @@ defineOptions({ name: 'cockpit-yarj-search-help' })
 import { ref, inject } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 defineProps<{
   modelValue: boolean
@@ -69,6 +72,7 @@ const cheatsheet = [
 <template>
   <v-dialog
     :model-value="modelValue"
+    :fullscreen="compact"
     max-width="720"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"

@@ -4,6 +4,7 @@ defineOptions({ name: 'cockpit-yarj-controls' })
 import { inject, ref } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import { useYarjCompact } from '../composables/useYarjCompact'
 
 defineProps<{
   explorationActive: boolean
@@ -21,10 +22,16 @@ const emit = defineEmits<{
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const compact = useYarjCompact()
 </script>
 
 <template>
-  <div class="yarj-controls">
+  <!-- 窄屏下探索 / 回放面板铺满底部，按钮列会压在面板上；此时靠双指缩放，面板里有退出按钮 -->
+  <div
+    v-show="!(compact && (explorationActive || routePlaybackActive))"
+    class="yarj-controls"
+    :class="{ 'is-compact': compact }"
+  >
     <v-btn
       icon
       variant="flat"
@@ -91,6 +98,11 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.yarj-controls.is-compact {
+  right: 12px;
+  bottom: 12px;
 }
 
 .yarj-ctrl-btn {

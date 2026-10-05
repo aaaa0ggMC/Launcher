@@ -104,6 +104,11 @@ async function refreshDerived(): Promise<void> {
   }
 
   maps.value = ((await window.cockpit.command('yarj.maps')) as MapFileInfo[]) ?? []
+  // 缓存统计第一次要遍历整个缓存目录，不挡住上面的列表
+  void refreshCacheStats()
+}
+
+async function refreshCacheStats(): Promise<void> {
   cacheStats.value = (await window.cockpit.command('yarj.cache-stats')) as TileCacheStats
 }
 
