@@ -572,6 +572,7 @@
   "yaya.mention.note_tools": "Tools available from now on in this session: {tools}",
   "yaya.mention.tools_count": "{n} tools",
   "yaya.mention.note_unavailable": "(This plugin cannot connect right now: {error}; its tools are unavailable for now)",
+  "yaya.input.share_failed": "Could not receive the shared content: {error}",
   "yaya.mention.note_plugin": "The user picked “{name}”",
   "yaya.mention.note_head": "Picked by the user in this message",
   "yaya.mention.kind_plugin": "Plugin",

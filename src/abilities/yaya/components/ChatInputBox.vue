@@ -407,7 +407,24 @@ function openPreview(id: string): void {
   previewOpen.value = true
 }
 
-defineExpose({ focus: () => textarea.value?.focus() })
+/** 安卓 App 分享进来的内容：文件（已在宿主上）变成附件，文字接在草稿后面 */
+async function acceptShare(share: {
+  paths?: string[]
+  text?: string
+  error?: string
+}): Promise<void> {
+  if (share.error)
+    attachError.value = te(
+      'yaya.input.share_failed',
+      { error: share.error },
+      '接收分享失败：{error}'
+    )
+  const text = share.text?.trim()
+  if (text) draft.value = draft.value ? `${draft.value}\n${text}` : text
+  if (share.paths?.length) await importPaths(share.paths)
+}
+
+defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
 </script>
 
 <template>

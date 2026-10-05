@@ -136,6 +136,16 @@ export default {
           component: defineAsyncComponent(() => import('./items/WebHostSection.vue'))
         },
         {
+          key: 'android',
+          label: 'Android 客户端',
+          icon: 'mdi-cellphone',
+          description: '后台保持运行、切换宿主（只在安卓 App 里出现）',
+          keywords: ['安卓', '手机', 'app', '客户端', '后台', '保活', '宿主', 'android', 'client'],
+          // 只在安卓 App 里（原生客户端注入了 window.cockpit.client）
+          visible: () => !!window.cockpit.client,
+          component: defineAsyncComponent(() => import('./items/AndroidClientSection.vue'))
+        },
+        {
           key: 'screenshot',
           label: '截图模式',
           icon: 'mdi-camera-outline',

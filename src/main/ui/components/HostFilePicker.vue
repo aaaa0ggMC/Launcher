@@ -80,7 +80,44 @@ const acceptAttr = computed(() =>
 
 function pickFromDevice(): void {
   uploadError.value = false
-  fileInput.value?.click()
+  if (window.cockpit.client) void pickNative()
+  else fileInput.value?.click()
+}
+
+/**
+ * 安卓 App：系统文件选择器 + 原生直接流式上传到宿主（不经过 WebView 的 JS 内存），
+ * 进度经 `cockpit:client-upload-progress` 事件回来。取消选择 = 返回空列表，对话框留着。
+ */
+let nativeBusy = false
+async function pickNative(): Promise<void> {
+  const client = window.cockpit.client
+  if (!client || nativeBusy) return
+  nativeBusy = true
+  // 选择文件期间不显示进度条；第一条上传进度到了才显示
+  uploadAborted = false
+  uploadPct.value = 0
+  uploadIndex.value = 0
+  uploadTotal.value = 0
+  uploadedPaths.value = []
+  const off = window.cockpit.on('cockpit:client-upload-progress', (p: unknown) => {
+    const e = p as { index: number; total: number; pct: number }
+    uploading.value = true
+    uploadIndex.value = e.index
+    uploadTotal.value = e.total
+    uploadPct.value = Math.max(0, e.pct)
+  })
+  try {
+    const r = await client.call<{ paths: string[] }>('pickFiles', { multiple: multi.value })
+    if (uploadAborted) return
+    if (r.paths.length) finish(multi.value ? r.paths : r.paths[0])
+  } catch (e) {
+    if (!uploadAborted) uploadError.value = true
+    console.warn('[hostpick] native pick failed', e)
+  } finally {
+    off()
+    uploading.value = false
+    nativeBusy = false
+  }
 }
 
 function onDeviceFile(ev: Event): void {

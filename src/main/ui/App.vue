@@ -1075,6 +1075,25 @@ onMounted(() => {
 })
 onBeforeUnmount(() => localAgentUnsub?.())
 
+// 安卓 App 的系统「分享」：文件已由原生传到宿主，这里切到第一个声明了 shareTarget 的能力交付。
+// 注册监听本身就是给原生的「页面就绪」信号（之前到达的分享在原生排队，不会丢）。
+if (window.cockpit.client && !agentView) {
+  let shareUnsub: (() => void) | null = null
+  onMounted(() => {
+    shareUnsub = window.cockpit.on('cockpit:client-shared', (payload: unknown) => {
+      const share = payload as { paths?: string[]; text?: string; error?: string }
+      const metas = new Map(sidebarReport.value.loaded.map((m) => [m.id, m]))
+      const target = abilities.value.find((a) => metas.get(a.id)?.shareTarget)
+      if (!target) {
+        console.warn('[share] no ability accepts shared content', share)
+        return
+      }
+      activate(target.id, { share })
+    })
+  })
+  onBeforeUnmount(() => shareUnsub?.())
+}
+
 // 网页版隐私授权（无头宿主没有授权窗口）：模态外壳悬浮窗，AI 禁区 + 只认真实手势
 if (window.cockpit.cap('privacy.consent') === 'web' && !agentView) {
   registerShellOutsider({

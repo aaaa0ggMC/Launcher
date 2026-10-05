@@ -572,6 +572,7 @@
   "yaya.mention.note_tools": "本会话起可用的工具：{tools}",
   "yaya.mention.tools_count": "{n} 个工具",
   "yaya.mention.note_unavailable": "（这个插件现在连不上：{error}；它的工具暂时不可用）",
+  "yaya.input.share_failed": "接收分享失败：{error}",
   "yaya.mention.note_plugin": "用户点名使用「{name}」",
   "yaya.mention.note_head": "用户在这条消息里点名",
   "yaya.mention.kind_plugin": "插件",

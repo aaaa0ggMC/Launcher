@@ -67,7 +67,10 @@ const pendingDelete = ref<{ messageId: string; kind: 'user' | 'assistant' } | nu
 
 const shellEl = ref<HTMLElement | null>(null)
 const scrollEl = ref<HTMLElement | null>(null)
-const inputRef = ref<{ focus: () => void } | null>(null)
+const inputRef = ref<{
+  focus: () => void
+  acceptShare: (share: { paths?: string[]; text?: string; error?: string }) => Promise<void>
+} | null>(null)
 
 // ---- 布局：按容器宽度（不是窗口宽度）决定侧栏常驻还是弹出 ----
 const shellWidth = ref(1200)
@@ -873,9 +876,26 @@ function flushChunks(): void {
 
 const unsubs: (() => void)[] = []
 
+/** 分享到达时输入框可能还没挂载：先存着，输入框出现再交 */
+let pendingShare: { paths?: string[]; text?: string } | null = null
+function flushShare(): void {
+  if (!pendingShare || !inputRef.value) return
+  const share = pendingShare
+  pendingShare = null
+  void inputRef.value.acceptShare(share)
+}
+watch(inputRef, flushShare)
+
 let pendingActivationSession: string | null = null
 let activationReady = false
 function onActivate(target: unknown): void {
+  // 安卓 App 的系统分享（外壳经 shareTarget 交付）：放进当前对话的输入框
+  const share = (target as { share?: unknown } | null)?.share
+  if (share && typeof share === 'object') {
+    pendingShare = share as { paths?: string[]; text?: string }
+    void nextTick(flushShare)
+    return
+  }
   const id = (target as { session?: unknown } | null)?.session
   if (typeof id !== 'string' || !id) return
   pendingActivationSession = id

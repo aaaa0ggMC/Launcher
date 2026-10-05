@@ -14,9 +14,26 @@ type CommandArgs = Record<string, unknown>
  */
 export type HostCap = 'native' | 'web' | 'none'
 
+/**
+ * 承载页面的原生客户端（安卓 App，`android/`）提供的能力。Electron / 普通浏览器里为 null，
+ * 页面判断 `window.cockpit.client` 是否存在即可，不要自己猜是不是在 App 里。
+ *
+ * - `call(method, args)`：异步调用原生方法（`info` / `settings.set` / `openConnect` / `pickFiles` …），
+ *   失败 reject；
+ * - 原生推来的事件经 `window.cockpit.on('cockpit:client-<事件名>', cb)` 收：
+ *   `upload-progress`（{index,total,pct,name,call}）、`shared`（别的应用分享进来：{paths,text,error?}）。
+ */
+export interface NativeClient {
+  kind: 'android'
+  version: string
+  call<T = unknown>(method: string, args?: Record<string, unknown>): Promise<T>
+}
+
 export interface CockpitTransport {
   /** 能力档位表（缺省 = 全部 native） */
   caps?: Record<string, HostCap>
+  /** 原生客户端（安卓 App）；缺省 = 没有 */
+  client?: NativeClient | null
   /** 自定义协议 URL → 宿主可访问的 URL（网页模式映射到 /_p/...；缺省原样） */
   hostUrl?(url: string): string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +74,8 @@ export function createCockpit(t: CockpitTransport) {
     cap: (id: string): HostCap => t.caps?.[id] ?? 'native',
     /** 宿主能否做这件事（`web` 降级也算能）；UI 用它决定显示 / 隐藏 */
     hasCap: (id: string): boolean => (t.caps?.[id] ?? 'native') !== 'none',
+    /** 承载页面的原生客户端（安卓 App）；没有为 null。见 NativeClient */
+    client: t.client ?? null,
     /** cockpit-icon:// / cockpit-audio:// / cockpit-tile:// → 当前宿主可加载的 URL */
     hostUrl: (url: string): string => t.hostUrl?.(url) ?? url,
     // -- command dispatcher (CLI-first core) ----------------------------------

@@ -19,7 +19,16 @@ export interface AppsConfig {
 
 export type HostCap = 'native' | 'web' | 'none'
 
+/** 承载页面的原生客户端（安卓 App）；Electron / 普通浏览器为 null。定义见 preload/api.ts */
+export interface NativeClient {
+  kind: 'android'
+  version: string
+  call<T = unknown>(method: string, args?: Record<string, unknown>): Promise<T>
+}
+
 export interface CockpitApi {
+  /** 原生客户端（安卓 App 里才有） */
+  client: NativeClient | null
   cap: (id: string) => HostCap
   hasCap: (id: string) => boolean
   hostUrl: (url: string) => string

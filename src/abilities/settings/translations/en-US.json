@@ -184,5 +184,13 @@
   "web.not_built": "Web assets are not built yet: run pnpm build:web (pnpm build includes it)",
   "web.copied": "Copied",
   "web.copy_link": "Copy link with token",
-  "web.token_hint": "The token in the link works like a password — don't share it."
+  "web.token_hint": "The token in the link works like a password — don't share it.",
+  "android.title": "Android client",
+  "android.hint": "These options live only in the app on this phone and don't affect browser pages on the same host.",
+  "android.version": "Version",
+  "android.device": "Device",
+  "android.host": "Host",
+  "android.keep_alive": "Keep running in background (ongoing notification keeps playback and the connection alive)",
+  "android.switch_host": "Switch host",
+  "label.Android 客户端": "Android client"
 }

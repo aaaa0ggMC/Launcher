@@ -178,6 +178,8 @@ export interface SidebarAbilityMeta {
   icon: string | null
   category: string
   keepAlive: boolean
+  /** 接收系统分享（见 Ability.shareTarget） */
+  shareTarget: boolean
   /** source folder under `abilities/` — used as the help namespace. */
   folder: string
   component?: Component
@@ -313,6 +315,7 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
       icon: meta.icon,
       category: meta.category,
       keepAlive: meta.keepAlive !== false,
+      shareTarget: meta.shareTarget === true,
       folder,
       component: meta.component
     })
@@ -405,21 +408,31 @@ export function buildSettingsSections(
     for (const s of injected) {
       const categoryId = `${a.id}.${s.key}`
       const catKeywords = s.keywords ?? []
-      const items: SettingsItem[] = (s.items ?? []).map((item) => {
-        const ik = item.keywords ?? []
-        return {
-          id: `${categoryId}.${item.key}`,
-          key: item.key,
-          categoryId,
-          label: item.label,
-          description: item.description ?? '',
-          icon: item.icon ?? 'mdi-toggle-switch-outline',
-          keywords: ik,
-          fullWidth: item.fullWidth === true,
-          component: markRaw(item.component),
-          haystack: `${item.label} ${item.description ?? ''} ${ik.join(' ')}`.toLowerCase()
-        }
-      })
+      const items: SettingsItem[] = (s.items ?? [])
+        .filter((item) => {
+          try {
+            return item.visible ? item.visible() : true
+          } catch {
+            return false
+          }
+        })
+        .map((item) => {
+          const ik = item.keywords ?? []
+          return {
+            id: `${categoryId}.${item.key}`,
+            key: item.key,
+            categoryId,
+            label: item.label,
+            description: item.description ?? '',
+            icon: item.icon ?? 'mdi-toggle-switch-outline',
+            keywords: ik,
+            fullWidth: item.fullWidth === true,
+            component: markRaw(item.component),
+            haystack: `${item.label} ${item.description ?? ''} ${ik.join(' ')}`.toLowerCase()
+          }
+        })
+      // 条目全被 visible 过滤掉的分类不显示
+      if (s.items?.length && !items.length) continue
       list.push({
         id: categoryId,
         abilityId: a.id,

@@ -52,6 +52,12 @@ export interface Ability {
    * 用户可在设置 → 能力里关掉全部能力悬浮窗或禁止某个能力弹出。
    */
   outsiders?: AbilityOutsider[]
+  /**
+   * 接收别的应用「分享」进来的文件 / 文字（安卓 App 的系统分享，`@ui/share-inbox`）。
+   * 收到分享时外壳切到第一个声明了它的能力，并以 `onActivate({ share })` 交付
+   * （`share` = `{ paths: 宿主上的路径[], text, error? }`）。
+   */
+  shareTarget?: boolean
 }
 
 /** 能力注入的一个快捷键声明 */
@@ -113,6 +119,8 @@ export interface AbilitySettingItem {
   component: Component
   /** Span the full row width instead of sharing a half-width column. */
   fullWidth?: boolean
+  /** 只在条件满足时出现（如只在安卓 App 里：`() => !!window.cockpit.client`）；启动时求值一次 */
+  visible?: () => boolean
 }
 
 export const FALLBACK_ICON = '😎'

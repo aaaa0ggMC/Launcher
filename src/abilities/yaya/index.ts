@@ -7,6 +7,8 @@ export default {
   icon: 'default/message-02/padding',
   category: '工具',
   keepAlive: true,
+  // 安卓 App 的系统分享：文件变成附件、文字放进输入框
+  shareTarget: true,
   component: defineAsyncComponent(() => import('./View.vue')),
   settings: [
     {

@@ -2,7 +2,7 @@
  * 网页 / 手机浏览器里的 `window.cockpit`：与 Electron preload 共用 `createCockpit`，
  * 只是传输层换成 HTTP + SSE。宿主不支持的 IPC 通道（窗口、对话框、全局快捷键、截图…）一律 nop。
  */
-import { createCockpit } from '../preload/api'
+import { createCockpit, type NativeClient } from '../preload/api'
 import { initBrowserBridge } from './browser-bridge'
 
 const TOKEN_KEY = 'cockpit-headless-token'
@@ -36,6 +36,8 @@ interface AndroidBridge {
   openExternal(url: string): void
   openConnect(): void
   version(): string
+  /** 通用异步调用（0.2.0 起）；结果经 window.__cockpitNative.reply 回来 */
+  call?(id: string, method: string, argsJson: string): void
 }
 const android = (window as unknown as { CockpitAndroid?: AndroidBridge }).CockpitAndroid
 
@@ -80,6 +82,59 @@ function emit(channel: string, ...args: unknown[]): void {
 export function emitLocal(channel: string, ...args: unknown[]): void {
   emit(channel, ...args)
 }
+
+/**
+ * 安卓 App 的原生调用（`window.cockpit.client`）。协议见 android/…/MainActivity.java：
+ * 页面 `CockpitAndroid.call(id, method, argsJson)` → 原生 `__cockpitNative.reply(id, ok, data)`；
+ * 原生事件 `__cockpitNative.event(name, data)` → 本地频道 `cockpit:client-<name>`。
+ * 原生在页面「就绪」前把事件排队；就绪信号等到有人监听 `cockpit:client-shared`（外壳挂载）
+ * 时才发，否则启动时就到的分享会在没人接的时候发出去丢掉。
+ */
+const SHARED_CHANNEL = 'cockpit:client-shared'
+let nativeReadySent = false
+const nativeClient: NativeClient | null = android?.call
+  ? (() => {
+      const pending = new Map<
+        string,
+        { resolve: (v: unknown) => void; reject: (e: Error) => void }
+      >()
+      let seq = 0
+      ;(window as unknown as { __cockpitNative: unknown }).__cockpitNative = {
+        reply(id: string, ok: boolean, data: unknown) {
+          const p = pending.get(id)
+          if (!p) return
+          pending.delete(id)
+          if (ok) p.resolve(data)
+          else
+            p.reject(
+              new Error(String((data as { error?: unknown } | null)?.error ?? 'native call failed'))
+            )
+        },
+        event(name: string, data: unknown) {
+          emit(`cockpit:client-${name}`, data)
+        }
+      }
+      return {
+        kind: 'android' as const,
+        version: android.version(),
+        call<T = unknown>(method: string, args: Record<string, unknown> = {}): Promise<T> {
+          const id = `n${++seq}`
+          return new Promise<T>((resolve, reject) => {
+            pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
+            android.call!(id, method, JSON.stringify(args))
+          })
+        }
+      }
+    })()
+  : null
+
+function signalNativeReady(): void {
+  if (!nativeClient || nativeReadySent) return
+  nativeReadySent = true
+  void nativeClient.call('ready').catch(() => {})
+}
+// 兜底：没有任何页面监听分享（比如外壳没挂载起来）也别让原生事件永远排队
+if (nativeClient) setTimeout(signalNativeReady, 10_000)
 
 /**
  * 真实用户操作（isTrusted）立即清除 agent 输入标记：之后的命令 / IPC 按用户来源计。
@@ -293,8 +348,10 @@ const cockpit = createCockpit({
     let set = listeners.get(channel)
     if (!set) listeners.set(channel, (set = new Set()))
     set.add(cb)
+    if (channel === SHARED_CHANNEL) queueMicrotask(signalNativeReady)
     return () => set!.delete(cb)
   },
+  client: nativeClient,
   caps: {
     // 浏览器本身就是窗口：不画最小化 / 最大化 / 关闭
     'window.frame': 'none',

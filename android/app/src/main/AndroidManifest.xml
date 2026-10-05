@@ -32,6 +32,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="linuxcockpit" android:host="connect" />
             </intent-filter>
+            <!-- 系统「分享」：文件 / 文字交给 Cockpit（上传到宿主后交给页面，如 YAYA 附件） -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="io.github.linuxcockpit.client.CONNECT_SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />

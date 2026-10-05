@@ -30,6 +30,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -37,11 +38,21 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Cockpit 安卓客户端：一个全屏 WebView，直接打开宿主（本机 Termux 里的无头宿主，或局域网电脑）托管的网页。
  * 前端全部来自宿主，所以宿主更新后这里不用重新打包；原生侧只补浏览器给不了的东西：
  * 连接设置、文件选择、后台保活、原生剪贴板 / 外部链接、系统栏配色、返回键关弹窗。
+ *
+ * 与网页的通信（{@link Bridge}）：
+ * - 页面 → 原生：`CockpitAndroid.call(id, method, argsJson)` 异步调用，结果经
+ *   `window.__cockpitNative.reply(id, ok, json)` 回到页面（web-shim 包装成 `window.cockpit.client`）；
+ * - 原生 → 页面：`window.__cockpitNative.event(name, json)`，页面就绪（shim 调 `ready`）前排队；
+ * - 文件不经过页面：原生直接流式上传到宿主 `/api/upload`（{@link Uploader}），只把宿主路径交给页面。
  */
 public class MainActivity extends Activity {
     static final String PREFS = "cockpit";
@@ -49,6 +60,7 @@ public class MainActivity extends Activity {
     private static final String CONNECT_PAGE = "file:///android_asset/connect.html";
     private static final int REQ_FILE = 1;
     private static final int REQ_NOTIFY = 2;
+    private static final int REQ_PICK = 3;
 
     private FrameLayout root;
     private WebView web;
@@ -60,6 +72,15 @@ public class MainActivity extends Activity {
     private JSONObject prefill;
     /** 当前宿主 origin（只有它和连接页能在 WebView 里打开，其余交给系统浏览器） */
     private String hostOrigin = "";
+    /** 宿主页面的 shim 已就绪（调过 ready），之前的事件排队 */
+    private boolean pageReady = false;
+    private final List<String[]> pendingEvents = new ArrayList<>();
+    /** 进行中的 pickFiles 调用 id（一次只允许一个） */
+    private String pickCallId;
+    /** 别的应用「分享」进来、还没交给页面的内容 */
+    private final List<Uri> sharedUris = new ArrayList<>();
+    private String sharedText = "";
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,7 +128,55 @@ public class MainActivity extends Activity {
             showConnect("");
             return true;
         }
+        if (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
+            collectShare(intent);
+            // 不占用这次启动：照常连接；页面就绪后再交给它（已就绪则立刻交）
+            if (pageReady) deliverShare();
+            return false;
+        }
         return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    private void collectShare(Intent intent) {
+        if (Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
+            ArrayList<Uri> list = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (list != null) sharedUris.addAll(list);
+        } else {
+            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u != null) sharedUris.add(u);
+        }
+        CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        if (text != null && text.length() > 0)
+            sharedText = sharedText.isEmpty() ? text.toString() : sharedText + "\n" + text;
+    }
+
+    /** 分享的文件先传到宿主，再以 `shared` 事件交给页面（{paths, text}） */
+    private void deliverShare() {
+        if (sharedUris.isEmpty() && sharedText.isEmpty()) return;
+        final List<Uri> uris = new ArrayList<>(sharedUris);
+        final String text = sharedText;
+        sharedUris.clear();
+        sharedText = "";
+        final String base = trimSlash(prefs.getString("url", DEFAULT_URL));
+        final String token = prefs.getString("token", "");
+        io.execute(() -> {
+            JSONObject ev = new JSONObject();
+            try {
+                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, uris,
+                        (i, n, pct, name) -> emitProgress(i, n, pct, name, "share"));
+                ev.put("paths", new JSONArray(paths));
+                ev.put("text", text);
+            } catch (Exception e) {
+                try {
+                    ev.put("paths", new JSONArray());
+                    ev.put("text", text);
+                    ev.put("error", String.valueOf(e.getMessage()));
+                } catch (JSONException ignored) {
+                }
+            }
+            emit("shared", ev);
+        });
     }
 
     // ---------------------------------------------------------------- 窗口 / 系统栏
@@ -203,6 +272,12 @@ public class MainActivity extends Activity {
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+            // 页面（重新）加载：等新页面的 shim 再调 ready 才发事件
+            pageReady = false;
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
             if (url.startsWith(CONNECT_PAGE)) {
                 applyBarColor(Color.rgb(0x12, 0x12, 0x12));
@@ -246,6 +321,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_PICK) {
+            onPicked(resultCode, data);
+            return;
+        }
         if (requestCode != REQ_FILE || fileCallback == null) {
             super.onActivityResult(requestCode, resultCode, data);
             return;
@@ -269,6 +348,7 @@ public class MainActivity extends Activity {
     void showConnect(String error) {
         pendingError = error == null ? "" : error;
         hostOrigin = "";
+        pageReady = false;
         web.loadUrl(CONNECT_PAGE);
     }
 
@@ -286,6 +366,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 hostOrigin = originOf(base);
+                pageReady = false;
                 String q = token.isEmpty() ? "" : "/?token=" + enc(token);
                 web.loadUrl(base + q);
             });
@@ -345,6 +426,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopService(new Intent(this, KeepAliveService.class));
+        io.shutdownNow();
         web.destroy();
         super.onDestroy();
     }
@@ -365,9 +447,165 @@ public class MainActivity extends Activity {
                 });
     }
 
+    // ---------------------------------------------------------------- 原生调用（RPC）
+
+    /** 页面 → 原生的异步调用；在 JavaBridge 线程上进来，耗时的转到 io 线程 / 主线程 */
+    private void dispatch(String id, String method, JSONObject args) {
+        try {
+            switch (method) {
+                case "ready":
+                    runOnUiThread(() -> {
+                        pageReady = true;
+                        for (String[] ev : pendingEvents) sendEvent(ev[0], ev[1]);
+                        pendingEvents.clear();
+                        deliverShare();
+                    });
+                    reply(id, true, new JSONObject());
+                    return;
+                case "info": {
+                    JSONObject o = new JSONObject();
+                    o.put("version", BuildConfig.VERSION_NAME);
+                    o.put("versionCode", BuildConfig.VERSION_CODE);
+                    o.put("sdk", Build.VERSION.SDK_INT);
+                    o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                    o.put("url", prefs.getString("url", DEFAULT_URL));
+                    o.put("keepAlive", prefs.getBoolean("keepAlive", true));
+                    reply(id, true, o);
+                    return;
+                }
+                case "settings.set": {
+                    if (args.has("keepAlive")) {
+                        boolean on = args.getBoolean("keepAlive");
+                        prefs.edit().putBoolean("keepAlive", on).apply();
+                        runOnUiThread(() -> {
+                            if (on) startKeepAlive();
+                            else stopService(new Intent(this, KeepAliveService.class));
+                        });
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("keepAlive", prefs.getBoolean("keepAlive", true));
+                    reply(id, true, o);
+                    return;
+                }
+                case "openConnect":
+                    runOnUiThread(() -> showConnect(""));
+                    reply(id, true, new JSONObject());
+                    return;
+                case "pickFiles":
+                    runOnUiThread(() -> startPick(id, args.optBoolean("multiple", false)));
+                    return;
+                default:
+                    reply(id, false, errorJson("unknown method: " + method));
+            }
+        } catch (Exception e) {
+            reply(id, false, errorJson(String.valueOf(e.getMessage())));
+        }
+    }
+
+    private void startPick(String id, boolean multiple) {
+        if (pickCallId != null) {
+            reply(id, false, errorJson("busy"));
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        if (multiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        pickCallId = id;
+        try {
+            startActivityForResult(intent, REQ_PICK);
+        } catch (ActivityNotFoundException e) {
+            pickCallId = null;
+            reply(id, false, errorJson("no file picker"));
+        }
+    }
+
+    private void onPicked(int resultCode, Intent data) {
+        final String id = pickCallId;
+        pickCallId = null;
+        if (id == null) return;
+        final List<Uri> uris = new ArrayList<>();
+        if (resultCode == RESULT_OK && data != null) {
+            ClipData clip = data.getClipData();
+            if (clip != null) for (int i = 0; i < clip.getItemCount(); i++) uris.add(clip.getItemAt(i).getUri());
+            else if (data.getData() != null) uris.add(data.getData());
+        }
+        if (uris.isEmpty()) {
+            try {
+                reply(id, true, new JSONObject().put("paths", new JSONArray()));
+            } catch (JSONException ignored) {
+            }
+            return;
+        }
+        final String base = trimSlash(prefs.getString("url", DEFAULT_URL));
+        final String token = prefs.getString("token", "");
+        io.execute(() -> {
+            try {
+                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, uris,
+                        (i, n, pct, name) -> emitProgress(i, n, pct, name, id));
+                reply(id, true, new JSONObject().put("paths", new JSONArray(paths)));
+            } catch (Exception e) {
+                reply(id, false, errorJson(String.valueOf(e.getMessage())));
+            }
+        });
+    }
+
+    private void emitProgress(int index, int total, int pct, String name, String call) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("index", index);
+            o.put("total", total);
+            o.put("pct", pct);
+            o.put("name", name);
+            o.put("call", call);
+            emit("upload-progress", o);
+        } catch (JSONException ignored) {
+        }
+    }
+
+    private static JSONObject errorJson(String msg) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("error", msg);
+        } catch (JSONException ignored) {
+        }
+        return o;
+    }
+
+    private void reply(String id, boolean ok, JSONObject data) {
+        String js = "window.__cockpitNative&&window.__cockpitNative.reply(" + JSONObject.quote(id) + ","
+                + ok + "," + data + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
+    /** 原生 → 页面事件；页面没就绪（还在连接页 / 宿主页面加载中）时排队 */
+    void emit(String name, JSONObject data) {
+        runOnUiThread(() -> {
+            if (pageReady) sendEvent(name, data.toString());
+            else pendingEvents.add(new String[]{name, data.toString()});
+        });
+    }
+
+    private void sendEvent(String name, String json) {
+        web.evaluateJavascript("window.__cockpitNative&&window.__cockpitNative.event("
+                + JSONObject.quote(name) + "," + json + ")", null);
+    }
+
     // ---------------------------------------------------------------- 网页可用的原生能力
 
     private class Bridge {
+        /** 通用异步调用（见类注释）；argsJson 为 JSON 对象文本 */
+        @JavascriptInterface
+        public void call(String id, String method, String argsJson) {
+            JSONObject args;
+            try {
+                args = argsJson == null || argsJson.isEmpty() ? new JSONObject() : new JSONObject(argsJson);
+            } catch (JSONException e) {
+                args = new JSONObject();
+            }
+            dispatch(id, method, args);
+        }
+
         /** 连接页：已保存的设置 + 待显示的错误 + 深链接预填 */
         @JavascriptInterface
         public String state() {

@@ -184,5 +184,13 @@
   "web.not_built": "网页资源还没构建：先运行 pnpm build:web（pnpm build 会一并构建）",
   "web.copied": "已复制",
   "web.copy_link": "复制带 token 的链接",
-  "web.token_hint": "链接里的 token 等同于登录凭据，不要发给别人。"
+  "web.token_hint": "链接里的 token 等同于登录凭据，不要发给别人。",
+  "android.title": "Android 客户端",
+  "android.hint": "这些选项只保存在这台手机的 App 里，不影响同一个宿主上的浏览器页面。",
+  "android.version": "版本",
+  "android.device": "设备",
+  "android.host": "宿主",
+  "android.keep_alive": "后台保持运行（常驻通知，切到后台时播放器与连接不断）",
+  "android.switch_host": "切换宿主",
+  "label.Android 客户端": "Android 客户端"
 }
