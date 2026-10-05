@@ -686,5 +686,15 @@
   "yaya.settings.type_anthropic": "Anthropic native (Claude Messages API)",
   "yaya.settings.type_gemini": "Google Gemini native (Generative Language API)",
   "yaya.plugin.documents.label": "Long documents",
-  "yaya.plugin.documents.desc": "Large attachments stay out of the context; the model searches and reads them on demand"
+  "yaya.plugin.documents.desc": "Large attachments stay out of the context; the model searches and reads them on demand",
+  "yaya.wf.review": "Answer, then self-review",
+  "yaya.wf.review_desc": "Answers normally (with tools), then a reviewing agent checks for errors and omissions and the answer is rewritten if needed. Slower, more reliable",
+  "yaya.wf.step.review": "Review the answer",
+  "yaya.wf.step.review_pass": "Review passed, nothing to change",
+  "yaya.wf.step.revise": "Revise per review",
+  "yaya.wf.perspectives": "Parallel perspectives",
+  "yaya.wf.perspectives_desc": "Expert, skeptic and pragmatist sub-agents answer in parallel; the main agent synthesizes and verifies with tools when needed. Good for hard questions and choosing approaches",
+  "yaya.wf.persp.expert": "Expert view",
+  "yaya.wf.persp.skeptic": "Skeptic view",
+  "yaya.wf.persp.pragmatist": "Pragmatic view"
 }

@@ -686,5 +686,15 @@
   "yaya.settings.type_anthropic": "Anthropic 原生（Claude Messages API）",
   "yaya.settings.type_gemini": "Google Gemini 原生（Generative Language API）",
   "yaya.plugin.documents.label": "长文档检索",
-  "yaya.plugin.documents.desc": "大附件不进上下文，模型按需检索 / 分段读取"
+  "yaya.plugin.documents.desc": "大附件不进上下文，模型按需检索 / 分段读取",
+  "yaya.wf.review": "回答后自我审阅",
+  "yaya.wf.review_desc": "先正常回答（可用工具），再由审阅 Agent 检查错误与遗漏；有问题时重写一版。更慢，更稳",
+  "yaya.wf.step.review": "审阅回答",
+  "yaya.wf.step.review_pass": "审阅通过，无需修改",
+  "yaya.wf.step.revise": "按审阅意见修订",
+  "yaya.wf.perspectives": "多视角并行",
+  "yaya.wf.perspectives_desc": "专家 / 质疑 / 实用三个子 Agent 并行作答，主 Agent 综合并按需用工具核实；适合方案选择与难题",
+  "yaya.wf.persp.expert": "专家视角",
+  "yaya.wf.persp.skeptic": "质疑视角",
+  "yaya.wf.persp.pragmatist": "实用视角"
 }

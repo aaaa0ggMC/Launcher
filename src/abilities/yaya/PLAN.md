@@ -200,7 +200,7 @@
 | | 内置工作流：`agent` 工具循环 / `chat` 纯对话 / `plan-act` 规划子 Agent + 执行 | `[x]` | `workflow/builtin.ts`；会话级选择（输入框）+ 设置里的默认工作流 |
 | | 过程记录持久化（每步 Agent / 耗时 / tokens / 子 Agent 输出） | `[x]` | `messages.meta.workflow`（挂在一次运行的第一个 assistant 节点上） |
 | | 流式 usage（`stream_options.include_usage`，网关不支持时自动退回） | `[x]` | `providers/openai.ts` |
-| | 更多工作流（审阅 / 多 Agent 并行等）、MCP 工具编排 | `[ ]` | 照 `builtin.ts` 注册即可 |
+| | 更多工作流（审阅 / 多 Agent 并行等）、MCP 工具编排 | `[x]` | `review`（回答后审阅子 Agent 挑错，有问题时重写）/ `perspectives`（专家 / 质疑 / 实用三个子 Agent 并行，主 Agent 综合并可用工具核实），单测 `workflow/workflows.test.ts`；MCP 工具与内置工具同在 `tools: 'enabled'` 里，由工作流统一编排 |
 | **内置工具** | `get_system_time` / `cockpit_list_commands` / `cockpit_command` | `[x]` | `services/tools/registry.ts`；`cockpit_command` 对需授权的命令要求确认，禁止调用 `yaya.*` |
 | | `read_file`（分段 / 目录列表）/ `write_file` / `run_bash` | `[x]` | 结果统一截断，`run_bash` 可被「停止」中断 |
 | | `fetch_url`（HTML 去标签、超时） | `[x]` | 同上 |
