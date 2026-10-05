@@ -25,6 +25,8 @@ export function installViewportVar(): void {
   root.classList.add('vh-js')
 
   let lastLogged = ''
+  let logTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingLog: Record<string, unknown> | null = null
   const update = (): void => {
     const vv = window.visualViewport
     const visible = vv ? vv.height : window.innerHeight
@@ -49,16 +51,26 @@ export function installViewportVar(): void {
       dpr: window.devicePixelRatio,
       appVh: Math.round(px)
     }
-    const key = JSON.stringify(info)
-    if (key !== lastLogged) {
-      lastLogged = key
-      console.warn('[viewport]', info)
-    }
+    // 日志只记稳定后的结果：键盘动画期间每帧一条 warn 会被转发成一次宿主请求（曾因此卡顿数秒）
+    pendingLog = info
+    if (logTimer) clearTimeout(logTimer)
+    logTimer = setTimeout(() => {
+      const key = JSON.stringify(pendingLog)
+      if (pendingLog && key !== lastLogged) {
+        lastLogged = key
+        console.warn('[viewport]', pendingLog)
+      }
+    }, 1000)
   }
-  let raf = 0
+  // 键盘弹出 / 收起动画期间 resize 几乎每帧一次，每次都要整页重排（含毛玻璃重绘）：
+  // 合并成动画结束后的一次（尾随 120ms），外壳一步到位，不跟着逐帧抖
+  let timer: ReturnType<typeof setTimeout> | null = null
   const schedule = (): void => {
-    cancelAnimationFrame(raf)
-    raf = requestAnimationFrame(update)
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      requestAnimationFrame(update)
+    }, 120)
   }
   window.addEventListener('resize', schedule)
   window.addEventListener('orientationchange', schedule)

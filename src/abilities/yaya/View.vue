@@ -386,7 +386,8 @@ function newChat(): void {
   hasMore.value = false
   snapshot.value = null
   draftWorkflow.value = null
-  void nextTick(() => inputRef.value?.focus())
+  // 触屏上不自动聚焦：会立刻弹出键盘、整页重排，用户想打字自己点输入框
+  if (!matchMedia('(pointer: coarse)').matches) void nextTick(() => inputRef.value?.focus())
 }
 
 async function ensureSession(): Promise<string> {
