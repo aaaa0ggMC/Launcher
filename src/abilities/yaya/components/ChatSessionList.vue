@@ -14,6 +14,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'selectSession', id: string): void
+  /** 搜索命中正文：打开会话并定位到命中的那条消息 */
+  (e: 'openHit', sessionId: string, messageId: string): void
   (e: 'createSession'): void
   (e: 'deleteSession', id: string): void
   (e: 'renameSession', id: string, title: string): void
@@ -180,7 +182,9 @@ function isRunning(id: string): boolean {
 function onItemClick(s: Session): void {
   if (editingId.value === s.id) return
   if (editingId.value) commitRename()
-  emit('selectSession', s.id)
+  const hit = contentHits.value.get(s.id)
+  if (hit) emit('openHit', s.id, hit.messageId)
+  else emit('selectSession', s.id)
 }
 
 function startRename(s: Session): void {

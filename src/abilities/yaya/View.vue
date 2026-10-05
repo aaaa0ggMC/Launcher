@@ -244,11 +244,17 @@ interface BranchWindow {
   messages: MessageNode[]
   hasMore: boolean
 }
-function fetchWindow(session: string, limit: number, before?: string): Promise<BranchWindow> {
+function fetchWindow(
+  session: string,
+  limit: number,
+  before?: string,
+  include?: string
+): Promise<BranchWindow> {
   return window.cockpit.command('yaya.messages-branch', {
     session,
     limit,
-    ...(before ? { before } : {})
+    ...(before ? { before } : {}),
+    ...(include ? { include } : {})
   }) as Promise<BranchWindow>
 }
 function userTurnCount(): number {
@@ -333,6 +339,66 @@ async function loadOlder(): Promise<void> {
     loadingOlder.value = false
   }
   void fillViewport()
+}
+
+// ---- 跳转到某条消息（搜索命中 / 用量统计）：目标在窗口外就把窗口往前扩到它 ----
+/** 重新加载窗口并保证包含目标；返回目标是否在当前分支上 */
+async function loadAround(messageId: string): Promise<boolean> {
+  const id = activeSessionId.value
+  if (!id) return false
+  const seq = ++loadSeq
+  flushChunks()
+  const win = await fetchWindow(id, Math.max(WINDOW_TURNS, userTurnCount()), undefined, messageId)
+  if (seq !== loadSeq || id !== activeSessionId.value) return false
+  messages.value = mergeNodes(messages.value, win.messages)
+  hasMore.value = win.hasMore
+  return win.messages.some((m) => m.id === messageId)
+}
+
+function turnHas(turn: Turn, id: string): boolean {
+  if (turn.kind === 'user') return turn.message.id === id
+  return turn.steps.some((m) => m.id === id) || turn.orphanResults.some((m) => m.id === id)
+}
+
+let flashTimer = 0
+async function jumpToMessage(sessionId: string, messageId: string): Promise<void> {
+  try {
+    if (sessionId !== activeSessionId.value) await selectSession(sessionId)
+    else drawerOpen.value = false
+    if (activeSessionId.value !== sessionId) return
+    if (!messages.value.some((m) => m.id === messageId) && !(await loadAround(messageId))) {
+      // 不在当前分支：切到它所在的分支（走到该分支最新的进展）再加载
+      await window.cockpit.command('yaya.session-switch-leaf', {
+        session: sessionId,
+        leaf: messageId
+      })
+      if (!(await loadAround(messageId))) {
+        showNotice(t('yaya.jump_not_found', '找不到这条消息，可能已被删除'), true)
+        return
+      }
+    }
+  } catch (e) {
+    showNotice(errText(e), true)
+    return
+  }
+  await nextTick()
+  const turn = turns.value.find((x) => turnHas(x, messageId))
+  const el = turn
+    ? scrollEl.value?.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(turn.key)}"]`)
+    : null
+  if (!el) return
+  stickToBottom.value = false
+  el.scrollIntoView({ block: 'center' })
+  // content-visibility: auto 的轮次先按估计高度排版，渲染后位置会变：下一帧再对一次
+  requestAnimationFrame(() => {
+    el.scrollIntoView({ block: 'center' })
+    lastScrollTop = scrollEl.value?.scrollTop ?? 0
+  })
+  el.classList.remove('jump-flash')
+  void el.offsetWidth
+  el.classList.add('jump-flash')
+  window.clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => el.classList.remove('jump-flash'), 2200)
 }
 
 /** 内容还撑不满一屏时（不会触发滚动事件）继续往前加载 */
@@ -971,6 +1037,7 @@ function onVisibility(): void {
 }
 
 onBeforeUnmount(() => {
+  window.clearTimeout(flashTimer)
   for (const off of unsubs) off()
   document.removeEventListener('visibilitychange', onVisibility)
   if (chunkTimer) clearTimeout(chunkTimer)
@@ -1000,6 +1067,7 @@ watch(isRunning, (now, before) => {
         :active-session-id="activeSessionId"
         :running-session-ids="runningIds"
         @select-session="selectSession"
+        @open-hit="jumpToMessage"
         @create-session="newChat"
         @delete-session="handleDelete"
         @rename-session="handleRename"
@@ -1192,6 +1260,7 @@ watch(isRunning, (now, before) => {
             <UserMessage
               v-if="turn.kind === 'user'"
               class="turn-item"
+              :data-turn-key="turn.key"
               :message="turn.message"
               :busy="isRunning"
               :editing="editingId === turn.message.id"
@@ -1203,6 +1272,7 @@ watch(isRunning, (now, before) => {
             <AssistantTurn
               v-else
               class="turn-item"
+              :data-turn-key="turn.key"
               :turn="turn"
               :assistant-name="assistantName"
               :live="isRunning && turn.key === lastTurnKey"
@@ -1336,6 +1406,7 @@ watch(isRunning, (now, before) => {
       v-model="showUsage"
       :session-id="activeSessionId || ''"
       :session-title="sessionTitle"
+      @jump="(id: string) => jumpToMessage(activeSessionId || '', id)"
     />
     <ModelSelectDialog
       v-model="showModelSelect"
@@ -1520,6 +1591,22 @@ watch(isRunning, (now, before) => {
 .thread > .turn-item {
   content-visibility: auto;
   contain-intrinsic-size: auto 480px;
+}
+/* 跳转到的轮次：短暂高亮（搜索命中 / 用量统计） */
+.thread > .turn-item.jump-flash {
+  border-radius: 12px;
+  animation: jump-flash 2.2s ease-out;
+}
+@keyframes jump-flash {
+  0%,
+  30% {
+    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.55);
+    background: rgba(var(--v-theme-primary), 0.08);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0);
+    background: rgba(var(--v-theme-primary), 0);
+  }
 }
 .loading {
   display: flex;

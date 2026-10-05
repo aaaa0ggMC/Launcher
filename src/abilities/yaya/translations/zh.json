@@ -718,5 +718,8 @@
   "yaya.widget.streaming": "生成中，代码块闭合后可以运行",
   "yaya.widget.too_large": "小部件超过 500KB，仅显示源码",
   "yaya.widget.sandbox_hint": "在隔离沙箱里运行：没有网络，无法访问 Cockpit",
-  "yaya.widget.frame_title": "HTML 小部件"
+  "yaya.widget.frame_title": "HTML 小部件",
+  "yaya.usage.jump": "在对话中定位",
+  "yaya.jump_not_found": "找不到这条消息，可能已被删除",
+  "yaya.usage.chart_hint": "点柱子可定位到那次调用"
 }

@@ -468,7 +468,7 @@ export interface BranchWindow {
  */
 export function getMessageBranchWindow(
   leafId: string | null | undefined,
-  opts: { limit: number; before?: string }
+  opts: { limit: number; before?: string; include?: string }
 ): BranchWindow {
   if (!leafId) return { messages: [], hasMore: false }
   const d = getYayaDb()
@@ -512,6 +512,20 @@ export function getMessageBranchWindow(
     if (++users === limit) {
       start = i
       break
+    }
+  }
+  // 跳转（搜索命中 / 用量统计）：窗口往前扩到目标所在轮，再多带一轮上下文
+  if (opts.include) {
+    const at = path.findIndex((r) => r.id === opts.include)
+    if (at >= 0 && at < start) {
+      let turnStart = 0
+      let seenUsers = 0
+      for (let i = at; i >= 0; i--) {
+        if (path[i].role !== 'user') continue
+        turnStart = i
+        if (++seenUsers === 2) break
+      }
+      start = turnStart
     }
   }
   const messages: MessageNode[] = []

@@ -718,5 +718,8 @@
   "yaya.widget.streaming": "Generating — you can run it once the code block is closed",
   "yaya.widget.too_large": "Widget is over 500KB — showing source only",
   "yaya.widget.sandbox_hint": "Runs in an isolated sandbox: no network, no access to Cockpit",
-  "yaya.widget.frame_title": "HTML widget"
+  "yaya.widget.frame_title": "HTML widget",
+  "yaya.usage.jump": "Show in conversation",
+  "yaya.jump_not_found": "Can't find this message — it may have been deleted",
+  "yaya.usage.chart_hint": "Click a bar to jump to that call"
 }
