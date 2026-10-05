@@ -1488,6 +1488,7 @@ watch(isRunning, (now, before) => {
       :session-title="sessionTitle"
       @view="treeView"
       @branch="treeBranch"
+      @jump="(turn: TreeTurn) => jumpToMessage(activeSessionId || '', turn.id)"
     />
     <UsageDialog
       v-model="showUsage"

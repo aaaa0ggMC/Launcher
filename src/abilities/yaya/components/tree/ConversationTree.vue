@@ -39,6 +39,8 @@ const emit = defineEmits<{
   (e: 'view', turn: TreeTurn): void
   /** 从这里开新分支（回答：接在它后面；提问：回到它之前并带回原文） */
   (e: 'branch', turn: TreeTurn, parentEnd: string | null): void
+  /** 跳到当前分支里的这一轮（只给主线上的节点：不切分支，只滚动定位） */
+  (e: 'jump', turn: TreeTurn): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -383,6 +385,17 @@ function confirmView(): void {
   emit('view', turn)
 }
 
+/** 选中的节点在当前分支（主线）上：可以直接跳过去 */
+const pickedOnPath = computed(() => !!picked.value && path.value.has(picked.value.id))
+
+function confirmJump(): void {
+  const turn = picked.value
+  if (!turn) return
+  picked.value = null
+  open.value = false
+  emit('jump', turn)
+}
+
 function confirmBranch(): void {
   const turn = picked.value
   if (!turn) return
@@ -655,7 +668,11 @@ watch(narrow, () => {
         </v-card-text>
         <v-card-actions class="flex-wrap justify-end ga-2 px-4 pb-4">
           <v-btn variant="text" @click="picked = null">{{ t('yaya.cancel', '取消') }}</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-eye-outline" @click="confirmView">
+          <!-- 主线上的节点「查看这条分支」就是现在这条，换成直接跳到这一轮 -->
+          <v-btn v-if="pickedOnPath" variant="tonal" prepend-icon="mdi-target" @click="confirmJump">
+            {{ t('yaya.tree.jump_here', '跳转到此节点') }}
+          </v-btn>
+          <v-btn v-else variant="tonal" prepend-icon="mdi-eye-outline" @click="confirmView">
             {{ t('yaya.tree.view', '查看这条分支') }}
           </v-btn>
           <v-btn

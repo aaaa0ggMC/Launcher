@@ -603,6 +603,7 @@
   "yaya.tree.branch_user_hint": "“Branch from here” goes back to just before this question and puts it in the input box — edit and send to start a new branch.",
   "yaya.tree.branch_answer_hint": "After “Branch from here”, your next message continues from this answer.",
   "yaya.tree.view": "View this branch",
+  "yaya.tree.jump_here": "Jump to this node",
   "yaya.tree.branch_here": "Branch from here",
   "yaya.tree.branched": "Moved here: your next message starts a new branch; the old conversation stays in the tree",
   "yaya.plugin.search.label": "Web Search",

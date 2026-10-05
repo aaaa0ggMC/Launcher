@@ -603,6 +603,7 @@
   "yaya.tree.branch_user_hint": "「从这里开新分支」会回到这条提问之前，并把原问题放进输入框，改完再发就是一条新分支。",
   "yaya.tree.branch_answer_hint": "「从这里开新分支」之后，你发的下一条消息会接在这轮回答后面。",
   "yaya.tree.view": "查看这条分支",
+  "yaya.tree.jump_here": "跳转到此节点",
   "yaya.tree.branch_here": "从这里开新分支",
   "yaya.tree.branched": "已回到这里：接下来发送的消息会开一条新分支，原来的对话保留在对话树里",
   "yaya.plugin.search.label": "网页搜索",
