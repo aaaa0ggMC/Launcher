@@ -50,6 +50,8 @@ const loading = ref(false)
 const errorMsg = ref('')
 const picked = ref<TreeTurn | null>(null)
 const narrow = ref(false)
+/** 触屏（没有滚轮）：提示只说双指缩放 */
+const coarse = ref(false)
 const stageEl = ref<HTMLElement | null>(null)
 const worldEl = ref<HTMLElement | null>(null)
 const stageSize = ref({ w: 0, h: 0 })
@@ -62,10 +64,23 @@ const edges = computed<GraphEdge[]>(() => buildEdges(graph.value, path.value))
 const sizes = computed(() => subtreeSizes(graph.value))
 const forkCount = computed(() => graph.value.nodes.filter((n) => n.children.length > 1).length)
 
+/**
+ * 手势进行中才给 will-change：常驻 will-change 会让浏览器按第一次的缩放把整层栅格化成位图，
+ * 之后再缩放文字只是位图拉伸（放大发糊、缩小发虚）；手势结束去掉它，文字按当前缩放重新清晰绘制。
+ */
+const gesturing = ref(false)
+let gestureTimer = 0
+function markGesture(): void {
+  gesturing.value = true
+  window.clearTimeout(gestureTimer)
+  gestureTimer = window.setTimeout(() => (gesturing.value = false), 180)
+}
+
 const worldStyle = computed(() => ({
   width: `${graph.value.width}px`,
   height: `${graph.value.height}px`,
-  transform: `translate(${viewport.value.x}px, ${viewport.value.y}px) scale(${viewport.value.scale})`
+  transform: `translate(${viewport.value.x}px, ${viewport.value.y}px) scale(${viewport.value.scale})`,
+  willChange: gesturing.value ? 'transform' : 'auto'
 }))
 
 function errText(e: unknown): string {
@@ -161,6 +176,7 @@ function onWheel(e: WheelEvent): void {
   const py = e.clientY - rect.top
   // 触控板 / 鼠标滚轮的行内滚动换算成像素
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
+  markGesture()
   viewport.value = zoomAt(viewport.value, Math.exp(-dy * 0.0015), px, py)
 }
 
@@ -236,6 +252,7 @@ function onPointerMove(e: PointerEvent): void {
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
   if (pointers.size >= 2) {
     if (pinch) applyPinch()
+    markGesture()
     dragged = true
     return
   }
@@ -246,6 +263,7 @@ function onPointerMove(e: PointerEvent): void {
     capturePointer(e.pointerId)
   }
   if (!dragged) return
+  markGesture()
   viewport.value = {
     ...viewport.value,
     x: viewport.value.x + (e.clientX - prev.x),
@@ -384,6 +402,7 @@ function onNarrowChange(e: MediaQueryListEvent): void {
 onMounted(() => {
   narrowMql = window.matchMedia('(max-width: 720px)')
   narrow.value = narrowMql.matches
+  coarse.value = window.matchMedia('(pointer: coarse)').matches
   narrowMql.addEventListener('change', onNarrowChange)
 })
 
@@ -392,6 +411,7 @@ onBeforeUnmount(() => {
   narrowMql = null
   ro?.disconnect()
   ro = null
+  window.clearTimeout(gestureTimer)
   loadSequence++
   resetPointers()
 })
@@ -453,8 +473,12 @@ watch(narrow, () => {
       </div>
 
       <div class="graph-toolbar">
-        <span class="text-caption text-medium-emphasis text-truncate graph-tip">
-          {{ t('yaya.tree.pan_hint', '拖动平移 · 滚轮 / 双指缩放') }}
+        <span class="text-caption text-medium-emphasis graph-tip">
+          {{
+            coarse
+              ? t('yaya.tree.pan_hint_touch', '拖动平移 · 双指缩放')
+              : t('yaya.tree.pan_hint', '拖动平移 · 滚轮 / 双指缩放')
+          }}
         </span>
         <v-spacer />
         <div class="d-flex align-center ga-1 flex-shrink-0">
@@ -574,21 +598,21 @@ watch(narrow, () => {
                     : t('yaya.tree.empty', '（空消息）'))
                 }}
               </span>
+              <!-- 一行放下：时间 + 图标计数（完整说明在 title / aria-label 里），放不下就省略号 -->
               <span class="node-meta">
                 <span v-if="node.id === tree?.current" class="node-here">
                   {{ t('yaya.tree.current', '当前') }}
                 </span>
-                <span>{{ timeText(node.turn.createdAt) }}</span>
-                <span v-if="node.turn.tools">
-                  · {{ te('yaya.tree.tools', { n: String(node.turn.tools) }, '{n} 次工具调用') }}
+                <span class="meta-time">{{ timeText(node.turn.createdAt) }}</span>
+                <span v-if="node.turn.tools" class="meta-item">
+                  <v-icon icon="mdi-wrench-outline" size="12" aria-hidden="true" />{{
+                    node.turn.tools
+                  }}
                 </span>
-                <span v-if="node.children.length > 1" class="node-fork">
-                  ·
-                  {{ te('yaya.tree.forks', { n: String(node.children.length) }, '{n} 个分支') }}
-                </span>
-                <span v-else-if="node.children.length === 1">
-                  ·
-                  {{ te('yaya.tree.nodes', { n: String(sizes.get(node.id) ?? 1) }, '{n} 个节点') }}
+                <span v-if="node.children.length > 1" class="meta-item node-fork">
+                  <v-icon icon="mdi-source-branch" size="12" aria-hidden="true" />{{
+                    node.children.length
+                  }}
                 </span>
               </span>
             </span>
@@ -667,11 +691,15 @@ watch(narrow, () => {
 .graph-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   padding: 8px 20px 12px;
 }
+/* 提示可以换行，不截断；窄到放不下时整行让给它，按钮换到下一行右侧 */
 .graph-tip {
   min-width: 0;
+  flex: 1 1 160px;
+  line-height: 1.5;
 }
 .zoom-chip {
   padding-block: 4px;
@@ -726,6 +754,7 @@ watch(narrow, () => {
 /* 节点卡片 */
 .graph-node {
   position: absolute;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -766,14 +795,18 @@ watch(narrow, () => {
 .node-body {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
 }
+/* 卡片高度固定：正文最多两行，第三行留给信息行（之前三行正文 + 换行的信息行会溢出卡片） */
 .node-text {
   font-size: 0.875rem;
-  line-height: 1.45;
+  line-height: 1.4;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
@@ -782,13 +815,33 @@ watch(narrow, () => {
   font-weight: 600;
 }
 .node-meta {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: rgba(var(--v-theme-on-surface), 0.65);
+}
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.meta-time {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .node-here {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-primary), 0.16);
   color: rgb(var(--v-theme-primary));
   font-weight: 700;
 }
