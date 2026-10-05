@@ -19,9 +19,11 @@ export type HostCap = 'native' | 'web' | 'none'
  * 页面判断 `window.cockpit.client` 是否存在即可，不要自己猜是不是在 App 里。
  *
  * - `call(method, args)`：异步调用原生方法（`info` / `settings.set` / `openConnect` / `pickFiles` /
- *   `pickDirectory` …），失败 reject；
+ *   `pickDirectory` / `media.update` …），失败 reject；
  * - 原生推来的事件经 `window.cockpit.on('cockpit:client-<事件名>', cb)` 收：
- *   `upload-progress`（{index,total,pct,name,call}）、`shared`（别的应用分享进来：{paths,text,error?}）。
+ *   `upload-progress`（{index,total,pct,name,call}）、`shared`（别的应用分享进来：{paths,text,error?}）、
+ *   `media-action`（系统媒体按钮：{action, position?}）。
+ * - 媒体控制不用页面直接调：web-shim 把 `navigator.mediaSession` 自动转给原生（headless/native-media.ts）。
  */
 export interface NativeClient {
   kind: 'android'

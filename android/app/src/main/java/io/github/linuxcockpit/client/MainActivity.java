@@ -74,6 +74,8 @@ public class MainActivity extends Activity {
 
     private FrameLayout root;
     private WebView web;
+    /** 系统媒体控制（通知栏 / 锁屏）；页面经 media.update 驱动 */
+    private MediaBridge media;
     private SharedPreferences prefs;
     private ValueCallback<Uri[]> fileCallback;
     /** 连接页要显示的错误（下次 state() 取走） */
@@ -138,6 +140,7 @@ public class MainActivity extends Activity {
         setupInsets();
         createSpinner();
         createWebView();
+        media = new MediaBridge(this);
 
         boolean restored = false;
         if (savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
@@ -454,6 +457,8 @@ public class MainActivity extends Activity {
             if (url.startsWith(CONNECT_PAGE)) return;
             // 页面（重新）加载：等新页面的 shim 再调 ready 才发事件，期间显示原生转圈
             pageReady = false;
+            // 旧页面的播放器没了：撤掉媒体卡片，新页面开始播放时会重新推
+            if (media != null) media.clear();
             showLoading(true);
         }
 
@@ -531,6 +536,7 @@ public class MainActivity extends Activity {
         pendingError = error == null ? "" : error;
         hostOrigin = "";
         pageReady = false;
+        if (media != null) media.clear();
         probeSeq++; // 让还在探测中的回调作废（它属于上一次尝试）
         pendingConnect = null;
         showLoading(false);
@@ -621,6 +627,7 @@ public class MainActivity extends Activity {
         probeSeq++; // 丢弃还没回来的探测结果，别让它动已销毁的界面
         pendingConnect = null;
         showLoading(false);
+        media.release();
         stopService(new Intent(this, KeepAliveService.class));
         io.shutdownNow();
         web.destroy();
@@ -684,6 +691,11 @@ public class MainActivity extends Activity {
                     return;
                 case "pickDirectory":
                     runOnUiThread(() -> startPickDir(id, args.optString("initial", "")));
+                    return;
+                case "media.update":
+                    // 页面的 navigator.mediaSession 快照 → 系统媒体会话 + 通知（0.5.0）
+                    runOnUiThread(() -> media.update(args));
+                    reply(id, true, new JSONObject());
                     return;
                 default:
                     reply(id, false, errorJson("unknown method: " + method));
