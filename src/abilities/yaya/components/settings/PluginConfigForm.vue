@@ -223,26 +223,8 @@ onMounted(async () => {
           </div>
 
           <div class="config-control d-flex align-center ga-2 flex-wrap">
-            <!-- text：多行 -->
-            <v-textarea
-              v-if="field.type === 'text'"
-              v-model="draft[field.key] as string"
-              :rows="4"
-              :placeholder="field.placeholder ?? ''"
-              variant="outlined"
-              hide-details
-              auto-grow
-            />
-            <!-- string：单行 -->
-            <v-text-field
-              v-else-if="field.type === 'string'"
-              v-model="draft[field.key] as string"
-              :placeholder="field.placeholder ?? ''"
-              variant="outlined"
-              hide-details
-            />
-            <!-- secret：密码框 + 占位提示 + 清除按钮；整块是 AI 禁区 -->
-            <template v-else-if="field.secret">
+            <!-- secret（先于 string / text 判断：secret 字段的 type 也是 string）：密码框 + 占位提示 + 清除按钮；整块是 AI 禁区 -->
+            <template v-if="field.secret">
               <div v-agent-forbidden class="d-flex align-center ga-2 flex-grow-1 min-w-0">
                 <v-text-field
                   v-model="draft[field.key] as string"
@@ -264,6 +246,24 @@ onMounted(async () => {
                 </v-btn>
               </div>
             </template>
+            <!-- text：多行 -->
+            <v-textarea
+              v-else-if="field.type === 'text'"
+              v-model="draft[field.key] as string"
+              :rows="4"
+              :placeholder="field.placeholder ?? ''"
+              variant="outlined"
+              hide-details
+              auto-grow
+            />
+            <!-- string：单行 -->
+            <v-text-field
+              v-else-if="field.type === 'string'"
+              v-model="draft[field.key] as string"
+              :placeholder="field.placeholder ?? ''"
+              variant="outlined"
+              hide-details
+            />
             <!-- number -->
             <v-text-field
               v-else-if="field.type === 'number'"

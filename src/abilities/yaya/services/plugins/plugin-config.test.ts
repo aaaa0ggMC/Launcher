@@ -134,6 +134,12 @@ it('secret 加密落盘、读回解密、publicYayaConfig 只给 pluginSecretsSe
   const inMemory = config.loadYayaConfig()
   assert.equal(inMemory.pluginConfig?.demo?.api_key, 'sk-live-123')
 
+  // 给页面 / 命令的配置视图：secret 只有「已设置」，绝不带值
+  const info = registry.listPluginInfo(inMemory).find((p) => p.id === 'demo')!
+  assert.equal('api_key' in (info.config?.values ?? {}), false)
+  assert.deepEqual(info.config?.secretsSet, ['api_key'])
+  assert.doesNotMatch(JSON.stringify(info), /sk-live-123/)
+
   // 落盘的是密文
   const saved = diskConfig()
   assert.match(String(saved.pluginConfig?.demo?.api_key), /^enc:v2:/)

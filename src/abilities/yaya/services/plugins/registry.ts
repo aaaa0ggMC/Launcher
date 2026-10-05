@@ -536,7 +536,9 @@ function configFieldView(field: PluginConfigField): PluginConfigField {
 /** 给界面的配置视图：schema（已翻译）+ 非 secret 字段的值 + 已设置的 secret key */
 function configInfoView(plugin: YayaPlugin, config: YayaConfig): PluginConfigInfo {
   const schema = (plugin.configSchema ?? []).map(configFieldView)
+  // secret（已解密）绝不下发：页面 / 命令结果 / AI 看到的都只有「已设置」
   const values = pluginConfigValues(plugin, config)
+  for (const f of schema) if (f.secret) delete values[f.key]
   const stored = config.pluginConfig?.[plugin.id] ?? {}
   const secretsSet = schema
     .filter((f) => f.secret)
