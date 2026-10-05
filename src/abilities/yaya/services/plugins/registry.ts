@@ -6,9 +6,14 @@ import { createHash } from 'node:crypto'
 import { makeLogger } from '../../../../main/process/logger'
 import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, YayaConfig } from '../../types'
+import { loadYayaConfig, setPluginSecretKeysResolver } from '../config'
 import { saveAsset } from '../assets'
 import type {
   NormalizedToolResult,
+  PluginConfigField,
+  PluginConfigInfo,
+  PluginGroup,
+  PluginGroupInfo,
   PluginInfo,
   PluginProvider,
   PluginStatus,
@@ -84,6 +89,126 @@ export function getPlugin(id: string): YayaPlugin | undefined {
 
 export function isPluginEnabled(plugin: YayaPlugin, config: YayaConfig): boolean {
   return config.pluginEnabled?.[plugin.id] ?? plugin.defaultEnabled ?? true
+}
+
+// 告诉 config.ts 哪些插件配置字段是 secret（落盘前加密、下发前脱敏都要用）。
+// 放在这里而不是 config.ts 自己 import registry：registry 要读 config 的 loadYayaConfig。
+setPluginSecretKeysResolver((pluginId) => pluginSecretKeys(pluginId))
+
+/** 插件 schema 里 secret 字段的 key（没有 schema / 插件未加载时为空） */
+function secretKeysOf(plugin: YayaPlugin | undefined): string[] {
+  if (!plugin?.configSchema) return []
+  return plugin.configSchema.filter((f) => f.secret).map((f) => f.key)
+}
+
+/** 按插件 id 查 secret 字段 key（落盘加密 / 下发脱敏 / 命令校验共用） */
+export function pluginSecretKeys(pluginId: string): string[] {
+  return secretKeysOf(current.find((p) => p.id === pluginId))
+}
+
+// ---------------------------------------------------------------------------
+// 插件配置（PLAN 6.4）：schema 默认值 + 用户值，按字段类型归一
+// ---------------------------------------------------------------------------
+
+/**
+ * 单个配置字段的归一化值：数字夹到 min/max、select 不在选项里回落默认、boolean 归一、
+ * 非法数字回落默认。secret 值由 loadYayaConfig 解密后原样进入（不做其它变换）。
+ */
+function normalizeConfigValue(field: PluginConfigField, raw: unknown): unknown {
+  if (field.type === 'number') {
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isFinite(n)) return field.default ?? 0
+    let v = n
+    if (typeof field.min === 'number') v = Math.max(field.min, v)
+    if (typeof field.max === 'number') v = Math.min(field.max, v)
+    return v
+  }
+  if (field.type === 'boolean') {
+    if (typeof raw === 'boolean') return raw
+    return raw === true || raw === 'true' || raw === 1 || raw === '1'
+  }
+  if (field.type === 'select') {
+    const value = String(raw)
+    if ((field.options ?? []).some((o) => o.value === value)) return value
+    return field.default ?? ''
+  }
+  return typeof raw === 'string' ? raw : String(raw)
+}
+
+/**
+ * 插件当前的配置值：schema 默认值 + 用户值（已归一）。没写进配置的字段用默认值，
+ * 没有默认值就不出现在结果里。工具经 `ToolRunContext.config` 读到的就是这个。
+ */
+export function pluginConfigValues(
+  plugin: YayaPlugin,
+  config: Pick<YayaConfig, 'pluginConfig'>
+): Record<string, unknown> {
+  const stored = config.pluginConfig?.[plugin.id] ?? {}
+  const out: Record<string, unknown> = {}
+  for (const field of plugin.configSchema ?? []) {
+    const raw = stored[field.key]
+    if (raw === undefined || raw === null) {
+      if (field.default !== undefined) out[field.key] = field.default
+      continue
+    }
+    out[field.key] = normalizeConfigValue(field, raw)
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 子分组（PLAN 6.4）
+// ---------------------------------------------------------------------------
+
+/** 插件的子分组定义（没有声明时为空数组） */
+function groupsOf(plugin: YayaPlugin): PluginGroup[] {
+  try {
+    return plugin.groups?.() ?? []
+  } catch (e) {
+    log.warn('plugin groups() failed', { plugin: plugin.id, error: String(e) })
+    return []
+  }
+}
+
+/**
+ * 分组是否启用：`pluginGroupEnabled['<插件 id>/<分组 id>']` 覆盖，缺省 = 分组的 defaultEnabled。
+ */
+export function isGroupEnabled(
+  plugin: YayaPlugin,
+  groupId: string,
+  config: Pick<YayaConfig, 'pluginGroupEnabled'>
+): boolean {
+  const group = groupsOf(plugin).find((g) => g.id === groupId)
+  return config.pluginGroupEnabled?.[`${plugin.id}/${groupId}`] ?? group?.defaultEnabled ?? true
+}
+
+/** 分组状态（没有 status 视为 ready） */
+function groupStatus(group: PluginGroup): PluginStatus {
+  try {
+    return group.status?.() ?? { state: 'ready' }
+  } catch {
+    return { state: 'error', message: 'status check failed' }
+  }
+}
+
+/** 分组此刻是否可用（启用 + ready） */
+function groupAvailable(group: PluginGroup, enabled: boolean): boolean {
+  return enabled && groupStatus(group).state === 'ready'
+}
+
+/**
+ * 工具所在分组此刻是否提供给模型：分组被用户关掉、或分组状态不是 ready 时整组不提供。
+ * 工具的 `group` 指向不存在的分组 = 视为无分组（照常提供）。
+ */
+function groupAvailableForTool(
+  plugin: YayaPlugin,
+  tool: PluginTool,
+  config: Pick<YayaConfig, 'pluginGroupEnabled'>
+): boolean {
+  if (!tool.group) return true
+  const group = groupsOf(plugin).find((g) => g.id === tool.group)
+  if (!group) return true
+  return groupAvailable(group, isGroupEnabled(plugin, group.id, config))
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +304,10 @@ export interface ResolvedTool {
 /**
  * 当前启用的全部工具（按插件顺序、插件内声明顺序，保证同配置下逐字节稳定）。
  * 动态插件会先 start()；连接失败的插件跳过（status 里有错误），不拖垮整个工作流。
+ *
+ * **工具表稳定性（提示词缓存）**：工具表只由插件启用态 / 分组可用性 / disabledTools 决定，
+ * **与 `pluginConfig` 的取值无关**——换了引擎、改了密钥都不改变工具名与描述，
+ * 插件自己的配置经 `ToolRunContext.config` 在运行时读取。
  */
 export async function resolveTools(config: YayaConfig): Promise<ResolvedTool[]> {
   const off = new Set(config.disabledTools ?? [])
@@ -196,6 +325,8 @@ export async function resolveTools(config: YayaConfig): Promise<ResolvedTool[]> 
     }
     for (const tool of plugin.tools()) {
       const name = wireName(plugin, tool)
+      // 整组不可用（被关掉 / 分组 status 非 ready）的工具不提供给模型
+      if (!groupAvailableForTool(plugin, tool, config)) continue
       if (!off.has(name)) out.push({ wireName: name, plugin, tool })
     }
   }
@@ -213,7 +344,8 @@ export function findTool(name: string): ResolvedTool | undefined {
   return undefined
 }
 
-/** 启用插件的 instructions，按插件顺序拼成一段（稳定，适合放在系统提示词前缀里） */
+/** 启用插件的 instructions，按插件顺序拼成一段（稳定，适合放在系统提示词前缀里）。
+ * 与工具表一样只取决于启用态，不随 `pluginConfig` 的取值变化（提示词缓存）。 */
 export function buildPluginInstructions(config: YayaConfig): string {
   const parts: string[] = []
   for (const plugin of current) {
@@ -240,13 +372,16 @@ export function toolNeedsApproval(
   return typeof a === 'function' ? a(args) : a === 'ask'
 }
 
-/** 带超时与中止地执行工具 */
+/** 带超时与中止地执行工具；顺带把插件当前配置（默认值已填、secret 已解密）放进 ctx.config */
 export async function runPluginTool(
   resolved: ResolvedTool,
   args: Record<string, unknown>,
-  ctx: Omit<ToolRunContext, 'pluginId'>
+  ctx: Omit<ToolRunContext, 'pluginId' | 'config'>
 ): Promise<unknown> {
   const timeoutMs = resolved.tool.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  // 工具表与 instructions 不因配置变化而变（提示词缓存），但工具**运行**要读到最新配置；
+  // 这里按当前配置算，调用方（runner）不需要改。
+  const config = pluginConfigValues(resolved.plugin, loadYayaConfig())
   const ac = new AbortController()
   ctx.signal.throwIfAborted()
   let onAbort: () => void = () => {}
@@ -261,7 +396,7 @@ export async function runPluginTool(
   try {
     return await Promise.race([
       cancelled,
-      resolved.tool.run(args, { ...ctx, pluginId: resolved.plugin.id, signal: ac.signal }),
+      resolved.tool.run(args, { ...ctx, pluginId: resolved.plugin.id, signal: ac.signal, config }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           ac.abort()
@@ -342,6 +477,55 @@ function defaultApprovalOf(tool: PluginTool): 'ask' | 'auto' | 'dynamic' {
   return typeof a === 'function' ? 'dynamic' : a
 }
 
+/** schema 的界面视图：翻译 label / description / 选项 label（不改动插件自己的对象） */
+function configFieldView(field: PluginConfigField): PluginConfigField {
+  const view: PluginConfigField = {
+    ...field,
+    label: field.labelKey ? t(field.labelKey, field.label) : field.label
+  }
+  if (field.description !== undefined)
+    view.description = field.descriptionKey
+      ? t(field.descriptionKey, field.description ?? '')
+      : field.description
+  if (field.options)
+    view.options = field.options.map((o) => ({
+      ...o,
+      label: o.labelKey ? t(o.labelKey, o.label) : o.label
+    }))
+  return view
+}
+
+/** 给界面的配置视图：schema（已翻译）+ 非 secret 字段的值 + 已设置的 secret key */
+function configInfoView(plugin: YayaPlugin, config: YayaConfig): PluginConfigInfo {
+  const schema = (plugin.configSchema ?? []).map(configFieldView)
+  const values = pluginConfigValues(plugin, config)
+  const stored = config.pluginConfig?.[plugin.id] ?? {}
+  const secretsSet = schema
+    .filter((f) => f.secret)
+    .filter((f) => stored[f.key] !== undefined && stored[f.key] !== null && stored[f.key] !== '')
+    .map((f) => f.key)
+  return { schema, values, secretsSet }
+}
+
+/** 给界面的分组视图：翻译文案 + 是否可用（启用且 ready） */
+function groupInfoView(plugin: YayaPlugin, config: YayaConfig): PluginGroupInfo[] | undefined {
+  const groups = groupsOf(plugin)
+  if (groups.length === 0) return undefined
+  return groups.map((g) => {
+    const enabled = isGroupEnabled(plugin, g.id, config)
+    const description = g.description ?? ''
+    return {
+      id: g.id,
+      label: g.labelKey ? t(g.labelKey, g.label) : g.label,
+      description: g.descriptionKey ? t(g.descriptionKey, description) : description,
+      enabled,
+      defaultEnabled: g.defaultEnabled ?? true,
+      status: groupStatus(g),
+      available: groupAvailable(g, enabled)
+    }
+  })
+}
+
 export function listPluginInfo(config: YayaConfig): PluginInfo[] {
   const off = new Set(config.disabledTools ?? [])
   return current.map((plugin) => {
@@ -373,9 +557,12 @@ export function listPluginInfo(config: YayaConfig): PluginInfo[] {
           docs: tool.docs,
           defaultApproval: defaultApprovalOf(tool),
           approval: config.toolApproval?.[name],
-          enabled: !off.has(name)
+          enabled: !off.has(name),
+          group: tool.group
         }
-      })
+      }),
+      groups: groupInfoView(plugin, config),
+      config: plugin.configSchema ? configInfoView(plugin, config) : undefined
     }
   })
 }

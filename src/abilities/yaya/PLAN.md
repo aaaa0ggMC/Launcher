@@ -395,10 +395,18 @@
   - 宿主统一执行：候选列表来自注册表（`listPluginInfo` 的插件 + 工具两级，按类型分组：插件 / MCP / Skill），提及解析、`session.meta.mentions` 覆盖、附注与内容的拼接位置（只进新消息，不动前缀）、启用后的工具表追加顺序（稳定、只追加）都在 runner / registry 里做一次。新来源（以后的其它 provider）只要实现 `mention` 或沿用默认就自动可被 `@`。
   - 命令：`yaya.mention-candidates [--query]`（候选，给输入框）与 `yaya.session-mentions --id [--remove]`（查看 / 撤销）。
 
-### 6.4 插件 SDK：插件自己的配置界面 + 子分组（以下几项共同需要）
+### 6.4 插件 SDK：插件自己的配置界面 + 子分组（以下几项共同需要）【已完成】
 
 - **配置**：插件声明配置 schema（字段类型、默认值、`secret` 标记），缺省按 schema 自动生成表单；复杂的在 `plugins/<id>/ui.ts` 提供 `settingsView` 组件。值存 `pluginConfig[<插件 id>]`，`secret` 字段与 MCP 请求头同规则（加密落盘、页面只有 `xxxSet`、留空沿用、显式清除）。插件详情页加「配置」入口（窄屏一层层进入）。插件经 `ctx.config` 读取，配置变化触发 `refreshPlugins`。工具表 / instructions 不因配置变化而改变（如 GenericSearch 换引擎不改 `web_search` 的名字与描述）。
 - **子分组**：插件可声明分组（id / 名称 / 状态 / 自己的开关与配置），工具挂在分组下；分组不可用时（如 Shizuku 没运行）整组工具不提供并说明原因。MCP 以后也可以按服务器能力分组。
+
+**实际做法（2026-10 落地）**：
+
+- `services/config.ts`：`pluginConfig[pid][key]` 的 secret 值以 `enc:v2:` 密文落盘；load 时凡是 `isEncryptedSecret(v)` 的字符串一律解密（不依赖 schema，插件可能还没加载）；save 时按「哪些 key 是 secret」加密明文。后者由 registry 注入 `setPluginSecretKeysResolver`（config.ts 不能 import registry：registry 要读 `loadYayaConfig`，反向依赖成环），于是 `yaya.config-save` / `provider-fetch-models` / 插件自己改配置等**所有**保存路径都自动加密，不会漏。`publicYayaConfig` 剥掉 secret 值（schema 标 secret 的 + 兜底密文识别）并生成 `pluginSecretsSet`；`mergeIncomingYayaConfig` 里 secret 空串沿用旧值、`pluginClearSecrets`（`<pid>/<key>`）删除、未知插件 / 未知 key 保留在内存配置里；`pluginSecretsSet` / `pluginClearSecrets` 两个仅传输字段不落盘。
+- `services/plugins/registry.ts`：`pluginConfigValues`（默认值 + 用户值，数字夹 min/max、select 回落默认、boolean 归一）、`isGroupEnabled`（`pluginGroupEnabled['pid/gid']` ?? `defaultEnabled ?? true`）、`resolveTools` 过滤掉「分组被关 / 分组 status 非 ready」的工具（未知分组 = 无分组）、`runPluginTool` 把 `config: pluginConfigValues(plugin, loadYayaConfig())` 放进 `ToolRunContext`（调用方 runner 不用改）、`listPluginInfo` 填 `groups`（translated label/description/status/available）与 `config`（translated schema、非 secret 值、secretsSet）与 `tool.group`。工具表稳定性写在注释里：工具表只随启用态 / 分组可用性 / disabledTools 变，与配置取值无关。
+- 命令：`yaya.plugin-config-get` / `yaya.plugin-config-set --values <JSON> [--clear k,k]`（按 schema 校验、未知 key 拒绝、secret 空串沿用；`logArgs: false` + `privacy: { agent: 'deny' }`）、`yaya.plugin-group-set`。保存后统一 `saveYayaConfig → refreshPlugins → 广播 cockpit:yaya-plugins-changed`。
+- 设置页：`PluginDetail.vue` 的「分组」区（名称 / 说明 / 状态点 + 不可用原因 / 开关）与「配置」区；`PluginConfigForm.vue` 按 schema 生成表单（secret 走 `v-agent-forbidden` + 密码框 + 清除，保存按钮 + `SaveStatusText`，容器 <640px 转单列标签在上）；`PluginUi.settingsView` + `plugin-ui-registry.settingsViewFor` 让插件整块替换表单；`PluginToolsList.vue` 按 `tool.group` 分组小标题。
+- 测试：`services/plugins/plugin-config.test.ts`（默认值 / 夹取、secret 密文落盘与解密、publicYayaConfig 只给 secretsSet、空串沿用与 clear、分组过滤、ctx.config）。
 
 ### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）
 

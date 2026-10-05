@@ -2,9 +2,11 @@
 import { useI18n } from '@ui/i18n'
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import type { PluginInfo } from '../../services/plugins/types'
+import type { PluginGroupInfo, PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import { handleMarkdownClick, renderMarkdown } from '../markdown'
+import { settingsViewFor } from '../plugin-ui-registry'
+import PluginConfigForm from './PluginConfigForm.vue'
 import PluginToolsList from './PluginToolsList.vue'
 import { isPluginEnabled, pluginFallbackIcon, setPluginEnabled } from './plugin-state'
 
@@ -32,6 +34,11 @@ const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
 /** markdown-it html:false：原始 HTML 一律转义，可直接 v-html */
 const docsHtml = computed(() => renderMarkdown(props.plugin.docs ?? '', labels.value))
 
+/** 插件自己在 ui.ts 里提供的配置界面（有它就替代 schema 自动生成的表单） */
+const customConfigView = computed(() =>
+  props.plugin.config ? settingsViewFor(props.plugin.id, props.plugin.kind) : null
+)
+
 function kindLabel(plugin: PluginInfo): string {
   if (plugin.kind === 'mcp') return t('yaya.settings.plugins.kind_mcp', 'MCP')
   if (plugin.kind === 'skill') return t('yaya.settings.plugins.kind_skill', 'Skill')
@@ -51,6 +58,29 @@ function statusColor(plugin: PluginInfo): string | undefined {
   if (plugin.status.state === 'connecting') return 'info'
   if (plugin.status.state === 'idle') return undefined
   return 'success'
+}
+
+function groupStatusText(group: PluginGroupInfo): string {
+  if (group.status.state === 'error')
+    return group.status.message || t('yaya.settings.plugins.status_error', '错误')
+  if (group.status.state === 'connecting')
+    return t('yaya.settings.plugins.status_connecting', '连接中')
+  if (group.status.state === 'idle') return t('yaya.settings.plugins.status_idle', '未连接')
+  return t('yaya.settings.plugins.status_ready', '就绪')
+}
+
+/** 分组不可用的原因（被关掉 / 状态不是就绪） */
+function groupUnavailableReason(group: PluginGroupInfo): string {
+  if (!group.enabled)
+    return t('yaya.settings.plugins.group_off_reason', '已关闭，该分组的工具不会提供给助手')
+  return group.status.message || t('yaya.settings.plugins.group_not_ready', '该分组此刻不可用')
+}
+
+/** 分组开关：直接调命令（保存 / 刷新 / 广播都在主进程做） */
+function toggleGroup(group: PluginGroupInfo, on: boolean): void {
+  void window.cockpit
+    .command('yaya.plugin-group-set', { id: props.plugin.id, group: group.id, enabled: on })
+    .catch((err) => console.error('failed to toggle plugin group', err))
 }
 
 function toggleEnabled(on: boolean): void {
@@ -148,7 +178,9 @@ function onDocsClick(ev: MouseEvent): void {
       </v-btn>
     </div>
 
-    <v-divider v-if="plugin.docs || plugin.tools.length > 0" />
+    <v-divider
+      v-if="plugin.docs || plugin.tools.length > 0 || plugin.groups?.length || plugin.config"
+    />
 
     <!-- 文档：Markdown 渲染，默认折叠 -->
     <div v-if="plugin.docs" class="docs-box rounded-lg border">
@@ -165,7 +197,75 @@ function onDocsClick(ev: MouseEvent): void {
       <div v-if="docsOpen" class="docs-body md-body pa-3" @click="onDocsClick" v-html="docsHtml" />
     </div>
 
-    <!-- 该插件的工具 -->
+    <!-- 子分组：每组一行（名称 / 说明 / 状态 / 开关），关掉后整组工具不提供给助手 -->
+    <div v-if="plugin.groups && plugin.groups.length > 0" class="d-flex flex-column ga-2">
+      <span class="text-body-2 font-weight-medium">
+        {{ t('yaya.settings.plugins.groups_title', '分组') }}
+      </span>
+      <div class="text-caption text-medium-emphasis">
+        {{
+          t('yaya.settings.plugins.groups_desc', '分组不可用或被关闭时，该分组的工具不会提供给助手')
+        }}
+      </div>
+      <div
+        v-for="group in plugin.groups"
+        :key="group.id"
+        class="group-row d-flex flex-wrap align-center ga-3 py-3 px-3 rounded-lg border"
+      >
+        <div class="min-w-0 flex-grow-1">
+          <div class="d-flex align-center flex-wrap ga-2">
+            <span class="text-body-2 font-weight-medium">{{ group.label }}</span>
+            <span
+              class="status-dot flex-shrink-0"
+              :class="group.available ? 'status-dot--ok' : 'status-dot--off'"
+              :title="group.available ? groupStatusText(group) : groupUnavailableReason(group)"
+            />
+            <span class="text-caption text-medium-emphasis">
+              {{ group.available ? groupStatusText(group) : groupUnavailableReason(group) }}
+            </span>
+          </div>
+          <div v-if="group.description" class="text-caption text-medium-emphasis group-desc">
+            {{ group.description }}
+          </div>
+        </div>
+        <v-switch
+          :model-value="group.enabled"
+          color="primary"
+          hide-details
+          density="compact"
+          class="flex-shrink-0"
+          :title="
+            te('yaya.settings.plugins.group_toggle_named', { name: group.label }, '启用分组 {name}')
+          "
+          :aria-label="
+            te('yaya.settings.plugins.group_toggle_named', { name: group.label }, '启用分组 {name}')
+          "
+          @update:model-value="toggleGroup(group, $event === true)"
+        />
+      </div>
+    </div>
+
+    <!-- 插件配置：插件自定义界面优先，否则按 schema 自动生成表单 -->
+    <div v-if="plugin.config" class="d-flex flex-column ga-2">
+      <span class="text-body-2 font-weight-medium">
+        {{ t('yaya.settings.plugins.config_title', '配置') }}
+      </span>
+      <component
+        :is="customConfigView"
+        v-if="customConfigView"
+        :plugin-id="plugin.id"
+        :info="plugin"
+      />
+      <PluginConfigForm
+        v-else
+        :plugin="plugin"
+        :schema="plugin.config.schema"
+        :values="plugin.config.values"
+        :secrets-set="plugin.config.secretsSet"
+      />
+    </div>
+
+    <!-- 该插件的工具（有分组时按分组小标题分组显示） -->
     <div class="d-flex flex-column ga-2">
       <span class="text-body-2 font-weight-medium">
         {{
@@ -176,6 +276,7 @@ function onDocsClick(ev: MouseEvent): void {
         v-if="plugin.tools.length > 0"
         :config="config"
         :tools="plugin.tools"
+        :groups="plugin.groups"
         :dimmed="!isPluginEnabled(config, plugin)"
       />
       <div v-else class="text-body-2 text-medium-emphasis py-2">
@@ -203,6 +304,33 @@ function onDocsClick(ev: MouseEvent): void {
 
 .detail-desc {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 分组行：背景与工具行一致，状态点 + 说明 + 开关 */
+.group-row {
+  background: rgba(var(--v-theme-surface-variant), 0.12);
+  border-color: rgba(var(--v-theme-surface-bright), 0.2) !important;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot--ok {
+  background: rgb(var(--v-theme-success));
+}
+
+.status-dot--off {
+  background: rgba(var(--v-theme-on-surface), 0.38);
+}
+
+.group-desc {
+  margin-top: 2px;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

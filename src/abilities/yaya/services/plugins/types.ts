@@ -57,10 +57,65 @@ export interface ToolSessionContext {
   toolCount: number
 }
 
+// ---------------------------------------------------------------------------
+// 插件配置（PLAN 6.4）：插件声明 schema，设置页按 schema 自动生成表单
+// ---------------------------------------------------------------------------
+
+export interface PluginConfigOption {
+  value: string
+  label: string
+  labelKey?: string
+}
+
+export interface PluginConfigField {
+  /** 插件内唯一：[a-zA-Z0-9_]+ */
+  key: string
+  type: 'string' | 'text' | 'number' | 'boolean' | 'select'
+  label: string
+  labelKey?: string
+  description?: string
+  descriptionKey?: string
+  default?: string | number | boolean
+  /**
+   * 凭据（API key 等）：加密落盘；`yaya.config-get` / 插件列表只给「已设置」不给值；
+   * 保存时空串 = 沿用旧值，显式清除才删除（与 MCP 请求头同规则）。
+   */
+  secret?: boolean
+  /** select 的选项 */
+  options?: PluginConfigOption[]
+  /** number 的范围 */
+  min?: number
+  max?: number
+  step?: number
+  placeholder?: string
+  /** 属于哪个子分组（缺省 = 插件本身的配置） */
+  group?: string
+}
+
+/**
+ * 子分组：插件把工具挂在分组下（如 Android Controller 的 Shizuku / Termux:API），
+ * 分组有自己的状态、开关与配置。分组不可用（status.state !== 'ready'）或被用户关掉时，
+ * 整组工具不提供给模型，设置页显示原因。
+ */
+export interface PluginGroup {
+  /** 插件内唯一：[a-z0-9-]+ */
+  id: string
+  label: string
+  labelKey?: string
+  description?: string
+  descriptionKey?: string
+  /** 缺省 true；用户覆盖记在 `config.pluginGroupEnabled['<插件 id>/<分组 id>']` */
+  defaultEnabled?: boolean
+  /** 缺省视为 ready */
+  status?: () => PluginStatus
+}
+
 export interface ToolRunContext {
   sessionId: string
   pluginId: string
   signal: AbortSignal
+  /** 本插件的配置值（默认值已填好，secret 已解密）；插件没有配置时为 {} */
+  config?: Record<string, unknown>
   /** 本次运行的上下文信息（宿主按需计算；旧调用方 / 测试里可能没有） */
   context?: () => ToolSessionContext
 }
@@ -79,6 +134,8 @@ export interface PluginTool {
   approval?: ApprovalDefault
   /** 缺省 60s；超时视为失败 */
   timeoutMs?: number
+  /** 所属子分组 id（见 YayaPlugin.groups） */
+  group?: string
   /** 给人看的 Markdown 说明（设置页插件详情） */
   docs?: string
   run(args: Record<string, unknown>, ctx: ToolRunContext): Promise<unknown>
@@ -114,6 +171,13 @@ export interface YayaPlugin {
   /** 当前工具列表（动态插件可能在 start 之后才有） */
   tools: () => PluginTool[]
   status?: () => PluginStatus
+  /**
+   * 配置 schema（缺省 = 无配置）。值存 `config.pluginConfig[<插件 id>]`。
+   * 配置变化会触发 refreshPlugins，但**工具表与 instructions 不能因配置而变**（提示词缓存）。
+   */
+  configSchema?: PluginConfigField[]
+  /** 子分组（缺省 = 无分组） */
+  groups?: () => PluginGroup[]
   /** 启用后首次需要工具前调用（连接 MCP 等）；失败抛错，status 应反映错误 */
   start?: () => Promise<void>
   /** 禁用 / 配置变化 / 退出时调用 */
@@ -139,6 +203,28 @@ export interface PluginToolInfo {
   defaultApproval: 'ask' | 'auto' | 'dynamic'
   approval?: 'ask' | 'auto'
   enabled: boolean
+  group?: string
+}
+
+export interface PluginGroupInfo {
+  id: string
+  /** 已翻译 */
+  label: string
+  description: string
+  enabled: boolean
+  defaultEnabled: boolean
+  status: PluginStatus
+  /** 本组工具此刻是否会提供给模型（启用且 ready） */
+  available: boolean
+}
+
+export interface PluginConfigInfo {
+  /** 已翻译的 schema */
+  schema: PluginConfigField[]
+  /** 非 secret 字段的当前值（缺省值已填） */
+  values: Record<string, unknown>
+  /** 已设置的 secret 字段 key */
+  secretsSet: string[]
 }
 
 export interface PluginInfo {
@@ -155,6 +241,8 @@ export interface PluginInfo {
   /** instructions 的长度（设置页提示「会占用多少系统提示词」） */
   instructionsChars: number
   tools: PluginToolInfo[]
+  groups?: PluginGroupInfo[]
+  config?: PluginConfigInfo
 }
 
 /** 宿主规范化后的工具结果 */

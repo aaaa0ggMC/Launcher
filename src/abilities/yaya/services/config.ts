@@ -98,6 +98,9 @@ export function loadYayaConfig(): YayaConfig {
     }
     cfg.assistantName = normalizeAssistantName(cfg.assistantName)
     cfg.processPreviewSteps = normalizeProcessPreviewSteps(cfg.processPreviewSteps)
+    // 仅传输字段不该出现在内存配置里（旧版本可能落过盘）
+    delete cfg.pluginSecretsSet
+    delete cfg.pluginClearSecrets
 
     // 解密 MCP 自定义请求头的值
     for (const m of cfg.mcpServers) {
@@ -120,6 +123,23 @@ export function loadYayaConfig(): YayaConfig {
         } catch (e) {
           log.warn(`Failed to decrypt API key for provider ${p.id}`, { error: String(e) })
           // 保留密文供用户恢复 vault 后重试。
+        }
+      }
+    }
+
+    // 解密插件配置里的 secret 值：凡是密文一律解密（不依赖 schema —— 插件可能还没加载，
+    // 而 secret 落盘时一定是密文形式，见 saveYayaConfig）
+    for (const [pid, values] of Object.entries(cfg.pluginConfig ?? {})) {
+      if (!values || typeof values !== 'object') continue
+      for (const [key, v] of Object.entries(values)) {
+        if (typeof v !== 'string' || !isEncryptedSecret(v)) continue
+        // 记住它在磁盘上是密文：插件没加载（拿不到 schema）时保存 / 下发也照样当 secret
+        knownSecrets.add(`${pid}/${key}`)
+        try {
+          values[key] = decryptSecret(v)
+        } catch (e) {
+          log.warn(`Failed to decrypt plugin config value ${key}`, { error: String(e) })
+          // 保留密文，避免下一次保存悄悄丢掉无法解密的凭据。
         }
       }
     }
@@ -168,8 +188,31 @@ export function saveYayaConfig(config: YayaConfig): void {
     }
   }
 
+  // 插件配置：schema 标 secret 的字段加密落盘（key 清单由 registry 注入）；
+  // 已经是密文的原样保留（重复保存同一份配置不会二次加密）
+  for (const [pid, values] of Object.entries(toSave.pluginConfig ?? {})) {
+    if (!values || typeof values !== 'object') continue
+    const secretKeys = secretKeysFor(pid)
+    for (const [key, v] of Object.entries(values)) {
+      if (!secretKeys.has(key) || typeof v !== 'string' || !v || isEncryptedSecret(v)) continue
+      knownSecrets.add(`${pid}/${key}`)
+      try {
+        values[key] = encryptSecret(v)
+      } catch (e) {
+        log.warn(`Failed to encrypt plugin config ${pid}.${key}`, { error: String(e) })
+        throw e
+      }
+    }
+  }
+  // 这两个字段只在传输里出现（config-get 返回 / config-save 入参），不落盘
+  delete toSave.pluginSecretsSet
+  delete toSave.pluginClearSecrets
+
   writeFileSync(file, JSON.stringify(toSave, null, 2), 'utf8')
-  cachedConfig = JSON.parse(JSON.stringify(config)) // 内存中保持明文
+  // 内存中保持明文（插件工具通过 ctx.config 读到的就是解密后的值）
+  cachedConfig = JSON.parse(JSON.stringify(config)) as YayaConfig
+  delete cachedConfig.pluginSecretsSet
+  delete cachedConfig.pluginClearSecrets
   log.info('YAYA config saved')
   getBroadcast()('cockpit:yaya-config-changed', publicYayaConfig(cachedConfig!))
 }
@@ -212,6 +255,107 @@ export function publicYayaConfig(config: YayaConfig): YayaConfig {
       headersSet: Object.keys(headers).filter((k) => Boolean(headers[k]))
     }
   })
+  // 插件配置：schema 标 secret 的值一律不下发（只回传 pluginSecretsSet）；
+  // 兜底再按密文特征识别一遍，双重保证不泄露
+  const secretsSet: Record<string, string[]> = {}
+  const pluginConfig = out.pluginConfig
+  if (pluginConfig) {
+    out.pluginConfig = {}
+    for (const [pid, values] of Object.entries(pluginConfig)) {
+      const secretKeys = secretKeysFor(pid)
+      const kept: Record<string, unknown> = {}
+      const set: string[] = []
+      for (const [key, v] of Object.entries(values ?? {})) {
+        const isSecret = secretKeys.has(key) || (typeof v === 'string' && isEncryptedSecret(v))
+        if (isSecret) {
+          if (!isEmptySecretValue(v)) set.push(key)
+          continue
+        }
+        kept[key] = v
+      }
+      out.pluginConfig[pid] = kept
+      if (set.length > 0) secretsSet[pid] = set.sort()
+    }
+  }
+  out.pluginSecretsSet = secretsSet
+  delete out.pluginClearSecrets
+  return out
+}
+
+/**
+ * 插件 secret 字段查询：插件 id → schema 里 `secret: true` 的字段 key。
+ *
+ * 由 `plugins/registry` 注入（见那里的 `setPluginSecretKeysResolver(...)` 调用）：
+ * config.ts **不能** import registry —— registry 自己要读本文件（`runPluginTool` 需要当前
+ * 插件配置），反向 import 会成环。用注入还有一个好处：**所有**保存路径（config-save、
+ * provider-fetch-models、插件表刷新、内置插件自己改配置…）都自动知道哪些值要加密，
+ * 不会漏掉哪一处而把明文 secret 写进磁盘；新调用方也不需要记得传参。
+ */
+export type PluginSecretKeysResolver = (pluginId: string) => string[]
+
+let pluginSecretKeysOf: PluginSecretKeysResolver = () => []
+
+/**
+ * 磁盘上是密文的 `<插件 id>/<key>`：只靠 schema 判断不够——插件暂时没加载（构建期关掉、
+ * MCP 还没连上）时 schema 拿不到，读进来已解密的凭据会被当成普通字段明文写盘 / 下发页面。
+ */
+const knownSecrets = new Set<string>()
+
+function secretKeysFor(pid: string): Set<string> {
+  const keys = new Set(pluginSecretKeysOf(pid))
+  for (const ref of knownSecrets) if (ref.startsWith(`${pid}/`)) keys.add(ref.slice(pid.length + 1))
+  return keys
+}
+
+export function setPluginSecretKeysResolver(resolve: PluginSecretKeysResolver): void {
+  pluginSecretKeysOf = resolve
+}
+
+/** 「不修改」的语义值：secret 字段留空 = 沿用已保存的值（与 MCP 请求头同规则） */
+function isEmptySecretValue(v: unknown): boolean {
+  return v === '' || v === undefined || v === null
+}
+
+/** `<插件 id>/<key>` 集合（`pluginClearSecrets`） */
+function makeSecretClearSet(clear: readonly string[] | undefined): Set<string> {
+  return new Set((clear ?? []).map((s) => s.trim()).filter(Boolean))
+}
+
+/**
+ * 合并提交上来的插件配置：
+ * - secret 字段空串 = 沿用旧值（`plugin-config-get` 不回传值）；
+ * - `pluginClearSecrets` 里的 `<插件 id>/<key>` 删除；
+ * - 非 secret 字段直接覆盖；未知插件 / 未知 key 原样保留（插件可能暂时没加载）；
+ * - 只在这里删 `pluginSecretsSet` / `pluginClearSecrets` 这两个仅传输字段，不落盘。
+ */
+function mergePluginConfig(
+  incoming: Record<string, Record<string, unknown>> | undefined,
+  current: Record<string, Record<string, unknown>> | undefined,
+  clear: Set<string>
+): Record<string, Record<string, unknown>> | undefined {
+  if (!incoming && !current) return undefined
+  const ids = [...new Set([...Object.keys(current ?? {}), ...Object.keys(incoming ?? {})])]
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const pid of ids) {
+    const values: Record<string, unknown> = { ...(current?.[pid] ?? {}) }
+    const secretKeys = secretKeysFor(pid)
+    for (const [key, value] of Object.entries(incoming?.[pid] ?? {})) {
+      if (clear.has(`${pid}/${key}`)) {
+        delete values[key]
+        knownSecrets.delete(`${pid}/${key}`)
+        continue
+      }
+      // secret 留空 = 不修改，保留旧值
+      if (secretKeys.has(key) && isEmptySecretValue(value)) continue
+      values[key] = value
+    }
+    for (const ref of clear) {
+      if (!ref.startsWith(`${pid}/`)) continue
+      delete values[ref.slice(pid.length + 1)]
+      knownSecrets.delete(ref)
+    }
+    out[pid] = values
+  }
   return out
 }
 
@@ -280,5 +424,13 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
       return { ...m, headers }
     })
   )
+  // 插件配置：secret 空串沿用旧值、pluginClearSecrets 删除、未知插件 / key 原样保留
+  next.pluginConfig = mergePluginConfig(
+    incoming.pluginConfig,
+    current.pluginConfig,
+    makeSecretClearSet(incoming.pluginClearSecrets)
+  )
+  delete next.pluginSecretsSet
+  delete next.pluginClearSecrets
   return next
 }

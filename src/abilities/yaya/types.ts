@@ -189,6 +189,18 @@ export interface YayaConfig {
   defaultWorkflow?: string
   /** 插件启用覆盖：缺省 = 插件自己的 defaultEnabled（插件 id → 是否启用） */
   pluginEnabled?: Record<string, boolean>
+  /**
+   * 插件配置值（插件 id → key → 值）。schema 里 `secret` 的字段加密落盘；`yaya.config-get`
+   * 不回传它们的值，只回传 `pluginSecretsSet`。保存时 secret 为空串 = 沿用旧值，
+   * `pluginClearSecrets` 里的 `<插件 id>/<key>` 删除。
+   */
+  pluginConfig?: Record<string, Record<string, unknown>>
+  /** 仅 config-get 返回：插件 id → 已设置的 secret key */
+  pluginSecretsSet?: Record<string, string[]>
+  /** 仅 config-save 入参：要清除的 secret，`<插件 id>/<key>` */
+  pluginClearSecrets?: string[]
+  /** 子分组启用覆盖：`<插件 id>/<分组 id>` → 是否启用（缺省 = 分组的 defaultEnabled） */
+  pluginGroupEnabled?: Record<string, boolean>
   /** Skill 目录（缺省 ~/.config/LinuxCockpit/yaya/skills） */
   skillsDir?: string
   /** 被用户禁用的工具（按 wire name 记，缺省 = 全部启用） */

@@ -53,6 +53,9 @@ import {
   assetDataUrl
 } from './services/assets'
 import { t, te } from '../../main/process/i18n'
+import { makeLogger } from '../../main/process/logger'
+
+const log = makeLogger('yaya-commands')
 
 /** 附件体积的简短显示（错误信息用） */
 function formatAssetBytes(n: number): string {
@@ -61,12 +64,14 @@ function formatAssetBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 import {
+  getPlugin,
   listPluginInfo,
+  pluginSecretKeys,
   refreshPlugins,
   registerPlugin,
   restartPlugin
 } from './services/plugins/registry'
-import type { YayaPlugin } from './services/plugins/types'
+import type { PluginConfigField, PluginGroup, YayaPlugin } from './services/plugins/types'
 // 动态插件来源：导入即注册（registerPluginProvider）
 import './services/plugins/mcp/provider'
 import './services/plugins/skills/provider'
@@ -80,6 +85,89 @@ import './services/workflow/builtin'
 import { listWorkflowInfo } from './services/workflow/registry'
 
 const normalizeScope = (v: unknown): ApprovalScope => (v === 'run' || v === 'session' ? v : 'once')
+
+// ---------------------------------------------------------------------------
+// 插件配置 / 子分组（PLAN 6.4）：入参解析与 schema 校验
+// ---------------------------------------------------------------------------
+
+/** `--values <JSON 对象>`：CLI 给字符串，设置页直接给对象 */
+function parseJsonObject(raw: unknown): Record<string, unknown> {
+  let value = raw
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      throw new Error(t('yaya.plugin.cmd_err_bad_values', '无效的配置值：需要 JSON 对象'))
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error(t('yaya.plugin.cmd_err_bad_values', '无效的配置值：需要 JSON 对象'))
+  return value as Record<string, unknown>
+}
+
+function badType(key: string, type: PluginConfigField['type']): Error {
+  return new Error(
+    te('yaya.plugin.cmd_err_bad_type', { key, type }, `配置项 ${key} 的值类型不对（应为 ${type}）`)
+  )
+}
+
+/** 单个字段的校验与归一：类型不符 / 不在可选项里一律拒绝；数字夹到 min/max */
+function checkedConfigValue(field: PluginConfigField, value: unknown): string | number | boolean {
+  if (field.type === 'number') {
+    const text = typeof value === 'number' ? String(value) : String(value ?? '').trim()
+    const n = Number(text)
+    if (!text || !Number.isFinite(n)) throw badType(field.key, field.type)
+    let clamped = n
+    if (typeof field.min === 'number') clamped = Math.max(field.min, clamped)
+    if (typeof field.max === 'number') clamped = Math.min(field.max, clamped)
+    return clamped
+  }
+  if (field.type === 'boolean') {
+    if (typeof value === 'boolean') return value
+    if (value === 'true') return true
+    if (value === 'false') return false
+    throw badType(field.key, field.type)
+  }
+  if (field.type === 'select') {
+    const v = String(value ?? '')
+    if (!(field.options ?? []).some((o) => o.value === v))
+      throw new Error(
+        te(
+          'yaya.plugin.cmd_err_bad_option',
+          { key: field.key },
+          `配置项 ${field.key} 的值不在可选项里`
+        )
+      )
+    return v
+  }
+  // string / text；secret 允许空串（= 不修改）
+  if (value === undefined || value === null) return ''
+  return typeof value === 'string' ? value : String(value)
+}
+
+/** 按 schema 校验配置入参：未知 key 直接拒绝（防止往配置里塞垃圾） */
+function validatePluginConfig(
+  plugin: YayaPlugin,
+  values: Record<string, unknown>
+): Record<string, unknown> {
+  const schema = new Map((plugin.configSchema ?? []).map((f) => [f.key, f]))
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    const field = schema.get(key)
+    if (!field)
+      throw new Error(te('yaya.plugin.cmd_err_unknown_key', { key }, `未知的配置项：${key}`))
+    out[key] = checkedConfigValue(field, value)
+  }
+  return out
+}
+
+/** 保存插件配置 / 分组开关后的标准动作：落盘 → 重建插件表 → 广播 */
+function applyPluginConfigChange(next: YayaConfig): Record<string, unknown> {
+  saveYayaConfig(next)
+  refreshPlugins(loadYayaConfig())
+  getBroadcast()('cockpit:yaya-plugins-changed', {})
+  return { ok: true, note: t('yaya.plugin.cmd_note_next_run', '新配置从下一次工具调用起生效') }
+}
 
 // 命令脚本与工具都经过注册表：不要让 YAYA 经脚本递归启动或修改自己。
 registerPreRunHook('yaya.', async () => {
@@ -337,6 +425,87 @@ const commands: CommandSpec[] = [
       const status = await restartPlugin(String(ctx.named.id))
       getBroadcast()('cockpit:yaya-plugins-changed', {})
       return status
+    }
+  },
+
+  {
+    // 插件自己的配置（PLAN 6.4）
+    name: 'yaya.plugin-config-get',
+    description:
+      '读取一个插件的配置 schema 与当前值（string / text / number / boolean / select；secret 字段只返回「已设置」，不回传值）。没有配置的插件返回空 schema',
+    usage: 'yaya.plugin-config-get --id <pluginId>',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const info = listPluginInfo(loadYayaConfig()).find((p) => p.id === id)
+      if (!info) throw new Error(t('yaya.plugin.cmd_err_unknown_plugin', `插件不存在：${id}`))
+      return info.config ?? { schema: [], values: {}, secretsSet: [] }
+    }
+  },
+
+  {
+    // 保存插件配置：schema 校验，secret 留空 = 不修改
+    name: 'yaya.plugin-config-set',
+    logArgs: false, // 入参里可能有 API key 等凭据，不进日志
+    description:
+      '保存一个插件的配置（按 schema 校验：未知 key / 类型不符会拒绝；secret 字段传空串 = 保留原值）。保存后重建插件表，新配置从下一次工具调用起生效',
+    usage: 'yaya.plugin-config-set --id <pluginId> --values <JSON 对象> [--clear <key,key>]',
+    ui: ['设置 → 插件 → 插件详情 → 配置 → 保存'],
+    privacy: { agent: 'deny' }, // 配置里放的是凭据，只能用户本人改
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const plugin = getPlugin(id)
+      if (!plugin) throw new Error(t('yaya.plugin.cmd_err_unknown_plugin', '插件不存在：' + id))
+      const checked = validatePluginConfig(plugin, parseJsonObject(ctx.named.values))
+      const clear = String(ctx.named.clear ?? '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean)
+
+      const next = JSON.parse(JSON.stringify(loadYayaConfig())) as YayaConfig
+      const current: Record<string, unknown> = { ...(next.pluginConfig?.[id] ?? {}) }
+      for (const key of clear) delete current[key]
+      const secretKeys = new Set(pluginSecretKeys(plugin.id))
+      for (const [key, value] of Object.entries(checked)) {
+        // secret 留空 = 保留原值（checkedConfigValue 已把 secret 的空串归一成 ''）
+        if (secretKeys.has(key) && value === '') continue
+        current[key] = value
+      }
+      next.pluginConfig = { ...(next.pluginConfig ?? {}), [id]: current }
+      return applyPluginConfigChange(next)
+    }
+  },
+
+  {
+    // 子分组开关（PLAN 6.4）
+    name: 'yaya.plugin-group-set',
+    description:
+      '启用 / 禁用一个插件的子分组（如 Android Controller 的 Shizuku / Termux:API）。关掉后该分组的工具不再提供给助手',
+    usage: 'yaya.plugin-group-set --id <pluginId> --group <分组 id> --enabled true|false',
+    ui: ['设置 → 插件 → 插件详情 → 分组 → 开关'],
+    privacy: { agent: 'deny' },
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      const groupId = String(ctx.named.group ?? '')
+      const enabled = ctx.named.enabled === true || ctx.named.enabled === 'true'
+      const plugin = getPlugin(id)
+      if (!plugin) throw new Error(t('yaya.plugin.cmd_err_unknown_plugin', '插件不存在：' + id))
+      let group: PluginGroup | undefined
+      try {
+        group = (plugin.groups?.() ?? []).find((g) => g.id === groupId)
+      } catch (e) {
+        log.warn('plugin groups() failed', { plugin: id, error: String(e) })
+      }
+      if (!group)
+        throw new Error(t('yaya.plugin.cmd_err_unknown_group', `分组不存在：${id}/${groupId}`))
+
+      const next = JSON.parse(JSON.stringify(loadYayaConfig())) as YayaConfig
+      const overrides: Record<string, boolean> = { ...(next.pluginGroupEnabled ?? {}) }
+      const key = `${id}/${groupId}`
+      // 与插件启用开关同一约定：等于分组的 defaultEnabled 时删键（恢复缺省值）
+      if (enabled === (group.defaultEnabled ?? true)) delete overrides[key]
+      else overrides[key] = enabled
+      next.pluginGroupEnabled = overrides
+      return applyPluginConfigChange(next)
     }
   },
 

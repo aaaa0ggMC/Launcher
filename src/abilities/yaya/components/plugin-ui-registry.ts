@@ -1,6 +1,7 @@
 /**
  * 渲染端插件 UI 注册表：收集 `plugins/<id>/ui.ts`，把工具的 wire name 映射回插件 / 裸工具名，
- * 给 ToolCallRow / AssistantTurn 查自定义视图与代码块渲染器。
+ * 给 ToolCallRow / AssistantTurn 查自定义视图与代码块渲染器，
+ * 也给插件详情页查自定义配置界面（settingsView）。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
 import type { PluginUi } from './plugin-ui'
@@ -55,11 +56,16 @@ function lazy(key: string, loader: () => Promise<unknown>): Component {
   return c
 }
 
-function uiFor(ref: ToolRef): PluginUi | undefined {
-  return (
-    uis.find((u) => u.pluginId === ref.pluginId) ??
-    uis.find((u) => u.pluginId === `kind:${ref.kind}`)
-  )
+function uiFor(pluginId: string, kind?: PluginKind): PluginUi | undefined {
+  return uis.find((u) => u.pluginId === pluginId) ?? uis.find((u) => u.pluginId === `kind:${kind}`)
+}
+
+/** 插件详情页的自定义配置界面（没有返回 null，走 schema 自动生成的表单） */
+export function settingsViewFor(pluginId: string, kind?: PluginKind): Component | null {
+  const ui = uiFor(pluginId, kind)
+  const loader = ui?.settingsView
+  if (!loader) return null
+  return lazy(`settings:${ui!.pluginId}`, loader)
 }
 
 export interface ResolvedToolView {
@@ -72,7 +78,7 @@ export interface ResolvedToolView {
 export function toolViewFor(wireName: string): ResolvedToolView | null {
   const ref = wireMap.value.get(wireName)
   if (!ref) return null
-  const ui = uiFor(ref)
+  const ui = uiFor(ref.pluginId, ref.kind)
   const loader = ui?.toolViews?.[ref.toolName]
   if (!loader) return null
   return {

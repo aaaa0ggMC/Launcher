@@ -2,7 +2,7 @@
 import { useI18n } from '@ui/i18n'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
-import type { PluginToolInfo } from '../../services/plugins/types'
+import type { PluginGroupInfo, PluginToolInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import {
   approvalChipColor,
@@ -25,6 +25,8 @@ const props = defineProps<{
   tools: PluginToolInfo[]
   /** 插件未启用：整体置灰但仍可浏览 */
   dimmed?: boolean
+  /** 插件的子分组（有则按分组小标题分组显示） */
+  groups?: PluginGroupInfo[]
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -46,6 +48,37 @@ const filteredTools = computed(() => {
       return false
     return true
   })
+})
+
+interface ToolSection {
+  id: string
+  label: string
+  tools: PluginToolInfo[]
+}
+
+/** 插件声明了分组时按分组小标题分组显示（group 指向不存在的分组 = 无分组） */
+const sections = computed<ToolSection[]>(() => {
+  const groups = props.groups ?? []
+  if (groups.length === 0) return [{ id: '', label: '', tools: filteredTools.value }]
+  const byId = new Map<string, PluginToolInfo[]>()
+  const plain: PluginToolInfo[] = []
+  for (const tool of filteredTools.value) {
+    if (tool.group && groups.some((g) => g.id === tool.group)) {
+      const list = byId.get(tool.group) ?? []
+      list.push(tool)
+      byId.set(tool.group, list)
+    } else plain.push(tool)
+  }
+  const out: ToolSection[] = groups
+    .map((g) => ({ id: g.id, label: g.label, tools: byId.get(g.id) ?? [] }))
+    .filter((s) => s.tools.length > 0)
+  if (plain.length > 0)
+    out.push({
+      id: '',
+      label: t('yaya.settings.plugins.tools_group_plain', '插件工具'),
+      tools: plain
+    })
+  return out
 })
 
 /** 「默认」一档的说明文字带上该工具的提供方默认值 */
@@ -234,53 +267,60 @@ onBeforeUnmount(() => {
         {{ t('yaya.settings.tools_filter_empty', '没有匹配的工具') }}
       </span>
     </div>
-    <div v-else ref="stack" class="d-flex flex-column ga-2">
-      <div
-        v-for="tool in filteredTools"
-        :key="tool.wireName"
-        class="tool-row d-flex flex-wrap align-center ga-3 py-3 px-3 rounded-lg border"
-        :class="{ 'tool-row-narrow': narrowRow }"
-      >
-        <div class="min-w-0 flex-grow-1">
-          <div class="d-flex align-center flex-wrap ga-2">
-            <span class="font-family-mono text-body-2 font-weight-medium">
-              {{ tool.wireName }}
-            </span>
-            <v-chip
-              variant="tonal"
-              :color="approvalChipColor(effectiveApproval(config, tool))"
-              class="chip-pad flex-shrink-0"
+    <div v-else ref="stack" class="d-flex flex-column ga-3">
+      <template v-for="section in sections" :key="section.id || 'plain'">
+        <div class="d-flex flex-column ga-2">
+          <span v-if="section.label" class="text-caption font-weight-medium text-medium-emphasis">
+            {{ section.label }}
+          </span>
+          <div
+            v-for="tool in section.tools"
+            :key="tool.wireName"
+            class="tool-row d-flex flex-wrap align-center ga-3 py-3 px-3 rounded-lg border"
+            :class="{ 'tool-row-narrow': narrowRow }"
+          >
+            <div class="min-w-0 flex-grow-1">
+              <div class="d-flex align-center flex-wrap ga-2">
+                <span class="font-family-mono text-body-2 font-weight-medium">
+                  {{ tool.wireName }}
+                </span>
+                <v-chip
+                  variant="tonal"
+                  :color="approvalChipColor(effectiveApproval(config, tool))"
+                  class="chip-pad flex-shrink-0"
+                >
+                  {{ approvalChipText(tool) }}
+                </v-chip>
+              </div>
+              <div class="text-caption text-medium-emphasis tool-desc">
+                {{ tool.description }}
+              </div>
+            </div>
+            <v-btn-toggle
+              :model-value="approvalValue(tool)"
+              class="approval-toggle flex-shrink-0"
+              density="comfortable"
+              variant="outlined"
+              divided
+              mandatory
+              :disabled="!tool.enabled"
+              @update:model-value="setToolApproval(config, tool, $event)"
             >
-              {{ approvalChipText(tool) }}
-            </v-chip>
-          </div>
-          <div class="text-caption text-medium-emphasis tool-desc">
-            {{ tool.description }}
+              <v-btn v-for="opt in approvalOptions(tool)" :key="opt.value" :value="opt.value">
+                {{ opt.text }}
+              </v-btn>
+            </v-btn-toggle>
+            <v-switch
+              :model-value="tool.enabled"
+              color="primary"
+              hide-details
+              density="compact"
+              class="flex-shrink-0"
+              @update:model-value="setToolEnabled(config, tool, $event === true)"
+            />
           </div>
         </div>
-        <v-btn-toggle
-          :model-value="approvalValue(tool)"
-          class="approval-toggle flex-shrink-0"
-          density="comfortable"
-          variant="outlined"
-          divided
-          mandatory
-          :disabled="!tool.enabled"
-          @update:model-value="setToolApproval(config, tool, $event)"
-        >
-          <v-btn v-for="opt in approvalOptions(tool)" :key="opt.value" :value="opt.value">
-            {{ opt.text }}
-          </v-btn>
-        </v-btn-toggle>
-        <v-switch
-          :model-value="tool.enabled"
-          color="primary"
-          hide-details
-          density="compact"
-          class="flex-shrink-0"
-          @update:model-value="setToolEnabled(config, tool, $event === true)"
-        />
-      </div>
+      </template>
     </div>
   </div>
 </template>
