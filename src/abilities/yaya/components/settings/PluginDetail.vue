@@ -5,7 +5,7 @@ import type { Ref } from 'vue'
 import type { PluginGroupInfo, PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import { handleMarkdownClick, renderMarkdown } from '../markdown'
-import { settingsViewFor } from '../plugin-ui-registry'
+import { settingsPanelFor, settingsViewFor } from '../plugin-ui-registry'
 import PluginConfigForm from './PluginConfigForm.vue'
 import PluginToolsList from './PluginToolsList.vue'
 import { isPluginEnabled, pluginFallbackIcon, setPluginEnabled } from './plugin-state'
@@ -38,6 +38,9 @@ const docsHtml = computed(() => renderMarkdown(props.plugin.docs ?? '', labels.v
 const customConfigView = computed(() =>
   props.plugin.config ? settingsViewFor(props.plugin.id, props.plugin.kind) : null
 )
+
+/** 插件自己的附加面板（如网页搜索的「测试搜索」），放在配置下面 */
+const extraPanel = computed(() => settingsPanelFor(props.plugin.id, props.plugin.kind))
 
 function kindLabel(plugin: PluginInfo): string {
   if (plugin.kind === 'mcp') return t('yaya.settings.plugins.kind_mcp', 'MCP')
@@ -264,6 +267,8 @@ function onDocsClick(ev: MouseEvent): void {
         :secrets-set="plugin.config.secretsSet"
       />
     </div>
+
+    <component :is="extraPanel" v-if="extraPanel" :plugin-id="plugin.id" :info="plugin" />
 
     <!-- 该插件的工具（有分组时按分组小标题分组显示） -->
     <div class="d-flex flex-column ga-2">

@@ -45,7 +45,14 @@ import {
   toolNeedsApproval,
   type ResolvedTool
 } from '../plugins/registry'
-import type { NativeState, ProviderMessage, ProviderTool } from '../providers/types'
+import type {
+  NativeState,
+  ProviderGenerateOptions,
+  ProviderGenerateResult,
+  ProviderMessage,
+  ProviderTool
+} from '../providers/types'
+import { MAX_RETRIES, errorBrief, isRetryable, retryDelay, sleep } from './retry'
 import type { ToolSessionContext } from '../plugins/types'
 import { sessionMentions } from '../plugins/mention'
 import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
@@ -66,7 +73,7 @@ import {
   type WorkflowContext,
   type WorkflowDefinition
 } from '../workflow/types'
-import type { LoopContext, WorkflowSnapshot, WorkflowStatus } from './types'
+import type { LoopContext, WorkflowRetry, WorkflowSnapshot, WorkflowStatus } from './types'
 
 const log = makeLogger('yaya-loop')
 
@@ -85,6 +92,8 @@ export class WorkflowRunner {
   private abortController = new AbortController()
   private readonly startedAt = Date.now()
   private bufferedContent = ''
+  /** 正在等待自动重试（进快照，界面据此给出提示） */
+  private retryState: WorkflowRetry | undefined
   private bufferedReasoning = ''
   /** 本次运行第一个 assistant 节点（过程记录挂在它上面），首个 assistantStep 复用它 */
   private readonly anchorId: string
@@ -243,7 +252,54 @@ export class WorkflowRunner {
       pendingApprovalTool: this.ctx.pendingApprovalTool,
       bufferedTokens: this.bufferedContent,
       bufferedReasoning: this.bufferedReasoning,
-      startedAt: this.startedAt
+      startedAt: this.startedAt,
+      retry: this.retryState
+    }
+  }
+
+  /**
+   * 带自动重试的模型请求：限流 / 过载 / 网关 / 网络错误按退避重试（见 retry.ts），
+   * 等待期间快照里带 retry，界面显示一行提示；等待可被停止打断。
+   * reset：重试前把这一步已经流出来的半截内容清掉（不然新内容会接在旧的后面）。
+   */
+  private async generateWithRetry(
+    options: ProviderGenerateOptions,
+    reset?: () => void
+  ): Promise<ProviderGenerateResult> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await this.ctx.provider.generate(options)
+        if (this.retryState) {
+          this.retryState = undefined
+          this.emitSnapshot()
+        }
+        return result
+      } catch (e) {
+        if (this.aborted || attempt > MAX_RETRIES || !isRetryable(e)) {
+          this.retryState = undefined
+          throw e
+        }
+        const delay = retryDelay(attempt, e)
+        log.warn(`model request failed, retry ${attempt}/${MAX_RETRIES} in ${delay}ms`, {
+          provider: this.ctx.provider.id,
+          model: options.model,
+          error: errorBrief(e)
+        })
+        reset?.()
+        this.retryState = {
+          attempt,
+          max: MAX_RETRIES,
+          at: Date.now() + delay,
+          error: errorBrief(e)
+        }
+        this.emitSnapshot()
+        try {
+          await sleep(delay, this.abortController.signal)
+        } catch (err) {
+          this.retryState = undefined
+          throw err
+        }
+      }
     }
   }
 
@@ -451,37 +507,45 @@ export class WorkflowRunner {
     })
     this.setStatus('streaming')
 
-    const result = await this.ctx.provider.generate({
-      model: this.model,
-      messages: [
-        { role: 'system', content: this.systemPrompt(opts.extraSystem) },
-        ...this.history()
-      ],
-      tools,
-      stream: this.ctx.config.streamOutput,
-      reasoning: this.reasoning,
-      signal: this.abortController.signal,
-      onToken: (tok) => {
-        const offset = this.bufferedContent.length
-        this.bufferedContent += tok
-        getBroadcast()('cockpit:yaya-token', {
-          sessionId: this.ctx.sessionId,
-          messageId,
-          token: tok,
-          offset
-        })
+    const result = await this.generateWithRetry(
+      {
+        model: this.model,
+        messages: [
+          { role: 'system', content: this.systemPrompt(opts.extraSystem) },
+          ...this.history()
+        ],
+        tools,
+        stream: this.ctx.config.streamOutput,
+        reasoning: this.reasoning,
+        signal: this.abortController.signal,
+        onToken: (tok) => {
+          const offset = this.bufferedContent.length
+          this.bufferedContent += tok
+          getBroadcast()('cockpit:yaya-token', {
+            sessionId: this.ctx.sessionId,
+            messageId,
+            token: tok,
+            offset
+          })
+        },
+        onReasoning: (chunk) => {
+          const offset = this.bufferedReasoning.length
+          this.bufferedReasoning += chunk
+          getBroadcast()('cockpit:yaya-reasoning', {
+            sessionId: this.ctx.sessionId,
+            messageId,
+            reasoning: chunk,
+            offset
+          })
+        }
       },
-      onReasoning: (chunk) => {
-        const offset = this.bufferedReasoning.length
-        this.bufferedReasoning += chunk
-        getBroadcast()('cockpit:yaya-reasoning', {
-          sessionId: this.ctx.sessionId,
-          messageId,
-          reasoning: chunk,
-          offset
-        })
+      () => {
+        // 重试从头生成：清掉半截内容，快照广播后页面会重新加载这条消息
+        this.bufferedContent = ''
+        this.bufferedReasoning = ''
+        updateMessage(messageId, { content: '', reasoningContent: undefined })
       }
-    })
+    )
     if (this.aborted) throw new Error('aborted')
 
     const content = result.content || this.bufferedContent
@@ -520,7 +584,7 @@ export class WorkflowRunner {
     })
     this.setStatus('streaming')
     try {
-      const result = await this.ctx.provider.generate({
+      const result = await this.generateWithRetry({
         model: this.model,
         messages: [{ role: 'system', content: opts.system }, ...(opts.messages ?? this.history())],
         stream: false,

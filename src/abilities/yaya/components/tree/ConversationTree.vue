@@ -23,6 +23,7 @@ import {
   fitTransform,
   metricsFor,
   nodeEdgePath,
+  packChains,
   subtreeSizes,
   zoomAt,
   SCALE_MAX,
@@ -39,6 +40,8 @@ const emit = defineEmits<{
   (e: 'view', turn: TreeTurn): void
   /** 从这里开新分支（回答：接在它后面；提问：回到它之前并带回原文） */
   (e: 'branch', turn: TreeTurn, parentEnd: string | null): void
+  /** 跳到当前分支里的这一轮（只给主线上的节点：不切分支，只滚动定位） */
+  (e: 'jump', turn: TreeTurn): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -57,7 +60,20 @@ const worldEl = ref<HTMLElement | null>(null)
 const stageSize = ref({ w: 0, h: 0 })
 const viewport = ref<Viewport>({ scale: 1, x: 0, y: 0 })
 
-const graph = computed(() => buildGraph(tree.value?.turns ?? [], metricsFor(narrow.value)))
+/** 把分叉点之间的线性链折成一个节点（点开展开）；关掉 = 全部展开 */
+const packOn = ref(true)
+const expandedPacks = ref<ReadonlySet<string>>(new Set())
+const displayTurns = computed(() => {
+  const turns = tree.value?.turns ?? []
+  if (!packOn.value) return turns
+  const current = tree.value?.current
+  return packChains(turns, new Set(current ? [current] : []), expandedPacks.value)
+})
+const graph = computed(() => buildGraph(displayTurns.value, metricsFor(narrow.value)))
+const packCount = computed(() => graph.value.nodes.filter((n) => n.turn.pack).length)
+/** 有折叠的链 → 按钮「全部展开」；否则（关掉了或都点开了）→「折叠线性链」 */
+const canExpandAll = computed(() => packOn.value && packCount.value > 0)
+const canRepack = computed(() => !packOn.value || expandedPacks.value.size > 0)
 /** 当前路径（要高亮连成主线的那串） */
 const path = computed(() => activePath(graph.value, tree.value?.current ?? null))
 const edges = computed<GraphEdge[]>(() => buildEdges(graph.value, path.value))
@@ -98,6 +114,7 @@ async function load(): Promise<void> {
     const result = (await window.cockpit.command('yaya.session-tree', { id })) as SessionTree
     if (sequence !== loadSequence || !open.value || id !== props.sessionId) return
     tree.value = result
+    expandedPacks.value = new Set()
     await nextTick()
     measure()
     viewport.value = { scale: 1, x: 0, y: 0 }
@@ -297,12 +314,42 @@ function onPointerUp(e: PointerEvent): void {
 }
 
 // ---- 节点：点击 / 键盘 ----
-function onNodeClick(turn: TreeTurn, event: MouseEvent): void {
+function onNodeClick(node: GraphNode, event: MouseEvent): void {
   if (dragged && event.detail !== 0) {
     dragged = false
     return
   }
-  picked.value = turn
+  if (node.turn.pack) expandPack(node)
+  else picked.value = node.turn
+}
+
+/** 屏幕上 (sx, sy) 处显示的画布点 (wx, wy) 保持不动：布局变了也不跳 */
+function keepOnScreen(wx: number, wy: number, sx: number, sy: number): void {
+  const k = viewport.value.scale
+  viewport.value = { scale: k, x: sx - wx * k, y: sy - wy * k }
+}
+
+/** 展开一段折叠的链：展开后第一轮落在原来折叠节点的位置上，并获得焦点 */
+function expandPack(node: GraphNode): void {
+  const first = node.turn.pack?.[0]
+  if (!first) return
+  const k = viewport.value.scale
+  const sx = viewport.value.x + node.x * k
+  const sy = viewport.value.y + node.y * k
+  expandedPacks.value = new Set([...expandedPacks.value, node.id])
+  const shown = graph.value.byId.get(first.id)
+  if (shown) keepOnScreen(shown.x, shown.y, sx, sy)
+  // 不让 focus 滚动舞台（舞台 overflow:hidden，滚了会和视口变换叠加，节点跳位）
+  void nextTick(() => focusNode(first.id, true))
+}
+
+function togglePacking(): void {
+  if (canExpandAll.value) packOn.value = false
+  else {
+    packOn.value = true
+    expandedPacks.value = new Set()
+  }
+  void nextTick(centerCurrent)
 }
 
 function siblingsOf(node: GraphNode): GraphNode[] {
@@ -310,9 +357,9 @@ function siblingsOf(node: GraphNode): GraphNode[] {
   return graph.value.byId.get(node.parent)?.children ?? [node]
 }
 
-function focusNode(id: string): void {
+function focusNode(id: string, preventScroll = false): void {
   const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id
-  worldEl.value?.querySelector<HTMLElement>(`[data-node-id="${safe}"]`)?.focus()
+  worldEl.value?.querySelector<HTMLElement>(`[data-node-id="${safe}"]`)?.focus({ preventScroll })
 }
 
 function onNodeKey(e: KeyboardEvent, node: GraphNode): void {
@@ -354,6 +401,17 @@ function timeText(ms: number): string {
 
 /** 无障碍名 / tooltip：预览、类型、时间、工具与分支摘要 */
 function nodeLabel(node: GraphNode): string {
+  const pack = node.turn.pack
+  if (pack) {
+    const head = te(
+      'yaya.tree.pack_label',
+      { n: String(pack.length) },
+      '折叠了 {n} 轮连续对话，点开展开'
+    )
+    const first = pack[0].preview || t('yaya.tree.no_text', '（只调用了工具）')
+    const last = pack[pack.length - 1].preview || t('yaya.tree.no_text', '（只调用了工具）')
+    return [head, `${first} … ${last}`, timeText(pack[0].createdAt)].join(' · ')
+  }
   const preview = node.turn.preview || t('yaya.tree.no_text', '（只调用了工具）')
   const kind =
     node.turn.kind === 'user'
@@ -381,6 +439,17 @@ function confirmView(): void {
   picked.value = null
   open.value = false
   emit('view', turn)
+}
+
+/** 选中的节点在当前分支（主线）上：可以直接跳过去 */
+const pickedOnPath = computed(() => !!picked.value && path.value.has(picked.value.id))
+
+function confirmJump(): void {
+  const turn = picked.value
+  if (!turn) return
+  picked.value = null
+  open.value = false
+  emit('jump', turn)
 }
 
 function confirmBranch(): void {
@@ -440,7 +509,14 @@ watch(narrow, () => {
 </script>
 
 <template>
-  <v-dialog v-model="open" :fullscreen="narrow" :max-width="narrow ? undefined : 1024" scrollable>
+  <!-- 画布层是绝对定位的，撑不起高度：桌面对话框给固定高度，否则舞台被压成 0 高 -->
+  <v-dialog
+    v-model="open"
+    :fullscreen="narrow"
+    :max-width="narrow ? undefined : 1024"
+    :height="narrow ? undefined : 'calc(var(--app-vh, 100vh) * 0.88)'"
+    scrollable
+  >
     <v-card class="tree-card" :class="{ 'is-fullscreen': narrow }" :rounded="narrow ? 0 : 'xl'">
       <div class="tree-head">
         <v-icon icon="mdi-file-tree-outline" />
@@ -499,6 +575,23 @@ watch(narrow, () => {
             :title="t('yaya.tree.zoom_in', '放大')"
             :aria-label="t('yaya.tree.zoom_in', '放大')"
             @click="zoomBy(1.25)"
+          />
+          <v-btn
+            v-if="canExpandAll || canRepack"
+            :icon="canExpandAll ? 'mdi-unfold-more-vertical' : 'mdi-unfold-less-vertical'"
+            variant="text"
+            size="small"
+            :title="
+              canExpandAll
+                ? t('yaya.tree.expand_all', '展开全部连续对话')
+                : t('yaya.tree.pack_all', '折叠连续对话')
+            "
+            :aria-label="
+              canExpandAll
+                ? t('yaya.tree.expand_all', '展开全部连续对话')
+                : t('yaya.tree.pack_all', '折叠连续对话')
+            "
+            @click="togglePacking"
           />
           <v-btn
             icon="mdi-fit-to-page-outline"
@@ -571,6 +664,7 @@ watch(narrow, () => {
             type="button"
             class="graph-node"
             :class="{
+              'is-pack': !!node.turn.pack,
               'is-user': node.turn.kind === 'user',
               'is-active': path.has(node.id),
               'is-current': node.id === tree?.current
@@ -580,42 +674,72 @@ watch(narrow, () => {
             :aria-label="nodeLabel(node)"
             :title="nodeLabel(node)"
             :style="nodeStyle(node)"
-            @click="onNodeClick(node.turn, $event)"
+            @click="onNodeClick(node, $event)"
             @keydown="onNodeKey($event, node)"
           >
-            <v-icon
-              :icon="node.turn.kind === 'user' ? 'mdi-account-outline' : 'mdi-robot-happy-outline'"
-              size="18"
-              class="node-icon"
-              aria-hidden="true"
-            />
-            <span class="node-body">
-              <span class="node-text">
-                {{
-                  node.turn.preview ||
-                  (node.turn.kind === 'answer'
-                    ? t('yaya.tree.no_text', '（只调用了工具）')
-                    : t('yaya.tree.empty', '（空消息）'))
-                }}
-              </span>
-              <!-- 一行放下：时间 + 图标计数（完整说明在 title / aria-label 里），放不下就省略号 -->
-              <span class="node-meta">
-                <span v-if="node.id === tree?.current" class="node-here">
-                  {{ t('yaya.tree.current', '当前') }}
+            <!-- 折叠的线性链：叠起来的卡片，点开展开 -->
+            <template v-if="node.turn.pack">
+              <v-icon icon="mdi-layers-outline" size="18" class="node-icon" aria-hidden="true" />
+              <span class="node-body">
+                <span class="node-text">
+                  <span class="pack-count">
+                    {{
+                      te(
+                        'yaya.tree.pack_count',
+                        { n: String(node.turn.pack.length) },
+                        '{n} 轮连续对话'
+                      )
+                    }}
+                  </span>
+                  {{ node.turn.preview || t('yaya.tree.no_text', '（只调用了工具）') }}
                 </span>
-                <span class="meta-time">{{ timeText(node.turn.createdAt) }}</span>
-                <span v-if="node.turn.tools" class="meta-item">
-                  <v-icon icon="mdi-wrench-outline" size="12" aria-hidden="true" />{{
-                    node.turn.tools
-                  }}
-                </span>
-                <span v-if="node.children.length > 1" class="meta-item node-fork">
-                  <v-icon icon="mdi-source-branch" size="12" aria-hidden="true" />{{
-                    node.children.length
-                  }}
+                <span class="node-meta">
+                  <span class="meta-time">{{ timeText(node.turn.createdAt) }}</span>
+                  <span class="meta-item pack-open">
+                    <v-icon icon="mdi-arrow-expand-horizontal" size="12" aria-hidden="true" />{{
+                      t('yaya.tree.pack_expand', '展开')
+                    }}
+                  </span>
                 </span>
               </span>
-            </span>
+            </template>
+            <template v-else>
+              <v-icon
+                :icon="
+                  node.turn.kind === 'user' ? 'mdi-account-outline' : 'mdi-robot-happy-outline'
+                "
+                size="18"
+                class="node-icon"
+                aria-hidden="true"
+              />
+              <span class="node-body">
+                <span class="node-text">
+                  {{
+                    node.turn.preview ||
+                    (node.turn.kind === 'answer'
+                      ? t('yaya.tree.no_text', '（只调用了工具）')
+                      : t('yaya.tree.empty', '（空消息）'))
+                  }}
+                </span>
+                <!-- 一行放下：时间 + 图标计数（完整说明在 title / aria-label 里），放不下就省略号 -->
+                <span class="node-meta">
+                  <span v-if="node.id === tree?.current" class="node-here">
+                    {{ t('yaya.tree.current', '当前') }}
+                  </span>
+                  <span class="meta-time">{{ timeText(node.turn.createdAt) }}</span>
+                  <span v-if="node.turn.tools" class="meta-item">
+                    <v-icon icon="mdi-wrench-outline" size="12" aria-hidden="true" />{{
+                      node.turn.tools
+                    }}
+                  </span>
+                  <span v-if="node.children.length > 1" class="meta-item node-fork">
+                    <v-icon icon="mdi-source-branch" size="12" aria-hidden="true" />{{
+                      node.children.length
+                    }}
+                  </span>
+                </span>
+              </span>
+            </template>
           </button>
         </div>
       </div>
@@ -655,7 +779,11 @@ watch(narrow, () => {
         </v-card-text>
         <v-card-actions class="flex-wrap justify-end ga-2 px-4 pb-4">
           <v-btn variant="text" @click="picked = null">{{ t('yaya.cancel', '取消') }}</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-eye-outline" @click="confirmView">
+          <!-- 主线上的节点「查看这条分支」就是现在这条，换成直接跳到这一轮 -->
+          <v-btn v-if="pickedOnPath" variant="tonal" prepend-icon="mdi-target" @click="confirmJump">
+            {{ t('yaya.tree.jump_here', '跳转到此节点') }}
+          </v-btn>
+          <v-btn v-else variant="tonal" prepend-icon="mdi-eye-outline" @click="confirmView">
             {{ t('yaya.tree.view', '查看这条分支') }}
           </v-btn>
           <v-btn
@@ -783,6 +911,31 @@ watch(narrow, () => {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.12);
   box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), 0.18);
+}
+/* 折叠的线性链：底下多画两层错开的卡边，像一叠卡片 */
+.graph-node.is-pack {
+  overflow: visible;
+  border-style: dashed;
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  box-shadow:
+    4px 4px 0 -2px rgb(var(--v-theme-surface)),
+    4px 4px 0 0 rgba(var(--v-theme-on-surface), 0.16),
+    8px 8px 0 -2px rgb(var(--v-theme-surface)),
+    8px 8px 0 0 rgba(var(--v-theme-on-surface), 0.1);
+}
+.graph-node.is-pack.is-active {
+  border-color: rgba(var(--v-theme-primary), 0.5);
+}
+.graph-node.is-pack .node-body {
+  overflow: hidden;
+}
+.pack-count {
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  margin-right: 4px;
+}
+.pack-open {
+  color: rgb(var(--v-theme-primary));
 }
 .node-icon {
   flex-shrink: 0;

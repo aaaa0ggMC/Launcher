@@ -180,6 +180,29 @@ const turns = computed(() => (prevTurns = buildTurnsReusing(messages.value, prev
 const lastTurnKey = computed(() => turns.value[turns.value.length - 1]?.key)
 /** 用户在标题栏头像上暂停了本会话的运行 */
 const isPaused = computed(() => isRunning.value && snapshot.value?.status === 'paused')
+/** 模型请求出错、等待自动重试：倒计时每半秒刷新一次（只在有重试时跑） */
+const retry = computed(() => (isRunning.value ? (snapshot.value?.retry ?? null) : null))
+const retryNow = ref(Date.now())
+let retryTicker = 0
+watch(
+  retry,
+  (r) => {
+    window.clearInterval(retryTicker)
+    retryTicker = 0
+    retryNow.value = Date.now()
+    if (r) retryTicker = window.setInterval(() => (retryNow.value = Date.now()), 500)
+  },
+  { immediate: true }
+)
+const retryText = computed(() => {
+  const r = retry.value
+  if (!r) return ''
+  const left = Math.ceil((r.at - retryNow.value) / 1000)
+  const vars = { n: String(r.attempt), max: String(r.max), s: String(left) }
+  return left > 0
+    ? te('yaya.retry_wait', vars, '请求出错，{s} 秒后自动重试（{n}/{max}）')
+    : te('yaya.retry_now', vars, '正在重试（{n}/{max}）…')
+})
 async function controlRun(action: 'pause' | 'resume' | 'stop'): Promise<void> {
   if (!activeSessionId.value) return
   const session = activeSessionId.value
@@ -1114,6 +1137,7 @@ function onVisibility(): void {
 
 onBeforeUnmount(() => {
   window.clearTimeout(flashTimer)
+  window.clearInterval(retryTicker)
   for (const off of unsubs) off()
   document.removeEventListener('visibilitychange', onVisibility)
   if (chunkTimer) clearTimeout(chunkTimer)
@@ -1403,6 +1427,13 @@ watch(isRunning, (now, before) => {
             />
           </div>
         </transition>
+        <transition name="fade">
+          <div v-if="retry" class="retry-hint" role="status" :title="retry.error">
+            <v-progress-circular indeterminate size="14" width="2" class="flex-shrink-0" />
+            <span class="flex-shrink-0">{{ retryText }}</span>
+            <span class="retry-reason text-medium-emphasis">{{ retry.error }}</span>
+          </div>
+        </transition>
         <div v-if="isPaused" class="paused-bar" role="status">
           <v-icon icon="mdi-pause-circle-outline" size="20" class="flex-shrink-0" />
           <span class="paused-text">{{
@@ -1488,6 +1519,7 @@ watch(isRunning, (now, before) => {
       :session-title="sessionTitle"
       @view="treeView"
       @branch="treeBranch"
+      @jump="(turn: TreeTurn) => jumpToMessage(activeSessionId || '', turn.id)"
     />
     <UsageDialog
       v-model="showUsage"
@@ -1932,6 +1964,24 @@ watch(isRunning, (now, before) => {
   width: 14px !important;
 }
 
+.retry-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 820px;
+  margin: 0 auto 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+.retry-reason {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .paused-bar {
   display: flex;
   align-items: center;

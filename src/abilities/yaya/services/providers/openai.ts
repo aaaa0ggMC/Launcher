@@ -29,7 +29,9 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.client = new OpenAI({
       apiKey: config.apiKey || 'dummy',
       baseURL: config.baseUrl || 'https://api.openai.com/v1',
-      timeout: 120_000
+      timeout: 120_000,
+      // 重试统一由运行器做（services/loop/retry.ts，界面上有提示）；SDK 自己再悄悄重试 2 次会叠加
+      maxRetries: 0
     })
   }
 
