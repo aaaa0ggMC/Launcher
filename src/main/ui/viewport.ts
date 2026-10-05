@@ -9,6 +9,17 @@
  * 只在没有自有窗口的宿主（网页）里启用；Electron 的视口由窗口决定，保持 CSS 默认。
  * 同时把量到的各种高度作为一条 warn 日志写进主机日志，便于在真机上排查（日志里能看到真实数值）。
  */
+/** 焦点在可输入的元素上（软键盘可能弹出） */
+function isEditing(): boolean {
+  const el = document.activeElement
+  if (!(el instanceof HTMLElement)) return false
+  if (el.isContentEditable || el instanceof HTMLTextAreaElement) return true
+  return (
+    el instanceof HTMLInputElement &&
+    !['button', 'checkbox', 'radio', 'range', 'color', 'file', 'submit', 'reset'].includes(el.type)
+  )
+}
+
 export function installViewportVar(): void {
   if (window.cockpit.hasCap('window.frame')) return
   const root = document.documentElement
@@ -29,7 +40,10 @@ export function installViewportVar(): void {
   let pendingLog: Record<string, unknown> | null = null
   const update = (): void => {
     const vv = window.visualViewport
-    const visible = vv ? vv.height : window.innerHeight
+    // 只有正在输入时才可能有软键盘：此时用 visualViewport（不缩布局视口的浏览器里只有它会变小）；
+    // 其余时候用 innerHeight。安卓 WebView 里键盘收起后 visualViewport.height 可能停在键盘弹出时的
+    // 旧值，外壳就一直只有半屏高（日志页只剩一截）；捏合缩放时 visualViewport 也会变小，同样不该用。
+    const visible = vv && isEditing() ? Math.min(vv.height, window.innerHeight) : window.innerHeight
     const safe = parseFloat(getComputedStyle(probe).paddingBottom) || 0
     const zoom = parseFloat(getComputedStyle(root).zoom) || 1
     if (visible <= 0) return
@@ -75,5 +89,8 @@ export function installViewportVar(): void {
   window.addEventListener('resize', schedule)
   window.addEventListener('orientationchange', schedule)
   window.visualViewport?.addEventListener('resize', schedule)
+  // 键盘收起不一定伴随可靠的 resize：失焦后再量一次（用的高度来源也随之切回 innerHeight）
+  document.addEventListener('focusout', schedule)
+  document.addEventListener('focusin', schedule)
   update()
 }

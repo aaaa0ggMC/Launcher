@@ -70,7 +70,10 @@ const sep = computed(() =>
     : '/'
 )
 
-const canUpload = computed(() => mode.value === 'open' && !wantsDir.value)
+// 单选与多选都能从此设备上传（多选时逐个上传）；选目录 / 另存为不行
+const canUpload = computed(
+  () => (mode.value === 'open' || mode.value === 'open-multi') && !wantsDir.value
+)
 const acceptAttr = computed(() =>
   filterable.value ? extensions.value.map((e) => `.${e}`).join(',') : ''
 )

@@ -964,6 +964,86 @@ function findSafeText(needle: string): boolean {
 const MASK_BG = '#1b1b1f'
 const MASK_FG = '#e6e1e5'
 
+/**
+ * 页面全部 @font-face，字体文件内嵌成 data URL，交给 modern-screenshot 的 `font.cssText`。
+ *
+ * modern-screenshot 只按**元素自身**的 font-family 决定嵌哪些字体；mdi 图标的字体写在
+ * `.mdi::before` 伪元素上（元素本身是正文字体），于是图标字体从不被嵌入，截图里全是方框。
+ * 这里自己收集，一页只做一次（字体文件不会变），之后每次截图复用。
+ */
+let fontCssPromise: Promise<string> | null = null
+
+function collectFontFaces(): CSSFontFaceRule[] {
+  const out: CSSFontFaceRule[] = []
+  const walk = (rules: CSSRuleList): void => {
+    for (const r of Array.from(rules)) {
+      if (r instanceof CSSFontFaceRule) out.push(r)
+      else if ('cssRules' in r && (r as CSSGroupingRule).cssRules)
+        walk((r as CSSGroupingRule).cssRules)
+    }
+  }
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      walk(sheet.cssRules)
+    } catch {
+      /* 跨域样式表读不了规则：跳过 */
+    }
+  }
+  return out
+}
+
+async function toDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    return await new Promise((resolve) => {
+      const fr = new FileReader()
+      fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : null)
+      fr.onerror = () => resolve(null)
+      fr.readAsDataURL(blob)
+    })
+  } catch {
+    return null
+  }
+}
+
+async function buildFontCss(): Promise<string> {
+  const parts: string[] = []
+  for (const rule of collectFontFaces()) {
+    const src = rule.style.getPropertyValue('src')
+    // 每条规则只取一个格式（优先 woff2），其余格式不下载
+    const urls = [
+      ...src.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)(?:\s*format\(\s*['"]?([\w-]+)['"]?\s*\))?/g)
+    ]
+    if (!urls.length) continue
+    const pick = urls.find((m) => m[3] === 'woff2' || /\.woff2(\?|#|$)/.test(m[2])) ?? urls[0]
+    if (pick[2].startsWith('data:')) {
+      parts.push(rule.cssText)
+      continue
+    }
+    const base = rule.parentStyleSheet?.href ?? location.href
+    const data = await toDataUrl(new URL(pick[2], base).href)
+    if (!data) continue
+    const decl = ['font-family', 'font-style', 'font-weight', 'font-display', 'unicode-range']
+      .map((k) => [k, rule.style.getPropertyValue(k)] as const)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}:${v};`)
+      .join('')
+    parts.push(`@font-face{${decl}src:url("${data}")${pick[3] ? ` format("${pick[3]}")` : ''};}`)
+  }
+  return parts.join('\n')
+}
+
+function fontCss(): Promise<string> {
+  if (!fontCssPromise)
+    fontCssPromise = buildFontCss().catch(() => {
+      fontCssPromise = null
+      return ''
+    })
+  return fontCssPromise
+}
+
 async function doScreenshot(args: BridgeArgs): Promise<Reply> {
   await waitReady()
   await quiet()
@@ -1018,7 +1098,11 @@ async function doScreenshot(args: BridgeArgs): Promise<Reply> {
   const width = Math.max(1, Math.round(full ? innerWidth : box.width))
   const height = Math.max(1, Math.round(full ? innerHeight : box.height))
   const bg = getComputedStyle(document.body).backgroundColor
+  const cssText = await fontCss()
+  checkCancelled()
   const canvas = await domToCanvas(target, {
+    // 自己提供字体（含伪元素用的图标字体），见 fontCss()；拿不到时交给库自己扫描
+    ...(cssText ? { font: { cssText } } : {}),
     width,
     height,
     // 1 张截图像素 = 1 CSS 像素：坐标可以直接交给 click_at（无头的坐标一律是 CSS 像素）
