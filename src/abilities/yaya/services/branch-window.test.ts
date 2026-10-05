@@ -91,3 +91,23 @@ it('attaches sibling ids only inside the window', () => {
   const w = db.getMessageBranchWindow(ids[ids.length - 1], { limit: 1 })
   assert.deepEqual(w.messages[0].siblingIds, [u3, 's3-u3x'])
 })
+
+it('include extends the window back to the target turn plus one turn of context', () => {
+  const ids = seed('s4', 8)
+  const leaf = ids[ids.length - 1]
+  const target = 's4-a3'
+  const w = db.getMessageBranchWindow(leaf, { limit: 2, include: target })
+  assert.equal(w.messages[0].content, 'u2')
+  assert.ok(w.messages.some((m) => m.id === target))
+  assert.equal(w.messages.at(-1)?.id, leaf)
+  assert.equal(w.hasMore, true)
+  // 已在窗口里 / 不在当前分支：窗口不变
+  const same = db.getMessageBranchWindow(leaf, { limit: 2, include: 's4-u8' })
+  assert.equal(same.messages[0].content, 'u7')
+  const off = db.getMessageBranchWindow(leaf, { limit: 2, include: 'nope' })
+  assert.equal(off.messages[0].content, 'u7')
+  // 目标在第一轮：一直扩到开头
+  const head = db.getMessageBranchWindow(leaf, { limit: 2, include: 's4-u1' })
+  assert.equal(head.messages[0].content, 'u1')
+  assert.equal(head.hasMore, false)
+})

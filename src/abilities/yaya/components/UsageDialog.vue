@@ -10,6 +10,16 @@ import type { SessionUsage, ToolRisk, UsageToolCall } from '../services/usage'
  */
 const props = defineProps<{ sessionId: string; sessionTitle: string }>()
 const open = defineModel<boolean>({ default: false })
+const emit = defineEmits<{
+  /** 定位到对话里的某条消息（窗口外的会先加载过去） */
+  (e: 'jump', messageId: string): void
+}>()
+
+function jump(messageId: string): void {
+  if (!messageId) return
+  open.value = false
+  emit('jump', messageId)
+}
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
@@ -85,7 +95,7 @@ const chart = computed(() => {
     prompt: c.prompt / max,
     cached: Math.min(c.cached, c.prompt) / max,
     completion: c.completion / max,
-    title: `#${i + 1} ${c.model}\n${t('yaya.usage.prompt', '输入')} ${c.prompt.toLocaleString()}（${t('yaya.usage.cached', '缓存命中')} ${c.cached.toLocaleString()}）\n${t('yaya.usage.completion', '输出')} ${c.completion.toLocaleString()}`
+    title: `#${i + 1} ${c.model}\n${t('yaya.usage.prompt', '输入')} ${c.prompt.toLocaleString()}（${t('yaya.usage.cached', '缓存命中')} ${c.cached.toLocaleString()}）\n${t('yaya.usage.completion', '输出')} ${c.completion.toLocaleString()}\n${t('yaya.usage.chart_hint', '点柱子可定位到那次调用')}`
   }))
 })
 const peakContext = computed(() => Math.max(0, ...(data.value?.calls ?? []).map((c) => c.prompt)))
@@ -255,7 +265,7 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
               role="img"
               :aria-label="t('yaya.usage.chart', '每次调用的上下文')"
             >
-              <g v-for="b in chart" :key="b.key">
+              <g v-for="b in chart" :key="b.key" class="bar" @click="jump(b.key)">
                 <title>{{ b.title }}</title>
                 <rect
                   class="bar-completion"
@@ -373,6 +383,18 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
                     {{ t('yaya.usage.reject_reason', '拒绝理由') }}：{{ c.rejectReason }}
                   </div>
                 </div>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  density="comfortable"
+                  class="flex-shrink-0"
+                  :title="t('yaya.usage.jump', '在对话中定位')"
+                  :aria-label="t('yaya.usage.jump', '在对话中定位')"
+                  @click="jump(c.messageId)"
+                >
+                  <v-icon icon="mdi-crosshairs-gps" size="18" />
+                </v-btn>
               </div>
             </div>
             <div v-if="filteredLog.length > logLimit" class="d-flex justify-center pt-2">
@@ -455,6 +477,12 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
 }
 .chart-wrap {
   margin-top: 14px;
+}
+.chart .bar {
+  cursor: pointer;
+}
+.chart .bar:hover rect {
+  opacity: 0.75;
 }
 .chart-legend {
   display: flex;

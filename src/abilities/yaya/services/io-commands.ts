@@ -4,7 +4,8 @@
  * CLI-first：界面按钮与这里共享同一套 handler。
  *  - `yaya.session-export`：只返回文本，无额外授权；
  *  - `yaya.session-export-file`：由调用方决定写到哪个路径，需要 system.exec 许可；
- *  - `yaya.import-openai`：读任意路径并启动后台作业（同样是调用方决定读什么）。
+ *  - `yaya.import`（旧名 `yaya.import-openai`）：读任意路径并启动后台作业（同样是调用方决定读什么），
+ *    自动识别 ChatGPT / Claude / DeepSeek 导出与 Rikkahub 备份。
  */
 import { writeFile } from 'node:fs/promises'
 import { SCOPE_EXEC } from '../../../main/process/privacy'
@@ -13,6 +14,7 @@ import { startJobByName } from '../../../main/process/background-tasks'
 import { t, te } from '../../../main/process/i18n'
 import { getSession } from './db'
 import { exportSessionJsonl, exportSessionMarkdown, type ExportScope } from './export'
+import { IMPORT_FORMATS, type ImportFormat } from './importers/load'
 
 /** 文件名消毒：去掉路径分隔符和控制字符，限长 */
 function sanitizeFilename(title: string): string {
@@ -107,24 +109,42 @@ export const ioCommands: CommandSpec[] = [
     }
   },
 
-  // 导入 ChatGPT conversations.json —— 跑在后台任务上（yaya.import-openai 作业）
-  {
-    name: 'yaya.import-openai',
-    description: t(
-      'yaya.io.cmd_import_desc',
-      '从 ChatGPT 导出的 conversations.json 导入会话（后台任务，完成后自动刷新列表）'
-    ),
-    usage: t('yaya.io.cmd_import_usage', 'yaya.import-openai --path <conversations.json>'),
+  // 导入会话 —— 跑在后台任务上（yaya.import 作业）；yaya.import-openai 是旧名字
+  importCommand('yaya.import', 'auto'),
+  importCommand('yaya.import-openai', 'openai')
+]
+
+function importCommand(name: string, defaultFormat: ImportFormat): CommandSpec {
+  return {
+    name,
+    description:
+      defaultFormat === 'openai'
+        ? t(
+            'yaya.io.cmd_import_desc',
+            '从 ChatGPT 导出的 conversations.json 导入会话（后台任务，完成后自动刷新列表）'
+          )
+        : t(
+            'yaya.io.cmd_import_any_desc',
+            '导入其它聊天应用的会话：ChatGPT / Claude / DeepSeek 导出的 conversations.json 或整个 zip、Rikkahub 备份 zip / 数据库（自动识别，后台任务）'
+          ),
+    usage:
+      defaultFormat === 'openai'
+        ? t('yaya.io.cmd_import_usage', 'yaya.import-openai --path <conversations.json>')
+        : 'yaya.import --path <file> [--format auto|openai|claude|deepseek|rikkahub]',
     privacy: { requires: [SCOPE_EXEC] },
-    related: ['job:yaya.import-openai'],
+    related: [`job:${name}`],
     run: async (ctx) => {
       const path = String(ctx.named.path ?? '')
       if (!path) {
         return { ok: false, error: t('yaya.io.err_no_path', '缺少参数：需要 --path <文件路径>') }
       }
-      const task = await startJobByName('yaya.import-openai', {
+      const format = IMPORT_FORMATS.includes(ctx.named.format as ImportFormat)
+        ? (ctx.named.format as ImportFormat)
+        : defaultFormat
+      const task = await startJobByName(name, {
         path,
-        name: t('yaya.io.job_import_title', '导入 ChatGPT 会话')
+        format,
+        name: t('yaya.io.job_import_any_title', '导入会话')
       })
       if (!task) {
         return {
@@ -135,4 +155,4 @@ export const ioCommands: CommandSpec[] = [
       return { ok: true, taskId: task.id }
     }
   }
-]
+}

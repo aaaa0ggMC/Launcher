@@ -133,7 +133,7 @@ export interface MessageTreeNode extends MessageNode {
 }
 
 /** 目前真正实现的协议都走 OpenAI 兼容接口；新增类型前先实现对应 Provider。 */
-export type ProviderType = 'openai' | 'codex-proxy' | 'ollama'
+export type ProviderType = 'openai' | 'codex-proxy' | 'ollama' | 'anthropic' | 'gemini'
 
 export interface ProviderConfig {
   id: string

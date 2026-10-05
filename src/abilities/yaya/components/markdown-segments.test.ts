@@ -77,3 +77,35 @@ it('block-cached rendering equals rendering the joined blocks, also while stream
     ['html', 'fence:true', 'html', 'fence:false']
   )
 })
+it('unclosed fence at the end (streaming) is open and runs to the end of the text', () => {
+  const segs = renderSegments('Intro\n\n```mermaid\ngraph TD\nA-->B', new Set(['mermaid']), labels)
+  const last = segs[segs.length - 1]
+  assert.ok(last.kind === 'fence' && !last.closed)
+  assert.equal(last.kind === 'fence' && last.source, 'graph TD\nA-->B')
+  // 只写了开头一行
+  const opening = renderSegments('```mermaid', new Set(['mermaid']), labels)[0]
+  assert.ok(opening.kind === 'fence' && !opening.closed && opening.source === '')
+})
+it('nested fences are not claimed: inside a longer outer fence, a list item or a blockquote', () => {
+  const langs = new Set(['mermaid'])
+  const outer = renderSegments('````markdown\n```mermaid\nA\n```\n````', langs, labels)
+  assert.deepEqual(
+    outer.map((s) => s.kind),
+    ['html']
+  )
+  const list = renderSegments('- item\n\n  ```mermaid\n  A\n  ```', langs, labels)
+  assert.ok(list.every((s) => s.kind === 'html'))
+  const quote = renderSegments('> ```mermaid\n> A\n> ```', langs, labels)
+  assert.ok(quote.every((s) => s.kind === 'html'))
+})
+it('adjacent claimed fences and an empty fence', () => {
+  const segs = renderSegments(
+    '```svg\n<svg/>\n```\n```mermaid\nA\n```\n\n```svg\n```',
+    new Set(['svg', 'mermaid']),
+    labels
+  )
+  assert.deepEqual(
+    segs.map((s) => (s.kind === 'fence' ? `${s.lang}:${s.closed}:${s.source}` : s.kind)),
+    ['svg:true:<svg/>\n', 'mermaid:true:A\n', 'svg:true:']
+  )
+})

@@ -3,7 +3,7 @@
 > **项目代号**：`yaya` (Yet Another Yes Agent)  
 > **所属架构**：Linux System Cockpit 下游智能体应用 / 独立公开子项目  
 > **设计基线**：Electron + Vue 3 + Vuetify 3 (Material 3) + TypeScript + SQLite  
-> **当前状态**：Phase 1–3 闭环可用（会话树 / 多服务商 / 工具循环 + 审批），Phase 4 附件已接通，输出 Slot 与 MCP 待做
+> **当前状态**（2026-10-05 核对）：Phase 1–5 闭环可用（会话树 / 多服务商含 Anthropic / Gemini 原生 / 工具循环 + 审批 / 附件与长文档检索 / 插件：MCP、Skill、Mermaid、SVG、HTML 小部件、搜索、Mention、安卓控制）；导入 ChatGPT / Claude / DeepSeek / Rikkahub。剩余：安卓自有 App 原生通道、真机 / 真实密钥实测（见第四、六节）
 
 ---
 
@@ -140,7 +140,7 @@
 - **支持导入源**：
   1. **OpenAI**：解析 `conversations.json`，还原 mapping 字典中的树状分支关系。
   2. **Claude**：解析 Anthropic 导出格式，映射为 YAYA 节点。
-  3. **DeepSeek / Rikkahub**：解析标准导出会话格式。
+  3. **DeepSeek / Rikkahub**：解析标准导出会话格式。【已完成：`services/importers/`，Rikkahub 读备份 zip 里的 SQLite】
 
 ---
 
@@ -180,7 +180,7 @@
 | **Provider 适配** | OpenAI 兼容（流式 / reasoning_content / tool_calls） | `[x]` | `services/providers/openai.ts` |
 | | 空节点清洗（防 400 content or tool_calls） | `[x]` | `runner.ts` `buildMessages` + provider |
 | | Ollama / Codex Proxy（同走 OpenAI 兼容） | `[x]` | `services/models.ts`（`/api/tags` 探测） |
-| | Anthropic / Gemini 原生 Provider | `[ ]` | 未实现，设置里已移除这两个选项（不装样子）；需要时先写 Provider 再开放 |
+| | Anthropic / Gemini 原生 Provider | `[x]` | `services/providers/anthropic.ts` / `gemini.ts`（直接走 HTTP，不引 SDK，兼容转发网关）：流式、工具、图片 / PDF、思考摘要；thinking 块签名 / `thoughtSignature` 存 `meta.native`，同模型继续时原样回传；端点不认识的可选字段 400 后去掉重试。单测用假 fetch，**未用真实密钥实测** |
 | **动态模型选择** | `/v1/models` 嗅探 | `[x]` | `fetchModelsFromEndpoint` |
 | | 模型选择弹窗（全局搜索 + Provider 过滤，窄屏全屏） | `[x]` | `components/ModelSelectDialog.vue` |
 | | 会话级模型切换（同时作为新对话默认） | `[x]` | `View.vue` |
@@ -200,14 +200,14 @@
 | | 内置工作流：`agent` 工具循环 / `chat` 纯对话 / `plan-act` 规划子 Agent + 执行 | `[x]` | `workflow/builtin.ts`；会话级选择（输入框）+ 设置里的默认工作流 |
 | | 过程记录持久化（每步 Agent / 耗时 / tokens / 子 Agent 输出） | `[x]` | `messages.meta.workflow`（挂在一次运行的第一个 assistant 节点上） |
 | | 流式 usage（`stream_options.include_usage`，网关不支持时自动退回） | `[x]` | `providers/openai.ts` |
-| | 更多工作流（审阅 / 多 Agent 并行等）、MCP 工具编排 | `[ ]` | 照 `builtin.ts` 注册即可 |
+| | 更多工作流（审阅 / 多 Agent 并行等）、MCP 工具编排 | `[x]` | `review`（回答后审阅子 Agent 挑错，有问题时重写）/ `perspectives`（专家 / 质疑 / 实用三个子 Agent 并行，主 Agent 综合并可用工具核实），单测 `workflow/workflows.test.ts`；MCP 工具与内置工具同在 `tools: 'enabled'` 里，由工作流统一编排 |
 | **内置工具** | `get_system_time` / `cockpit_list_commands` / `cockpit_command` | `[x]` | `services/tools/registry.ts`；`cockpit_command` 对需授权的命令要求确认，禁止调用 `yaya.*` |
 | | `read_file`（分段 / 目录列表）/ `write_file` / `run_bash` | `[x]` | 结果统一截断，`run_bash` 可被「停止」中断 |
 | | `fetch_url`（HTML 去标签、超时） | `[x]` | 同上 |
 | | 工具逐个启用 / 禁用 | `[x]` | `disabledTools` + `yaya.tools-list`，设置页「工具」 |
-| | ~~`search_document`~~ | 移除 | 原为返回固定字符串的假工具；等长文档 Slot 真正实现再加 |
+| | ~~`search_document`~~ | 移除 | 原为返回固定字符串的假工具；已由长文档检索插件 `docs_search` 取代 |
 | **安全与授权** | 工具调用内联审批（参数预览 + 允许 / 拒绝） | `[x]` | `ToolCallRow.vue`；重启后挂起的审批收敛为中断 |
-| **外部生态** | MCP 客户端 | `[ ]` | `mcpServers` 配置字段已有，客户端未实现 |
+| **外部生态** | MCP 客户端 | `[x]` | Era 2 B1：`services/plugins/mcp/*`（Streamable HTTP / SSE、请求头加密、状态、失败不重放），每个服务器 = 一个插件 |
 
 ---
 
@@ -218,11 +218,11 @@
 | **附件** | 选文件 → 复制进会话资产目录 | `[x]` | `yaya.asset-import`（≤ 25MB，网页模式同样可用） |
 | | 图片 → Vision；文本 ≤ 200KB 内联；其余给路径让模型用 `read_file` | `[x]` | `providers/openai.ts` `attachmentParts` |
 | | 缩略图预览 | `[x]` | `yaya.asset-preview`（data URL，≤ 4MB） |
-| | `yaya-asset://` 协议 | `[ ]` | 目前只做路径解析（已防 `../` 越界） |
-| **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[ ]` | |
+| | `yaya-asset://` 协议 | `[x]` | `services/asset-protocol.ts`（只给图片 / 音视频、支持 Range、防越界）；界面缩略图 / 工具截图直接 `<img loading="lazy">`，不再走 data URL；网页模式经 `/_p/yaya-asset/…`。Electron 与网页模式都实测加载成功 |
+| **输入预处理 Slot** | 超大文件摘要 + 检索工具 | `[x]` | `plugins/documents/`：超过内联上限的文本 / PDF 只给 id + 开头摘要（`attachmentRefNote`），模型用 `docs_list` / `docs_search`（BM25，中英文）/ `docs_read`（按行）按需取；只读本会话附件，无需 exec 授权；PDF 走本机 `pdftotext` |
 | **输出渲染 Slot** | Markdown 代码块高亮 + 复制 | `[x]` | `components/markdown.ts`（highlight.js 按需加载，配色跟主题） |
-| | Mermaid 渲染 | `[ ]` | 需要新依赖，待定 |
-| | SVG / HTML 小部件沙箱 | `[ ]` | |
+| | Mermaid 渲染 | `[x]` | `plugins/mermaid/`（6.2，渲染端按需加载 mermaid，`securityLevel: 'strict'`，配色跟主题） |
+| | SVG / HTML 小部件沙箱 | `[x]` | SVG：`plugins/svg/`（净化后 data URL `<img>`）；HTML：`plugins/widget/`，```widget 代码块点击运行，`sandbox="allow-scripts"` iframe + 外壳页自带 CSP（无网络 / 无存储 / 拿不到父页面，Electron 与网页模式实测） |
 
 ---
 
@@ -250,15 +250,17 @@
 | :--- | :--- | :---: | :--- |
 | **OpenAI 导入** | `conversations.json` → 消息树（re-parent、current_node、去重、事务） | `[x]` | `services/importers/openai.ts` |
 | | 后台任务运行（进度 / 停止） | `[x]` | `jobs.ts` `yaya.import-openai` |
-| **Claude / DeepSeek / Rikkahub 导入** | | `[ ]` | |
+| **Claude / DeepSeek / Rikkahub 导入** | | `[x]` | `yaya.import` 自动识别 json / zip / db；格式按公开结构推断，未用真实导出样本实测 |
 
 ---
 
 ## 四、 后续开发路线与近期优先级 (Next Action Items)
 
+> 2026-10-05 核对：MCP 客户端、Mermaid / SVG、GenericSearch、Mention、插件配置与子分组都已完成（见第五、六节），原来的「中期 / 长期」只剩下面几项。
+
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
-2. **中期**：MCP 客户端（stdio / SSE）→ 动态挂载外部工具（设置的工具页已按来源分组 + 搜索，可直接容纳）；长文档 Slot（摘要 + 检索工具）；更多工作流。
-3. **长期**：Claude / DeepSeek 等导入器；输出小部件沙箱。
+2. ~~**中期**：Anthropic / Gemini 原生 Provider；长文档 Slot；更多工作流；`yaya-asset://` 协议。~~（已完成）
+3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~、~~HTML 小部件沙箱~~（已完成）；Android Controller 插件（Termux 后端已做、待真机验证；自有 App 原生通道未做）。
 
 
 ---
@@ -338,7 +340,7 @@
 ### 6.1 长会话滑动窗口加载（已做第一版，2026-10-05）
 
 **已完成**：`yaya.messages-branch --limit N [--before id]`（`getMessageBranchWindow`：轻量查询走路径、按用户消息边界截窗口、只给窗口内节点查兄弟分支）；页面先加载最后 20 轮，滚到顶部 / 点「加载更早的消息」向上翻页并保持位置；运行中只刷新最后两轮（`refreshTail`），未变化的节点 / 轮次复用旧对象（`mergeNodes` / `buildTurnsReusing`）不重渲染；token 每 50ms 合并写入；Markdown 按顶层空行分块缓存（流式只重渲染最后一块）；轮次 `content-visibility: auto`；滚动按方向判断用户意图（上翻立即停止跟随）。网页版 SSE 断线自动重连 + 重连 / 回到前台 / 切回页面时重新同步。
-**还没做**：搜索命中 / 用量统计跳转到窗口外的消息；工具图片缩略图懒加载。
+**跳转（2026-10-05 补上）**：搜索命中（点会话列表里带正文命中的会话）、用量统计（点柱子或明细里的定位按钮）→ `yaya.messages-branch --include <id>` 把窗口往前扩到目标所在轮，目标不在当前分支就先切到它所在的分支，滚到目标并短暂高亮（网页模式实测）。工具图片缩略图懒加载已随 `yaya-asset://` 协议完成。
 
 原计划：
 
@@ -371,9 +373,9 @@
 - **流式约定**落实在视图里：`streaming` 为 true 只显示源码，不渲染、不净化。
 
 **没做 / 待办**
-- mermaid 主题、最大尺寸等插件自己的配置项（6.4 的 configSchema 已具备，显示类插件还没有用上）；
-- `renderSegments` 的未闭合 / 嵌套代码块用例补强；插件 ui 的单测脚手架（SVG 净化已有单测）；
-- 「告诉 AI」的稳定系统提示词开关（当前只有 @ 点名附注这一条路径）；
+- ~~mermaid 主题、最大尺寸等插件自己的配置项~~ 已做：mermaid `configSchema`（配色：跟随界面 / 默认 / 中性 / 森林 / 暗色；最大显示高度），渲染端经 `pluginConfigValues()`（`plugin-ui-registry.ts`，来自 `yaya.plugins-list`）读取，改完即时重渲染（网页模式实测）；
+- ~~`renderSegments` 的未闭合 / 嵌套代码块用例补强~~ 已补（`markdown-segments.test.ts`：流式未闭合、外层更长围栏 / 列表 / 引用里的代码块不接管、相邻与空代码块）；插件 ui 组件的单测脚手架仍没有（无 jsdom）；
+- ~~「告诉 AI」的稳定系统提示词开关~~ 已改为插件启用即带一段固定英文 instructions（`plugins/mermaid/index.ts` / `plugins/svg/index.ts`，见 AGENTS.md「显示类插件必须写」）；
 - 导出 PNG 白底 2x、超大 SVG 的尺寸夹取策略没有实机调过。
 
 原计划与设计：
@@ -400,7 +402,7 @@
 
 ### 6.3 Mention：输入 `@` 点名插件 / Skill / 工具（已完成第一版，2026-10-05）
 
-**实际做法**：`services/plugins/mention.ts`（候选 / 解析 / 会话列表合并）；附注存在用户消息 `meta.mentionNote`，`sanitizeHistory` 发给模型时拼在该消息后（前缀不变）；`session.meta.mentions` 记本会话强制启用的插件 / `tool:<wire>`，`resolveTools(config, forced)` 把它们追加在工具表末尾；Skill 点名随消息加载 SKILL.md 正文；输入框 `@` / 工具栏 @ 按钮弹候选（键盘上下 / 回车 / Esc），点名以标签显示在输入框与用户气泡；右上角菜单可撤销本会话的点名；导出 Markdown 还原为 `@名字`。命令 `yaya.mention-candidates` / `yaya.session-mentions`，`yaya.workflow-start --mentions`。**没做**：MCP 提供方的「附注列出可用工具名」（目前缺省只启用插件 + 一句点名附注）；图片类 mention content（只取文本）。
+**实际做法**：`services/plugins/mention.ts`（候选 / 解析 / 会话列表合并）；附注存在用户消息 `meta.mentionNote`，`sanitizeHistory` 发给模型时拼在该消息后（前缀不变）；`session.meta.mentions` 记本会话强制启用的插件 / `tool:<wire>`，`resolveTools(config, forced)` 把它们追加在工具表末尾；Skill 点名随消息加载 SKILL.md 正文；输入框 `@` / 工具栏 @ 按钮弹候选（键盘上下 / 回车 / Esc），点名以标签显示在输入框与用户气泡；右上角菜单可撤销本会话的点名；导出 Markdown 还原为 `@名字`。命令 `yaya.mention-candidates` / `yaya.session-mentions`，`yaya.workflow-start --mentions`。附注对所有来源（含 MCP）统一列出本会话起可用的工具名（`resolveMentions`）。**没做**：图片类 mention content（只取文本）。
 
 原计划：
 
@@ -433,7 +435,9 @@
 - 设置页：`PluginDetail.vue` 的「分组」区（名称 / 说明 / 状态点 + 不可用原因 / 开关）与「配置」区；`PluginConfigForm.vue` 按 schema 生成表单（secret 走 `v-agent-forbidden` + 密码框 + 清除，保存按钮 + `SaveStatusText`，容器 <640px 转单列标签在上）；`PluginUi.settingsView` + `plugin-ui-registry.settingsViewFor` 让插件整块替换表单；`PluginToolsList.vue` 按 `tool.group` 分组小标题。
 - 测试：`services/plugins/plugin-config.test.ts`（默认值 / 夹取、secret 密文落盘与解密、publicYayaConfig 只给 secretsSet、空串沿用与 clear、分组过滤、ctx.config）。
 
-### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）
+### 6.5 GenericSearch 插件（多引擎联合搜索，对模型只暴露一个 `web_search`）【已完成】
+
+**实际做法**：`plugins/search/`（引擎 Tavily / Brave / Bing / SearXNG / Google / Grok，每个引擎一个子分组放凭据；单引擎或联合模式），引擎实现与合并去重在框架共用模块 `src/main/process/web-search.ts`，AIDJ 的 `web_search` 也已改用它。
 
 - 引擎：Tavily / Bing / Brave / SearXNG / Grok（xAI，带引用的回答引擎）/ Google CSE …，各自密钥与参数在插件配置里（`secret` 加密）。
 - 模式：指定单个引擎，或多引擎联合（并发，按 URL 去重合并，多引擎同时命中的排前，标注来源引擎；单个引擎失败不影响整体）。回答引擎归一成「摘要 + 引用列表」。
@@ -441,6 +445,8 @@
 - 网络走主进程 `net.fetch`（系统代理）；AIDJ 现有的 Tavily `web_search`（`aidj/agent/web-search.ts`）抽成共用模块，两边复用。
 
 ### 6.6 Android Controller 插件（安卓附加能力）
+
+**进度（2026-10-05）**：Termux 后端已做成内置插件 `plugins/android/`（子分组 Termux:API / Shizuku（`rish`，默认关闭）；21 个工具，改变状态的 `guard(SCOPE_CONTROL)`，定位 / 相机 / 剪贴板 / 屏幕是 `yaya` 的 sensitive scope，Shell 走 `system.exec` + 每次确认；短信 / 电话 / 通讯录不提供）。不在安卓上分组显示「不可用」、默认不启用、不加 instructions。**未在真机上验证**（命令行参数按 termux-api 文档写，单测用桩脚本）。自有 App 的 nodejs-mobile 原生通道还没做（现在的 App 是连 Termux 宿主的 WebView 壳，Node 侧调不到 Java）。
 
 分层（**直接做成插件，不走 MCP**；全程进程内通信，无网络）：
 ```

@@ -54,6 +54,12 @@ protocol.registerSchemesAsPrivileged([
     // supportFetchAPI 让渲染端 fetch 可用；corsEnabled + ACAO:* 保持瓦片源 origin-clean。
     // handler 由能力自身注册（src/abilities/yarj/tile-protocol.ts），此处只需声明特权。
     privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
+  },
+  {
+    scheme: 'yaya-asset',
+    // YAYA 会话资产（附件 / 工具截图）：yaya-asset://<会话>/<文件>，界面 <img> 直接加载、可懒加载。
+    // handler 由能力注册（src/abilities/yaya/services/asset-protocol.ts）。
+    privileges: { secure: true, supportFetchAPI: true, stream: true, corsEnabled: true }
   }
 ])
 

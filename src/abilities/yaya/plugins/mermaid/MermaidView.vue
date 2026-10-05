@@ -16,6 +16,7 @@ import { useI18n } from '@ui/i18n'
 import type { FenceViewProps } from '../../components/plugin-ui'
 import DiagramFrame from '../../components/plugin-kit/DiagramFrame.vue'
 import { svgToDataUrl } from '../../components/plugin-kit/image-utils'
+import { pluginConfigValues } from '../../components/plugin-ui-registry'
 
 const props = defineProps<FenceViewProps>()
 
@@ -139,6 +140,17 @@ onMounted(() => {
   onBeforeUnmount(off)
 })
 
+// 插件配置（设置 → 插件 → Mermaid）：配色 / 最大高度
+const MERMAID_THEMES = new Set(['default', 'neutral', 'forest', 'dark'])
+const themeChoice = computed(() => {
+  const v = String(pluginConfigValues('mermaid').theme ?? 'follow')
+  return MERMAID_THEMES.has(v) ? v : 'follow'
+})
+const maxHeight = computed(() => {
+  const n = Number(pluginConfigValues('mermaid').max_height)
+  return Number.isFinite(n) ? Math.min(2000, Math.max(160, n)) : 420
+})
+
 // ---------------------------------------------------------------------------
 // 渲染：按「源码 + 主题」缓存；可取消（seq）
 // ---------------------------------------------------------------------------
@@ -207,7 +219,8 @@ async function renderNow(): Promise<void> {
     reset()
     return
   }
-  const key = `${themeSignature()}\n${source}`
+  const choice = themeChoice.value
+  const key = `${choice === 'follow' ? themeSignature() : choice}\n${source}`
   const hit = cacheGet(key)
   if (hit) {
     seq++
@@ -230,9 +243,10 @@ async function renderNow(): Promise<void> {
     m.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
-      theme: 'base',
       htmlLabels: false,
-      themeVariables: themeVariables()
+      ...(choice === 'follow'
+        ? { theme: 'base' as const, themeVariables: themeVariables() }
+        : { theme: choice as 'default' | 'neutral' | 'forest' | 'dark', themeVariables: {} })
     })
     const out = await m.render(`yaya-mermaid-${mine}-${Date.now().toString(36)}`, source)
     if (mine !== seq) return
@@ -250,7 +264,7 @@ async function renderNow(): Promise<void> {
 }
 
 watch(
-  () => [props.source, props.streaming, themeEpoch.value] as const,
+  () => [props.source, props.streaming, themeEpoch.value, themeChoice.value] as const,
   () => void renderNow(),
   { immediate: true }
 )
@@ -272,6 +286,7 @@ const hint = computed(() =>
     :error="error"
     :busy="busy"
     :hint="hint"
+    :max-image-height="maxHeight"
     export-name="mermaid"
   />
 </template>

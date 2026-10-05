@@ -32,6 +32,35 @@ const plugin: YayaPlugin = {
   // 显示类插件没有工具
   tools: () => [],
   instructions: () => INSTRUCTIONS,
+  // 只影响界面怎么画（渲染端经 plugins-list 读到），不进工具表 / instructions
+  configSchema: [
+    {
+      key: 'theme',
+      type: 'select',
+      label: '配色',
+      labelKey: 'yaya.plugin.mermaid.cfg_theme',
+      default: 'follow',
+      options: [
+        { value: 'follow', label: '跟随界面主题', labelKey: 'yaya.plugin.mermaid.theme_follow' },
+        { value: 'default', label: 'Mermaid 默认', labelKey: 'yaya.plugin.mermaid.theme_default' },
+        { value: 'neutral', label: '中性（黑白）', labelKey: 'yaya.plugin.mermaid.theme_neutral' },
+        { value: 'forest', label: '森林', labelKey: 'yaya.plugin.mermaid.theme_forest' },
+        { value: 'dark', label: '暗色', labelKey: 'yaya.plugin.mermaid.theme_dark' }
+      ]
+    },
+    {
+      key: 'max_height',
+      type: 'number',
+      label: '图的最大显示高度（像素）',
+      labelKey: 'yaya.plugin.mermaid.cfg_max_height',
+      description: '超过的部分等比缩小；点图可以放大查看',
+      descriptionKey: 'yaya.plugin.mermaid.cfg_max_height_desc',
+      default: 420,
+      min: 160,
+      max: 2000,
+      step: 20
+    }
+  ],
   // 用户 @ 点名时：只拼一句附注，不改系统提示词
   mention: () => ({
     note: t(

@@ -12,6 +12,7 @@ import type {
 } from './types'
 import { readAssetData, resolveAssetLocalPath, isTextMime } from '../assets'
 import { reasoningParams, resolveReasoningStyle } from './reasoning'
+import { attachmentRefNote, INLINE_TEXT_LIMIT } from './attachments'
 import { makeLogger } from '../../../../main/process/logger'
 
 const log = makeLogger('yaya-provider-openai')
@@ -310,9 +311,6 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 }
 
-/** 文本附件内联上限：再大就只告诉模型路径，让它用 read_file 按需读 */
-const INLINE_TEXT_LIMIT = 200 * 1024
-
 async function attachmentParts(
   att: MessageAttachment
 ): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
@@ -338,13 +336,7 @@ async function attachmentParts(
       ]
     }
   }
-  const summary = att.summary ? ` summary="${att.summary}"` : ''
-  return [
-    {
-      type: 'text',
-      text: `<attachment name="${att.name}" mime="${att.mimeType}" size="${att.size}" path="${localPath}"${summary} />（内容未内联，需要时用 read_file 读取该路径）`
-    }
-  ]
+  return [{ type: 'text', text: await attachmentRefNote(att) }]
 }
 
 function toOpenAiTool(t: ProviderTool): OpenAI.Chat.Completions.ChatCompletionTool {

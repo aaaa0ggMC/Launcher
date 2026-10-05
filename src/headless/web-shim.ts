@@ -370,7 +370,7 @@ const cockpit = createCockpit({
     clipboard: android ? 'native' : 'web',
     external: android ? 'native' : 'web'
   },
-  hostUrl: (u) => u.replace(/^cockpit-(icon|audio|tile):\/\//, '/_p/cockpit-$1/'),
+  hostUrl: (u) => u.replace(/^(cockpit-(?:icon|audio|tile)|yaya-asset):\/\//, '/_p/$1/'),
   platform: info.platform,
   wayland: false,
   windowDebug: false,

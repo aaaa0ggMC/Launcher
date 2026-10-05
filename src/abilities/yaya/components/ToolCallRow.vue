@@ -6,6 +6,7 @@ import { summarizeArgs } from './turns'
 import { argFields, resultFields, type FieldView } from './tool-view'
 import { highlightCode } from './markdown'
 import { toolViewFor } from './plugin-ui-registry'
+import { assetUrl } from './asset-url'
 
 const props = defineProps<{
   call: ToolCallItem
@@ -31,24 +32,15 @@ const results = computed(() => (pluginView.value ? [] : resultFields(props.call.
 // 工具产出的图片（会话资产）：默认视图显示缩略图，插件视图自己处理
 const imageUrls = ref<string[]>([])
 const imagesLoaded = ref(false)
-async function loadImages(): Promise<void> {
+function loadImages(): void {
   if (imagesLoaded.value || !props.call.images?.length) return
   imagesLoaded.value = true
-  const urls: string[] = []
-  for (const uri of props.call.images) {
-    try {
-      const url = (await window.cockpit.command('yaya.asset-preview', { uri })) as string | null
-      if (url) urls.push(url)
-    } catch {
-      /* 读不到就跳过 */
-    }
-  }
-  imageUrls.value = urls
+  imageUrls.value = props.call.images.map(assetUrl)
 }
 watch(
   () => open.value && !pluginView.value,
   (show) => {
-    if (show) void loadImages()
+    if (show) loadImages()
   }
 )
 const zoomed = ref<string | null>(null)
@@ -177,7 +169,7 @@ function onReasonKey(e: KeyboardEvent): void {
         :aria-label="t('yaya.tool.zoom', '查看大图')"
         @click="zoomed = url"
       >
-        <img :src="url" alt="" class="tool-image" />
+        <img :src="url" alt="" class="tool-image" loading="lazy" />
       </button>
       <v-dialog
         :model-value="zoomed !== null"

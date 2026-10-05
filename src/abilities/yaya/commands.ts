@@ -7,6 +7,7 @@ import type { ApprovalScope } from './types'
 import { normalizeEffort } from './services/providers/reasoning'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
+import { registerYayaAssetProtocol } from './services/asset-protocol'
 import { currentOrigin, SCOPE_EXEC } from '../../main/process/privacy'
 import { registerPreRunHook } from '../../main/process/commands/registry'
 import { getBroadcast } from '../../main/process/broadcast'
@@ -194,6 +195,7 @@ for (const [file, plugin] of Object.entries(builtinPlugins)) {
 
 // 系统启动时恢复异常中断的工作流状态、按配置建立插件表
 registerStartupHook(() => {
+  registerYayaAssetProtocol()
   reconcileInterruptedWorkflows()
   refreshPlugins(loadYayaConfig())
 })
@@ -274,9 +276,9 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.messages-branch',
     description:
-      '获取指定会话当前活跃分支的消息列表。不带 --limit 返回整条分支（数组）；带 --limit 返回 { messages, hasMore }：按用户消息边界取最后 N 轮，--before 取该消息之前的 N 轮（长会话滑动加载）',
+      '获取指定会话当前活跃分支的消息列表。不带 --limit 返回整条分支（数组）；带 --limit 返回 { messages, hasMore }：按用户消息边界取最后 N 轮，--before 取该消息之前的 N 轮（长会话滑动加载）；--include 把窗口往前扩到包含该消息（搜索命中 / 用量统计跳转）',
     usage:
-      'yaya.messages-branch --session <sessionId> [--leaf <leafId>] [--limit <轮数> [--before <messageId>]]',
+      'yaya.messages-branch --session <sessionId> [--leaf <leafId>] [--limit <轮数> [--before <messageId>] [--include <messageId>]]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
       const session = getSession(sessionId)
@@ -285,7 +287,8 @@ const commands: CommandSpec[] = [
       if (Number.isFinite(limit) && limit > 0) {
         if (!session) return { messages: [], hasMore: false }
         const before = ctx.named.before ? String(ctx.named.before) : undefined
-        const win = getMessageBranchWindow(leafId, { limit, before })
+        const include = ctx.named.include ? String(ctx.named.include) : undefined
+        const win = getMessageBranchWindow(leafId, { limit, before, include })
         return { ...win, messages: overlayLiveBuffer(sessionId, win.messages) }
       }
       if (!session) return []
@@ -782,7 +785,8 @@ const commands: CommandSpec[] = [
         }
       }
 
-      if (!baseUrl) {
+      // 原生协议（Anthropic / Gemini）留空 = 官方地址
+      if (!baseUrl && type !== 'anthropic' && type !== 'gemini') {
         return { ok: false, models: [], error: '缺少 Base URL' }
       }
 
