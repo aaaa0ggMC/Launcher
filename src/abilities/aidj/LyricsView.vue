@@ -21,6 +21,7 @@ import {
   extractPlainLyrics as stripLrcTags,
   type LyricLine
 } from './parser/lrcParser'
+import { shouldResumeFollow, FOLLOW_SETTLE_MS, FOLLOW_IDLE_RESUME_MS } from './lyrics-follow'
 
 defineOptions({ name: 'cockpit-aidj-lyrics' })
 
@@ -36,6 +37,8 @@ const cfg = ref<AidjLyricsPageConfig>({ ...DEFAULT_LYRICS_PAGE_CFG })
 const state = ref<PlaybackState>({})
 const coverUrl = ref('')
 const lyricsOpen = ref(false)
+/** Desktop lyrics is a child window: unavailable in the web / headless host. */
+const canDesktopLyrics = window.cockpit.hasCap('window.child')
 const players = ref<string[]>([])
 const selectedPlayer = ref('')
 const playerBusy = ref(false)
@@ -515,6 +518,11 @@ let recenterActive = false
  */
 function recenter(): void {
   if (!scrollMode.value || recenterActive) return
+  if (followPaused.value) {
+    // The user is reading elsewhere: keep the padding right, don't yank the view.
+    computePad()
+    return
+  }
   recenterActive = true
   let lastH = -1
   let lastTop = -1
@@ -577,9 +585,99 @@ function followCurrent(): number {
   return top
 }
 
+// -- manual scroll pauses follow ---------------------------------------------
+// Only real gestures (wheel / touch drag / scrollbar drag / scroll keys) pause:
+// the `scroll` event alone can't tell them apart from our own `scrollTo`.
+// While paused, a quiet gap of FOLLOW_SETTLE_MS with the current line back near
+// the center resumes at once; otherwise FOLLOW_IDLE_RESUME_MS without any
+// gesture resumes and recenters (see lyrics-follow.ts).
+const followPaused = ref(false)
+let lastGestureAt = 0
+let holding = false
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+
+function clearFollowTimers(): void {
+  if (settleTimer) clearTimeout(settleTimer)
+  if (idleTimer) clearTimeout(idleTimer)
+  settleTimer = idleTimer = null
+}
+
+/** Current line center minus viewport center (px), null when there's none. */
+function currentLineOffset(): number | null {
+  const el = scrollEl.value
+  const idx = currentIdx.value
+  if (!el || idx < 0) return null
+  const target = el.querySelector(`[data-line-idx="${idx}"]`) as HTMLElement | null
+  if (!target) return null
+  const lineCenter = target.offsetTop + target.offsetHeight / 2 - el.scrollTop
+  return lineCenter - el.clientHeight / 2
+}
+
+function checkResume(): void {
+  if (!followPaused.value) return
+  const idleMs = performance.now() - lastGestureAt
+  if (shouldResumeFollow({ offsetPx: currentLineOffset(), idleMs, holding })) resumeFollow()
+}
+
+function resumeFollow(): void {
+  clearFollowTimers()
+  followPaused.value = false
+  recenter()
+}
+
+function markGesture(): void {
+  if (!scrollMode.value) return
+  followPaused.value = true
+  lastGestureAt = performance.now()
+  clearFollowTimers()
+  settleTimer = setTimeout(checkResume, FOLLOW_SETTLE_MS)
+  idleTimer = setTimeout(checkResume, FOLLOW_IDLE_RESUME_MS)
+}
+
+/** Momentum / scrollbar-drag scrolling keeps the gesture "alive". */
+function onLyricScroll(): void {
+  if (followPaused.value) markGesture()
+}
+
+function onLyricTouchStart(): void {
+  holding = true
+}
+
+function onLyricTouchEnd(): void {
+  holding = false
+  if (followPaused.value) markGesture()
+}
+
+function onLyricPointerDown(e: PointerEvent): void {
+  // Mouse on the element itself (not a line) = grabbing the scrollbar.
+  if (e.pointerType !== 'mouse' || e.target !== e.currentTarget) return
+  holding = true
+  markGesture()
+  window.addEventListener('pointerup', onLyricPointerUp, { once: true })
+}
+
+function onLyricPointerUp(): void {
+  holding = false
+  if (followPaused.value) markGesture()
+}
+
+function onLyricKeydown(e: KeyboardEvent): void {
+  if (SCROLL_KEYS.has(e.key)) markGesture()
+}
+
 watch(
   () => [currentIdx.value, scrollMode.value],
-  () => recenter(),
+  () => {
+    if (!scrollMode.value && followPaused.value) {
+      clearFollowTimers()
+      followPaused.value = false
+    }
+    // The new current line may have landed where the user left the view.
+    if (followPaused.value && performance.now() - lastGestureAt >= FOLLOW_SETTLE_MS) checkResume()
+    recenter()
+  },
   { flush: 'post' }
 )
 
@@ -639,6 +737,7 @@ async function toggleLyricsWindow(): Promise<void> {
 }
 
 async function refreshLyricsOpen(): Promise<void> {
+  if (!canDesktopLyrics) return
   const res = (await window.cockpit.command('aidj.lyrics-state').catch(() => null)) as {
     open?: boolean
   } | null
@@ -772,6 +871,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(rafId)
   padRO?.disconnect()
   padRO = null
+  clearFollowTimers()
+  window.removeEventListener('pointerup', onLyricPointerUp)
   unsub?.()
   window.removeEventListener('resize', onResize)
 
@@ -830,7 +931,7 @@ defineExpose({ toMarkdown })
           <v-icon v-else size="40">mdi-music-note-eighth</v-icon>
         </div>
 
-        <div class="min-w-0 flex-grow-1 d-flex flex-column ga-1">
+        <div class="lyrics-info min-w-0 flex-grow-1 d-flex flex-column ga-1">
           <div class="d-flex align-center ga-2 flex-wrap">
             <span class="lyrics-track-name">{{
               hasTrack ? state.track : t('aidj.lyrics_page.waiting', 'Waiting to play…')
@@ -916,7 +1017,11 @@ defineExpose({ toMarkdown })
                 />
               </template>
             </v-tooltip>
-            <v-tooltip :text="t('aidj.lyrics_page.desktop', 'Desktop lyrics')" location="top">
+            <v-tooltip
+              v-if="canDesktopLyrics"
+              :text="t('aidj.lyrics_page.desktop', 'Desktop lyrics')"
+              location="top"
+            >
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"
@@ -954,6 +1059,14 @@ defineExpose({ toMarkdown })
           :ref="setScrollEl"
           class="lyric-scroll"
           :style="{ paddingTop: padPx + 'px', paddingBottom: padPx + 'px' }"
+          @wheel.passive="markGesture"
+          @touchstart.passive="onLyricTouchStart"
+          @touchmove.passive="markGesture"
+          @touchend="onLyricTouchEnd"
+          @touchcancel="onLyricTouchEnd"
+          @pointerdown="onLyricPointerDown"
+          @keydown="onLyricKeydown"
+          @scroll.passive="onLyricScroll"
         >
           <div
             v-for="(line, i) in lrcLines"
@@ -1429,11 +1542,20 @@ defineExpose({ toMarkdown })
 }
 
 /* 窄屏（≤720px）：封面 + 标题一行，控制区（播放器下拉 + 上一首 / 播放 / 下一首）单独占满一行，
-   否则标题只剩一列宽、被挤成竖排字。桌面不变。 */
+   否则标题只剩一列宽、被挤成竖排字。桌面不变。
+   信息块 flex-basis 必须是 0：默认 auto 按长歌名算基准宽度，放不下就整块换行到封面下面，
+   右边留一大片空白；`.flex-grow-1` 带 !important，这里也要带。 */
 @media (max-width: 720px) {
   .lyrics-header {
     flex-wrap: wrap;
     gap: 12px;
+  }
+  .lyrics-info {
+    flex: 1 1 0 !important;
+    min-width: 0;
+  }
+  .lyrics-track-name {
+    overflow-wrap: anywhere;
   }
   .lyrics-cover {
     width: 64px;
@@ -1451,6 +1573,14 @@ defineExpose({ toMarkdown })
     width: auto;
     max-width: none;
     min-width: 0;
+  }
+}
+
+/* 触屏：上一首 / 播放 / 下一首等控制按钮热区放大到 40px。 */
+@media (pointer: coarse) {
+  .lyrics-controls :deep(.v-btn--icon) {
+    width: 40px;
+    height: 40px;
   }
 }
 </style>
