@@ -124,7 +124,14 @@ class WebPlayerEngine {
     // dropped; the instance outlives every page switch).
     window.cockpit?.on('cockpit:aidj-webplayer', (ev) => this.handleCommand(ev as EngineCommand))
     // 网页版事件流断线重连后，把当前状态重新报给宿主（断线期间的状态上报可能丢了）
-    window.cockpit?.on('cockpit:host-reconnected', () => this.report())
+    window.cockpit?.on('cockpit:host-reconnected', () => {
+      this.report()
+      void this.hello()
+    })
+    // 上线即打招呼并取走排队的播放指令（引擎创建前 aidj.send 广播的歌单会在宿主排队），
+    // 之后每 30s 心跳一次，宿主据此判断「有没有页面在放歌」
+    void this.hello()
+    setInterval(() => void this.hello(), 30_000)
     // 手机浏览器切后台 / 锁屏后 AudioContext 会被挂起（或进入 interrupted），而 resume() 在没有
     // 用户手势时可能永远不 resolve——播放指令经宿主绕一圈回来时已经不在手势里了。
     // 所以在页面上的任何一次真实点按里顺手把它唤醒。
@@ -441,6 +448,17 @@ class WebPlayerEngine {
     if (i >= 0) this.history.splice(i, 1)
     this.history.unshift(song)
     if (this.history.length > 50) this.history.length = 50
+  }
+
+  private async hello(): Promise<void> {
+    try {
+      const r = (await window.cockpit.command('aidj.web-player-hello')) as {
+        pending?: EngineCommand | null
+      } | null
+      if (r?.pending) this.handleCommand(r.pending)
+    } catch {
+      /* dbus 模式下命令不可用：没有内置播放器，忽略 */
+    }
   }
 
   private async resume(): Promise<void> {

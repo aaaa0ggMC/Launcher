@@ -42,6 +42,14 @@ export const webPlayerCommands: CommandSpec[] = [
     }
   },
   {
+    name: 'aidj.web-player-hello',
+    description:
+      '渲染端内置播放器引擎上线 / 心跳（内部）：记为在线，并取走引擎上线前排队的播放指令',
+    usage: 'aidj.web-player-hello',
+    ...WEB_ONLY,
+    run: () => ({ ok: true, pending: getWebPlayerBackend().hello() })
+  },
+  {
     name: 'aidj.player-volbal',
     description: '查询或设置内置播放器的响度平衡（--enabled <bool> --method <lufs|linear>）',
     usage: 'aidj.player-volbal [--enabled <true|false>] [--method <lufs|linear>]',

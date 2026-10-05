@@ -274,6 +274,7 @@ export class WebPlayerBackend implements PlayerBackend {
 
   /** Store a state report pushed up by the renderer engine. */
   report(state: WebPlayerReport): void {
+    this.lastEngineSeen = Date.now()
     this.lastStatus = {
       status: state.status,
       track: state.track ?? '',
@@ -414,6 +415,27 @@ export class WebPlayerBackend implements PlayerBackend {
     getBroadcast()('cockpit:aidj-webplayer', payload)
   }
 
+  // ---- 迟到的播放器引擎也能接上 ----
+  // 引擎（渲染端 <audio>）只在打开过播放器 / AIDJ 页面后才存在；之前广播的播放指令没人收就丢了
+  // （AI 调 aidj.send 返回 ok，却什么都没放）。没有在线引擎时把最近一次换歌单 / 追加记下来，
+  // 引擎创建时（及每 30s 心跳）经 aidj.web-player-hello 取走。
+  private lastEngineSeen = 0
+  private pending: { type: 'playlist' | 'enqueue'; songs: unknown[] } | null = null
+  private static readonly ENGINE_TTL_MS = 75_000
+
+  /** 有引擎在最近 75 秒内打过招呼 / 上报过状态 */
+  get engineOnline(): boolean {
+    return Date.now() - this.lastEngineSeen < WebPlayerBackend.ENGINE_TTL_MS
+  }
+
+  /** 引擎打招呼：记为在线，交出排队中的指令（只交给第一个来取的引擎，避免多个页面一起放） */
+  hello(): Record<string, unknown> | null {
+    this.lastEngineSeen = Date.now()
+    const p = this.pending
+    this.pending = null
+    return p
+  }
+
   async sendFiles(paths: string[], opts?: { append?: boolean }): Promise<boolean> {
     if (!paths.length) return false
     // Resolve library names for the queue (the engine advances by itself);
@@ -432,7 +454,15 @@ export class WebPlayerBackend implements PlayerBackend {
         emotion: lib?.metadata.get(name)?.emotion ?? null
       }
     })
-    this.emit({ type: opts?.append ? 'enqueue' : 'playlist', songs })
+    const type = opts?.append ? 'enqueue' : 'playlist'
+    if (!this.engineOnline) {
+      // 没有在线引擎：排队，等播放器页面打开时取走（追加合并进排队中的歌单）
+      this.pending =
+        type === 'enqueue' && this.pending
+          ? { type: this.pending.type, songs: [...this.pending.songs, ...songs] }
+          : { type, songs }
+    }
+    this.emit({ type, songs })
     log.info('WebPlayerBackend.sendFiles', {
       count: songs.length,
       append: opts?.append === true

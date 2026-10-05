@@ -144,6 +144,14 @@ export const playbackCommands: CommandSpec[] = [
       if (pathArray.length === 0) return { ok: false, error: '未指定文件路径' }
       const append = String(ctx.named.append ?? '') === 'true'
       await backend.sendFiles(pathArray, { append })
+      // 内置播放器：浏览器里还没有播放器引擎（没打开过播放器 / AIDJ 页面）时指令先排队
+      const queued =
+        backend instanceof WebPlayerBackend && !backend.engineOnline
+          ? {
+              queued: true,
+              hint: '内置播放器还没在任何页面上运行：歌单已排队，打开「播放器」或「AI DJ」页面（ui.navigate --ability aidj-player）后会自动开始播放'
+            }
+          : {}
       const lib = await loadLibrary()
       const pathToName = new Map<string, string>()
       for (const [name, p] of lib.musicPaths) pathToName.set(p, name)
@@ -152,7 +160,7 @@ export const playbackCommands: CommandSpec[] = [
       if (state.config?.preferences.record_freq) {
         await bumpFrequency(names)
       }
-      return { ok: true }
+      return { ok: true, ...queued }
     }
   },
   {
