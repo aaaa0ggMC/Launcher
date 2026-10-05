@@ -115,12 +115,13 @@ export const webPlayerCommands: CommandSpec[] = [
       const enabled =
         ctx.named.enabled !== undefined ? String(ctx.named.enabled) !== 'false' : undefined
       const seconds = ctx.named.seconds !== undefined ? Number(ctx.named.seconds) : undefined
+      if (!backend.isConnected) await backend.connect()
+      const cur = backend.getCrossfade()
       if (enabled === undefined && seconds === undefined) {
-        const s = await backend.getPlaybackDetail()
-        return { ok: true, enabled: s.crossfade === true, seconds: s.crossfadeSeconds ?? 2.5 }
+        return { ok: true, enabled: cur.enabled, seconds: cur.seconds }
       }
-      const next = enabled ?? (await backend.getPlaybackDetail()).crossfade === true
-      const sec = seconds ?? (await backend.getPlaybackDetail()).crossfadeSeconds ?? 2.5
+      const next = enabled ?? cur.enabled
+      const sec = seconds ?? cur.seconds
       await backend.setCrossfade(next, sec)
       // Persist the shared preference.
       try {

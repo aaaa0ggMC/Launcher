@@ -557,9 +557,10 @@ export class WebPlayerBackend implements PlayerBackend {
     const index = this.queueIndex
     const song = this.queue[index]
     if (!song || song.path !== this.lastTrackPath) return null
-    // A live engine elsewhere (another tab) is still playing: don't double up.
+    // A live engine elsewhere (another tab) is still playing — a playing
+    // engine reports every ~300ms — don't double up.
     const r = this.lastReporter
-    if (r && r.status === 'Playing' && Date.now() - r.at < 3000) return null
+    if (r && r.status === 'Playing' && Date.now() - r.at < 1500) return null
     return {
       type: 'restore',
       songs: this.queue,
@@ -650,6 +651,11 @@ export class WebPlayerBackend implements PlayerBackend {
   }
 
   // -- M4: crossfade / EQ / playback rate / AB loop / sleep timer -------------
+
+  /** Current crossfade setting (the backend's — the engine only echoes it). */
+  getCrossfade(): { enabled: boolean; seconds: number } {
+    return { enabled: this.crossfadeEnabled, seconds: this.crossfadeSeconds }
+  }
 
   async setCrossfade(enabled: boolean, seconds?: number): Promise<void> {
     this.crossfadeEnabled = enabled

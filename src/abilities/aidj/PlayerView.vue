@@ -555,7 +555,12 @@ watch(spectrumOn, (on) => {
   persistSpectrum(on)
 })
 
-onMounted(() => startPolling())
+onMounted(() => {
+  // The player page must work on its own: when it is the first AIDJ page opened
+  // (App relaunched straight into it) no engine existed, so play did nothing.
+  ensureWebPlayerEngine()
+  startPolling()
+})
 onActivated(() => startPolling())
 onDeactivated(() => {
   stopPolling()
