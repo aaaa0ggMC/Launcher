@@ -356,15 +356,15 @@ onUnmounted(() => {
         >
           <v-icon size="18">mdi-arrow-left</v-icon>
         </v-btn>
-        <span class="text-body-2 font-weight-medium">
+        <span class="slots-title text-body-2 font-weight-medium">
           {{ t('aidj.slots.title', '元数据槽位 (Metadata Slots)') }}
         </span>
-        <v-chip size="small" color="primary" variant="flat" class="ml-1 active-chip">
+        <v-chip size="small" color="primary" variant="flat" class="ml-1 active-chip slots-count">
           {{
             t('aidj.slots.active_count', '生效: {n} 首').replace('{n}', String(totalActiveSongs))
           }}
         </v-chip>
-        <v-spacer />
+        <v-spacer class="slots-spacer" />
         <v-btn
           variant="tonal"
           prepend-icon="mdi-plus"
@@ -378,6 +378,7 @@ onUnmounted(() => {
           size="small"
           variant="text"
           :loading="loading"
+          class="slots-refresh"
           :title="t('aidj.sessions.refresh', '刷新')"
           @click="loadSlots"
         >
@@ -447,7 +448,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Actions Group -->
-            <div class="d-flex align-center ga-1" @click.stop>
+            <div class="slot-actions d-flex align-center ga-1" @click.stop>
               <v-btn
                 v-if="!s.isWriteTarget"
                 variant="text"
@@ -495,7 +496,7 @@ onUnmounted(() => {
     <!-- VIEW MODE: DETAIL (SLOT ITEMS SLIDING WINDOW) -->
     <template v-else-if="viewMode === 'detail' && selectedSlot">
       <!-- Detail Head -->
-      <div class="slots-head d-flex align-center ga-2 pb-2">
+      <div class="slots-head slots-head--detail d-flex align-center ga-2 pb-2">
         <v-btn
           icon
           size="small"
@@ -505,7 +506,7 @@ onUnmounted(() => {
         >
           <v-icon size="18">mdi-arrow-left</v-icon>
         </v-btn>
-        <span class="text-body-2 font-weight-medium text-truncate">
+        <span class="slots-title text-body-2 font-weight-medium text-truncate">
           {{ selectedSlot.name }}
         </span>
         <v-chip size="small" variant="flat" color="primary" class="active-chip">
@@ -803,6 +804,62 @@ onUnmounted(() => {
 @media (max-width: 720px) {
   .virtual-items-list {
     height: min(320px, calc(40 * var(--app-vh))) !important;
+  }
+  /* 标题栏两行：返回 + 标题（单行省略）+ 刷新 / 生效数 + 新建合集。
+     之前一行塞五样东西，标题被挤成逐词竖排、「生效」chip 被裁掉。 */
+  .slots-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .slots-title {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .slots-refresh {
+    order: 1;
+  }
+  .slots-count,
+  .slots-spacer,
+  .create-btn {
+    order: 2;
+  }
+  .slots-count {
+    margin-left: 40px !important;
+  }
+  .slots-head:not(.slots-head--detail)::after {
+    /* 换行占位：把生效数 / 新建合集挤到第二行 */
+    content: '';
+    order: 1;
+    flex-basis: 100%;
+  }
+  .slots-head--detail .slots-count,
+  .slots-head--detail .slots-spacer {
+    order: 0;
+  }
+  .slots-scroll {
+    overflow-x: hidden;
+  }
+  /* 槽位卡片：勾选 + 名称 / 数量一行，操作按钮换到下一行右对齐，不再横向溢出 */
+  .slot-card {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .slot-info {
+    flex: 1 1 0 !important;
+  }
+  .slot-meta {
+    white-space: nowrap;
+  }
+  .slot-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .slot-actions .target-btn {
+    padding-inline: 8px;
   }
 }
 
