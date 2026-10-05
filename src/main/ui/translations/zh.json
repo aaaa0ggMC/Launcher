@@ -246,6 +246,7 @@
   "web.err_headless_running": "无头宿主正在运行（pid {pid}），先关掉它再开启网页服务",
   "web.err_not_running": "网页服务未运行",
   "autosave.saving": "正在保存…",
+  "settings.openAbility": "打开 {name}",
   "autosave.saved": "已自动保存",
   "autosave.failed": "保存失败",
   "autosave.idle": "修改后自动保存"

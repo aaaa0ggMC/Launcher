@@ -246,6 +246,7 @@
   "web.err_headless_running": "A headless host is running (pid {pid}); stop it before enabling web access",
   "web.err_not_running": "Web access is not running",
   "autosave.saving": "Saving…",
+  "settings.openAbility": "Open {name}",
   "autosave.saved": "Saved automatically",
   "autosave.failed": "Save failed",
   "autosave.idle": "Changes save automatically"
