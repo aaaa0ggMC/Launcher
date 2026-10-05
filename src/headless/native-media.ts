@@ -12,7 +12,11 @@ import type { NativeClient } from '../preload/api'
  * 播放 / 暂停状态：页面写了 `playbackState` 就用它；否则跟踪最近一次 `play()` 的媒体元素
  * （播放器的 <audio> 往往不在 DOM 里，document 上收不到事件，所以包一层 `play()`）。
  * 封面在页面里取回并缩成 ≤512px 的 JPEG data URL 再交给原生——原生不用处理宿主鉴权。
- * 旧版 App 不认 `media.update` 时静默停用。
+ * 旧版 App 不认 `media.update` 时停用。
+ *
+ * Android WebView 根本没有 `navigator.mediaSession` / `MediaMetadata`（Chrome 有，WebView 没有），
+ * 页面（AIDJ 播放器）检测不到就什么都不写——所以这里先补一个最小实现，再照常拦截。
+ * 诊断信息以 `[native-media]` 打到 console（会进宿主「日志」页）。
  */
 
 type Action = 'play' | 'pause' | 'previoustrack' | 'nexttrack' | 'stop' | 'seekto'
@@ -34,9 +38,15 @@ export function installNativeMedia(
   client: NativeClient,
   on: (channel: string, cb: (...args: unknown[]) => void) => () => void
 ): void {
+  const polyfilled = ensureMediaSession()
   const ms = navigator.mediaSession as MediaSession | undefined
-  if (!ms) return
+  if (!ms) {
+    console.warn('[native-media] navigator.mediaSession unavailable; native media controls off')
+    return
+  }
+  console.warn(`[native-media] installed (${polyfilled ? 'polyfilled' : 'native'} mediaSession)`)
   let disabled = false
+  let reported = false
 
   const handlers = new Map<Action, MediaSessionActionHandler>()
   let position: { position: number; duration: number; rate: number; at: number } | null = null
@@ -223,9 +233,15 @@ export function installNativeMedia(
       await client.call('media.update', args)
       sent = { ...snap, at: Date.now() }
       sentArtKey = snap.artKey
-    } catch {
-      // 旧版 App 没有这个方法：停用，不再打扰
-      disabled = true
+      if (!reported && snap.state !== 'none') {
+        reported = true
+        console.warn(`[native-media] first update ok: state=${snap.state} title=${snap.title}`)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.warn(`[native-media] media.update failed: ${msg}`)
+      // 旧版 App 没有这个方法：停用，不再打扰；其它错误下次变化时再试
+      if (/unknown|not supported|no such/i.test(msg)) disabled = true
     } finally {
       sending = false
     }
@@ -254,4 +270,54 @@ export function installNativeMedia(
     }
     schedule()
   })
+}
+
+/**
+ * WebView 没有 Media Session API 时补一个只存值的实现（页面写进来，上面的拦截读出去）。
+ * 返回是否做了补丁。
+ */
+function ensureMediaSession(): boolean {
+  if (navigator.mediaSession) return false
+  if (typeof window.MediaMetadata !== 'function') {
+    class MediaMetadataShim {
+      title: string
+      artist: string
+      album: string
+      artwork: MediaImage[]
+      constructor(init: MediaMetadataInit = {}) {
+        this.title = init.title ?? ''
+        this.artist = init.artist ?? ''
+        this.album = init.album ?? ''
+        this.artwork = [...(init.artwork ?? [])]
+      }
+    }
+    ;(window as unknown as { MediaMetadata: unknown }).MediaMetadata = MediaMetadataShim
+  }
+  class MediaSessionShim {
+    private _metadata: MediaMetadata | null = null
+    private _state: MediaSessionPlaybackState = 'none'
+    get metadata(): MediaMetadata | null {
+      return this._metadata
+    }
+    set metadata(v: MediaMetadata | null) {
+      this._metadata = v
+    }
+    get playbackState(): MediaSessionPlaybackState {
+      return this._state
+    }
+    set playbackState(v: MediaSessionPlaybackState) {
+      this._state = v
+    }
+    setActionHandler(): void {
+      /* 由 installNativeMedia 在实例上覆盖 */
+    }
+    setPositionState(): void {
+      /* 同上 */
+    }
+  }
+  Object.defineProperty(navigator, 'mediaSession', {
+    configurable: true,
+    value: new MediaSessionShim()
+  })
+  return true
 }
