@@ -19,6 +19,8 @@ import {
   fitTransform,
   metricsFor,
   nodeEdgePath,
+  packChains,
+  PACK_PREFIX,
   subtreeSizes,
   zoomAt,
   type GraphNode
@@ -323,4 +325,74 @@ it('breaks mutual cycles into a visible forest without overlapping nodes', () =>
   assert.equal(g.edges.length, 2)
   assert.equal(subtreeSizes(g).get(g.roots[0].id), 3)
   assert.equal(new Set(g.nodes.map((n) => `${n.x},${n.y}`)).size, 3)
+})
+
+describe('packChains：折叠线性链', () => {
+  /** root → a1..a5 → fork → (b1 → b2 → b3 → b4 → leafB) / (c1 → leafC) */
+  function forked(): TreeTurn[] {
+    const list = [turn('root', null)]
+    let prev = 'root'
+    for (const id of ['a1', 'a2', 'a3', 'a4', 'a5', 'fork']) {
+      list.push(turn(id, prev))
+      prev = id
+    }
+    list.push(turn('b1', 'fork'), turn('b2', 'b1'), turn('b3', 'b2'), turn('b4', 'b3'))
+    list.push(turn('leafB', 'b4'), turn('c1', 'fork'), turn('leafC', 'c1'))
+    return list
+  }
+  const ids = (list: { id: string }[]): string[] => list.map((t) => t.id)
+
+  it('分叉点之间的链折成一个节点，锚点（根 / 分叉 / 分支第一轮 / 叶子）保留', () => {
+    const out = packChains(forked())
+    assert.deepEqual(ids(out), [
+      'root',
+      `${PACK_PREFIX}a1`,
+      'fork',
+      'b1',
+      `${PACK_PREFIX}b2`,
+      'leafB',
+      'c1',
+      'leafC'
+    ])
+    const pa = out.find((t) => t.id === `${PACK_PREFIX}a1`)!
+    assert.deepEqual(ids(pa.pack ?? []), ['a1', 'a2', 'a3', 'a4', 'a5'])
+    assert.equal(pa.parent, 'root')
+    assert.equal(pa.endId, 'a5')
+    assert.equal(out.find((t) => t.id === 'fork')?.parent, `${PACK_PREFIX}a1`)
+    assert.equal(out.find((t) => t.id === 'leafB')?.parent, `${PACK_PREFIX}b2`)
+    // 折完的图照样能布局，活跃路径能穿过折叠节点
+    const g = buildGraph(out)
+    assert.equal(g.nodes.length, out.length)
+    assert.deepEqual(
+      [...activePath(g, 'leafB')],
+      ['leafB', `${PACK_PREFIX}b2`, 'b1', 'fork', `${PACK_PREFIX}a1`, 'root']
+    )
+  })
+
+  it('不够 min 轮不折；keep 的节点把链切开；展开过的保持展开', () => {
+    // b 链只有 b2 b3 b4 三轮可折；keep b3 → 两边都不足 3 轮
+    assert.ok(!ids(packChains(forked(), new Set(['b3']))).includes(`${PACK_PREFIX}b2`))
+    const opened = packChains(forked(), new Set(), new Set([`${PACK_PREFIX}a1`]))
+    assert.ok(ids(opened).includes('a3'))
+    assert.ok(ids(opened).includes(`${PACK_PREFIX}b2`))
+    // 统计：工具次数累加，活跃取任一
+    const tools = forked().map((t) => (t.id.startsWith('a') ? { ...t, tools: 2 } : t))
+    tools[3] = { ...tools[3], active: true }
+    const p = packChains(tools).find((t) => t.id === `${PACK_PREFIX}a1`)!
+    assert.equal(p.tools, 10)
+    assert.equal(p.active, true)
+  })
+
+  it('没有可折的链时原样返回；异常数据（环 / 悬空父节点）不卡死', () => {
+    const plain = [turn('r', null), turn('x', 'r'), turn('y', 'r')]
+    assert.deepEqual(ids(packChains(plain)), ['r', 'x', 'y'])
+    const cyc = [turn('p', 'q'), turn('q', 'p'), turn('z', 'missing')]
+    assert.deepEqual(ids(packChains(cyc)), ['p', 'q', 'z'])
+    // 十万轮的长链：一个折叠节点 + 首尾
+    const long: TreeTurn[] = [turn('n0', null)]
+    for (let i = 1; i < 100_000; i++) long.push(turn(`n${i}`, `n${i - 1}`))
+    const packed = packChains(long)
+    assert.equal(packed.length, 3)
+    assert.equal(packed[1].pack?.length, 99_998)
+  })
 })

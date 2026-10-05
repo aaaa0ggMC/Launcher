@@ -48,9 +48,14 @@ export const SCALE_MAX = 2.5
 /** 移动超过这个距离算「拖动」，不再当成点击节点 */
 export const DRAG_THRESHOLD = 5
 
+/** 节点数据：普通轮次，或「折叠的线性链」（pack 里是被收起的那几轮，按先后顺序） */
+export interface PackedTurn extends TreeTurn {
+  pack?: TreeTurn[]
+}
+
 export interface GraphNode {
   id: string
-  turn: TreeTurn
+  turn: PackedTurn
   /** 父节点 id（根为 null） */
   parent: string | null
   children: GraphNode[]
@@ -89,7 +94,7 @@ export interface Viewport {
 }
 
 /** 建节点 / 挂父子；不做布局 */
-function buildNodes(turns: readonly TreeTurn[]): { nodes: GraphNode[]; roots: GraphNode[] } {
+function buildNodes(turns: readonly PackedTurn[]): { nodes: GraphNode[]; roots: GraphNode[] } {
   const byId = new Map<string, GraphNode>()
   const nodes: GraphNode[] = []
   for (const turn of turns) {
@@ -177,7 +182,10 @@ function assignRows(roots: readonly GraphNode[]): void {
 }
 
 /** 把轮次列表变成可渲染的图（节点 + 边 + 画布尺寸） */
-export function buildGraph(turns: readonly TreeTurn[], metrics?: GraphMetrics): ConversationGraph {
+export function buildGraph(
+  turns: readonly PackedTurn[],
+  metrics?: GraphMetrics
+): ConversationGraph {
   const m = metrics ?? WIDE_METRICS
   const colStep = m.nodeWidth + m.colGap
   const rowStep = m.nodeHeight + m.rowGap
@@ -210,6 +218,98 @@ export function buildGraph(turns: readonly TreeTurn[], metrics?: GraphMetrics): 
     height: m.margin * 2 + (maxRow + 1) * m.nodeHeight + maxRow * m.rowGap,
     metrics: m
   }
+}
+
+/** 折叠节点的 id 前缀（后面接被收起的第一轮的 id，展开状态按它记） */
+export const PACK_PREFIX = 'pack:'
+/** 至少这么多轮连在一起才折叠（两轮折成一个没什么意义，反而多一次点击） */
+export const PACK_MIN = 3
+
+/**
+ * 把分叉点之间不分叉的线性链折叠成一个节点（「分支 → A → B → C → 分支」里的 A B C）。
+ *
+ * 一直保留可见的「锚点」：根、叶子、分叉点（多个子节点）、分支的第一轮（父节点分叉）、
+ * 以及 keep 里的节点（当前所在轮次）。夹在锚点之间、连续 ≥ min 轮的其余节点折成一个，
+ * 链后面的锚点改挂到折叠节点下面。expanded 里的折叠 id 原样展开。
+ * 纯函数，显式迭代；父节点悬空 / 成环的数据不卡死（这些节点当锚点，交给 buildGraph 处理）。
+ */
+export function packChains(
+  turns: readonly TreeTurn[],
+  keep: ReadonlySet<string> = new Set(),
+  expanded: ReadonlySet<string> = new Set(),
+  min = PACK_MIN
+): PackedTurn[] {
+  const byId = new Map<string, TreeTurn>()
+  for (const t of turns) if (!byId.has(t.id)) byId.set(t.id, t)
+  const children = new Map<string, TreeTurn[]>()
+  for (const t of byId.values()) {
+    if (t.parent === null || t.parent === t.id || !byId.has(t.parent)) continue
+    const list = children.get(t.parent)
+    if (list) list.push(t)
+    else children.set(t.parent, [t])
+  }
+  const validParent = (t: TreeTurn): TreeTurn | undefined =>
+    t.parent !== null && t.parent !== t.id ? byId.get(t.parent) : undefined
+  const isAnchor = (t: TreeTurn): boolean => {
+    const parent = validParent(t)
+    return (
+      !parent ||
+      keep.has(t.id) ||
+      (children.get(t.id)?.length ?? 0) !== 1 ||
+      (children.get(parent.id)?.length ?? 0) > 1
+    )
+  }
+
+  /** 被折叠的轮次 → 折叠节点 id；链后面的锚点 → 新父节点 */
+  const packedInto = new Map<string, string>()
+  const reparent = new Map<string, string>()
+  const packs = new Map<string, PackedTurn>()
+  for (const start of byId.values()) {
+    if (isAnchor(start) || packedInto.has(start.id)) continue
+    const parent = validParent(start)
+    // 只从链头开始（父节点是锚点）；成环的数据里找不到链头，整段保持原样
+    if (!parent || !isAnchor(parent)) continue
+    const run: TreeTurn[] = []
+    const seen = new Set<string>()
+    let node: TreeTurn | undefined = start
+    while (node && !isAnchor(node) && !seen.has(node.id)) {
+      seen.add(node.id)
+      run.push(node)
+      node = children.get(node.id)?.[0]
+    }
+    const id = PACK_PREFIX + start.id
+    if (run.length < min || expanded.has(id) || !node || seen.has(node.id)) continue
+    const last = run[run.length - 1]
+    packs.set(start.id, {
+      id,
+      kind: start.kind,
+      parent: start.parent,
+      endId: last.endId,
+      preview: start.preview,
+      tools: run.reduce((n, t) => n + t.tools, 0),
+      createdAt: start.createdAt,
+      active: run.some((t) => t.active),
+      pack: run
+    })
+    for (const t of run) packedInto.set(t.id, id)
+    reparent.set(node.id, id)
+  }
+  if (!packs.size) return turns.slice()
+
+  const out: PackedTurn[] = []
+  const emitted = new Set<string>()
+  for (const t of turns) {
+    if (emitted.has(t.id)) continue
+    emitted.add(t.id)
+    const pack = packs.get(t.id)
+    if (pack) out.push(pack)
+    else if (packedInto.has(t.id)) continue
+    else {
+      const parent = reparent.get(t.id)
+      out.push(parent ? { ...t, parent } : t)
+    }
+  }
+  return out
 }
 
 /** 当前节点回溯到根的路径（要连成高亮主线的那条） */
@@ -250,7 +350,7 @@ export function subtreeSizes(graph: ConversationGraph): Map<string, number> {
       continue
     }
     stack.pop()
-    let n = 1
+    let n = node.turn.pack?.length ?? 1
     for (const kid of node.children) n += sizes.get(kid.id) ?? 0
     sizes.set(node.id, n)
   }
