@@ -151,7 +151,14 @@ function openRouteGeotagModal(route?: Route, initialOffset?: number): void {
 }
 
 function onSelectRouteFromDrawer(route: Route): void {
+  // 窄屏下抽屉盖满地图，选中后收起才看得到聚焦结果
+  if (compact.value) routeDrawerOpen.value = false
   onFocusRouteOnMap(route)
+}
+
+function onPlayRouteFromDetail(route: Route): void {
+  if (compact.value) routeDrawerOpen.value = false
+  void startRoutePlayback(route)
 }
 
 function onOpenRouteDetail(route: Route): void {
@@ -3043,7 +3050,7 @@ async function reloadPreferences(): Promise<void> {
       v-model="routeDetailModalOpen"
       :route="selectedRouteForDetail"
       :exploration-active="explorationActive"
-      @play-route="startRoutePlayback"
+      @play-route="onPlayRouteFromDetail"
       @start-geotag="onStartGeotagFromDetail"
       @view-photo="onViewPhotoFromRoute"
       @focus-route="onFocusRouteFromDetail"

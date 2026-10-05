@@ -4,6 +4,9 @@ defineOptions({ name: 'cockpit-yarj-route-geotag-modal' })
 import { ref, computed, watch } from 'vue'
 import type { Route, GeotagPreviewResult } from '../types'
 import { photoThumbUrl } from '../types'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 const props = defineProps<{
   modelValue: boolean
@@ -163,6 +166,7 @@ function close(): void {
 <template>
   <v-dialog
     :model-value="modelValue"
+    :fullscreen="compact"
     max-width="720"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"

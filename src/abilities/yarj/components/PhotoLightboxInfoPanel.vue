@@ -682,6 +682,20 @@ defineExpose({
   z-index: 20;
 }
 
+/* 窄屏：改成盖在照片上的底部面板 */
+.lightbox-info-drawer.is-compact {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: 62%;
+  border-left: none;
+  border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+
 .drawer-header {
   flex-shrink: 0;
 }

@@ -5,6 +5,9 @@ import { ref, inject, watch, onMounted } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import type { YarjConfig } from '../types'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 const props = defineProps<{
   modelValue: boolean
@@ -108,6 +111,7 @@ async function clearCorrection(): Promise<void> {
 <template>
   <v-dialog
     :model-value="modelValue"
+    :fullscreen="compact"
     max-width="640"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"

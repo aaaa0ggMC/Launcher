@@ -4,6 +4,9 @@ defineOptions({ name: 'cockpit-yarj-route-detail-modal' })
 import { ref, computed, watch } from 'vue'
 import type { Route, Photo } from '../types'
 import { photoThumbUrl } from '../types'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 const props = defineProps<{
   modelValue: boolean
@@ -244,11 +247,18 @@ function handleGeotag(): void {
 <template>
   <v-dialog
     :model-value="modelValue"
+    :fullscreen="compact"
     max-width="920"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <v-card v-if="route" v-privacy="'yarj.location'" rounded="xl" class="route-modal-card">
+    <v-card
+      v-if="route"
+      v-privacy="'yarj.location'"
+      rounded="xl"
+      class="route-modal-card"
+      :class="{ 'is-compact': compact }"
+    >
       <!-- 头部：标题与活动状态 -->
       <v-card-title
         class="pa-5 pb-3 d-flex align-center justify-space-between flex-wrap ga-2 border-b flex-shrink-0 route-modal-title"
@@ -810,6 +820,13 @@ function handleGeotag(): void {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
+}
+
+/* 窄屏全屏弹窗：撑满高度，去掉圆角 */
+.route-modal-card.is-compact {
+  max-height: none;
+  height: 100%;
+  border-radius: 0 !important;
 }
 
 .route-modal-title {

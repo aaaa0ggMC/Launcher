@@ -958,6 +958,22 @@ defineExpose({
     color 0.15s ease;
 }
 
+.menu-item > span {
+  white-space: nowrap;
+}
+
+/* 右侧状态 Chip 过长时截断，不挤压左边的菜单名 */
+.menu-item > .v-chip {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.menu-item > .v-chip :deep(.v-chip__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .menu-item:hover {
   background: rgba(var(--v-theme-primary), 0.12);
   color: rgb(var(--v-theme-primary));
