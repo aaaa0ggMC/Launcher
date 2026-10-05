@@ -3,7 +3,7 @@
 > **项目代号**：`yaya` (Yet Another Yes Agent)  
 > **所属架构**：Linux System Cockpit 下游智能体应用 / 独立公开子项目  
 > **设计基线**：Electron + Vue 3 + Vuetify 3 (Material 3) + TypeScript + SQLite  
-> **当前状态**：Phase 1–5 闭环可用（会话树 / 多服务商 / 工具循环 + 审批 / 附件 / 插件：MCP、Skill、Mermaid、SVG、搜索、Mention），Era 2 插件架构已落地；剩余项见第三节的 `[ ]` 与第六节
+> **当前状态**（2026-10-05 核对）：Phase 1–5 闭环可用（会话树 / 多服务商含 Anthropic / Gemini 原生 / 工具循环 + 审批 / 附件与长文档检索 / 插件：MCP、Skill、Mermaid、SVG、HTML 小部件、搜索、Mention、安卓控制）；导入 ChatGPT / Claude / DeepSeek / Rikkahub。剩余：安卓自有 App 原生通道、真机 / 真实密钥实测（见第四、六节）
 
 ---
 
