@@ -10,7 +10,7 @@ const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const routeRoots = ref<GalleryRoot[]>([])
-const routes = ref<Route[]>([])
+const routeCount = ref(0)
 const searching = ref('')
 const loading = ref(true)
 const snackbar = ref(false)
@@ -21,8 +21,9 @@ async function refresh(): Promise<void> {
   try {
     const cfg = (await window.cockpit.command('yarj.config')) as YarjConfig
     routeRoots.value = cfg.routeRoots ?? []
-    const list = (await window.cockpit.command('yarj.routes')) as Route[]
-    routes.value = list ?? []
+    // 只要条数：yarj.routes 会把每条轨迹的完整 GeoJSON 一起传过来，航线多时打开设置页会卡
+    const r = (await window.cockpit.command('yarj.route-count')) as { count?: number } | null
+    routeCount.value = r?.count ?? 0
   } catch {
     /* ignore */
   } finally {
@@ -108,7 +109,7 @@ defineExpose({
   toMarkdown: (): string => {
     const title = '运动航线目录'
     if (!routeRoots.value.length) return `${title}: 未配置`
-    return `${title}:\n  ${routeRoots.value.map((r) => `- ${r.path}`).join('\n  ')}\n已入库航线数: ${routes.value.length}`
+    return `${title}:\n  ${routeRoots.value.map((r) => `- ${r.path}`).join('\n  ')}\n已入库航线数: ${routeCount.value}`
   }
 })
 </script>
@@ -118,8 +119,8 @@ defineExpose({
     <v-card rounded="lg" variant="tonal" class="card-fill">
       <v-card-title class="text-subtitle-2 d-flex align-center justify-space-between">
         <span>{{ t('label.航线目录', '航线目录') }}</span>
-        <v-chip v-if="routes.length > 0" size="small" variant="flat" color="primary">
-          已入库 {{ routes.length }} 条轨迹
+        <v-chip v-if="routeCount > 0" size="small" variant="flat" color="primary">
+          已入库 {{ routeCount }} 条轨迹
         </v-chip>
       </v-card-title>
       <v-card-text>

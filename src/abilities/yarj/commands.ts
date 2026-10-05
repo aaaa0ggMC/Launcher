@@ -44,6 +44,7 @@ import {
   countCorrectedPhotos,
   getRoute,
   queryRoutes,
+  routeCount,
   deleteRoute,
   countRouteGeotaggedPhotos,
   findMatchingPhotosForRoute,
@@ -497,6 +498,12 @@ const specs: CommandSpec[] = [
       const since = typeof ctx.named.since === 'string' ? ctx.named.since : undefined
       return queryRoutes({ activityType, q, since })
     }
+  },
+  {
+    name: 'yarj.route-count',
+    description: '已入库的运动航线条数（不返回轨迹本身）',
+    usage: 'yarj.route-count',
+    run: async () => ({ count: routeCount() })
   },
   {
     name: 'yarj.route',

@@ -53,7 +53,8 @@ const PUBLIC = new Set([
   'yarj.maps',
   'yarj.map-info',
   'yarj.cache-stats',
-  'yarj.scan-status'
+  'yarj.scan-status',
+  'yarj.route-count'
 ])
 
 /** 其余 yarj 命令：声明 reads，并对结果做位置脱敏（仅 agent 来源生效）。 */
