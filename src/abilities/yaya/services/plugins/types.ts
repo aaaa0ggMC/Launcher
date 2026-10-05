@@ -178,10 +178,30 @@ export interface YayaPlugin {
   configSchema?: PluginConfigField[]
   /** 子分组（缺省 = 无分组） */
   groups?: () => PluginGroup[]
+  /**
+   * 用户在输入框 `@` 点名本插件时的效果（PLAN 6.3）。缺省由宿主按来源决定：
+   * builtin / mcp = `{ enable: 'plugin' }`；skill = 随消息加载 SKILL.md 正文（Skill 提供方实现）；
+   * 显示类插件（没有工具）应返回一句 note，如「可以用 ```mermaid 代码块画图」。
+   * 效果只作用于**这条用户消息及之后**，不改系统提示词（提示词缓存不失效）。
+   */
+  mention?: (ctx: MentionContext) => MentionEffect | Promise<MentionEffect>
   /** 启用后首次需要工具前调用（连接 MCP 等）；失败抛错，status 应反映错误 */
   start?: () => Promise<void>
   /** 禁用 / 配置变化 / 退出时调用 */
   stop?: () => Promise<void>
+}
+
+export interface MentionContext {
+  sessionId: string
+}
+
+export interface MentionEffect {
+  /** 拼进这条用户消息的附注（给模型看，不显示在用户气泡里） */
+  note?: string
+  /** 随这条消息加载的内容（文本 / 图片，走工具结果同一套规范化） */
+  content?: ToolContentPart[]
+  /** 本会话起启用：'plugin' = 整个插件；数组 = 只启用这些裸工具名；缺省 = 不改工具表 */
+  enable?: 'plugin' | string[]
 }
 
 /** 动态插件来源（MCP / Skill）：配置变化时重算插件列表；返回的同 id 插件应复用连接 */
