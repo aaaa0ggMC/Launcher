@@ -1,7 +1,6 @@
 import type { CommandSpec } from '../../../main/process/commands/types'
 import {
   loadAidjConfig,
-  saveAidjConfig,
   loadEqProfiles,
   saveEqProfiles,
   findEqProfile,
@@ -14,7 +13,7 @@ import type { WebPlayerReport } from '../player-backend'
 import type { EqProfile } from '../types'
 import { EQ_BAND_COUNT } from '../types'
 import { isWebRemoteRunning, getWebRemotePort, stopWebRemoteServer } from '../web-remote'
-import { log, WEB_ONLY, findWebRemoteTaskId } from './shared'
+import { log, WEB_ONLY, findWebRemoteTaskId, savePreferences } from './shared'
 
 export const webPlayerCommands: CommandSpec[] = [
   {
@@ -47,7 +46,11 @@ export const webPlayerCommands: CommandSpec[] = [
       '渲染端内置播放器引擎上线 / 心跳（内部）：记为在线，并取走引擎上线前排队的播放指令',
     usage: 'aidj.web-player-hello',
     ...WEB_ONLY,
-    run: () => ({ ok: true, pending: getWebPlayerBackend().hello() })
+    run: (ctx) => {
+      const engineId = typeof ctx.named.engineId === 'string' ? ctx.named.engineId : undefined
+      const empty = ctx.named.empty === true || ctx.named.empty === 'true'
+      return { ok: true, pending: getWebPlayerBackend().hello(engineId, empty) }
+    }
   },
   {
     name: 'aidj.player-volbal',
@@ -70,12 +73,10 @@ export const webPlayerCommands: CommandSpec[] = [
       await backend.setVolbal(enabled, method)
       // Persist the shared preference (same fields the continuous task uses).
       try {
-        const config = await loadAidjConfig()
-        if (config) {
-          config.preferences.dynamic_balance_volume = enabled
-          if (method) config.preferences.sound_adjust_method = method
-          await saveAidjConfig(config)
-        }
+        await savePreferences({
+          dynamic_balance_volume: enabled,
+          ...(method ? { sound_adjust_method: method } : {})
+        })
       } catch (e) {
         log.warn('persist player volbal failed', { error: String(e) })
       }
@@ -114,20 +115,17 @@ export const webPlayerCommands: CommandSpec[] = [
       const enabled =
         ctx.named.enabled !== undefined ? String(ctx.named.enabled) !== 'false' : undefined
       const seconds = ctx.named.seconds !== undefined ? Number(ctx.named.seconds) : undefined
+      if (!backend.isConnected) await backend.connect()
+      const cur = backend.getCrossfade()
       if (enabled === undefined && seconds === undefined) {
-        const s = await backend.getPlaybackDetail()
-        return { ok: true, enabled: s.crossfade === true, seconds: s.crossfadeSeconds ?? 2.5 }
+        return { ok: true, enabled: cur.enabled, seconds: cur.seconds }
       }
-      const next = enabled ?? (await backend.getPlaybackDetail()).crossfade === true
-      const sec = seconds ?? (await backend.getPlaybackDetail()).crossfadeSeconds ?? 2.5
+      const next = enabled ?? cur.enabled
+      const sec = seconds ?? cur.seconds
       await backend.setCrossfade(next, sec)
       // Persist the shared preference.
       try {
-        const config = await loadAidjConfig()
-        if (config) {
-          config.preferences.crossfade = { enabled: next, seconds: sec }
-          await saveAidjConfig(config)
-        }
+        await savePreferences({ crossfade: { enabled: next, seconds: sec } })
       } catch (e) {
         log.warn('persist player crossfade failed', { error: String(e) })
       }
@@ -153,7 +151,6 @@ export const webPlayerCommands: CommandSpec[] = [
     usage: 'aidj.eq-range [--set <12-60>]',
     ...WEB_ONLY,
     run: async (ctx) => {
-      const config = await loadAidjConfig()
       if (ctx.named.set === undefined) {
         return { ok: true, range: await getEqGainRange() }
       }
@@ -162,10 +159,7 @@ export const webPlayerCommands: CommandSpec[] = [
         return { ok: false, error: '范围必须在 12–60 dB 之间' }
       }
       const range = Math.round(n)
-      if (config) {
-        config.preferences.eq_gain_range = range
-        await saveAidjConfig(config)
-      }
+      await savePreferences({ eq_gain_range: range })
       return { ok: true, range }
     }
   },
@@ -245,8 +239,7 @@ export const webPlayerCommands: CommandSpec[] = [
       // If the deleted profile was active, fall back to flat.
       const config = await loadAidjConfig()
       if (config?.preferences.eq_preset === id) {
-        config.preferences.eq_preset = 'flat'
-        await saveAidjConfig(config)
+        await savePreferences({ eq_preset: 'flat' })
         const backend = getWebPlayerBackend()
         const flat = await findEqProfile('flat')
         backend.setEqPreset('flat')
@@ -268,11 +261,7 @@ export const webPlayerCommands: CommandSpec[] = [
       backend.setEqPreset(id)
       await backend.setEQ(profile.gains)
       try {
-        const config = await loadAidjConfig()
-        if (config) {
-          config.preferences.eq_preset = id
-          await saveAidjConfig(config)
-        }
+        await savePreferences({ eq_preset: id })
       } catch (e) {
         log.warn('persist active eq failed', { error: String(e) })
       }
@@ -326,11 +315,7 @@ export const webPlayerCommands: CommandSpec[] = [
       await backend.setRate(rate)
       // Persist the shared preference (survives restarts, mirrors the settings page).
       try {
-        const config = await loadAidjConfig()
-        if (config) {
-          config.preferences.playback_rate = rate
-          await saveAidjConfig(config)
-        }
+        await savePreferences({ playback_rate: rate })
       } catch (e) {
         log.warn('persist player rate failed', { error: String(e) })
       }

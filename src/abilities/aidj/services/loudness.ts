@@ -12,10 +12,17 @@ const execFileAsync = promisify(execFile)
  */
 export async function analyzeLoudness(filepath: string): Promise<LoudnessInfo | null> {
   try {
-    const [lufsOut, volOut] = await Promise.all([
-      runFfmpeg(filepath, ['-af', 'ebur128=peak=true', '-f', 'null', '-']),
-      runFfmpeg(filepath, ['-af', 'volumedetect', '-f', 'null', '-'])
+    // One decode for both filters — two parallel full decodes per track made
+    // a phone (Termux) take many seconds per song.
+    const out = await runFfmpeg(filepath, [
+      '-af',
+      'ebur128=peak=true,volumedetect',
+      '-f',
+      'null',
+      '-'
     ])
+    const lufsOut = out
+    const volOut = out
 
     const summary = lufsOut.slice(lufsOut.lastIndexOf('Summary:'))
     const lufsMatch = summary.match(/I:\s+(-?\d+(?:\.\d+)?)\s+LUFS/)
@@ -169,6 +176,12 @@ export class VolBal {
   private cacheMethod: 'lufs' | 'linear' | null = null
   private active = false
   private base = 0.5
+  /** Track the most recent `apply` was for — measuring takes seconds (minutes
+   *  on a phone), so a result that lands after the user skipped on is stale and
+   *  must not set the volume of whatever is playing now. */
+  private latest: string | null = null
+  /** An anchor measurement is in flight (concurrent applies just update `latest`). */
+  private anchoring = false
 
   constructor(private readonly hooks: VolBalHooks) {}
 
@@ -213,26 +226,41 @@ export class VolBal {
     if (!this.enabled) return
     const cache = this.cache
     if (!cache) return
+    this.latest = path
     if (!this.active) {
-      // Land the reference volume first: the measurement takes seconds.
-      await this.hooks.setVolume(this.base)
-      const anchor = await cache.setAnchor(path, this.base, this.hooks.measure)
-      if (anchor != null) {
-        this.active = true
-        this.hooks.log?.('info', 'volbal anchor', {
-          path,
-          anchor,
-          method: this.method,
-          base: this.base
-        })
-      } else {
-        this.hooks.log?.('warn', 'volbal anchor failed: loudness measurement unavailable', {
-          path
-        })
+      if (this.anchoring) return
+      this.anchoring = true
+      try {
+        // Land the reference volume first: the measurement takes seconds.
+        await this.hooks.setVolume(this.base)
+        const anchor = await cache.setAnchor(path, this.base, this.hooks.measure)
+        if (anchor != null) {
+          this.active = true
+          this.hooks.log?.('info', 'volbal anchor', {
+            path,
+            anchor,
+            method: this.method,
+            base: this.base
+          })
+        } else {
+          this.hooks.log?.('warn', 'volbal anchor failed: loudness measurement unavailable', {
+            path
+          })
+        }
+      } finally {
+        this.anchoring = false
       }
+      // The track changed while the anchor was measured: balance the one
+      // that is actually playing now (the anchor track itself sits at base).
+      const now = this.latest
+      if (this.active && now && now !== path) await this.apply(now)
       return
     }
     const info = await this.hooks.measure(path)
+    if (this.latest !== path) {
+      this.hooks.log?.('info', 'volbal adjust dropped: track changed while measuring', { path })
+      return
+    }
     const songVal = info ? (this.method === 'lufs' ? info.integrated_lufs : info.rms_db) : null
     const target = songVal == null ? null : cache.computeVolume(songVal)
     if (target != null) {

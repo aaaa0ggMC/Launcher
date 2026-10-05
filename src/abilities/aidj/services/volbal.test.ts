@@ -153,4 +153,57 @@ describe('AIDJ VolBal state machine', () => {
     assert.equal(anchor, -12.3)
     assert.equal(cache.anchorVal, -12.3)
   })
+
+  it('drops a measurement that lands after the track changed (only the current track sets volume)', async () => {
+    const s = spy()
+    const gates: Record<string, () => void> = {}
+    const table: Record<string, LoudnessInfo> = { a: LOUD, b: QUIET, c: MID }
+    const vb = new VolBal({
+      // b / c resolve only when released — simulates a slow phone ffmpeg
+      measure: (p) =>
+        p === 'a'
+          ? Promise.resolve(table[p])
+          : new Promise((resolve) => {
+              gates[p] = () => resolve(table[p])
+            }),
+      setVolume: s.setVolume
+    })
+    vb.configure(true, 'lufs')
+    await vb.apply('a')
+    s.volumes.length = 0
+    const pb = vb.apply('b')
+    const pc = vb.apply('c') // user skipped b before it was measured
+    gates.c()
+    await pc
+    gates.b() // b's late result must not override c
+    await pb
+    assert.equal(s.volumes.length, 1)
+    assert.ok(s.volumes[0] > 0.5 && s.volumes[0] < 1.0, `c target ${s.volumes[0]}`)
+  })
+
+  it('anchors once even when tracks change during the anchor measurement', async () => {
+    const s = spy()
+    let release: () => void = () => {}
+    let calls = 0
+    const vb = new VolBal({
+      measure: (p) => {
+        calls++
+        if (p === 'a') return new Promise((r) => (release = () => r(LOUD)))
+        return Promise.resolve(p === 'c' ? MID : QUIET)
+      },
+      setVolume: s.setVolume
+    })
+    vb.configure(true, 'lufs')
+    const pa = vb.apply('a')
+    await vb.apply('b')
+    await vb.apply('c')
+    release()
+    await pa
+    assert.equal(vb.anchor, -8.6)
+    // base first, then c (the track playing now) balanced against the anchor
+    assert.equal(s.volumes[0], 0.5)
+    assert.equal(s.volumes.length, 2)
+    assert.ok(s.volumes[1] > 0.5 && s.volumes[1] < 1.0)
+    assert.equal(calls, 2) // a (anchor) + c — b was never measured
+  })
 })
