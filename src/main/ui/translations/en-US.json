@@ -244,5 +244,9 @@
   "agent.presence.approve_session": "Allow in this chat",
   "web.err_not_built": "Web assets are not built yet: run pnpm build:web (or pnpm build)",
   "web.err_headless_running": "A headless host is running (pid {pid}); stop it before enabling web access",
-  "web.err_not_running": "Web access is not running"
+  "web.err_not_running": "Web access is not running",
+  "autosave.saving": "Saving…",
+  "autosave.saved": "Saved automatically",
+  "autosave.failed": "Save failed",
+  "autosave.idle": "Changes save automatically"
 }

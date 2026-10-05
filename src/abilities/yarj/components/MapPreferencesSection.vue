@@ -7,14 +7,14 @@ import { translate } from '@ui/i18n'
 import type { YarjConfig } from '../types'
 import { DEFAULT_YARJ_CONFIG, GRANULARITY_PRESETS } from '../types'
 import PhotoFilterRulesManager from './PhotoFilterRulesManager.vue'
+import { useAutoSave } from '@ui/composables/autoSave'
+import AutoSaveHint from '@ui/components/AutoSaveHint.vue'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
 
 const config = ref<YarjConfig>({ ...DEFAULT_YARJ_CONFIG })
 const loading = ref(true)
-const saving = ref(false)
-const savedSnackbar = ref(false)
 
 async function loadConfig(): Promise<void> {
   loading.value = true
@@ -31,44 +31,43 @@ async function loadConfig(): Promise<void> {
   }
 }
 
-async function savePreferences(): Promise<void> {
-  saving.value = true
-  try {
-    await window.cockpit.command('yarj.save-config', {
-      patch: {
-        defaultProjection: config.value.defaultProjection,
-        initialViewMode: config.value.initialViewMode,
-        mapLanguage: config.value.mapLanguage,
-        zoomSpeed: config.value.zoomSpeed,
-        doubleClickAction: config.value.doubleClickAction,
-        cruiseStayDurationSec: config.value.cruiseStayDurationSec,
-        flightSpeed: config.value.flightSpeed,
-        defaultFocusRange: config.value.defaultFocusRange,
-        autoPlayOnExplore: config.value.autoPlayOnExplore,
-        autoOpenDrawerOnCruise: config.value.autoOpenDrawerOnCruise,
-        exploredRadiusM: config.value.exploredRadiusM,
-        exploredGranularity: config.value.exploredGranularity,
-        footprintOpacity: config.value.footprintOpacity,
-        showPhotosLayer: config.value.showPhotosLayer,
-        showExploredLayer: config.value.showExploredLayer,
-        drawerPageSize: config.value.drawerPageSize,
-        timeShuttleStyle: config.value.timeShuttleStyle,
-        clusterDensity: config.value.clusterDensity,
-        autoScanOnStartup: config.value.autoScanOnStartup,
-        gpsPriority: JSON.parse(
-          JSON.stringify(config.value.gpsPriority || ['track', 'corrected', 'guess', 'db', 'exif'])
-        ),
-        showRoutesLayer: config.value.showRoutesLayer,
-        photoFilterRules: JSON.parse(JSON.stringify(config.value.photoFilterRules || [])),
-        routeSmoothing: config.value.routeSmoothing ?? true,
-        routeSmoothingWindow: config.value.routeSmoothingWindow ?? 5,
-        routeCameraSmoothing: config.value.routeCameraSmoothing ?? true
-      }
-    })
-    savedSnackbar.value = true
-  } finally {
-    saving.value = false
-  }
+/** 每项改动都立即保存（已是「改完即保存」）；状态改用一行提示，不再每次弹 toast。 */
+const prefsSave = useAutoSave(async () => {
+  await window.cockpit.command('yarj.save-config', {
+    patch: {
+      defaultProjection: config.value.defaultProjection,
+      initialViewMode: config.value.initialViewMode,
+      mapLanguage: config.value.mapLanguage,
+      zoomSpeed: config.value.zoomSpeed,
+      doubleClickAction: config.value.doubleClickAction,
+      cruiseStayDurationSec: config.value.cruiseStayDurationSec,
+      flightSpeed: config.value.flightSpeed,
+      defaultFocusRange: config.value.defaultFocusRange,
+      autoPlayOnExplore: config.value.autoPlayOnExplore,
+      autoOpenDrawerOnCruise: config.value.autoOpenDrawerOnCruise,
+      exploredRadiusM: config.value.exploredRadiusM,
+      exploredGranularity: config.value.exploredGranularity,
+      footprintOpacity: config.value.footprintOpacity,
+      showPhotosLayer: config.value.showPhotosLayer,
+      showExploredLayer: config.value.showExploredLayer,
+      drawerPageSize: config.value.drawerPageSize,
+      timeShuttleStyle: config.value.timeShuttleStyle,
+      clusterDensity: config.value.clusterDensity,
+      autoScanOnStartup: config.value.autoScanOnStartup,
+      gpsPriority: JSON.parse(
+        JSON.stringify(config.value.gpsPriority || ['track', 'corrected', 'guess', 'db', 'exif'])
+      ),
+      showRoutesLayer: config.value.showRoutesLayer,
+      photoFilterRules: JSON.parse(JSON.stringify(config.value.photoFilterRules || [])),
+      routeSmoothing: config.value.routeSmoothing ?? true,
+      routeSmoothingWindow: config.value.routeSmoothingWindow ?? 5,
+      routeCameraSmoothing: config.value.routeCameraSmoothing ?? true
+    }
+  })
+})
+
+function savePreferences(): void {
+  void prefsSave.flush()
 }
 
 const GPS_SOURCE_META: Record<
@@ -730,15 +729,9 @@ onMounted(() => {
           {{ t('yarj.prefs.resetDefaults', '恢复全部偏好默认值') }}
         </v-btn>
 
-        <span v-if="saving" class="text-caption on-surface-variant">
-          {{ t('yarj.prefs.saving', '保存中...') }}
-        </span>
+        <AutoSaveHint :status="prefsSave.status.value" :error="prefsSave.error.value" />
       </div>
     </template>
-
-    <v-snackbar v-model="savedSnackbar" timeout="1800" color="success" location="bottom end">
-      {{ t('yarj.prefs.saveSuccess', '偏好设置已更新并保存') }}
-    </v-snackbar>
   </div>
 </template>
 

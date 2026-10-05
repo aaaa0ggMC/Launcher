@@ -578,7 +578,12 @@ defineExpose({ toMarkdown })
       <ChatView ref="chatRef" />
 
       <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
-        <button class="page-menu-handle" @click="toggleMenu">
+        <button
+          class="page-menu-handle"
+          :aria-label="t('aidj.subpage.menu', '页面菜单')"
+          :title="t('aidj.subpage.menu', '页面菜单')"
+          @click="toggleMenu"
+        >
           <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
         </button>
 
@@ -1020,35 +1025,28 @@ defineExpose({ toMarkdown })
   opacity: 0.6;
 }
 
-/* 窄屏（≤720px）：把手浮在页面顶部正中会盖住「正在播放」的曲目名，改成流内单独一行，
-   弹层仍然浮在内容之上（绝对定位，用 margin 居中，不占 transform——进出动画要用它）。桌面不变。 */
+/* 窄屏（≤720px）：把手浮在顶部正中会盖住「正在播放」的曲目名，单独占一行又太费高度——
+   改成正在播放条右端的圆形菜单按钮（ChatView 在窄屏给这一行右侧留了位置），弹层从右上角展开。
+   桌面不变。 */
 @media (max-width: 720px) {
-  .aidj-shell {
-    display: flex;
-    flex-direction: column;
-  }
-  /* ChatView 自己是 absolute 铺满（桌面靠它），窄屏改回流内，让出把手那一行 */
-  .aidj-shell > .aidj-root {
-    position: relative;
-    inset: auto;
-    flex: 1 1 0;
-    min-height: 0;
-    height: auto !important;
-  }
   .page-menu {
-    position: relative;
-    order: -1;
-    top: auto;
+    top: 8px;
     left: auto;
+    right: 8px;
     transform: none;
-    flex-shrink: 0;
+    align-items: flex-end;
+  }
+  .page-menu-handle {
+    width: 40px;
+    height: 40px;
+    border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.28);
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   }
   .page-menu-pop {
     position: absolute;
     top: 100%;
-    left: 0;
     right: 0;
-    margin-inline: auto;
   }
 }
 

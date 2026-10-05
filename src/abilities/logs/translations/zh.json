@@ -5,7 +5,7 @@
   "logs.caption": "当前会话日志 · 按级别过滤 · 实时滚动",
   "logs.levelFilter": "级别",
   "logs.levelAll": "全部",
-  "logs.ignoreSelf": "忽略 logs 自身日志",
+  "logs.ignoreSelf": "隐藏自身日志",
   "logs.export": "导出",
   "logs.exportTitle": "导出当前会话日志",
   "logs.exportFailed": "导出失败",

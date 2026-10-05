@@ -116,6 +116,11 @@ const scrollEl = ref<{ $el: HTMLElement } | null>(null)
 const scrollWrapRef = ref<HTMLElement | null>(null)
 const scrollHeight = ref(300)
 
+/** 工具栏紧凑形态：按本页容器宽度（不是窗口断点，见 AGENTS §11.8） */
+const rootRef = ref<HTMLElement | null>(null)
+const compact = ref(false)
+const COMPACT_BELOW = 640
+
 function scrollToBottom(): void {
   const el = scrollEl.value?.$el
   if (el) el.scrollTop = el.scrollHeight
@@ -131,6 +136,7 @@ function onScroll(): void {
 let unsub: (() => void) | null = null
 let scrollCleanup: (() => void) | null = null
 let ro: ResizeObserver | null = null
+let rootRo: ResizeObserver | null = null
 
 const SELF_HIDDEN_KEY = 'cockpit-logs-ignore-self'
 
@@ -155,6 +161,13 @@ onMounted(async () => {
     if (stick) void nextTick(() => scrollToBottom())
   })
   if (scrollWrapRef.value) ro.observe(scrollWrapRef.value)
+  if (rootRef.value) {
+    compact.value = rootRef.value.clientWidth < COMPACT_BELOW
+    rootRo = new ResizeObserver(() => {
+      if (rootRef.value) compact.value = rootRef.value.clientWidth < COMPACT_BELOW
+    })
+    rootRo.observe(rootRef.value)
+  }
   await loadInitial()
 })
 
@@ -162,6 +175,7 @@ onBeforeUnmount(() => {
   scrollCleanup?.()
   unsub?.()
   ro?.disconnect()
+  rootRo?.disconnect()
 })
 
 watch(level, () => void loadInitial())
@@ -230,39 +244,62 @@ defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div class="logs-root">
-    <div class="d-flex align-center ga-3 mb-3 flex-wrap">
-      <div>
+  <div ref="rootRef" class="logs-root">
+    <!-- 工具栏：宽屏一行（标题 · 条数 · 开关 · 级别 · 导出）；窄屏标题行带条数与导出图标，
+         开关与级别下一行。控件统一 40px 高，级别下拉不用浮动标签（原来的 solo-filled 又高又宽）。 -->
+    <div class="logs-toolbar mb-3" :class="{ 'logs-toolbar--compact': compact }">
+      <div class="logs-title">
         <div class="text-h6 font-weight-medium">{{ t('logs.heading') }}</div>
         <div class="text-caption on-surface-variant mt-1">
           {{ translateTemplate(uiLang, 'logs.caption', {}) }}
         </div>
       </div>
-      <v-spacer />
-      <span class="text-caption on-surface-variant font-family-mono">
+      <span class="logs-total text-caption on-surface-variant font-family-mono">
         {{ translateTemplate(uiLang, 'logs.total', { n: String(total) }) }}
       </span>
-      <v-switch
-        v-model="ignoreSelf"
-        density="compact"
-        hide-details
-        color="primary"
-        :label="t('logs.ignoreSelf')"
+      <v-btn
+        v-if="compact"
+        class="logs-export-icon"
+        icon="mdi-export"
+        variant="tonal"
+        size="small"
+        :loading="exporting"
+        :aria-label="t('logs.export')"
+        :title="t('logs.export')"
+        @click="doExport"
       />
-      <v-select
-        v-model="level"
-        :items="levelOptions"
-        density="compact"
-        variant="solo-filled"
-        flat
-        hide-details
-        attach
-        :label="t('logs.levelFilter')"
-        class="logs-level"
-      />
-      <v-btn variant="tonal" prepend-icon="mdi-export" :loading="exporting" @click="doExport">
-        {{ t('logs.export') }}
-      </v-btn>
+      <div class="logs-filters">
+        <v-switch
+          v-model="ignoreSelf"
+          density="compact"
+          hide-details
+          inset
+          color="primary"
+          class="logs-self flex-grow-0"
+          :label="t('logs.ignoreSelf')"
+        />
+        <v-select
+          v-model="level"
+          :items="levelOptions"
+          density="compact"
+          variant="outlined"
+          hide-details
+          attach
+          prepend-inner-icon="mdi-filter-variant"
+          :aria-label="t('logs.levelFilter')"
+          :title="t('logs.levelFilter')"
+          class="logs-level"
+        />
+        <v-btn
+          v-if="!compact"
+          variant="tonal"
+          prepend-icon="mdi-export"
+          :loading="exporting"
+          @click="doExport"
+        >
+          {{ t('logs.export') }}
+        </v-btn>
+      </div>
     </div>
 
     <div v-if="hasOlder" class="d-flex justify-center mb-1">
@@ -317,22 +354,47 @@ defineExpose({ toMarkdown })
   min-height: 240px;
 }
 
-.logs-level {
-  width: 130px;
-  flex-shrink: 0;
-}
-
-.logs-level :deep(.v-field__input) {
-  justify-content: flex-end;
+.logs-toolbar {
+  display: flex;
   align-items: center;
-  text-align: right;
-  /* kill the floating-label top/bottom padding so the value is truly centered */
-  padding-top: 0;
-  padding-bottom: 0;
+  flex-wrap: wrap;
+  gap: 12px 16px;
 }
 
-.logs-level :deep(.v-list-item__content) {
-  text-align: right;
+.logs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.logs-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.logs-self :deep(.v-label) {
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.logs-level {
+  width: 160px;
+  flex: 0 0 auto;
+}
+
+/* 窄：标题 + 条数 + 导出图标一行，开关与级别另起一行铺满 */
+.logs-toolbar--compact {
+  gap: 8px 12px;
+}
+
+.logs-toolbar--compact .logs-filters {
+  flex: 1 1 100%;
+  justify-content: space-between;
+}
+
+.logs-toolbar--compact .logs-level {
+  width: 150px;
 }
 
 .logs-scroll-wrap {

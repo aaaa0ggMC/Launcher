@@ -2,6 +2,7 @@
  * 网页 / 手机浏览器里的 `window.cockpit`：与 Electron preload 共用 `createCockpit`，
  * 只是传输层换成 HTTP + SSE。宿主不支持的 IPC 通道（窗口、对话框、全局快捷键、截图…）一律 nop。
  */
+import { installNativeMedia } from './native-media'
 import { createCockpit, type NativeClient } from '../preload/api'
 import { initBrowserBridge } from './browser-bridge'
 
@@ -388,3 +389,6 @@ const cockpit = createCockpit({
 
 // 浏览器 UI 桥（B5）：登记本标签页，等待宿主把固定方法的界面请求定向发过来
 initBrowserBridge(cockpit)
+
+// 安卓 App：把 navigator.mediaSession 转给原生（通知栏 / 锁屏媒体控制）；浏览器里由浏览器自己处理
+if (nativeClient) installNativeMedia(nativeClient, cockpit.on)

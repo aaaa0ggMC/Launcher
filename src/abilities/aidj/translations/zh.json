@@ -812,5 +812,6 @@
   "aidj.settings.loop_tool.session_memory": "本次 DJ 会话已播放 / 已入队的歌，用来避免重复",
   "aidj.settings.loop_tool.use_playbook": "取某个范式（playbook）的完整步骤",
   "aidj.settings.loop_tool.no_music": "你只想聊天或说停时，不选歌、直接回答",
-  "aidj.settings.loop_tool.web_search": "联网搜索（Tavily）查歌手、歌曲、场景等资料"
+  "aidj.settings.loop_tool.web_search": "联网搜索（Tavily）查歌手、歌曲、场景等资料",
+  "aidj.subpage.menu": "页面菜单"
 }

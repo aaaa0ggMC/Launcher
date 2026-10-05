@@ -1487,7 +1487,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
     <div class="chat-topbar px-4 py-3">
       <div class="chat-topbar-row">
         <v-icon start class="flex-shrink-0">mdi-disc-player</v-icon>
-        <span class="text-body-2 font-weight-medium ml-1 flex-shrink-0">{{
+        <span class="text-body-2 font-weight-medium ml-1 flex-shrink-0 now-playing-label">{{
           t('aidj.now_playing')
         }}</span>
         <span class="text-body-2 track-name text-truncate ml-2" :title="playerStatus.track || ''">{{
@@ -1529,7 +1529,7 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
                       : 'mdi-wifi-off'
                 }}
               </v-icon>
-              <span>{{
+              <span class="chat-topbar-net-text">{{
                 netState === 'ok'
                   ? 'API'
                   : netState === 'checking'
@@ -1949,18 +1949,41 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 .chat-topbar-net {
   margin-inline-start: 8px;
 }
+/* 窄屏：一行放下（图标 + 曲目 + 状态 + API 圆点），「正在播放」文字与 API 文字省掉；
+   右侧留出页面菜单按钮的位置（View.vue 把菜单把手放在这一行右端）。
+   只有 dbus 模式的播放器下拉才另起一行。 */
 @media (max-width: 720px) {
+  .chat-topbar {
+    padding: 8px 56px 8px 12px !important;
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
   .chat-topbar-row {
     flex-wrap: wrap;
     row-gap: 8px;
   }
+  .now-playing-label {
+    display: none;
+  }
+  .track-name {
+    margin-left: 4px !important;
+  }
+  .chat-topbar-extra {
+    flex: 0 0 auto;
+    margin-inline-start: 6px;
+  }
   .chat-topbar-net {
     margin-inline-start: 0;
   }
-  .chat-topbar-extra {
+  .chat-topbar-net-text {
+    display: none;
+  }
+  /* dbus 模式：API 圆点 + 播放器下拉整体换到第二行 */
+  .chat-topbar-extra:has(.player-select-col) {
     flex: 1 1 100%;
-    /* 第二行靠右：只有 API 标签时（内置播放器没有播放器下拉）不要跑到最左边 */
-    justify-content: flex-end;
+    margin-inline-start: 0;
   }
   .player-select-col {
     flex: 1 1 auto;
