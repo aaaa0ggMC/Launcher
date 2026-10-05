@@ -9,7 +9,6 @@ import { renderSegments, handleMarkdownClick } from './markdown'
 import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
-import BranchSwitcher from './BranchSwitcher.vue'
 import WorkflowCard from './WorkflowCard.vue'
 
 const props = defineProps<{
@@ -151,12 +150,6 @@ async function copyTurn(): Promise<void> {
     <div class="turn-col">
       <div class="turn-head">
         <span class="turn-name">{{ assistantName }}</span>
-        <BranchSwitcher
-          v-if="turn.siblingIds && turn.siblingIds.length > 1"
-          :ids="turn.siblingIds"
-          :current="turn.firstId"
-          @switch="(id) => emit('switchBranch', id)"
-        />
       </div>
 
       <div

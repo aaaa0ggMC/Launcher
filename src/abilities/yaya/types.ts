@@ -266,3 +266,29 @@ export interface WorkflowInfo {
   /** 是否会调用工具（纯对话类 workflow 为 false） */
   usesTools: boolean
 }
+
+// ---- 对话树（yaya.session-tree，见 services/tree.ts）----
+
+export interface TreeTurn {
+  /** 轮次起点的消息 id（user 节点自身 / 回答链的第一个节点） */
+  id: string
+  kind: 'user' | 'answer'
+  /** 父轮次 id（根为 null） */
+  parent: string | null
+  /** 回答链的最后一个节点（从这里开新分支 = 接在它后面） */
+  endId: string
+  /** 提问：原文开头；回答：最后一段有内容的回复开头 */
+  preview: string
+  /** 回答里的工具调用次数 */
+  tools: number
+  createdAt: number
+  /** 在当前分支上 */
+  active: boolean
+  status?: string
+}
+
+export interface SessionTree {
+  turns: TreeTurn[]
+  /** 当前所在轮次（活跃叶子所在的轮次） */
+  current: string | null
+}

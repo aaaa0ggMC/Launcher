@@ -72,6 +72,7 @@ import {
   restartPlugin
 } from './services/plugins/registry'
 import { mentionCandidates, sessionMentions } from './services/plugins/mention'
+import { buildSessionTree } from './services/tree'
 import type { PluginConfigField, PluginGroup, YayaPlugin } from './services/plugins/types'
 // 动态插件来源：导入即注册（registerPluginProvider）
 import './services/plugins/mcp/provider'
@@ -307,15 +308,50 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-switch-leaf',
     description:
       '切换到某个消息节点所在的分支（自动沿该节点走到它最近更新的叶子，不会截断后续对话）',
-    usage: 'yaya.session-switch-leaf --session <sessionId> --leaf <messageId>',
+    usage: 'yaya.session-switch-leaf --session <sessionId> --leaf <messageId|root> [--exact true]',
     run: async (ctx) => {
       const sessionId = String(ctx.named.session)
+      const exact = ctx.named.exact === true || ctx.named.exact === 'true'
+      // --exact：停在这个节点本身（「从这里开新分支」：之后发的消息接在它后面）；
+      // --leaf root：回到会话开头（从第一条消息之前另起）
+      if (exact && String(ctx.named.leaf) === 'root') {
+        updateSession(sessionId, { activeLeafId: null })
+        return { ok: true, sessionId, leafId: null }
+      }
       const node = getMessage(String(ctx.named.leaf))
       if (!node || node.sessionId !== sessionId) throw new Error('message not in session')
-      const leafId = findLatestLeaf(node.id)
+      const leafId = exact ? node.id : findLatestLeaf(node.id)
       updateSession(sessionId, { activeLeafId: leafId })
       return { ok: true, sessionId, leafId }
     }
+  },
+
+  {
+    name: 'yaya.message-get',
+    description: '读取一条消息（正文、附件、@ 点名），如对话树里「从这条提问开新分支」时带回原文',
+    usage: 'yaya.message-get --session <sessionId> --id <messageId>',
+    run: (ctx) => {
+      const msg = getMessage(String(ctx.named.id))
+      if (!msg || msg.sessionId !== String(ctx.named.session))
+        throw new Error('message not in session')
+      return {
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        attachments: msg.attachments ?? [],
+        mentions: Array.isArray(msg.meta?.mentions) ? msg.meta.mentions : []
+      }
+    }
+  },
+
+  {
+    name: 'yaya.session-tree',
+    description:
+      '会话的对话树：一次提问 / 一轮回答各是一个节点（回答里的工具调用合在一起），带父节点、预览、是否在当前分支；current = 当前所在节点',
+    usage: 'yaya.session-tree --id <sessionId>',
+    ui: ['YAYA 右上角菜单 → 对话树'],
+    related: ['yaya.session-switch-leaf'],
+    run: (ctx) => buildSessionTree(String(ctx.named.id))
   },
 
   // 7.1 更新指定会话属性 (标题、模型、Provider 等)

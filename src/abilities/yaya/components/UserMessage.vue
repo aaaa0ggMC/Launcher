@@ -4,7 +4,6 @@ import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import type { MessageNode } from '../types'
 import type { MessageMenuRequest } from './message-menu'
-import BranchSwitcher from './BranchSwitcher.vue'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 
 const props = defineProps<{
@@ -180,12 +179,6 @@ function openPreview(id: string): void {
       </div>
 
       <div class="user-actions">
-        <BranchSwitcher
-          v-if="message.siblingIds && message.siblingIds.length > 1"
-          :ids="message.siblingIds"
-          :current="message.id"
-          @switch="(id) => emit('switchBranch', id)"
-        />
         <v-btn
           icon
           variant="text"

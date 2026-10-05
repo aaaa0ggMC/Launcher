@@ -29,6 +29,8 @@ import ChatInputBox from './components/ChatInputBox.vue'
 import ModelSelectDialog from './components/ModelSelectDialog.vue'
 import MessageMenu from './components/MessageMenu.vue'
 import UsageDialog from './components/UsageDialog.vue'
+import ConversationTree from './components/tree/ConversationTree.vue'
+import type { TreeTurn } from './types'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
@@ -48,6 +50,7 @@ const snapshot = ref<WorkflowSnapshot | null>(null)
 const draft = ref('')
 const showModelSelect = ref(false)
 const showUsage = ref(false)
+const showTree = ref(false)
 const loadingMessages = ref(false)
 const notice = ref<{ text: string; error?: boolean } | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
@@ -540,6 +543,52 @@ async function handleSwitchBranch(messageId: string): Promise<void> {
   }
 }
 
+/** 对话树：查看某条分支（走到它最新的进展） */
+async function treeView(turn: TreeTurn): Promise<void> {
+  await handleSwitchBranch(turn.endId)
+  void scrollToBottom(true)
+}
+
+/**
+ * 对话树：从某个节点开新分支。回答 → 停在这轮回答末尾（下一条消息接在后面）；
+ * 提问 → 回到它之前，并把原问题放回输入框（改完再发 = 新分支）。原来的对话都保留。
+ */
+async function treeBranch(turn: TreeTurn, parentEnd: string | null): Promise<void> {
+  const session = activeSessionId.value
+  if (!session) return
+  try {
+    let prefill: string | null = null
+    if (turn.kind === 'user') {
+      const msg = (await window.cockpit.command('yaya.message-get', {
+        session,
+        id: turn.id
+      })) as { content: string }
+      prefill = msg.content
+    }
+    await window.cockpit.command('yaya.session-switch-leaf', {
+      session,
+      leaf: turn.kind === 'user' ? (parentEnd ?? 'root') : turn.endId,
+      exact: true
+    })
+    messages.value = []
+    hasMore.value = false
+    await loadMessages()
+    void scrollToBottom(true)
+    if (prefill !== null) {
+      draft.value = prefill
+      if (!matchMedia('(pointer: coarse)').matches) inputRef.value?.focus()
+    }
+    showNotice(
+      t(
+        'yaya.tree.branched',
+        '已回到这里：接下来发送的消息会开一条新分支，原来的对话保留在对话树里'
+      )
+    )
+  } catch (e) {
+    showNotice(errText(e), true)
+  }
+}
+
 async function handleDelete(id: string): Promise<void> {
   await window.cockpit.command('yaya.session-delete', { id })
   sessions.value = sessions.value.filter((s) => s.id !== id)
@@ -1024,6 +1073,12 @@ watch(isRunning, (now, before) => {
               />
             </v-list-group>
             <v-list-item
+              prepend-icon="mdi-file-tree-outline"
+              :title="t('yaya.tree.title', '对话树')"
+              :disabled="!activeSessionId"
+              @click="showTree = true"
+            />
+            <v-list-item
               prepend-icon="mdi-chart-box-outline"
               :title="t('yaya.usage.title', '用量统计')"
               :disabled="!activeSessionId"
@@ -1218,6 +1273,13 @@ watch(isRunning, (now, before) => {
       </v-card>
     </v-dialog>
 
+    <ConversationTree
+      v-model="showTree"
+      :session-id="activeSessionId || ''"
+      :session-title="sessionTitle"
+      @view="treeView"
+      @branch="treeBranch"
+    />
     <UsageDialog
       v-model="showUsage"
       :session-id="activeSessionId || ''"
