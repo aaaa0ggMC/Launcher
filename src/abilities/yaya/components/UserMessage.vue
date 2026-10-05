@@ -257,14 +257,17 @@ function openPreview(id: string): void {
   word-break: break-word;
 }
 .attachments {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 88px);
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  align-self: flex-end;
+  width: fit-content;
   gap: 8px;
   max-width: 85%;
 }
 .thumb {
   display: block;
+  flex: 0 0 88px;
   width: 88px;
   height: 88px;
   padding: 0;
@@ -321,9 +324,10 @@ function openPreview(id: string): void {
     max-width: 92%;
   }
   .attachments {
-    grid-template-columns: repeat(auto-fill, 72px);
+    justify-content: flex-end;
   }
   .thumb {
+    flex-basis: 72px;
     width: 72px;
     height: 72px;
   }
@@ -338,9 +342,10 @@ function openPreview(id: string): void {
     border-radius: 14px 6px 14px 14px;
   }
   .attachments {
-    grid-template-columns: repeat(auto-fill, 64px);
+    justify-content: flex-end;
   }
   .thumb {
+    flex-basis: 64px;
     width: 64px;
     height: 64px;
   }
