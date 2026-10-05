@@ -1,5 +1,10 @@
 <template>
-  <div ref="pageMenuRef" class="page-menu" :class="{ 'is-open': menuOpen }" @click.stop>
+  <div
+    ref="pageMenuRef"
+    class="page-menu"
+    :class="{ 'is-open': menuOpen, 'is-compact': compact }"
+    @click.stop
+  >
     <button class="page-menu-handle" @click="toggleMenu">
       <v-icon size="16">{{ menuOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
     </button>
@@ -647,6 +652,9 @@ import type {
   TileCacheStats
 } from '../types'
 import { filterPhotosWithQuery } from '../search-parser'
+import { useYarjCompact } from '../composables/useYarjCompact'
+
+const compact = useYarjCompact()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t } = useI18n(uiLang)
@@ -875,6 +883,26 @@ defineExpose({
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.page-menu.is-compact.is-open {
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  transform: none;
+  pointer-events: none;
+}
+
+.page-menu.is-compact.is-open > * {
+  pointer-events: auto;
+}
+
+/* 窄屏：菜单铺满宽度，内容过长时在面板内滚动 */
+.page-menu.is-compact .page-menu-pop {
+  width: 100%;
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow-y: auto;
 }
 
 .page-menu-handle {

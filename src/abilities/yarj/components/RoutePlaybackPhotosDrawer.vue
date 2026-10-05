@@ -1,9 +1,12 @@
 <script setup lang="ts">
 defineOptions({ name: 'cockpit-yarj-route-playback-photos-drawer' })
 
+import { computed } from 'vue'
 import type { Photo } from '../types'
 import { photoThumbUrl } from '../types'
 import { haversineDistM } from '../explored-area'
+import { useYarjCompact } from '../composables/useYarjCompact'
+import { useSwipeDismiss } from '../composables/useSwipeDismiss'
 
 const props = defineProps<{
   open: boolean
@@ -22,6 +25,12 @@ const emit = defineEmits<{
   (e: 'selectPhoto', payload: { photo: Photo; index: number; allPhotos: Photo[] }): void
   (e: 'locatePhoto', photo: Photo): void
 }>()
+
+const compact = useYarjCompact()
+const swipe = useSwipeDismiss(
+  computed(() => props.open),
+  () => emit('close')
+)
 
 const windowPresets = [
   { label: '±1 分钟', value: 60 },
@@ -78,7 +87,14 @@ function handlePhotoClick(p: Photo, idx: number): void {
 
 <template>
   <Transition name="drawer-slide">
-    <aside v-if="open" class="route-playback-drawer">
+    <aside
+      v-if="open"
+      class="route-playback-drawer"
+      :class="{ 'is-compact': compact }"
+      :style="swipe.style.value"
+      v-on="swipe.handlers"
+      @click.capture="swipe.onClickCapture"
+    >
       <!-- 头部：标题、窗口调节与关闭 -->
       <div class="drawer-header pa-4 border-b d-flex flex-column ga-3">
         <div class="d-flex align-center justify-space-between">
@@ -217,6 +233,16 @@ function handlePhotoClick(p: Photo, idx: number): void {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.route-playback-drawer.is-compact {
+  /* 让出顶部菜单的下拉把手 */
+  top: 32px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: auto;
+  touch-action: pan-y;
 }
 
 .drawer-body {

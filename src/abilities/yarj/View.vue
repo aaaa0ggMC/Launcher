@@ -74,6 +74,7 @@ import {
   isDetailLayer
 } from './composables/useMapLODLabels'
 import { useRoutePlayback } from './composables/useRoutePlayback'
+import { provideYarjCompact } from './composables/useYarjCompact'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
@@ -83,6 +84,8 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 // ---------------------------------------------------------------------------
 
 const mapEl = ref<HTMLElement | null>(null)
+const shellEl = ref<HTMLElement | null>(null)
+const compact = provideYarjCompact(shellEl)
 const labelsEl = ref<HTMLElement | null>(null)
 const providers = ref<ProviderItem[]>([])
 const activeProviderId = ref('google-hybrid')
@@ -2779,7 +2782,7 @@ async function reloadPreferences(): Promise<void> {
 </script>
 
 <template>
-  <div class="yarj-shell">
+  <div ref="shellEl" class="yarj-shell" :class="{ 'is-compact': compact }">
     <!-- 页面进入初始化加载动画（避免黑屏/卡住） -->
     <Transition name="fade">
       <div v-if="initializing" class="yarj-loading-overlay">

@@ -6,6 +6,7 @@ import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import type { Photo, JourneyData, JourneyStage, JourneyLeg, ExploredGranularity } from '../types'
 import { GRANULARITY_PRESETS } from '../types'
+import { useYarjCompact } from '../composables/useYarjCompact'
 
 const GRANULARITY_LIST: ExploredGranularity[] = ['fine', 'standard', 'trip', 'coarse', 'massive']
 
@@ -43,6 +44,7 @@ const emit = defineEmits<{
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
+const compact = useYarjCompact()
 
 const jumpMenuOpen = ref(false)
 const jumpStageInput = ref('')
@@ -97,7 +99,7 @@ function resetToGranularity(): void {
       <div
         v-if="explorationActive && journeyData?.stages.length"
         class="yarj-journey-time-badge"
-        :class="{ 'has-drawer-open': drawerOpen }"
+        :class="{ 'has-drawer-open': drawerOpen, 'is-compact': compact }"
       >
         <div class="time-badge-inner">
           <v-icon
@@ -121,12 +123,12 @@ function resetToGranularity(): void {
       <div
         v-if="explorationActive && journeyData?.stages.length"
         class="yarj-exploration-bar"
-        :class="{ 'has-drawer-open': drawerOpen }"
+        :class="{ 'has-drawer-open': drawerOpen, 'is-compact': compact }"
       >
         <div class="exploration-card">
           <!-- 第一行：阶段信息、时空跃迁与退出按钮 -->
-          <div class="d-flex align-center justify-space-between ga-3 mb-3">
-            <div class="d-flex align-center ga-2 min-w-0 flex-grow-1">
+          <div class="d-flex align-center flex-wrap ga-3 mb-3 explore-head">
+            <div class="d-flex align-center ga-2 min-w-0 flex-grow-1 explore-stage">
               <!-- 支持点击键入站点编号快速精准跳转 -->
               <v-menu
                 v-model="jumpMenuOpen"
@@ -147,9 +149,11 @@ function resetToGranularity(): void {
                     "
                   >
                     {{
-                      t('yarj.exploration.stageCount', '第 {curr} / {total} 站')
-                        .replace('{curr}', String(currentStageIndex + 1))
-                        .replace('{total}', String(journeyData.stages.length))
+                      compact
+                        ? `${currentStageIndex + 1} / ${journeyData.stages.length}`
+                        : t('yarj.exploration.stageCount', '第 {curr} / {total} 站')
+                            .replace('{curr}', String(currentStageIndex + 1))
+                            .replace('{total}', String(journeyData.stages.length))
                     }}
                     <v-icon end size="14" class="ml-1 opacity-80">mdi-menu-swap</v-icon>
                   </v-chip>
@@ -261,8 +265,8 @@ function resetToGranularity(): void {
               </div>
             </div>
 
-            <!-- 右侧：交通推测 Chip 与 退出按钮 -->
-            <div class="d-flex align-center ga-2 flex-shrink-0">
+            <!-- 右侧：交通推测 Chip 与 退出按钮（窄屏下交通 Chip 换到第二行铺满） -->
+            <div v-if="currentLeg" class="explore-leg">
               <v-chip
                 v-if="currentLeg"
                 variant="tonal"
@@ -285,28 +289,29 @@ function resetToGranularity(): void {
                   </template>
                 </span>
               </v-chip>
-
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                color="error"
-                :title="t('yarj.exploration.exit', '退出探索')"
-                @click="emit('exit')"
-              >
-                <v-icon size="20">mdi-close</v-icon>
-              </v-btn>
             </div>
+
+            <v-btn
+              icon
+              size="small"
+              variant="text"
+              color="error"
+              class="flex-shrink-0 explore-exit"
+              :title="t('yarj.exploration.exit', '退出探索')"
+              @click="emit('exit')"
+            >
+              <v-icon size="20">mdi-close</v-icon>
+            </v-btn>
           </div>
 
           <v-divider class="mb-3 opacity-20" />
 
           <!-- 第二行：操作控制工具栏 -->
-          <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
+          <div class="d-flex align-center justify-space-between ga-3 flex-wrap explore-toolbar">
             <!-- 左侧：粒度选择器、自定义目标站数与视距聚焦 -->
-            <div class="d-flex align-center ga-2 flex-wrap">
+            <div class="d-flex align-center ga-2 flex-wrap explore-tools">
               <div class="d-flex align-center ga-1 granularity-stepper">
-                <span class="text-caption on-surface-variant mr-1"
+                <span v-if="!compact" class="text-caption on-surface-variant mr-1"
                   >{{ t('yarj.exploration.granularity', '粒度') }}:</span
                 >
                 <v-btn
@@ -365,8 +370,19 @@ function resetToGranularity(): void {
                 </v-btn>
               </div>
 
-              <!-- 跳转至指定站点按钮 -->
+              <!-- 跳转至指定站点按钮（窄屏只留图标） -->
               <v-btn
+                v-if="compact"
+                icon
+                size="small"
+                variant="tonal"
+                :title="t('yarj.exploration.jumpBtnTitle', '跳转站点')"
+                @click="jumpMenuOpen = true"
+              >
+                <v-icon size="18">mdi-ray-start-arrow</v-icon>
+              </v-btn>
+              <v-btn
+                v-else
                 variant="tonal"
                 class="font-weight-medium"
                 prepend-icon="mdi-ray-start-arrow"
@@ -481,9 +497,21 @@ function resetToGranularity(): void {
             </div>
 
             <!-- 右侧：本站照片 + 巡航播放控制 -->
-            <div class="d-flex align-center ga-2 flex-wrap">
+            <div class="d-flex align-center ga-2 flex-wrap explore-playback">
               <v-btn
-                v-if="currentStage?.photos.length"
+                v-if="currentStage?.photos.length && compact"
+                icon
+                size="small"
+                variant="tonal"
+                :title="t('yarj.exploration.viewPhotos', '本站照片')"
+                @click="emit('open-photo-drawer', currentStage.photos, currentStage.center)"
+              >
+                <v-badge :content="currentStage.photos.length" color="primary" floating>
+                  <v-icon size="18">mdi-image-multiple-outline</v-icon>
+                </v-badge>
+              </v-btn>
+              <v-btn
+                v-else-if="currentStage?.photos.length"
                 variant="tonal"
                 prepend-icon="mdi-image-multiple-outline"
                 @click="emit('open-photo-drawer', currentStage.photos, currentStage.center)"
@@ -506,6 +534,7 @@ function resetToGranularity(): void {
               <v-btn
                 :color="isPlaying ? 'secondary' : 'primary'"
                 variant="flat"
+                class="explore-play"
                 :prepend-icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
                 @click="emit('toggle-play')"
               >
@@ -557,6 +586,65 @@ function resetToGranularity(): void {
   max-width: calc(100% - 420px - 56px);
 }
 
+.yarj-exploration-bar.is-compact,
+.yarj-exploration-bar.is-compact.has-drawer-open {
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: auto;
+  max-width: none;
+  transform: none;
+}
+
+.explore-leg {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.explore-leg :deep(.v-chip) {
+  max-width: 100%;
+}
+
+.is-compact .exploration-card {
+  padding: 12px 14px;
+}
+
+/* 窄屏：交通 Chip 单独一行；播放按钮排在工具行上面并撑满 */
+.is-compact .explore-leg {
+  order: 3;
+  flex-basis: 100%;
+}
+
+.is-compact .explore-exit {
+  order: 2;
+}
+
+.is-compact .explore-toolbar {
+  /* 工具类上的 d-flex / align-center / flex-wrap 都是 !important */
+  flex-direction: column-reverse !important;
+  align-items: stretch !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+}
+
+.is-compact .explore-tools,
+.is-compact .explore-playback {
+  flex-wrap: nowrap !important;
+}
+
+.is-compact .explore-tools .granularity-stepper {
+  flex: 1 1 auto;
+  justify-content: space-between;
+}
+
+.is-compact .explore-playback .explore-play {
+  flex: 1 1 auto;
+}
+
+.is-compact .explore-playback :deep(.v-badge) {
+  margin-right: 6px;
+}
+
 .exploration-card {
   pointer-events: auto;
   background: rgba(var(--v-theme-surface), var(--glass-a, 0.88));
@@ -576,7 +664,8 @@ function resetToGranularity(): void {
 
 .yarj-journey-time-badge {
   position: absolute;
-  top: 20px;
+  /* 让出顶部菜单的下拉把手（高 24px，同样水平居中） */
+  top: 34px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
@@ -589,6 +678,20 @@ function resetToGranularity(): void {
 .yarj-journey-time-badge.has-drawer-open {
   left: calc((100% - 420px - 16px) / 2);
   transform: translateX(-50%);
+}
+
+/* 窄屏：照片抽屉铺满整屏，HUD 不必再避让，回到正中 */
+.yarj-journey-time-badge.is-compact {
+  left: 50%;
+}
+
+.is-compact .time-badge-inner {
+  gap: 8px;
+  padding: 8px 16px;
+}
+
+.is-compact .time-display {
+  font-size: 1rem;
 }
 
 .time-badge-inner {
