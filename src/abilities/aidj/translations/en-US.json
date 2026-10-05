@@ -812,5 +812,6 @@
   "aidj.settings.loop_tool.session_memory": "Songs this DJ session already played or queued, to avoid repeats",
   "aidj.settings.loop_tool.use_playbook": "Load the full steps of a playbook",
   "aidj.settings.loop_tool.no_music": "When you just want to chat or say stop: answer without picking songs",
-  "aidj.settings.loop_tool.web_search": "Web search (Tavily) for artists, songs, scenes and other facts"
+  "aidj.settings.loop_tool.web_search": "Web search (Tavily) for artists, songs, scenes and other facts",
+  "aidj.subpage.menu": "Page menu"
 }
