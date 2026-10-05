@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { translate } from '../../../main/ui/i18n'
 import UsageBreakdownView from './UsageBreakdown.vue'
 import type { UsageBreakdown } from '../loop/usage'
+import { fitStatusCount } from './status-fit'
 
 const props = defineProps<{
   visibleStatus: string[]
@@ -39,17 +40,38 @@ const memoryConfirm = ref(false)
  * 说明文字，开关类直接变成开关，Tokens 明细（宽屏下是悬停提示，触屏看不到）也直接展开。
  */
 const COMPACT_BELOW = 520
-const COMPACT_SHOWN = 3
+/** 紧凑条里标签间距，与 .compact-strip 的 gap 一致 */
+const STRIP_GAP = 6
 const rootEl = ref<HTMLElement | null>(null)
+const stripEl = ref<HTMLElement | null>(null)
+const measureEl = ref<HTMLElement | null>(null)
 const compact = ref(false)
 const sheetOpen = ref(false)
+/** 一行实际放得下的前几项（按实测宽度算，标签长短不一，固定个数会横向溢出） */
+const shownCount = ref(0)
 let ro: ResizeObserver | null = null
+
+function measure(): void {
+  const root = rootEl.value
+  if (!root) return
+  compact.value = root.clientWidth < COMPACT_BELOW
+  const box = measureEl.value
+  if (!compact.value || !box) return
+  const chips = Array.from(box.children) as HTMLElement[]
+  const moreW = Math.max(...chips.splice(-2).map((c) => c.offsetWidth), 0)
+  const available = stripEl.value?.clientWidth ?? root.clientWidth
+  shownCount.value = fitStatusCount(
+    chips.map((c) => c.offsetWidth),
+    available,
+    STRIP_GAP,
+    moreW
+  )
+}
+
 onMounted(() => {
   if (!rootEl.value) return
-  compact.value = rootEl.value.clientWidth < COMPACT_BELOW
-  ro = new ResizeObserver(() => {
-    compact.value = (rootEl.value?.clientWidth ?? COMPACT_BELOW) < COMPACT_BELOW
-  })
+  measure()
+  ro = new ResizeObserver(() => measure())
   ro.observe(rootEl.value)
 })
 onBeforeUnmount(() => ro?.disconnect())
@@ -163,8 +185,10 @@ const entries = computed<Entry[]>(() => {
   }
   return out
 })
-const shownEntries = computed(() => entries.value.slice(0, COMPACT_SHOWN))
-const hiddenCount = computed(() => Math.max(0, entries.value.length - COMPACT_SHOWN))
+const shownEntries = computed(() => entries.value.slice(0, shownCount.value))
+const hiddenCount = computed(() => Math.max(0, entries.value.length - shownCount.value))
+// 标签数值变了宽度也会变（Tokens 从 0 涨到 12.3k），重新量；切进紧凑模式后测量层才渲染，也要再量一次
+watch([entries, compact], () => void nextTick(measure), { flush: 'post' })
 
 function toggleEntry(e: Entry): void {
   if (e.key === 'volbal') emit('toggleVolbal')
@@ -188,8 +212,25 @@ function onClearMemoryConfirm(): void {
 <template>
   <div ref="rootEl" class="aidj-status-bar" :class="{ compact }">
     <!-- 紧凑：一行前 N 项 + 「+N」，整条可点，点开底部弹层看全部 -->
+    <!-- 测量层：不可见、不进无障碍树，只用来量每个标签的真实宽度 -->
+    <div v-if="compact" ref="measureEl" class="measure-row" aria-hidden="true">
+      <v-chip v-for="e in entries" :key="e.key" variant="flat" size="small" class="status-chip">
+        <span class="status-label">{{ e.label }}</span
+        ><span class="status-value">{{ e.value }}</span>
+      </v-chip>
+      <!-- 「+N」两种文字都量，取宽的那个 -->
+      <v-chip variant="tonal" size="small" class="status-chip">
+        <v-icon size="16" start>mdi-chevron-up</v-icon>
+        +{{ entries.length }}
+      </v-chip>
+      <v-chip variant="tonal" size="small" class="status-chip">
+        <v-icon size="16" start>mdi-chevron-up</v-icon>
+        {{ t('aidj.status.title', '状态') }}
+      </v-chip>
+    </div>
     <button
       v-if="compact"
+      ref="stripEl"
       type="button"
       class="compact-strip"
       :aria-label="t('aidj.status.open', '查看全部状态')"
@@ -432,6 +473,7 @@ function onClearMemoryConfirm(): void {
 
 <style scoped>
 .aidj-status-bar {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -456,8 +498,23 @@ function onClearMemoryConfirm(): void {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  overflow-x: auto;
-  /* 单行放不下时可横向滑动；点按任意位置都打开弹层 */
+  /* 放几个由实测宽度决定（measure），不会溢出；点按任意位置都打开弹层 */
+  overflow: hidden;
+}
+.measure-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 6px;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.measure-row > * {
+  flex-shrink: 0;
 }
 .compact-strip > * {
   flex-shrink: 0;

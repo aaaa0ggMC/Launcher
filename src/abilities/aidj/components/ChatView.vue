@@ -1959,6 +1959,8 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
   }
   .chat-topbar-extra {
     flex: 1 1 100%;
+    /* 第二行靠右：只有 API 标签时（内置播放器没有播放器下拉）不要跑到最左边 */
+    justify-content: flex-end;
   }
   .player-select-col {
     flex: 1 1 auto;

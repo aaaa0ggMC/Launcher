@@ -111,20 +111,30 @@
   只补缺字段（`--force` 可重测）、并发 2、可取消、带进度；结果一次性并入当前写入槽位，
   同曲目后写覆盖，并失效槽位/曲库缓存。
 
-## 待完成
+## 已完成（2026-10-06，云端会话补完，分支 `claude/project-thread-4690q4`）
 
-1. **B6** 帮助文档同步（`help/*/Library/MetadataAndStats.md` 提一句实测响度与补录命令）。
-2. **C** 歌词自动滚动恢复（`LyricsView.vue`）：wheel/touchmove/方向键判手势（不能用 scroll
-   事件，程序化 scrollTo 会触发）；停下防抖 ~150ms 后若当前行已在中心 ±32px 内→立即恢复，
-   否则 ~10s 无操作→恢复并居中；补 `shouldResumeFollow()` 纯函数单测（含"拖到中心附近"边界）。
-3. **D** 歌词页：≤720px 让封面+标题信息同行（信息块 `flex:1 1 0; min-width:0`，chips 块内换行），
-   不再整块 wrap 到封面下面；无 `window.child` 能力（headless/网页）隐藏「桌面歌词」按钮并停
-   轮询 `lyrics-state`，`View.vue` page-menu 的入口同样门控；控制区触屏热区 40px。
-4. **E** AI DJ 页：`ChatStatusBar.vue` compact 模式按**实测宽度**决定显示前 N 个（其余收进
-   `+N`），替代固定 3 个导致的横向溢出；`View.vue` page-menu 把手窄屏改流内一行（弹层 overlay），
-   不再遮住正在播放的曲目；≤720px `.chat-topbar-extra` 第二行右对齐（API chip 不换到左边）。
-5. **F** `pnpm typecheck && lint && test && build`、隐私扫描、按文件路径分次提交并 push
-   （主仓库 A+B+C+D+E；不提交也不 push Android/headless 目录选择的未提交改动）。
+- **B6** 帮助文档：`help/zh-cn/曲库/元数据与统计.md` 与 `help/en-us/Library/MetadataAndStats.md`
+  新增「实测响度」小节（两个字段的含义、提取模型以实测为准、`background.job --name
+aidj.loudness-backfill` 补录老歌）。
+- **C** 歌词自动滚动恢复：`lyrics-follow.ts` 的 `shouldResumeFollow()` 纯函数 + 6 例单测（含 ±32px
+  边界、按住不恢复）；`LyricsView.vue` 只认 wheel / touchmove / 鼠标拖滚动条 / 滚动键为手势，
+  暂停期间 `recenter()` 只算 padding 不滚动；停下 150ms 后当前行在中心附近立即恢复，否则 10s 无操作
+  恢复并居中；暂停中当前行换到中心附近也会恢复。
+- **D** 歌词页：≤720px 信息块 `flex: 1 1 0 !important; min-width: 0`，长歌名在封面右侧换行；
+  无 `window.child`（网页 / 无头）时隐藏「桌面歌词」按钮并不再请求 `aidj.lyrics-state`，
+  `View.vue` 页面菜单入口同样门控；`(pointer: coarse)` 下控制按钮 40px。
+- **E** AI DJ 页：`ChatStatusBar.vue` 紧凑模式用不可见测量层量每个标签宽度，
+  `components/status-fit.ts` 的 `fitStatusCount()`（5 例单测）决定显示前几个，其余收进 `+N`，
+  不再横向溢出；`View.vue` ≤720px 把手改成流内一行（ChatView 改回流内），弹层仍浮在内容上；
+  `.chat-topbar-extra` 第二行靠右。
+- **F** `pnpm typecheck` / `pnpm lint` / `pnpm test`（559 通过、0 失败）通过；网页模式 400px 截图
+  确认：把手不再盖住曲目名、状态条 3 项 + `+6` 无溢出、菜单无「桌面歌词」、歌词页长标题在封面右侧、
+  滚轮滚动后停住、约 10s 后回到当前行。
+
+## 仍需真机验证
+
+- 触屏上歌词页手动拖动后停住 / 拖回中心立即恢复（桌面只用滚轮验证过）。
+- Android App 里 AI DJ 页状态条与把手、歌词页头部的实际观感。
 
 ## 已验证
 

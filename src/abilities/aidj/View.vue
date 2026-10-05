@@ -265,6 +265,8 @@ async function startFromNow(): Promise<void> {
 
 // -- 桌面歌词：绑定当前设置的 DBus，窗口单例（已存在则聚焦，不重复启动） -----
 const lyricsOpen = ref(false)
+/** 桌面歌词是子窗口：网页 / 无头宿主开不了，入口整个隐藏。 */
+const canDesktopLyrics = window.cockpit.hasCap('window.child')
 
 async function toggleLyricsWindow(): Promise<void> {
   const res = (await window.cockpit.command('aidj.lyrics-toggle').catch(() => null)) as {
@@ -275,6 +277,7 @@ async function toggleLyricsWindow(): Promise<void> {
 }
 
 async function refreshLyricsOpen(): Promise<void> {
+  if (!canDesktopLyrics) return
   const res = (await window.cockpit.command('aidj.lyrics-state').catch(() => null)) as {
     open?: boolean
   } | null
@@ -634,7 +637,7 @@ defineExpose({ toMarkdown })
                 <v-icon size="18">mdi-database-sync-outline</v-icon>
                 <span>{{ t('aidj.metadata_sync', '更新 MetaData') }}</span>
               </div>
-              <div class="menu-item" @click="toggleLyricsWindow">
+              <div v-if="canDesktopLyrics" class="menu-item" @click="toggleLyricsWindow">
                 <v-icon size="18">mdi-music-note-plus</v-icon>
                 <span>{{
                   lyricsOpen
@@ -1015,6 +1018,38 @@ defineExpose({ toMarkdown })
 .session-meta {
   font-size: 0.72rem;
   opacity: 0.6;
+}
+
+/* 窄屏（≤720px）：把手浮在页面顶部正中会盖住「正在播放」的曲目名，改成流内单独一行，
+   弹层仍然浮在内容之上（绝对定位，用 margin 居中，不占 transform——进出动画要用它）。桌面不变。 */
+@media (max-width: 720px) {
+  .aidj-shell {
+    display: flex;
+    flex-direction: column;
+  }
+  /* ChatView 自己是 absolute 铺满（桌面靠它），窄屏改回流内，让出把手那一行 */
+  .aidj-shell > .aidj-root {
+    position: relative;
+    inset: auto;
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto !important;
+  }
+  .page-menu {
+    position: relative;
+    order: -1;
+    top: auto;
+    left: auto;
+    transform: none;
+    flex-shrink: 0;
+  }
+  .page-menu-pop {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+  }
 }
 
 .menu-pop-enter-active,
