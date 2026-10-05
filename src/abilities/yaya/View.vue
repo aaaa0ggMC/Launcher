@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
+import { DrawerSwipe } from '../../main/ui/composables/drawer-swipe'
 import type {
   Session,
   MessageNode,
@@ -84,6 +85,81 @@ function toggleSidebar(): void {
   if (wide.value) sidebarPinned.value = !sidebarPinned.value
   else drawerOpen.value = !drawerOpen.value
 }
+
+// ---- 窄屏弹出侧栏：单指向左划收回（与外壳侧栏同一套手势判定，竖向滚动不受影响） ----
+const drawerSwipe = new DrawerSwipe()
+const drawerDragX = ref(0)
+const drawerDragging = ref(false)
+const drawerWidth = ref(1)
+let drawerBlockClick = false
+
+function resetDrawerSwipe(): void {
+  drawerSwipe.reset()
+  drawerDragX.value = 0
+  drawerDragging.value = false
+}
+
+function onDrawerPointerDown(e: PointerEvent): void {
+  if (wide.value || !drawerOpen.value || e.button !== 0) return
+  if ((e.target as Element).closest('input, textarea, [contenteditable="true"]')) return
+  drawerBlockClick = false
+  const el = e.currentTarget as HTMLElement
+  const width = el.getBoundingClientRect().width
+  drawerWidth.value = el.offsetWidth || 1
+  drawerSwipe.down(e.pointerId, e.clientX, e.clientY, width, e.timeStamp)
+  drawerDragging.value = false
+  drawerDragX.value = 0
+}
+
+function onDrawerPointerMove(e: PointerEvent): void {
+  const state = drawerSwipe.move(e.pointerId, e.clientX, e.clientY)
+  if (!state) return
+  const el = e.currentTarget as HTMLElement
+  const width = el.getBoundingClientRect().width
+  // 页面可能被缩放：屏幕位移换回元素自身坐标
+  const scale = width > 0 ? el.offsetWidth / width : 1
+  drawerDragging.value = state.dragging
+  drawerDragX.value = state.offset * scale
+  if (state.dragging) {
+    drawerBlockClick = true
+    e.preventDefault()
+    if (!el.hasPointerCapture(e.pointerId)) el.setPointerCapture(e.pointerId)
+  }
+}
+
+function onDrawerPointerEnd(e: PointerEvent): void {
+  // 子元素被夺走捕获时也会冒泡一个 lostpointercapture，我们自己的捕获还在
+  if (e.type === 'lostpointercapture' && e.target !== e.currentTarget) return
+  const result = drawerSwipe.end(e.pointerId, e.timeStamp, e.type !== 'pointerup')
+  drawerDragging.value = false
+  drawerDragX.value = 0
+  if (result.close) drawerOpen.value = false
+}
+
+/** 划过之后吞掉随后的 click，免得松手时点开了手指下的会话 */
+function onDrawerClick(e: MouseEvent): void {
+  if (!drawerBlockClick || e.detail === 0) return
+  drawerBlockClick = false
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
+
+const drawerStyle = computed(() =>
+  drawerDragging.value
+    ? { transform: `translateX(${drawerDragX.value}px)`, transition: 'none' }
+    : undefined
+)
+/** 遮罩跟着手指变淡 */
+const scrimStyle = computed(() =>
+  drawerDragging.value
+    ? {
+        opacity: String(Math.max(0, 1 + drawerDragX.value / drawerWidth.value)),
+        transition: 'none'
+      }
+    : undefined
+)
+
+watch([drawerOpen, wide], resetDrawerSwipe)
 
 // ---- 派生状态 ----
 const assistantName = computed(() => config.value?.assistantName?.trim() || 'YAYA')
@@ -1056,11 +1132,22 @@ watch(isRunning, (now, before) => {
 <template>
   <div ref="shellEl" class="yaya-shell" :class="{ 'is-narrow': !wide }">
     <!-- 会话侧栏：宽屏常驻，窄屏弹出 -->
-    <div v-if="!wide && drawerOpen" class="scrim" @click="drawerOpen = false" />
+    <div v-if="!wide && drawerOpen" class="scrim" :style="scrimStyle" @click="drawerOpen = false" />
     <aside
       class="sidebar"
-      :class="{ 'is-open': sidebarVisible, 'is-overlay': !wide }"
+      :class="{
+        'is-open': sidebarVisible,
+        'is-overlay': !wide,
+        'is-swipeable': !wide && drawerOpen
+      }"
+      :style="drawerStyle"
       :aria-hidden="!sidebarVisible"
+      @pointerdown="onDrawerPointerDown"
+      @pointermove="onDrawerPointerMove"
+      @pointerup="onDrawerPointerEnd"
+      @pointercancel="onDrawerPointerEnd"
+      @lostpointercapture="onDrawerPointerEnd"
+      @click.capture="onDrawerClick"
     >
       <ChatSessionList
         :sessions="sessions"
@@ -1459,6 +1546,23 @@ watch(isRunning, (now, before) => {
 }
 .sidebar.is-overlay.is-open {
   transform: translateX(0);
+}
+/* 会话列表本身是滚动容器：触控手势只看到滚动容器为止，所以子孙也要禁横向平移，
+   否则浏览器接管横划（pointercancel），收不回来 */
+.sidebar.is-swipeable,
+.sidebar.is-swipeable :deep(*) {
+  touch-action: pan-y;
+}
+@media (pointer: coarse) {
+  .sidebar.is-swipeable {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .sidebar.is-swipeable input,
+  .sidebar.is-swipeable textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
 }
 .scrim {
   position: absolute;
