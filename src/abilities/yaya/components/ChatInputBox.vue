@@ -118,6 +118,11 @@ const inputContext: PluginInputContext = {
 }
 
 function onInput(): void {
+  // Vuetify emits the model update after the native input event. Match the committed draft.
+  void nextTick(notifyInput)
+}
+
+function notifyInput(): void {
   const selection = inputContext.selection()
   const caret = selection.start
   for (const hooks of inputHooks.values())
