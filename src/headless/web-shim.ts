@@ -28,6 +28,18 @@ try {
 const authHeaders = { authorization: `Bearer ${token}` }
 
 /**
+ * 安卓客户端（android/，一个打开宿主网页的 WebView 壳）注入的原生桥。
+ * 只补浏览器做不好的：剪贴板（WebView 的 navigator.clipboard 常因缺少用户激活而失败）、外部链接（交给系统浏览器）。
+ */
+interface AndroidBridge {
+  copyText(text: string): void
+  openExternal(url: string): void
+  openConnect(): void
+  version(): string
+}
+const android = (window as unknown as { CockpitAndroid?: AndroidBridge }).CockpitAndroid
+
+/**
  * 本标签页的浏览器 UI 桥 clientId（B5）：宿主用它把 YAYA 的界面请求**定向**发给发起工作流的
  * 这个标签页（绝不广播、绝不挑「最新」的）。重复 id 会被宿主拒绝，不会顶掉别的标签页。
  */
@@ -264,10 +276,12 @@ const cockpit = createCockpit({
           )
         )
       case 'clipboard:write':
-        await navigator.clipboard?.writeText(String(args[0] ?? ''))
+        if (android) android.copyText(String(args[0] ?? ''))
+        else await navigator.clipboard?.writeText(String(args[0] ?? ''))
         return
       case 'shell:open-external':
-        window.open(String(args[0] ?? ''), '_blank', 'noopener')
+        if (android) android.openExternal(String(args[0] ?? ''))
+        else window.open(String(args[0] ?? ''), '_blank', 'noopener')
         return
       case 'window:work-area':
         return { x: 0, y: 0, width: innerWidth, height: innerHeight }
@@ -294,9 +308,9 @@ const cockpit = createCockpit({
     screenshot: 'none',
     // 授权弹窗：外壳悬浮窗（Outsider SDK，PrivacyConsentPopup.vue）
     'privacy.consent': 'web',
-    // 浏览器有等价实现
-    clipboard: 'web',
-    external: 'web'
+    // 浏览器有等价实现；安卓客户端走原生
+    clipboard: android ? 'native' : 'web',
+    external: android ? 'native' : 'web'
   },
   hostUrl: (u) => u.replace(/^cockpit-(icon|audio|tile):\/\//, '/_p/cockpit-$1/'),
   platform: info.platform,

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cockpit</string>
+    <string name="keepalive_channel">Background</string>
+    <string name="keepalive_title">Cockpit is running</string>
+    <string name="keepalive_text">Keeping the host connection and playback alive</string>
+    <string name="shortcut_connect">Connection settings</string>
+    <string name="err_unreachable">Cannot reach the host. Is it running in Termux?</string>
+    <string name="err_token">The host rejected the token.</string>
+    <string name="err_http">The host returned an error:</string>
+    <string name="err_disconnected">Lost connection to the host</string>
+</resources>

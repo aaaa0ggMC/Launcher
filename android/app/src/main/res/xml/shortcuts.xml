@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="connect"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_connect">
+        <intent
+            android:action="io.github.linuxcockpit.client.CONNECT_SETTINGS"
+            android:targetPackage="io.github.linuxcockpit.client"
+            android:targetClass="io.github.linuxcockpit.client.MainActivity" />
+    </shortcut>
+</shortcuts>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+<title>Cockpit</title>
+<style>
+  :root { color-scheme: dark; --bg: #121212; --card: #1e1f22; --fg: #e6e6e6; --dim: #9aa0a6;
+          --pri: #4fc3d7; --err: #ef6c6c; --line: rgba(255,255,255,.12); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+               font: 15px/1.55 system-ui, -apple-system, "Noto Sans CJK SC", sans-serif; }
+  main { max-width: 520px; margin: 0 auto; padding: 32px 20px 40px; display: flex; flex-direction: column; gap: 20px; }
+  header { display: flex; align-items: center; gap: 14px; }
+  header h1 { font-size: 1.35rem; margin: 0; font-weight: 600; }
+  header small { color: var(--dim); }
+  .card { background: var(--card); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+  label { display: flex; flex-direction: column; gap: 8px; font-size: .9rem; color: var(--dim); }
+  .row { display: flex; gap: 8px; }
+  input[type=text], input[type=password], input[type=url] {
+    flex: 1; min-width: 0; min-height: 48px; padding: 10px 14px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--fg); font-size: 1rem; }
+  input:focus { outline: 2px solid var(--pri); outline-offset: -1px; }
+  button { min-height: 48px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--line);
+           background: transparent; color: var(--fg); font-size: .95rem; cursor: pointer; }
+  button.primary { background: var(--pri); color: #0b2228; border: none; font-weight: 600; }
+  button:disabled { opacity: .55; }
+  .check { flex-direction: row; align-items: center; gap: 12px; color: var(--fg); min-height: 48px; }
+  .check input { width: 22px; height: 22px; accent-color: var(--pri); }
+  .check span small { display: block; color: var(--dim); }
+  .error { background: rgba(239,108,108,.12); color: var(--err); border-radius: 12px; padding: 12px 14px; }
+  .help { color: var(--dim); font-size: .88rem; display: flex; flex-direction: column; gap: 10px; }
+  .help h2 { font-size: .95rem; color: var(--fg); margin: 0; font-weight: 600; }
+  code { background: rgba(255,255,255,.07); padding: 2px 6px; border-radius: 6px; word-break: break-all;
+         font-family: ui-monospace, "JetBrains Mono", monospace; font-size: .85em; }
+  pre { margin: 0; background: rgba(255,255,255,.05); border-radius: 10px; padding: 10px 12px;
+        white-space: pre-wrap; word-break: break-all; font-size: .82rem; }
+  .actions { display: flex; justify-content: flex-end; }
+  .actions button { min-width: 140px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 data-t="title"></h1>
+      <small id="ver"></small>
+    </div>
+  </header>
+
+  <div id="error" class="error" hidden></div>
+
+  <form class="card" id="form">
+    <label><span data-t="url"></span>
+      <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" />
+    </label>
+    <label><span data-t="token"></span>
+      <div class="row">
+        <input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="button" id="show" data-t="show"></button>
+        <button type="button" id="paste" data-t="paste"></button>
+      </div>
+    </label>
+    <label class="check">
+      <input id="keep" type="checkbox" />
+      <span><span data-t="keep"></span><small data-t="keepHint"></small></span>
+    </label>
+    <div class="actions"><button class="primary" id="go" type="submit" data-t="connect"></button></div>
+  </form>
+
+  <section class="help">
+    <h2 data-t="helpTitle"></h2>
+    <span data-t="help1"></span>
+    <pre>pnpm dev:web
+# <span data-t="or"></span>
+node headless/index.js</pre>
+    <span data-t="help2"></span>
+    <pre>cat ~/.config/LinuxCockpit/headless-token</pre>
+    <span data-t="help3"></span>
+  </section>
+</main>
+<script>
+  const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+  const T = zh ? {
+    title: '连接 Cockpit 宿主', url: '宿主地址', token: 'Token', show: '显示', hide: '隐藏', paste: '粘贴',
+    keep: '后台保持运行', keepHint: '常驻通知，切到后台时播放器和连接不断', connect: '连接', connecting: '正在连接…',
+    helpTitle: '怎么用', help1: '先在 Termux 里启动无头宿主（默认监听 127.0.0.1:47810）：', or: '或者用打包好的版本：',
+    help2: 'Token 在宿主上这个文件里，复制后点「粘贴」：',
+    help3: '连上之后界面全部来自宿主，宿主更新后不用重装这个应用。之后想换宿主：长按桌面图标 →「连接设置」。'
+  } : {
+    title: 'Connect to Cockpit host', url: 'Host URL', token: 'Token', show: 'Show', hide: 'Hide', paste: 'Paste',
+    keep: 'Keep running in background', keepHint: 'Ongoing notification keeps playback and the connection alive',
+    connect: 'Connect', connecting: 'Connecting…', helpTitle: 'How to use',
+    help1: 'Start the headless host in Termux first (listens on 127.0.0.1:47810 by default):', or: 'or the packed build:',
+    help2: 'The token is in this file on the host — copy it, then tap “Paste”:',
+    help3: 'Once connected, the whole UI comes from the host, so host updates need no app reinstall. To switch hosts later: long-press the app icon → “Connection settings”.'
+  }
+  for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t]
+
+  const A = window.CockpitAndroid
+  const $ = (id) => document.getElementById(id)
+  const st = JSON.parse(A ? A.state() : '{}')
+  const pre = st.prefill || {}
+  $('url').value = pre.url || st.url || 'http://127.0.0.1:47810'
+  $('token').value = pre.token || st.token || ''
+  $('keep').checked = st.keepAlive !== false
+  $('ver').textContent = st.version ? 'v' + st.version : ''
+  if (st.error) { $('error').textContent = st.error; $('error').hidden = false }
+
+  $('show').onclick = () => {
+    const pw = $('token').type === 'password'
+    $('token').type = pw ? 'text' : 'password'
+    $('show').textContent = pw ? T.hide : T.show
+  }
+  $('paste').onclick = () => {
+    const v = A ? A.pasteText().trim() : ''
+    if (v) $('token').value = v
+  }
+  $('form').onsubmit = (e) => {
+    e.preventDefault()
+    let url = $('url').value.trim()
+    if (url && !/^https?:\/\//i.test(url)) url = 'http://' + url
+    $('go').disabled = true
+    $('go').textContent = T.connecting
+    $('error').hidden = true
+    A && A.connect(url, $('token').value.trim(), $('keep').checked)
+  }
+</script>
+</body>
+</html>

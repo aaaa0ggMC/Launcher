@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keepalive_channel">后台运行</string>
+    <string name="keepalive_title">Cockpit 正在后台运行</string>
+    <string name="keepalive_text">保持与宿主的连接和播放</string>
+    <string name="shortcut_connect">连接设置</string>
+    <string name="err_unreachable">连不上宿主。Termux 里的宿主启动了吗？</string>
+    <string name="err_token">宿主拒绝了这个 token。</string>
+    <string name="err_http">宿主返回错误：</string>
+    <string name="err_disconnected">与宿主的连接断开了</string>
+</resources>
