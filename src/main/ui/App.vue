@@ -12,6 +12,7 @@ import {
   nextTick
 } from 'vue'
 import { useTheme } from 'vuetify'
+import { DrawerSwipe } from './composables/drawer-swipe'
 import {
   applyUiScale as applyUiScaleFromConfig,
   applyFont as applyFontFromConfig
@@ -100,6 +101,60 @@ const sidebarOverlay = computed(
 /** 弹出式永远展开显示（有搜索和分组），只有常驻时才有「窄条」形态 */
 const railMode = computed(() => !sidebarOverlay.value && rail.value)
 const drawerOpen = ref(false)
+const drawerSwipe = new DrawerSwipe()
+const drawerDragX = ref(0)
+const drawerDragging = ref(false)
+let drawerScale = 1
+let drawerBlockClick = false
+
+function resetDrawerSwipe(): void {
+  drawerSwipe.reset()
+  drawerDragX.value = 0
+  drawerDragging.value = false
+}
+
+function onDrawerPointerDown(e: PointerEvent): void {
+  if (!sidebarOverlay.value || !drawerOpen.value || e.button !== 0) return
+  if ((e.target as Element).closest('input, textarea, [contenteditable="true"]')) return
+  drawerBlockClick = false
+  const el = e.currentTarget as HTMLElement
+  const width = el.getBoundingClientRect().width
+  drawerScale = width > 0 ? el.offsetWidth / width : 1
+  drawerSwipe.down(e.pointerId, e.clientX, e.clientY, width, e.timeStamp)
+  drawerDragging.value = false
+  drawerDragX.value = 0
+}
+
+function onDrawerPointerMove(e: PointerEvent): void {
+  const state = drawerSwipe.move(e.pointerId, e.clientX, e.clientY)
+  if (!state) return
+  drawerDragging.value = state.dragging
+  drawerDragX.value = state.offset * drawerScale
+  if (state.dragging) {
+    drawerBlockClick = true
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    if (!el.hasPointerCapture(e.pointerId)) el.setPointerCapture(e.pointerId)
+  }
+}
+
+function onDrawerPointerEnd(e: PointerEvent): void {
+  // Taking capture from a drawer child also bubbles a lost event; our own capture is still active.
+  if (e.type === 'lostpointercapture' && e.target !== e.currentTarget) return
+  const result = drawerSwipe.end(e.pointerId, e.timeStamp, e.type !== 'pointerup')
+  drawerDragging.value = false
+  drawerDragX.value = 0
+  if (result.close) drawerOpen.value = false
+}
+
+function onDrawerClick(e: MouseEvent): void {
+  if (!drawerBlockClick || e.detail === 0) return
+  drawerBlockClick = false
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
+
+watch([drawerOpen, sidebarOverlay], resetDrawerSwipe)
 let narrowMql: MediaQueryList | null = null
 const onNarrowChange = (e: MediaQueryListEvent): void => {
   narrow.value = e.matches
@@ -1326,11 +1381,24 @@ onBeforeUnmount(() => {
     <v-navigation-drawer
       :model-value="sidebarOverlay ? drawerOpen : true"
       :rail="railMode"
+      :touchless="sidebarOverlay && drawerOpen"
+      :class="{ 'sidebar-swipeable': sidebarOverlay && drawerOpen }"
+      :style="
+        drawerDragging
+          ? { transform: `translateX(${drawerDragX}px)`, transition: 'none' }
+          : undefined
+      "
       :temporary="sidebarOverlay"
       :permanent="!sidebarOverlay"
       width="264"
       rail-width="64"
       color="surface-variant"
+      @pointerdown="onDrawerPointerDown"
+      @pointermove="onDrawerPointerMove"
+      @pointerup="onDrawerPointerEnd"
+      @pointercancel="onDrawerPointerEnd"
+      @lostpointercapture="onDrawerPointerEnd"
+      @click.capture="onDrawerClick"
       @update:model-value="(v: boolean) => sidebarOverlay && (drawerOpen = v)"
     >
       <template #prepend>
