@@ -743,5 +743,6 @@
   "yaya.plugin.mermaid.theme_forest": "Forest",
   "yaya.plugin.mermaid.theme_dark": "Dark",
   "yaya.plugin.mermaid.cfg_max_height": "Maximum diagram height (px)",
-  "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom"
+  "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom",
+  "yaya.tree.pan_hint_touch": "Drag to pan · pinch to zoom"
 }
