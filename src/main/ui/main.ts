@@ -12,6 +12,7 @@ import { buildThemeDefinitions, DEFAULT_SCHEME_ID } from './color_schemes'
 import { vPrivacy, vPrivacyAction, vAgentForbidden } from './privacy'
 import { installViewportVar } from './viewport'
 import { installTouchGuard } from './touch-guard'
+import { installTapRescue } from './tap-rescue'
 
 const vuetify = createVuetify({
   components,
@@ -109,6 +110,7 @@ async function mountRoot(): Promise<void> {
     .mount('#app')
   installViewportVar()
   installTouchGuard()
+  installTapRescue()
 }
 
 void mountRoot()

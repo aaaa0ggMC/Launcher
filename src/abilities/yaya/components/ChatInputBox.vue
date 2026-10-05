@@ -187,6 +187,16 @@ function onKeyDown(e: KeyboardEvent): void {
 const canExpand = computed(
   () => expanded.value || draft.value.includes('\n') || draft.value.length > 80
 )
+/**
+ * 输入框旁的按钮：按下时不抢走输入框焦点。否则手机上一按下键盘就开始收起、页面跟着重排，
+ * 按钮在手指下面移走，抬起时落空（看起来按下了却没反应）。pointerdown 取消默认动作只阻止
+ * 兼容鼠标事件（焦点转移），click 照常触发。
+ */
+function keepFocus(e: PointerEvent): void {
+  const a = document.activeElement
+  if (a instanceof HTMLTextAreaElement || a instanceof HTMLInputElement) e.preventDefault()
+}
+
 function toggleExpanded(): void {
   expanded.value = !expanded.value
   textarea.value?.focus()
@@ -507,6 +517,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           :aria-label="
             expanded ? t('yaya.input.collapse', '收起') : t('yaya.input.expand', '展开编辑')
           "
+          @pointerdown="keepFocus"
           @click="toggleExpanded"
         />
       </div>
@@ -519,6 +530,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           :disabled="importing"
           :title="t('yaya.input.attach', '添加附件')"
           :aria-label="t('yaya.input.attach', '添加附件')"
+          @pointerdown="keepFocus"
           @click="attach"
         />
         <v-btn
@@ -605,6 +617,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           prepend-icon="mdi-stop"
           class="send-btn"
           :aria-label="t('yaya.stop', '停止')"
+          @pointerdown="keepFocus"
           @click="emit('abort')"
         >
           <span class="btn-text">{{ t('yaya.stop', '停止') }}</span>
@@ -627,6 +640,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
           :aria-label="
             isRunning ? t('yaya.input.interrupt_send', '打断并发送') : t('yaya.send', '发送')
           "
+          @pointerdown="keepFocus"
           @click="send"
         >
           <span class="btn-text">{{
