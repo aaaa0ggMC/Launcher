@@ -109,6 +109,17 @@ export interface WebPlayerReport {
   crossfadeSeconds?: number
   eqPreset?: string
   eqGains?: number[]
+  /** Random id of the reporting engine instance — a new id = a freshly
+   *  created engine (page reload / App relaunch) that needs the prefs pushed. */
+  engineId?: string
+}
+
+/** One queued song as the renderer engine receives it. */
+interface WebPlayerSong {
+  name: string
+  path: string
+  url: string
+  emotion?: unknown
 }
 
 /** Backend-neutral contract every playback mode implements. */
@@ -204,6 +215,21 @@ export class WebPlayerBackend implements PlayerBackend {
   }
   private queueIndex = -1
   private queueTotal = 0
+  /** Mirror of the engine queue (playlist / enqueue / trim / clear), so a
+   *  freshly created engine — the Android App relaunched while the host kept
+   *  running — can be handed the queue back instead of showing a stale
+   *  "Playing" it can't actually play. */
+  private queue: WebPlayerSong[] = []
+  /** false once the engine's reported queue length disagrees with the mirror. */
+  private queueValid = true
+  private lastPositionMs = 0
+  /** Engine instances seen so far (each gets the prefs pushed once). */
+  private knownEngines = new Set<string>()
+  private lastReporter: { id: string; at: number; status: string } | null = null
+  /** Last volume we asked the engine for (manual or volbal) — handed to the
+   *  next engine instead of resetting it to the default. */
+  private intendedVol: number | null = null
+  private lastPrefsFixAt = 0
 
   // -- continuous-playback auxiliaries (mirror `aidj.continuous` semantics) ---
   private volbal = new VolBal({
@@ -248,13 +274,38 @@ export class WebPlayerBackend implements PlayerBackend {
     this.playbackRate = config?.preferences.playback_rate ?? 1.0
     const defaultVol = config?.preferences.default_volume ?? 0.8
     this.defaultVol = defaultVol
-    this.lastStatus.volume = defaultVol
-    this.lastDetail.volume = defaultVol
-    // Push the persisted feature prefs into the renderer engine.
+    if (this.lastStatus.volume == null) this.lastStatus.volume = defaultVol
+    if (this.lastDetail.volume == null) this.lastDetail.volume = defaultVol
+    // Push the persisted feature prefs into the renderer engine (if any is up —
+    // an engine created later gets them in `bringUp`). Volume is NOT re-pushed
+    // here: every aidj.save-config lands here and would reset the user's volume.
+    await this.pushPrefs()
+  }
+
+  /** Push crossfade / EQ / rate to the engine(s). */
+  private async pushPrefs(): Promise<void> {
     this.emit({ type: 'crossfade', enabled: this.crossfadeEnabled, seconds: this.crossfadeSeconds })
     this.emit({ type: 'eq', gains: await this.eqGainsFor(this.eqPreset) })
     this.emit({ type: 'rate', rate: this.playbackRate })
-    this.emit({ type: 'volume', volume: defaultVol })
+  }
+
+  /**
+   * A new engine instance came up (first page load, reload, App relaunch).
+   * It starts with its own hardcoded defaults (crossfade off, 0.8 volume, flat
+   * EQ) and missed every pref broadcast sent before it existed — the old
+   * "came back after 75s offline" check never fired for a quick relaunch.
+   */
+  private bringUp(id: string, path: string | null): void {
+    this.knownEngines.add(id)
+    log.info('web player engine up', { engineId: id, path })
+    void this.pushPrefs()
+    // Volume it SHOULD be at, so the first track never starts loud: the volbal
+    // target when loudness balance is on, else the last volume we set.
+    if (this.volbal.isEnabled && (path ?? this.lastTrackPath)) {
+      void this.volbal.apply((path ?? this.lastTrackPath) as string)
+    } else {
+      void this.setVolume(this.intendedVol ?? this.defaultVol)
+    }
   }
 
   /** Resolve an EQ profile id → gains (unknown id falls back to flat). */
@@ -277,8 +328,11 @@ export class WebPlayerBackend implements PlayerBackend {
 
   /** Store a state report pushed up by the renderer engine. */
   report(state: WebPlayerReport): void {
-    const engineJustCameUp = !this.engineOnline
+    const engineId = typeof state.engineId === 'string' ? state.engineId : null
+    // Reports without an id (shouldn't happen) fall back to the old heuristic.
+    const engineJustCameUp = engineId ? !this.knownEngines.has(engineId) : !this.engineOnline
     this.lastEngineSeen = Date.now()
+    if (engineId) this.lastReporter = { id: engineId, at: Date.now(), status: state.status }
     this.lastStatus = {
       status: state.status,
       track: state.track ?? '',
@@ -302,28 +356,44 @@ export class WebPlayerBackend implements PlayerBackend {
       loopA: state.loopA,
       loopB: state.loopB,
       sleepRemainMs: state.sleepRemainMs,
-      crossfade: state.crossfade,
-      crossfadeSeconds: state.crossfadeSeconds,
+      // The backend owns these prefs (persisted config); the engine only echoes.
+      crossfade: this.crossfadeEnabled,
+      crossfadeSeconds: this.crossfadeSeconds,
       eqPreset: this.eqPreset,
       eqGains: state.eqGains,
       volbal: this.getVolbalState()
     }
-    if (typeof state.playbackRate === 'number') this.playbackRate = state.playbackRate
-    if (typeof state.crossfade === 'boolean') this.crossfadeEnabled = state.crossfade
-    if (typeof state.crossfadeSeconds === 'number') this.crossfadeSeconds = state.crossfadeSeconds
-    if (typeof state.queueIndex === 'number') this.queueIndex = state.queueIndex
-    if (typeof state.queueTotal === 'number') this.queueTotal = state.queueTotal
+    // An engine that disagrees with the backend's prefs (it was created after
+    // they were broadcast, or missed one) gets them again — at most once a second.
+    const prefsDrift =
+      (typeof state.crossfade === 'boolean' && state.crossfade !== this.crossfadeEnabled) ||
+      (typeof state.crossfadeSeconds === 'number' &&
+        state.crossfadeSeconds !== this.crossfadeSeconds) ||
+      (typeof state.playbackRate === 'number' && state.playbackRate !== this.playbackRate)
+    if (prefsDrift && !engineJustCameUp && Date.now() - this.lastPrefsFixAt > 1000) {
+      this.lastPrefsFixAt = Date.now()
+      this.emit({
+        type: 'crossfade',
+        enabled: this.crossfadeEnabled,
+        seconds: this.crossfadeSeconds
+      })
+      this.emit({ type: 'rate', rate: this.playbackRate })
+    }
+    // An empty engine (just created, nothing restored yet) must not wipe the
+    // queue mirror's cursor.
+    if (typeof state.queueTotal === 'number' && state.queueTotal > 0) {
+      if (typeof state.queueIndex === 'number') this.queueIndex = state.queueIndex
+      this.queueTotal = state.queueTotal
+      if (state.queueTotal !== this.queue.length) this.queueValid = false
+      if (typeof state.positionMs === 'number') this.lastPositionMs = state.positionMs
+    }
     // Track-change side effects: record play frequency + apply loudness balance
     // (the engine auto-advances, so the backend watches the reported track).
     const path = state.path ?? null
     if (engineJustCameUp) {
-      // A freshly created engine starts at its own default (0.8) — push the
-      // volume it SHOULD be at once, so the first track never starts loud:
-      // the volbal base (50%) when loudness balance is on, the persisted
-      // default volume otherwise. Only on bring-up: re-pushing on the 30s
-      // heartbeat would fight the user's manual volume changes.
-      if (this.volbal.isEnabled) void this.volbal.apply(path ?? this.lastTrackPath ?? '')
-      else void this.setVolume(this.defaultVol)
+      if (engineId) this.bringUp(engineId, path)
+      else if (this.volbal.isEnabled) void this.volbal.apply(path ?? this.lastTrackPath ?? '')
+      else void this.setVolume(this.intendedVol ?? this.defaultVol)
     }
     if (path && path !== this.lastTrackPath) {
       this.lastTrackPath = path
@@ -402,12 +472,51 @@ export class WebPlayerBackend implements PlayerBackend {
     return Date.now() - this.lastEngineSeen < WebPlayerBackend.ENGINE_TTL_MS
   }
 
-  /** 引擎打招呼：记为在线，交出排队中的指令（只交给第一个来取的引擎，避免多个页面一起放） */
-  hello(): Record<string, unknown> | null {
+  /**
+   * 引擎打招呼：记为在线，交出排队中的指令（只交给第一个来取的引擎，避免多个页面一起放）。
+   * 新创建、队列为空的引擎（App 退出重进 / 页面刷新，宿主一直在跑）拿回上一次的队列：
+   * 停在原来的歌和进度上、暂停，点播放就能接着放——之前页面只显示宿主残留的
+   * 「Playing」，新引擎里却什么都没有，点什么都放不出来。
+   */
+  hello(engineId?: string, empty?: boolean): Record<string, unknown> | null {
     this.lastEngineSeen = Date.now()
+    const fresh = !!engineId && !this.knownEngines.has(engineId)
     const p = this.pending
     this.pending = null
-    return p
+    const restore = !p && fresh && empty === true ? this.restoreCommand() : null
+    if (fresh) {
+      const restorePath = (restore?.songs as WebPlayerSong[] | undefined)?.[
+        restore?.index as number
+      ]?.path
+      this.bringUp(engineId as string, restorePath ?? null)
+    }
+    if (restore) {
+      log.info('web player queue restored into new engine', {
+        engineId,
+        index: restore.index,
+        total: (restore.songs as unknown[]).length,
+        positionMs: restore.positionMs
+      })
+    }
+    return p ?? restore
+  }
+
+  /** The queue to hand a fresh empty engine, or null when there is nothing
+   *  trustworthy to restore / another engine is still actively playing it. */
+  private restoreCommand(): Record<string, unknown> | null {
+    if (!this.queueValid || !this.queue.length) return null
+    const index = this.queueIndex
+    const song = this.queue[index]
+    if (!song || song.path !== this.lastTrackPath) return null
+    // A live engine elsewhere (another tab) is still playing: don't double up.
+    const r = this.lastReporter
+    if (r && r.status === 'Playing' && Date.now() - r.at < 3000) return null
+    return {
+      type: 'restore',
+      songs: this.queue,
+      index,
+      positionMs: this.lastPositionMs
+    }
   }
 
   async sendFiles(paths: string[], opts?: { append?: boolean }): Promise<boolean> {
@@ -429,6 +538,12 @@ export class WebPlayerBackend implements PlayerBackend {
       }
     })
     const type = opts?.append ? 'enqueue' : 'playlist'
+    if (type === 'playlist') {
+      this.queue = [...songs]
+      this.queueValid = true
+    } else {
+      this.queue.push(...songs)
+    }
     if (!this.engineOnline) {
       // 没有在线引擎：排队，等播放器页面打开时取走（追加合并进排队中的歌单）
       this.pending =
@@ -452,6 +567,7 @@ export class WebPlayerBackend implements PlayerBackend {
   /** Clear queued-but-unplayed songs (trim after the cursor) — the current
    *  track + play history stay so prev keeps working. */
   async trimQueue(): Promise<boolean> {
+    if (this.queueIndex >= 0) this.queue = this.queue.slice(0, this.queueIndex + 1)
     this.emit({ type: 'trim' })
     return true
   }
@@ -461,6 +577,8 @@ export class WebPlayerBackend implements PlayerBackend {
     this.lastDetail = { ...this.lastDetail, ok: false, status: 'Stopped', track: '' }
     this.queueIndex = -1
     this.queueTotal = 0
+    this.queue = []
+    this.queueValid = true
     this.emit({ type: 'clear' })
     return true
   }
@@ -477,6 +595,7 @@ export class WebPlayerBackend implements PlayerBackend {
   async setVolume(vol: number): Promise<boolean> {
     const v = Math.max(0, Math.min(1, vol))
     this.lastStatus.volume = v
+    this.intendedVol = v
     this.emit({ type: 'volume', volume: v })
     return true
   }

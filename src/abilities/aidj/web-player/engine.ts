@@ -44,6 +44,8 @@ type EngineCommand =
   | { type: 'sleep'; minutes: number }
   | { type: 'crossfade'; enabled: boolean; seconds?: number }
   | { type: 'eq'; gains: number[] }
+  /** Hand a fresh engine the queue it had before (App relaunch, page reload). */
+  | { type: 'restore'; songs: WebPlayerSong[]; index: number; positionMs?: number }
 
 type PlayerStatus = 'Playing' | 'Paused' | 'Stopped' | 'Unknown'
 
@@ -72,6 +74,12 @@ const EQ_FREQS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 class WebPlayerEngine {
   private audio: HTMLAudioElement
+  /** Instance id — the host tells a fresh engine (needs prefs / restore) from
+   *  one it already knows. Not crypto: `randomUUID` needs a secure context and
+   *  the page may be served over plain http on a LAN address. */
+  private readonly engineId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  /** Seek target (seconds) applied once the restored track's metadata loads. */
+  private pendingSeekSec: number | null = null
 
   private queue: WebPlayerSong[] = []
   private index = -1
@@ -183,6 +191,11 @@ class WebPlayerEngine {
         ? Math.round(this.audio.duration * 1000)
         : 0
       dbg('loadedmetadata, dur=', this.lengthMs, 'ctx.state=', this.ctx?.state)
+      if (this.pendingSeekSec != null) {
+        const sec = this.pendingSeekSec
+        this.pendingSeekSec = null
+        if (sec > 0 && sec < this.audio.duration) this.audio.currentTime = sec
+      }
       void this.updateMediaMetadata()
       this.report()
     })
@@ -404,6 +417,9 @@ class WebPlayerEngine {
         this.applyEQ(cmd.gains)
         this.report()
         break
+      case 'restore':
+        this.restore(cmd.songs ?? [], cmd.index, cmd.positionMs ?? 0)
+        break
     }
   }
 
@@ -429,6 +445,18 @@ class WebPlayerEngine {
     this.report()
   }
 
+  /** Load the previous queue paused at the old track + position — the user
+   *  taps play to continue (no autoplay: there is no gesture to unlock audio). */
+  private restore(songs: WebPlayerSong[], index: number, positionMs: number): void {
+    if (this.queue.length || !songs.length) return
+    this.queue = songs
+    this.index = Math.max(0, Math.min(songs.length - 1, index))
+    this.pendingSeekSec = positionMs > 0 ? positionMs / 1000 : null
+    this.status = 'Paused'
+    dbg('restore queue', { index: this.index, total: songs.length, positionMs })
+    this.loadTrack()
+  }
+
   private loadTrack(): void {
     const song = this.queue[this.index]
     if (!song) {
@@ -450,12 +478,23 @@ class WebPlayerEngine {
     if (this.history.length > 50) this.history.length = 50
   }
 
+  private helloed = false
+
   private async hello(): Promise<void> {
     try {
-      const r = (await window.cockpit.command('aidj.web-player-hello')) as {
+      const r = (await window.cockpit.command('aidj.web-player-hello', {
+        engineId: this.engineId,
+        empty: this.queue.length === 0
+      })) as {
         pending?: EngineCommand | null
       } | null
       if (r?.pending) this.handleCommand(r.pending)
+      else if (!this.helloed) {
+        // Nothing to load: still report once, so the host drops the stale
+        // state the previous engine left behind ("Playing" that never moves).
+        this.report()
+      }
+      this.helloed = true
     } catch {
       /* dbus 模式下命令不可用：没有内置播放器，忽略 */
     }
@@ -703,6 +742,7 @@ class WebPlayerEngine {
     /** Debug diagnostics — AudioContext state + master gain (silence hunter). */
     ctxState?: string
     masterGain?: number
+    engineId: string
   } {
     const song = this.queue[this.index]
     return {
@@ -723,7 +763,8 @@ class WebPlayerEngine {
       crossfadeSeconds: this.crossfadeSeconds,
       eqGains: this.eqGains,
       ctxState: this.ctx?.state,
-      masterGain: this.masterGain?.gain.value
+      masterGain: this.masterGain?.gain.value,
+      engineId: this.engineId
     }
   }
 
