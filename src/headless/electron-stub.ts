@@ -12,12 +12,30 @@ import { stat } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { Readable } from 'node:stream'
 
-function makeNop(): any {
+/**
+ * 没有显式实现的成员被**调用**时，每个路径只警告一次（A4）：把「网页里点了没反应」
+ * 变成日志里看得见的一行，方便发现能力里新增的 Electron 用法。
+ */
+const warned = new Set<string>()
+function warnNop(path: string): void {
+  if (warned.has(path)) return
+  warned.add(path)
+  console.warn(`[electron-stub] ${path}() is a no-op in headless mode`)
+}
+
+function makeNop(path = 'electron'): any {
   const fn = function () {}
   return new Proxy(fn, {
-    get: (_t, key) => (key === 'then' || typeof key === 'symbol' ? undefined : makeNop()),
-    apply: () => undefined,
-    construct: () => makeNop(),
+    get: (_t, key) =>
+      key === 'then' || typeof key === 'symbol' ? undefined : makeNop(`${path}.${String(key)}`),
+    apply: () => {
+      warnNop(path)
+      return undefined
+    },
+    construct: () => {
+      warnNop(`new ${path}`)
+      return makeNop(`${path}#instance`)
+    },
     set: () => true
   })
 }
@@ -43,7 +61,7 @@ export const app = new Proxy(
     quit: () => process.exit(0),
     commandLine: { appendSwitch: noop }
   } as Record<string, unknown>,
-  { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
+  { get: (t, k) => (k in t ? t[k as string] : makeNop(`app.${String(k)}`)) }
 )
 
 /**
@@ -61,11 +79,11 @@ const virtualWebContents = new Proxy(
     send: (channel: string, ...args: unknown[]) => broadcastSink(channel, ...args),
     isDestroyed: () => false
   } as Record<string, unknown>,
-  { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
+  { get: (t, k) => (k in t ? t[k as string] : makeNop(`webContents.${String(k)}`)) }
 )
 const virtualWindow = new Proxy(
   { webContents: virtualWebContents, isDestroyed: () => false } as Record<string, unknown>,
-  { get: (t, k) => (k in t ? t[k as string] : makeNop()) }
+  { get: (t, k) => (k in t ? t[k as string] : makeNop(`BrowserWindow.${String(k)}`)) }
 )
 
 export const BrowserWindow = Object.assign(function BrowserWindow() {}, {
@@ -137,13 +155,13 @@ export const protocol = {
   registerFileProtocol: noop,
   unhandle: (scheme: string): void => void protocolHandlers.delete(scheme)
 }
-export const session = makeNop()
-export const shell = makeNop()
-export const nativeImage = makeNop()
-export const Notification = makeNop()
-export const WebContentsView = makeNop()
-export const globalShortcut = makeNop()
-export const dialog = makeNop()
-export const clipboard = makeNop()
+export const session = makeNop('session')
+export const shell = makeNop('shell')
+export const nativeImage = makeNop('nativeImage')
+export const Notification = makeNop('Notification')
+export const WebContentsView = makeNop('WebContentsView')
+export const globalShortcut = makeNop('globalShortcut')
+export const dialog = makeNop('dialog')
+export const clipboard = makeNop('clipboard')
 
 export default { app, BrowserWindow, ipcMain, safeStorage, screen, net }
