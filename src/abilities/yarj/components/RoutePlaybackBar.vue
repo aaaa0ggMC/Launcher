@@ -301,10 +301,11 @@ function cycleOtherRoutesMode(): void {
           </v-btn>
 
           <!-- 时间颗粒度跳转按钮组 -->
-          <div class="d-flex align-center ga-2 ml-1 flex-wrap">
+          <div class="d-flex align-center ml-1 flex-wrap" :class="compact ? 'ga-1' : 'ga-2'">
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="后退 5 分钟"
               @click="emit('jumpTime', -300)"
             >
@@ -313,6 +314,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="后退 1 分钟"
               @click="emit('jumpTime', -60)"
             >
@@ -321,6 +323,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="前进 1 分钟"
               @click="emit('jumpTime', 60)"
             >
@@ -329,6 +332,7 @@ function cycleOtherRoutesMode(): void {
             <v-btn
               variant="tonal"
               class="font-mono"
+              :class="{ 'compact-jump': compact }"
               title="前进 5 分钟"
               @click="emit('jumpTime', 300)"
             >
@@ -423,7 +427,8 @@ function cycleOtherRoutesMode(): void {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: calc(100% - 48px);
+  /* 两侧各留出右下按钮列的宽度，居中时不压住按钮 */
+  width: calc(100% - 144px);
   max-width: 860px;
   z-index: 20;
   pointer-events: none;
@@ -481,6 +486,11 @@ function cycleOtherRoutesMode(): void {
   border-radius: 18px;
   padding: 16px 20px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.compact-jump {
+  min-width: 0 !important;
+  padding-inline: 10px !important;
 }
 
 .slider-wrap {

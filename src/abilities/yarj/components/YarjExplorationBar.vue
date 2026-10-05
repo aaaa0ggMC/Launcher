@@ -127,7 +127,10 @@ function resetToGranularity(): void {
       >
         <div class="exploration-card">
           <!-- 第一行：阶段信息、时空跃迁与退出按钮 -->
-          <div class="d-flex align-center flex-wrap ga-3 mb-3 explore-head">
+          <div
+            class="d-flex align-center flex-wrap ga-3 mb-3 explore-head"
+            :class="{ 'stack-leg': compact || drawerOpen }"
+          >
             <div class="d-flex align-center ga-2 min-w-0 flex-grow-1 explore-stage">
               <!-- 支持点击键入站点编号快速精准跳转 -->
               <v-menu
@@ -568,7 +571,8 @@ function resetToGranularity(): void {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: calc(100% - 48px);
+  /* 两侧各留出右下按钮列的宽度，居中时不压住按钮 */
+  width: calc(100% - 144px);
   max-width: 860px;
   z-index: 20;
   pointer-events: none;
@@ -609,13 +613,13 @@ function resetToGranularity(): void {
   padding: 12px 14px;
 }
 
-/* 窄屏：交通 Chip 单独一行；播放按钮排在工具行上面并撑满 */
-.is-compact .explore-leg {
+/* 窄屏 / 照片抽屉打开时：交通 Chip 单独一行，退出按钮留在右上角 */
+.stack-leg .explore-leg {
   order: 3;
   flex-basis: 100%;
 }
 
-.is-compact .explore-exit {
+.stack-leg .explore-exit {
   order: 2;
 }
 

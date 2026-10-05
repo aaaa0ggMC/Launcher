@@ -116,7 +116,7 @@ function handlePhotoClick(p: Photo, idx: number): void {
 
         <!-- 关联时间颗粒度筛选 Presets -->
         <div class="d-flex align-center justify-space-between ga-2">
-          <div class="text-caption text-medium-emphasis">时间视窗：</div>
+          <div class="text-caption text-medium-emphasis text-no-wrap">时间视窗：</div>
           <div class="d-flex ga-1 flex-wrap">
             <v-chip
               v-for="preset in windowPresets"
