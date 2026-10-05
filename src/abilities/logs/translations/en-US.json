@@ -5,7 +5,7 @@
   "logs.caption": "Current session logs · filter by level · live tail",
   "logs.levelFilter": "Level",
   "logs.levelAll": "All",
-  "logs.ignoreSelf": "Hide logs-self",
+  "logs.ignoreSelf": "Hide own logs",
   "logs.export": "Export",
   "logs.exportTitle": "Export current session logs",
   "logs.exportFailed": "Export failed",

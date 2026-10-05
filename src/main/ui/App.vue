@@ -1689,7 +1689,10 @@ onBeforeUnmount(() => {
 
     <v-main scrollable class="content-bg">
       <v-container fluid :class="narrow ? 'px-2 py-4' : 'pa-4'">
-        <div class="d-flex flex-column" style="min-height: calc(var(--app-vh) - 64px - 32px)">
+        <!-- min-height 写在 class 里而不是内联 style：settings / campusinfo 激活时会临时把内联
+             min-height 改成 0、离开时清空内联值——写成内联的话清空就把它永久抹掉了，之后
+             所有页面（日志等按 flex 铺满的页面）都塌成内容高度。 -->
+        <div class="page-host d-flex flex-column">
           <!-- 独占 SDK：当前页面有被 AI 占用的资源时，App bar 下方显示窄条（可一键接管） -->
           <ExclusiveBanner
             :current-id="currentId"
@@ -1769,6 +1772,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+/* 页面宿主：至少占满 App bar 以下的可视区（64px App bar + 32px 容器上下内边距） */
+.page-host {
+  min-height: calc(var(--app-vh) - 64px - 32px);
+}
 .sidebar-swipeable {
   touch-action: pan-y;
   user-select: none;
