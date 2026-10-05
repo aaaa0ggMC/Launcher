@@ -180,7 +180,7 @@
 | **Provider 适配** | OpenAI 兼容（流式 / reasoning_content / tool_calls） | `[x]` | `services/providers/openai.ts` |
 | | 空节点清洗（防 400 content or tool_calls） | `[x]` | `runner.ts` `buildMessages` + provider |
 | | Ollama / Codex Proxy（同走 OpenAI 兼容） | `[x]` | `services/models.ts`（`/api/tags` 探测） |
-| | Anthropic / Gemini 原生 Provider | `[ ]` | 未实现，设置里已移除这两个选项（不装样子）；需要时先写 Provider 再开放 |
+| | Anthropic / Gemini 原生 Provider | `[x]` | `services/providers/anthropic.ts` / `gemini.ts`（直接走 HTTP，不引 SDK，兼容转发网关）：流式、工具、图片 / PDF、思考摘要；thinking 块签名 / `thoughtSignature` 存 `meta.native`，同模型继续时原样回传；端点不认识的可选字段 400 后去掉重试。单测用假 fetch，**未用真实密钥实测** |
 | **动态模型选择** | `/v1/models` 嗅探 | `[x]` | `fetchModelsFromEndpoint` |
 | | 模型选择弹窗（全局搜索 + Provider 过滤，窄屏全屏） | `[x]` | `components/ModelSelectDialog.vue` |
 | | 会话级模型切换（同时作为新对话默认） | `[x]` | `View.vue` |

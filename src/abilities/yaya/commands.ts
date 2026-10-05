@@ -782,8 +782,8 @@ const commands: CommandSpec[] = [
         }
       }
 
-      // 原生协议（Anthropic）留空 = 官方地址
-      if (!baseUrl && type !== 'anthropic') {
+      // 原生协议（Anthropic / Gemini）留空 = 官方地址
+      if (!baseUrl && type !== 'anthropic' && type !== 'gemini') {
         return { ok: false, models: [], error: '缺少 Base URL' }
       }
 

@@ -5,6 +5,7 @@
 import { makeLogger } from '../../../main/process/logger'
 import type { ProviderType } from '../types'
 import { listAnthropicModels } from './providers/anthropic'
+import { listGeminiModels } from './providers/gemini'
 
 const log = makeLogger('yaya-models')
 
@@ -25,7 +26,8 @@ export async function fetchModelsFromEndpoint(
   options: FetchModelsOptions
 ): Promise<FetchModelsResult> {
   const { baseUrl, apiKey, type = 'openai', timeoutMs = 8000 } = options
-  if (type === 'anthropic') return fetchNativeModels(type, baseUrl, apiKey, timeoutMs)
+  if (type === 'anthropic' || type === 'gemini')
+    return fetchNativeModels(type, baseUrl, apiKey, timeoutMs)
   if (!baseUrl) {
     return { ok: false, models: [], error: '未提供 Base URL' }
   }
@@ -123,7 +125,8 @@ async function fetchNativeModels(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const models = await listAnthropicModels(baseUrl, apiKey, controller.signal)
+    const list = type === 'gemini' ? listGeminiModels : listAnthropicModels
+    const models = await list(baseUrl, apiKey, controller.signal)
     if (!models.length)
       return { ok: false, models: [], error: '端点返回了数据但未包含有效模型列表' }
     return { ok: true, models: models.sort() }

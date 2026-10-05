@@ -683,5 +683,6 @@
   "yaya.settings.plugins.mcp_toggle_named": "Enable server {name}",
   "yaya.settings.plugins.mcp_edit_short": "Edit",
   "yaya.plugin.mention.docs": "# @ Mentions\n\nType @ or click the toolbar @ button to search plugins, skills and MCP servers by name, description or tool name. Selecting an item enables its tools for this conversation.\n\nDisabling the mention plugin removes its composer extension. Existing conversation mentions can be revoked from the conversation menu. Mentioning never bypasses tool approval or privacy consent.",
-  "yaya.settings.type_anthropic": "Anthropic native (Claude Messages API)"
+  "yaya.settings.type_anthropic": "Anthropic native (Claude Messages API)",
+  "yaya.settings.type_gemini": "Google Gemini native (Generative Language API)"
 }

@@ -40,9 +40,15 @@ const providerTypes = computed(() => providerTypeItems(t))
 
 /** 思考强度参数格式（各家不统一；auto 按地址猜） */
 /** 原生协议：思考参数由 Provider 自己决定，不需要选格式 */
-const nativeProtocol = computed(() => props.provider.type === 'anthropic')
+const nativeProtocol = computed(
+  () => props.provider.type === 'anthropic' || props.provider.type === 'gemini'
+)
 const baseUrlPlaceholder = computed(() =>
-  props.provider.type === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'
+  props.provider.type === 'anthropic'
+    ? 'https://api.anthropic.com'
+    : props.provider.type === 'gemini'
+      ? 'https://generativelanguage.googleapis.com'
+      : 'https://api.openai.com/v1'
 )
 
 const reasoningStyles = computed(() => [

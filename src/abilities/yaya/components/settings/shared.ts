@@ -39,6 +39,10 @@ export function providerTypeItems(
       title: t('yaya.settings.type_anthropic', 'Anthropic 原生（Claude Messages API）'),
       value: 'anthropic'
     },
+    {
+      title: t('yaya.settings.type_gemini', 'Google Gemini 原生（Generative Language API）'),
+      value: 'gemini'
+    },
     { title: t('yaya.settings.type_ollama', 'Ollama（本地部署）'), value: 'ollama' },
     {
       title: t('yaya.settings.type_codex_proxy', 'Codex Proxy（本地代理）'),
