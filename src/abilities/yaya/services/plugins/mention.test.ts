@@ -162,3 +162,18 @@ it('点名未连接的动态插件（MCP）：先启动再列工具；连不上�
   assert.match(r.note, /mcp-demo_video/)
   assert.match(r.note, /ECONNREFUSED/)
 })
+
+it('基础设施插件可退出点名候选，不改变其他插件的默认可见性', () => {
+  const config = setup()
+  registry.registerPlugin({
+    id: 'composer',
+    kind: 'builtin',
+    label: 'Composer',
+    description: 'input infrastructure',
+    mentionable: false,
+    tools: () => []
+  })
+  registry.refreshPlugins(config)
+  assert.ok(!mention.mentionCandidates(config).some((item) => item.ref === 'composer'))
+  assert.ok(mention.mentionCandidates(config).some((item) => item.ref === 'chart'))
+})

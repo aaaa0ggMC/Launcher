@@ -164,6 +164,8 @@ export interface YayaPlugin {
   namespace?: string | false
   /** 新装时是否默认启用（缺省 true；用户覆盖记在 config.pluginEnabled） */
   defaultEnabled?: boolean
+  /** Infrastructure plugins can opt out of user mention candidates. Defaults to true. */
+  mentionable?: boolean
   /** 给人看的 Markdown 文档 */
   docs?: string
   /** 拼进系统提示词的片段（必须稳定）；返回空串 = 无 */

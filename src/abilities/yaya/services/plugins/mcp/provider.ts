@@ -217,7 +217,9 @@ async function refreshTools(entry: McpEntry): Promise<void> {
   const conn = entry.conn
   if (!conn || conn.closed) return
   try {
-    applyTools(entry, await conn.listTools())
+    const tools = await conn.listTools()
+    if (entry.conn !== conn || conn.closed) return
+    applyTools(entry, tools)
     refreshMeta(entry)
     getBroadcast()('cockpit:yaya-plugins-changed', {})
   } catch (e) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '@ui/i18n'
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, onActivated, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
@@ -51,34 +51,53 @@ const selectedPlugin = computed<PluginInfo | null>(
   () => plugins.value.find((p) => p.id === selectedId.value) ?? null
 )
 
+let loadSequence = 0
+
 async function loadPlugins(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   loadError.value = null
   try {
     const res = (await window.cockpit.command('yaya.plugins-list')) as
       PluginInfo[] | { plugins?: PluginInfo[] } | null
+    if (sequence !== loadSequence) return
     plugins.value = Array.isArray(res) ? res : (res?.plugins ?? [])
   } catch (err) {
-    plugins.value = []
+    if (sequence !== loadSequence) return
     loadError.value = String(err)
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
-let unsubscribe: (() => void) | null = null
-
-onMounted(() => {
-  void loadPlugins()
-  // 后端插件列表变化（连接成功 / 配置保存后）会广播，重新拉取
-  unsubscribe = window.cockpit.on('cockpit:yaya-plugins-changed', () => {
+const unsubscribes: (() => void)[] = []
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRefresh(): void {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
     void loadPlugins()
-  })
+  }, 80)
+}
+function refreshOnVisible(): void {
+  if (document.visibilityState === 'visible') scheduleRefresh()
+}
+onMounted(() => {
+  for (const channel of [
+    'cockpit:yaya-plugins-changed',
+    'cockpit:yaya-config-changed',
+    'cockpit:host-reconnected'
+  ])
+    unsubscribes.push(window.cockpit.on(channel, scheduleRefresh))
+  document.addEventListener('visibilitychange', refreshOnVisible)
+  void loadPlugins()
 })
-
+onActivated(scheduleRefresh)
 onBeforeUnmount(() => {
-  unsubscribe?.()
-  unsubscribe = null
+  loadSequence++
+  for (const unsubscribe of unsubscribes) unsubscribe()
+  if (refreshTimer) clearTimeout(refreshTimer)
+  document.removeEventListener('visibilitychange', refreshOnVisible)
 })
 
 async function restart(pluginId: string): Promise<void> {

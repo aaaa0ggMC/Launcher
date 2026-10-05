@@ -668,5 +668,19 @@
   "yaya.select_text.answer": "Answer",
   "yaya.select_text.full": "Full process",
   "yaya.select_text.hint": "Long-press or drag to select any part, then copy from the system menu",
-  "yaya.select_text.copy_all": "Copy all"
+  "yaya.select_text.copy_all": "Copy all",
+  "yaya.mention.search": "Search plugins, skills or MCP servers",
+  "yaya.tree.pan_hint": "Drag to pan · Wheel / pinch to zoom",
+  "yaya.tree.zoom_out": "Zoom out",
+  "yaya.tree.zoom_in": "Zoom in",
+  "yaya.tree.fit": "Fit graph",
+  "yaya.tree.retry": "Retry",
+  "yaya.tree.load_failed": "Could not load: {error}",
+  "yaya.plugin.mention.label": "@ Mentions",
+  "yaya.plugin.mention.desc": "Mention plugins, skills or MCP servers to enable their tools in this conversation",
+  "yaya.settings.plugins.mcp_refreshing": "Refreshing…",
+  "yaya.settings.plugins.mcp_details": "Details",
+  "yaya.settings.plugins.mcp_toggle_named": "Enable server {name}",
+  "yaya.settings.plugins.mcp_edit_short": "Edit",
+  "yaya.plugin.mention.docs": "# @ Mentions\n\nType @ or click the toolbar @ button to search plugins, skills and MCP servers by name, description or tool name. Selecting an item enables its tools for this conversation.\n\nDisabling the mention plugin removes its composer extension. Existing conversation mentions can be revoked from the conversation menu. Mentioning never bypasses tool approval or privacy consent."
 }

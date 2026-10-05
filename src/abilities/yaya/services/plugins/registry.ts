@@ -3,6 +3,7 @@
  * 负责启用判定、工具 wire name、审批判定、系统提示词片段拼接、生命周期与结果规范化。
  */
 import { createHash } from 'node:crypto'
+import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
 import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, YayaConfig } from '../../types'
@@ -76,6 +77,7 @@ export function refreshPlugins(config: YayaConfig): YayaPlugin[] {
     if (!still || still !== old || !isPluginEnabled(still, config)) void stopPlugin(old)
   }
   current = next
+  getBroadcast()('cockpit:yaya-plugins-changed', {})
   return current
 }
 
@@ -245,8 +247,12 @@ async function ensureStarted(plugin: YayaPlugin): Promise<void> {
       .then(() => {
         started.add(plugin)
       })
-      .finally(() => starting.delete(plugin))
+      .finally(() => {
+        starting.delete(plugin)
+        getBroadcast()('cockpit:yaya-plugins-changed', {})
+      })
     starting.set(plugin, p)
+    getBroadcast()('cockpit:yaya-plugins-changed', {})
   }
   await p
 }
@@ -273,7 +279,10 @@ async function stopPlugin(plugin: YayaPlugin): Promise<void> {
     } catch (e) {
       log.warn('plugin stop failed', { plugin: plugin.id, error: String(e) })
     }
-  })().finally(() => stopping.delete(plugin))
+  })().finally(() => {
+    stopping.delete(plugin)
+    getBroadcast()('cockpit:yaya-plugins-changed', {})
+  })
   stopping.set(plugin, job)
   return job
 }

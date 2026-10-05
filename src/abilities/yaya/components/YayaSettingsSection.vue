@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { useI18n } from '@ui/i18n'
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  onActivated,
+  provide,
+  ref,
+  watch
+} from 'vue'
 import type { Ref } from 'vue'
 import type { ProviderConfig, YayaConfig } from '../types'
 import AssistantSection from './settings/AssistantSection.vue'
@@ -12,6 +22,7 @@ import ProvidersSection from './settings/ProvidersSection.vue'
 import SaveStatusText from './settings/SaveStatusText.vue'
 import { YAYA_SAVE_API_KEY, type YayaSettingsSaveApi } from './settings/shared'
 import type { ProviderDraft } from './settings/shared'
+import { mergeConfigSnapshot } from './settings/config-sync'
 
 defineOptions({ name: 'cockpit-yaya-settings' })
 
@@ -167,9 +178,11 @@ async function persist(): Promise<void> {
   persistRunning = true
   const c = config.value
   clampSteps(c)
+  const submittedSnapshot = JSON.parse(JSON.stringify(c)) as YayaConfig
   const payload = JSON.parse(JSON.stringify(c)) as YayaConfig
   // 密钥只写不回显：空 = 保留原值，点了「清除」才显式清空
   let keyTouched = false
+  const submittedClear = { ...pendingClearKey.value }
   for (const p of payload.providers) {
     if (pendingClearKey.value[p.id]) {
       p.clearApiKey = true
@@ -184,12 +197,18 @@ async function persist(): Promise<void> {
   }
   saving.value = true
   try {
-    await window.cockpit.command('yaya.config-save', { config: payload })
-    pendingClearKey.value = {}
+    const saved = (await window.cockpit.command('yaya.config-save', { config: payload })) as {
+      config?: YayaConfig
+      revision?: number
+    }
+    pendingClearKey.value = Object.fromEntries(
+      Object.entries(pendingClearKey.value).filter(([id]) => !submittedClear[id])
+    )
     saveError.value = null
-    lastSavedSnapshot = JSON.stringify(c)
+    if (saved.config) await applyRemoteConfig(saved.config, saved.revision, submittedSnapshot)
+    else lastSavedSnapshot = JSON.stringify(submittedSnapshot)
     flashSaved()
-    if (keyTouched) {
+    if (keyTouched && !saved.config) {
       // 密钥保存后只刷新各服务商的 apiKeySet，不整份覆盖 config
       // （否则用户正在输入的字段会被冲掉）
       await refreshKeyFlags()
@@ -231,14 +250,39 @@ async function refreshKeyFlags(): Promise<void> {
   }
 }
 
+let configLoadSequence = 0
+let applySequence = 0
+let remoteRevision = -1
+let mounted = true
+
+async function applyRemoteConfig(
+  remote: YayaConfig,
+  revision?: number,
+  base?: YayaConfig
+): Promise<void> {
+  if (!mounted || !Array.isArray(remote?.providers)) return
+  if (revision !== undefined && revision < remoteRevision) return
+  if (revision !== undefined) remoteRevision = revision
+  ++configLoadSequence // A broadcast supersedes an in-flight config-get.
+  const sequence = ++applySequence
+  const baseline =
+    base ?? (lastSavedSnapshot ? (JSON.parse(lastSavedSnapshot) as YayaConfig) : remote)
+  const merged = config.value ? mergeConfigSnapshot(baseline, config.value, remote) : remote
+  suppressSave = true
+  config.value = merged
+  lastSavedSnapshot = JSON.stringify(remote)
+  await nextTick()
+  if (!mounted || sequence !== applySequence) return
+  suppressSave = false
+  if (JSON.stringify(config.value) !== lastSavedSnapshot) scheduleSave()
+}
+
 async function loadConfig(): Promise<void> {
+  const sequence = ++configLoadSequence
   try {
     const res = (await window.cockpit.command('yaya.config-get')) as YayaConfig
-    suppressSave = true
-    config.value = res
-    lastSavedSnapshot = JSON.stringify(res)
-    await nextTick()
-    suppressSave = false
+    if (!mounted || sequence !== configLoadSequence) return
+    await applyRemoteConfig(res)
   } catch (err) {
     console.error('Failed to load Yaya config', err)
   }
@@ -465,11 +509,35 @@ function undoClearApiKey(id: string): void {
   pendingClearKey.value = nextPending
 }
 
+const configUnsubscribes: (() => void)[] = []
+function refreshOnVisible(): void {
+  if (document.visibilityState === 'visible') void loadConfig()
+}
 onMounted(() => {
+  configUnsubscribes.push(
+    window.cockpit.on('cockpit:yaya-config-changed', (remote, revision) => {
+      void applyRemoteConfig(
+        remote as YayaConfig,
+        typeof revision === 'number' ? revision : undefined
+      )
+    })
+  )
+  configUnsubscribes.push(
+    window.cockpit.on('cockpit:host-reconnected', () => {
+      remoteRevision = -1
+      void loadConfig()
+    })
+  )
+  document.addEventListener('visibilitychange', refreshOnVisible)
   void loadConfig()
 })
+onActivated(() => void loadConfig())
 
 onBeforeUnmount(() => {
+  mounted = false
+  ++configLoadSequence
+  for (const off of configUnsubscribes) off()
+  document.removeEventListener('visibilitychange', refreshOnVisible)
   if (saveTimer !== null) clearTimeout(saveTimer)
   if (savedFadeTimer !== null) clearTimeout(savedFadeTimer)
   if (savedHideTimer !== null) clearTimeout(savedHideTimer)

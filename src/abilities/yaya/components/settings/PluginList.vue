@@ -75,8 +75,18 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
       @update:model-value="query = $event ?? ''"
     />
 
-    <div v-if="loading" class="text-body-2 text-medium-emphasis py-4">
-      {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+    <!--
+      初次加载（一份插件数据都没有）才整块替换；后台刷新时保留列表，
+      只在顶部叠一条进度线，几何与滚动位置都不动。
+    -->
+    <div
+      v-if="loading && plugins.length === 0"
+      class="d-flex flex-column align-center justify-center ga-2 py-6 text-medium-emphasis"
+    >
+      <v-progress-circular indeterminate color="primary" size="24" width="2" />
+      <span class="text-body-2">
+        {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+      </span>
     </div>
     <div
       v-else-if="rows.length === 0"
@@ -91,7 +101,10 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
         }}
       </span>
     </div>
-    <div v-else class="d-flex flex-column ga-2">
+    <div v-else class="plugin-rows d-flex flex-column ga-2">
+      <div v-if="loading" class="refresh-line" aria-hidden="true">
+        <v-progress-linear indeterminate color="primary" height="2" />
+      </div>
       <div
         v-for="row in rows"
         :key="row.plugin.id"
@@ -168,6 +181,23 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
   min-width: 0;
 }
 
+/* 列表容器：相对定位，供刷新进度线定位用（绝对定位，不占布局） */
+.plugin-rows {
+  position: relative;
+  min-width: 0;
+}
+
+.refresh-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  z-index: 1;
+}
+
 .plugin-row {
   cursor: pointer;
   background: rgba(var(--v-theme-surface-variant), 0.12);
@@ -211,6 +241,13 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
   .row-desc {
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+}
+
+/* 触屏设备：开关的触摸热区不小于 48px */
+@media (pointer: coarse) {
+  .plugin-rows :deep(.v-switch) {
+    --v-selection-control-size: 48px;
   }
 }
 </style>

@@ -668,5 +668,19 @@
   "yaya.select_text.answer": "回答",
   "yaya.select_text.full": "完整过程",
   "yaya.select_text.hint": "长按或拖动选择任意一段，用系统菜单复制",
-  "yaya.select_text.copy_all": "全部复制"
+  "yaya.select_text.copy_all": "全部复制",
+  "yaya.mention.search": "搜索插件 / 工具",
+  "yaya.tree.pan_hint": "拖动平移 · 滚轮 / 双指缩放",
+  "yaya.tree.zoom_out": "缩小",
+  "yaya.tree.zoom_in": "放大",
+  "yaya.tree.fit": "适应大小",
+  "yaya.tree.retry": "重试",
+  "yaya.tree.load_failed": "加载失败：{error}",
+  "yaya.plugin.mention.label": "@ 点名",
+  "yaya.plugin.mention.desc": "输入 @ 点名插件、Skill 或 MCP 服务器，在本对话启用它们的工具",
+  "yaya.settings.plugins.mcp_refreshing": "正在刷新…",
+  "yaya.settings.plugins.mcp_details": "详情",
+  "yaya.settings.plugins.mcp_toggle_named": "启用服务器 {name}",
+  "yaya.settings.plugins.mcp_edit_short": "编辑",
+  "yaya.plugin.mention.docs": "# @ 点名\n\n输入 @ 或点击工具栏 @，按名字、描述或工具名过滤插件、Skill 与 MCP 服务器。选择后在当前会话启用它们的工具。\n\n停用 mention 插件会移除输入框扩展；已发出的会话点名可在会话菜单撤销。点名不会绕过工具审批与隐私授权。"
 }

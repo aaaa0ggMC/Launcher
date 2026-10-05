@@ -40,6 +40,7 @@ import {
 } from './services/loop/manager'
 import {
   loadYayaConfig,
+  getYayaConfigRevision,
   saveYayaConfig,
   publicYayaConfig,
   mergeIncomingYayaConfig
@@ -71,7 +72,7 @@ import {
   registerPlugin,
   restartPlugin
 } from './services/plugins/registry'
-import { mentionCandidates, sessionMentions } from './services/plugins/mention'
+import { sessionMentions } from './services/plugins/mention'
 import { buildSessionTree } from './services/tree'
 import type { PluginConfigField, PluginGroup, YayaPlugin } from './services/plugins/types'
 // 动态插件来源：导入即注册（registerPluginProvider）
@@ -395,16 +396,6 @@ const commands: CommandSpec[] = [
         .filter(Boolean)
       return startWorkflow(sessionId, prompt, attachments, parentMessageId, mentions)
     }
-  },
-
-  {
-    name: 'yaya.mention-candidates',
-    description:
-      '输入框 @ 的候选：全部插件（内置 / MCP / Skill，含全局禁用的）与单个工具，按名字 / 描述过滤',
-    usage: 'yaya.mention-candidates [--query <文本>]',
-    ui: ['YAYA 输入框输入 @ / 工具栏 @ 按钮'],
-    related: ['yaya.workflow-start', 'yaya.session-mentions'],
-    run: (ctx) => mentionCandidates(loadYayaConfig(), String(ctx.named.query ?? ''))
   },
 
   {
@@ -760,8 +751,11 @@ const commands: CommandSpec[] = [
       if (!config || !Array.isArray(config.providers)) throw new Error('invalid config')
       saveYayaConfig(mergeIncomingYayaConfig(config))
       refreshPlugins(loadYayaConfig())
-      getBroadcast()('cockpit:yaya-plugins-changed', {})
-      return { ok: true }
+      return {
+        ok: true,
+        config: publicYayaConfig(loadYayaConfig()),
+        revision: getYayaConfigRevision()
+      }
     }
   },
 
@@ -825,4 +819,9 @@ for (const c of commands) {
   if (PRIVACY[c.name] && !c.privacy) c.privacy = PRIVACY[c.name]
 }
 
-export default commands
+// Plugin-owned command surfaces keep composer features out of the kernel.
+const pluginCommands = import.meta.glob<CommandSpec[]>('./plugins/*/commands.ts', {
+  eager: true,
+  import: 'default'
+})
+export default [...commands, ...Object.values(pluginCommands).flat()]

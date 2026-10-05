@@ -63,6 +63,7 @@ export function mentionCandidates(config: YayaConfig, query = ''): MentionCandid
     !q || xs.some((x) => x?.toLowerCase().includes(q))
   const out: MentionCandidate[] = []
   for (const p of listPlugins()) {
+    if (p.mentionable === false) continue
     const label = pluginLabel(p)
     const description = p.descriptionKey ? t(p.descriptionKey, p.description) : p.description
     const tools = safeTools(p)

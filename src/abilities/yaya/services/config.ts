@@ -153,6 +153,11 @@ export function loadYayaConfig(): YayaConfig {
   }
 }
 
+let configRevision = 0
+export function getYayaConfigRevision(): number {
+  return configRevision
+}
+
 export function saveYayaConfig(config: YayaConfig): void {
   const file = getYayaConfigPath()
   mkdirSync(dirname(file), { recursive: true })
@@ -214,7 +219,7 @@ export function saveYayaConfig(config: YayaConfig): void {
   delete cachedConfig.pluginSecretsSet
   delete cachedConfig.pluginClearSecrets
   log.info('YAYA config saved')
-  getBroadcast()('cockpit:yaya-config-changed', publicYayaConfig(cachedConfig!))
+  getBroadcast()('cockpit:yaya-config-changed', publicYayaConfig(cachedConfig!), ++configRevision)
 }
 
 export function normalizeAssistantName(name: unknown): string {

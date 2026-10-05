@@ -41,16 +41,21 @@ const editingId = ref<string | null>(null)
 
 const servers = computed<McpServerConfig[]>(() => props.config.mcpServers ?? [])
 
-/** 容器放不下对话框时全屏（ResizeObserver 量容器，不用窗口断点） */
+/**
+ * 容器放不下的宽度阈值（ResizeObserver 量容器宽，不用窗口断点——页面可能被缩放或嵌在别处）：
+ * 窄容器时对话框全屏、卡片从「一行排不开就换行」改成堆叠布局。
+ */
+const NARROW_PX = 720
+
 const rootEl = ref<HTMLElement | null>(null)
-const fullscreen = ref(false)
+const narrow = ref(false)
 let resizeObs: ResizeObserver | null = null
 
 onMounted(async () => {
   await nextTick()
   if (rootEl.value && typeof ResizeObserver !== 'undefined') {
     const measure = (): void => {
-      fullscreen.value = (rootEl.value?.clientWidth ?? 0) < 720
+      narrow.value = (rootEl.value?.clientWidth ?? 0) < NARROW_PX
     }
     measure()
     resizeObs = new ResizeObserver(measure)
@@ -96,7 +101,9 @@ function statusText(server: McpServerConfig): string {
   if (state === 'connecting') return t('yaya.settings.plugins.status_connecting', '连接中')
   if (state === 'error') return t('yaya.settings.plugins.status_error', '错误')
   if (state === 'idle') return t('yaya.settings.plugins.status_idle', '未连接')
-  return t('yaya.settings.plugins.status_ready', '就绪')
+  if (state === 'ready') return t('yaya.settings.plugins.status_ready', '就绪')
+  // 插件列表里还没有这个服务器（刚添加 / 列表尚未刷新）→ 不能显示「就绪」，按未连接兜底
+  return t('yaya.settings.plugins.status_idle', '未连接')
 }
 
 function statusColor(server: McpServerConfig): string | undefined {
@@ -118,6 +125,11 @@ function toggleServer(server: McpServerConfig, on: boolean): void {
   server.enabled = on
   const plugin = pluginOf(server)
   if (plugin) setPluginEnabled(props.config, plugin, on)
+  // 插件列表里还没有这个服务器（刚添加、列表未刷新）时上面没有 plugin 可写；
+  // 这里无论如何都显式落一份布尔值，保证注册表读到的是「本次切换」的结果。
+  const next: Record<string, boolean> = { ...(props.config.pluginEnabled ?? {}) }
+  next[`mcp-${server.id}`] = on
+  props.config.pluginEnabled = next
 }
 
 function saveServer(server: McpServerConfig): void {
@@ -180,8 +192,15 @@ function doDeleteServer(server: McpServerConfig): void {
       {{ notice.text }}
     </v-alert>
 
-    <div v-if="loading" class="text-body-2 text-medium-emphasis py-4">
-      {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+    <!-- 初次加载（一份数据都没有）才用整块 loader；有数据时后台刷新不走这里 -->
+    <div
+      v-if="loading && servers.length === 0"
+      class="d-flex flex-column align-center justify-center ga-2 py-6 text-medium-emphasis"
+    >
+      <v-progress-circular indeterminate color="primary" size="24" width="2" />
+      <span class="text-body-2">
+        {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+      </span>
     </div>
     <div
       v-else-if="servers.length === 0"
@@ -192,44 +211,88 @@ function doDeleteServer(server: McpServerConfig): void {
         {{ t('yaya.settings.plugins.mcp_empty', '尚未添加任何 MCP 服务器') }}
       </span>
     </div>
-    <div v-else class="d-flex flex-column ga-2">
+    <!--
+      服务器列表：后台刷新时整份保留（只在顶部叠一条进度线），
+      几何与滚动位置都不动，不再出现「一点开关滚回首屏」。
+    -->
+    <div v-else class="server-cards d-flex flex-column ga-2">
+      <div v-if="loading" class="refresh-line" aria-hidden="true">
+        <v-progress-linear indeterminate color="primary" height="2" />
+      </div>
+      <span v-if="loading" class="sr-only">
+        {{ t('yaya.settings.plugins.mcp_refreshing', '正在刷新…') }}
+      </span>
+
       <div
         v-for="server in servers"
         :key="server.id"
-        class="server-row d-flex align-center ga-3 pa-3 rounded-lg border"
-        role="button"
-        :aria-label="server.name"
-        tabindex="0"
-        @click="emit('selectPlugin', `mcp-${server.id}`)"
-        @keydown.enter.prevent="emit('selectPlugin', `mcp-${server.id}`)"
-        @keydown.space.prevent="emit('selectPlugin', `mcp-${server.id}`)"
+        class="server-card rounded-lg border"
+        :class="{ 'server-card--compact': narrow }"
       >
-        <v-icon icon="mdi-connection" color="primary" class="flex-shrink-0" />
-        <div class="min-w-0 flex-grow-1">
-          <div class="d-flex align-center flex-wrap ga-2">
-            <span class="font-weight-bold text-subtitle-2">{{ server.name }}</span>
-            <v-chip variant="tonal" class="chip-pad flex-shrink-0">
-              {{ transportLabel(server) }}
-            </v-chip>
-            <v-chip variant="tonal" :color="statusColor(server)" class="chip-pad flex-shrink-0">
+        <!-- 头部：图标 + 名称同一行，传输方式 / 状态第二行（窄容器时换行独占一行） -->
+        <div class="card-head">
+          <v-icon icon="mdi-server-network" color="primary" size="24" class="flex-shrink-0" />
+          <span class="card-name font-weight-bold text-subtitle-2" :title="server.name">
+            {{ server.name }}
+          </span>
+          <span class="card-meta d-flex align-center flex-wrap ga-2">
+            <v-chip variant="tonal" class="chip-pad">{{ transportLabel(server) }}</v-chip>
+            <v-chip variant="tonal" :color="statusColor(server)" class="chip-pad">
               {{ statusText(server) }}
             </v-chip>
+          </span>
+          <span class="head-grow" />
+          <!-- 开关带文字标签，卡片本身不是按钮，点开关不会误进详情 -->
+          <div class="switch-cell d-flex align-center ga-2">
+            <span class="switch-label text-caption">
+              {{ t('yaya.settings.plugins.enable_plugin', '启用该插件') }}
+            </span>
+            <v-switch
+              :model-value="server.enabled"
+              color="primary"
+              hide-details
+              density="compact"
+              :title="
+                te(
+                  'yaya.settings.plugins.mcp_toggle_named',
+                  { name: server.name },
+                  '启用服务器 {name}'
+                )
+              "
+              :aria-label="
+                te(
+                  'yaya.settings.plugins.mcp_toggle_named',
+                  { name: server.name },
+                  '启用服务器 {name}'
+                )
+              "
+              @update:model-value="toggleServer(server, $event === true)"
+            />
           </div>
-          <div class="text-caption text-medium-emphasis server-url">{{ server.url }}</div>
         </div>
-        <v-icon icon="mdi-chevron-right" class="flex-shrink-0" />
-        <!-- 开关单独一层：点击 / 按键都不触发行进详情 -->
-        <div class="row-switch flex-shrink-0" @click.stop @keydown.stop>
-          <v-switch
-            :model-value="server.enabled"
-            color="primary"
-            hide-details
-            density="compact"
-            @update:model-value="toggleServer(server, $event === true)"
-          />
+
+        <!-- 地址：宽容器单行省略，窄容器最多两行；悬停看全文 -->
+        <div class="server-url text-caption text-medium-emphasis" :title="server.url">
+          {{ server.url }}
         </div>
-        <!-- 删除：行内二次确认 -->
-        <div class="row-actions flex-shrink-0 d-flex align-center ga-1" @click.stop @keydown.stop>
+
+        <!-- 操作区与信息区分开：详情 / 编辑 + 删除 -->
+        <div class="card-foot d-flex flex-wrap align-center ga-2">
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-connection"
+            @click="emit('selectPlugin', `mcp-${server.id}`)"
+          >
+            {{ t('yaya.settings.plugins.mcp_details', '详情') }}
+          </v-btn>
+          <v-btn variant="text" prepend-icon="mdi-pencil-outline" @click="openEditor(server.id)">
+            {{
+              narrow
+                ? t('yaya.settings.plugins.mcp_edit_short', '编辑')
+                : t('yaya.settings.plugins.edit', '编辑服务器')
+            }}
+          </v-btn>
+          <v-spacer />
           <template v-if="confirmDeleteId === server.id">
             <v-btn variant="text" color="error" @click="doDeleteServer(server)">
               {{ t('yaya.settings.delete_confirm', '确认删除？') }}
@@ -254,7 +317,7 @@ function doDeleteServer(server: McpServerConfig): void {
       v-model="dialogOpen"
       :server="editingServer"
       :existing-ids="servers.map((s) => s.id)"
-      :fullscreen="fullscreen"
+      :fullscreen="narrow"
       @save="saveServer"
     />
   </div>
@@ -270,10 +333,41 @@ function doDeleteServer(server: McpServerConfig): void {
   min-width: 0;
 }
 
-.server-row {
+/* 卡片列表容器：相对定位，供刷新进度线定位用（绝对定位，不占布局） */
+.server-cards {
+  position: relative;
+  min-width: 0;
+}
+
+.refresh-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* 仅供读屏 / 无障碍树：刷新提示 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.server-card {
   background: rgba(var(--v-theme-surface-variant), 0.12);
   border-color: rgba(var(--v-theme-surface-bright), 0.2) !important;
-  cursor: pointer;
+  padding: 16px;
 }
 
 /* chip：默认密度 + 显式内边距，label 不贴边框 */
@@ -282,23 +376,102 @@ function doDeleteServer(server: McpServerConfig): void {
   min-height: 24px;
 }
 
+.card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.card-meta {
+  flex-shrink: 0;
+}
+
+.head-grow {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+
+.switch-cell {
+  flex-shrink: 0;
+}
+
+.switch-label {
+  white-space: nowrap;
+}
+
 /* URL 等宽 + 省略，超长也不撑破布局 */
 .server-url {
+  margin-top: 12px;
+  min-width: 0;
   font-family: ui-monospace, monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 容器放不下时换行，不出横向滚动条 */
-@media (max-width: 560px) {
-  .server-row {
-    flex-wrap: wrap;
+/* 操作区与信息区分开，上方一条细分隔线 */
+.card-foot {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(var(--v-theme-surface-bright), 0.14);
+}
+
+.server-card--compact .card-head {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.server-card--compact .card-meta {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.server-card--compact .switch-cell {
+  grid-column: 3;
+  grid-row: 1;
+}
+.server-card--compact .head-grow,
+.server-card--compact .switch-label,
+.server-card--compact .card-foot :deep(.v-spacer) {
+  display: none;
+}
+.server-card--compact .card-foot > :deep(.v-btn:last-child) {
+  margin-left: auto;
+}
+
+/* 窄容器（量容器宽）：元信息独占第二行、URL 最多两行、触摸目标放大 */
+.server-card--compact .card-meta {
+  flex-basis: 100%;
+}
+
+.server-card--compact .server-url {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.server-card--compact :deep(.v-btn) {
+  --v-btn-height: 48px;
+}
+
+.server-card--compact :deep(.v-switch) {
+  --v-selection-control-size: 48px;
+}
+
+/* 触屏设备：按钮 / 开关的触摸热区不小于 48px */
+@media (pointer: coarse) {
+  .server-card :deep(.v-btn) {
+    --v-btn-height: 48px;
   }
 
-  .server-url {
-    white-space: normal;
-    overflow-wrap: anywhere;
+  .server-card :deep(.v-switch) {
+    --v-selection-control-size: 48px;
   }
 }
 </style>

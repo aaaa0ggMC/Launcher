@@ -26,8 +26,10 @@ const wireMap = ref(new Map<string, ToolRef>())
 const pluginOn = ref(new Map<string, boolean>())
 let loading: Promise<void> | null = null
 let subscribed = false
+let refreshSequence = 0
 
 export function refreshPluginMap(): Promise<void> {
+  const sequence = ++refreshSequence
   loading = (async () => {
     try {
       const list = (await window.cockpit.command('yaya.plugins-list')) as PluginInfo[]
@@ -38,6 +40,7 @@ export function refreshPluginMap(): Promise<void> {
         for (const t of p.tools)
           map.set(t.wireName, { pluginId: p.id, kind: p.kind, toolName: t.name })
       }
+      if (sequence !== refreshSequence) return
       wireMap.value = map
       pluginOn.value = on
     } catch {
@@ -53,6 +56,10 @@ export function ensurePluginMap(): void {
   if (!subscribed) {
     subscribed = true
     window.cockpit.on('cockpit:yaya-plugins-changed', () => void refreshPluginMap())
+    window.cockpit.on('cockpit:host-reconnected', () => void refreshPluginMap())
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void refreshPluginMap()
+    })
   }
 }
 
@@ -134,3 +141,14 @@ export function fenceViewFor(lang: string): Component | null {
   }
   return null
 }
+
+/** Composer extensions are enabled only after the backend confirms plugin availability. */
+export const inputExtensions = computed(() =>
+  [...uis]
+    .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+    .filter((ui) => pluginOn.value.get(ui.pluginId) === true && ui.inputExtension)
+    .map((ui) => ({
+      pluginId: ui.pluginId,
+      component: lazy(`input:${ui.pluginId}`, ui.inputExtension!)
+    }))
+)

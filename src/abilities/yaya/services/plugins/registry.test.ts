@@ -118,3 +118,49 @@ it('system file and shell tools cannot bypass the execution guard', async () => 
     )
   }
 })
+
+it('plugin list notifications track connecting, ready, failed and stopped states', async () => {
+  const { setBroadcast } = await import('../../../../main/process/broadcast')
+  const ready = deferred()
+  let state: 'idle' | 'connecting' | 'ready' | 'error' = 'idle'
+  const observed: string[] = []
+  setBroadcast((channel) => {
+    if (channel === 'cockpit:yaya-plugins-changed') observed.push(state)
+  })
+  try {
+    const p: YayaPlugin = {
+      ...plugin(),
+      status: () => ({ state }),
+      start: async () => {
+        state = 'connecting'
+        await ready.promise
+        state = 'ready'
+      },
+      stop: async () => {
+        state = 'idle'
+      }
+    }
+    registry.registerPlugin(p)
+    registry.refreshPlugins(config)
+    const started = registry.tryStartPlugin(p)
+    await tick()
+    assert.ok(observed.includes('connecting'))
+    ready.resolve()
+    assert.equal(await started, null)
+    assert.equal(observed.at(-1), 'ready')
+    await registry.stopAllPlugins()
+    assert.equal(observed.at(-1), 'idle')
+    const broken: YayaPlugin = {
+      ...plugin(),
+      id: 'broken',
+      start: async () => {
+        state = 'error'
+        throw new Error('offline-test-failure')
+      }
+    }
+    assert.equal(await registry.tryStartPlugin(broken), 'offline-test-failure')
+    assert.equal(observed.at(-1), 'error')
+  } finally {
+    setBroadcast(() => {})
+  }
+})

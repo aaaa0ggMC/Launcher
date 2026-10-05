@@ -256,8 +256,18 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
       {{ notice.text }}
     </v-alert>
 
-    <div v-if="loading" class="text-body-2 text-medium-emphasis py-4">
-      {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+    <!--
+      初次加载（一份 Skill 数据都没有）才整块替换；后台刷新时保留列表，
+      只在顶部叠一条进度线，几何与滚动位置都不动。
+    -->
+    <div
+      v-if="loading && skills.length === 0"
+      class="d-flex flex-column align-center justify-center ga-2 py-6 text-medium-emphasis"
+    >
+      <v-progress-circular indeterminate color="primary" size="24" width="2" />
+      <span class="text-body-2">
+        {{ t('yaya.settings.plugins.loading', '正在加载插件列表…') }}
+      </span>
     </div>
     <div
       v-else-if="skills.length === 0"
@@ -276,7 +286,10 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
         }}
       </span>
     </div>
-    <div v-else class="d-flex flex-column ga-2">
+    <div v-else class="skill-rows d-flex flex-column ga-2">
+      <div v-if="loading" class="refresh-line" aria-hidden="true">
+        <v-progress-linear indeterminate color="primary" height="2" />
+      </div>
       <div
         v-for="skill in skills"
         :key="skill.id"
@@ -351,6 +364,23 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
   min-width: 0;
 }
 
+/* 列表容器：相对定位，供刷新进度线定位用（绝对定位，不占布局） */
+.skill-rows {
+  position: relative;
+  min-width: 0;
+}
+
+.refresh-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  z-index: 1;
+}
+
 .hub-row {
   background: rgba(var(--v-theme-surface-variant), 0.12);
   border-color: rgba(var(--v-theme-surface-bright), 0.2) !important;
@@ -392,6 +422,13 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
 @media (max-width: 560px) {
   .skill-row {
     flex-wrap: wrap;
+  }
+}
+
+/* 触屏设备：开关的触摸热区不小于 48px */
+@media (pointer: coarse) {
+  .skill-rows :deep(.v-switch) {
+    --v-selection-control-size: 48px;
   }
 }
 </style>
