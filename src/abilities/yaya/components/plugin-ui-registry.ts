@@ -24,6 +24,8 @@ interface ToolRef {
 const wireMap = ref(new Map<string, ToolRef>())
 /** 插件 id → 是否启用（同样来自 yaya.plugins-list；命令失败时保持上一次的值） */
 const pluginOn = ref(new Map<string, boolean>())
+/** 插件 id → 非 secret 配置值（缺省值已填；显示类插件的界面按它渲染） */
+const pluginValues = ref(new Map<string, Record<string, unknown>>())
 let loading: Promise<void> | null = null
 let subscribed = false
 let refreshSequence = 0
@@ -35,19 +37,28 @@ export function refreshPluginMap(): Promise<void> {
       const list = (await window.cockpit.command('yaya.plugins-list')) as PluginInfo[]
       const map = new Map<string, ToolRef>()
       const on = new Map<string, boolean>()
+      const values = new Map<string, Record<string, unknown>>()
       for (const p of list) {
         on.set(p.id, p.enabled)
+        if (p.config) values.set(p.id, p.config.values)
         for (const t of p.tools)
           map.set(t.wireName, { pluginId: p.id, kind: p.kind, toolName: t.name })
       }
       if (sequence !== refreshSequence) return
       wireMap.value = map
       pluginOn.value = on
+      pluginValues.value = values
     } catch {
       /* 拿不到就只用默认视图 */
     }
   })()
   return loading
+}
+
+/** 插件的非 secret 配置值（响应式；还没拉到时为空对象，调用方自己兜底默认值） */
+export function pluginConfigValues(pluginId: string): Record<string, unknown> {
+  ensurePluginMap()
+  return pluginValues.value.get(pluginId) ?? {}
 }
 
 /** 首次使用时拉取一次，并跟随插件变化刷新 */

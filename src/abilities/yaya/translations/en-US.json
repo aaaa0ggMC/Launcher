@@ -735,5 +735,13 @@
   "yaya.privacy.android_clipboard": "Phone clipboard",
   "yaya.privacy.android_clipboard_desc": "YAYA reads the phone clipboard (may contain passwords or codes)",
   "yaya.privacy.android_screen": "Phone screen",
-  "yaya.privacy.android_screen_desc": "YAYA takes screenshots of the phone screen"
+  "yaya.privacy.android_screen_desc": "YAYA takes screenshots of the phone screen",
+  "yaya.plugin.mermaid.cfg_theme": "Colors",
+  "yaya.plugin.mermaid.theme_follow": "Follow the app theme",
+  "yaya.plugin.mermaid.theme_default": "Mermaid default",
+  "yaya.plugin.mermaid.theme_neutral": "Neutral (black & white)",
+  "yaya.plugin.mermaid.theme_forest": "Forest",
+  "yaya.plugin.mermaid.theme_dark": "Dark",
+  "yaya.plugin.mermaid.cfg_max_height": "Maximum diagram height (px)",
+  "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom"
 }

@@ -373,8 +373,8 @@
 - **流式约定**落实在视图里：`streaming` 为 true 只显示源码，不渲染、不净化。
 
 **没做 / 待办**
-- mermaid 主题、最大尺寸等插件自己的配置项（6.4 的 configSchema 已具备，显示类插件还没有用上）；
-- `renderSegments` 的未闭合 / 嵌套代码块用例补强；插件 ui 的单测脚手架（SVG 净化已有单测）；
+- ~~mermaid 主题、最大尺寸等插件自己的配置项~~ 已做：mermaid `configSchema`（配色：跟随界面 / 默认 / 中性 / 森林 / 暗色；最大显示高度），渲染端经 `pluginConfigValues()`（`plugin-ui-registry.ts`，来自 `yaya.plugins-list`）读取，改完即时重渲染（网页模式实测）；
+- ~~`renderSegments` 的未闭合 / 嵌套代码块用例补强~~ 已补（`markdown-segments.test.ts`：流式未闭合、外层更长围栏 / 列表 / 引用里的代码块不接管、相邻与空代码块）；插件 ui 组件的单测脚手架仍没有（无 jsdom）；
 - ~~「告诉 AI」的稳定系统提示词开关~~ 已改为插件启用即带一段固定英文 instructions（`plugins/mermaid/index.ts` / `plugins/svg/index.ts`，见 AGENTS.md「显示类插件必须写」）；
 - 导出 PNG 白底 2x、超大 SVG 的尺寸夹取策略没有实机调过。
 

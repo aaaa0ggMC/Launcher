@@ -29,6 +29,8 @@ const props = withDefaults(
     exportName?: string
     /** 工具栏旁边的状态说明（如「生成中，代码块闭合成图」） */
     hint?: string
+    /** 图区最大高度（px） */
+    maxImageHeight?: number
   }>(),
   {
     svgText: null,
@@ -36,7 +38,8 @@ const props = withDefaults(
     error: null,
     busy: false,
     exportName: 'diagram',
-    hint: ''
+    hint: '',
+    maxImageHeight: 420
   }
 )
 
@@ -275,7 +278,11 @@ onBeforeUnmount(() => {
       :aria-label="t('yaya.diagram.zoom', '放大查看')"
       @click="zoom = true"
     >
-      <img :src="imageSrc ?? ''" :alt="t('yaya.diagram.image_alt', '渲染出的图表')" />
+      <img
+        :src="imageSrc ?? ''"
+        :alt="t('yaya.diagram.image_alt', '渲染出的图表')"
+        :style="{ maxHeight: `${maxImageHeight}px` }"
+      />
     </button>
 
     <pre v-else class="diagram-src">{{ source }}</pre>

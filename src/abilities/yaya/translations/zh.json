@@ -735,5 +735,13 @@
   "yaya.privacy.android_clipboard": "手机剪贴板",
   "yaya.privacy.android_clipboard_desc": "YAYA 读取手机剪贴板（可能含密码、验证码）",
   "yaya.privacy.android_screen": "手机屏幕",
-  "yaya.privacy.android_screen_desc": "YAYA 截取手机屏幕"
+  "yaya.privacy.android_screen_desc": "YAYA 截取手机屏幕",
+  "yaya.plugin.mermaid.cfg_theme": "配色",
+  "yaya.plugin.mermaid.theme_follow": "跟随界面主题",
+  "yaya.plugin.mermaid.theme_default": "Mermaid 默认",
+  "yaya.plugin.mermaid.theme_neutral": "中性（黑白）",
+  "yaya.plugin.mermaid.theme_forest": "森林",
+  "yaya.plugin.mermaid.theme_dark": "暗色",
+  "yaya.plugin.mermaid.cfg_max_height": "图的最大显示高度（像素）",
+  "yaya.plugin.mermaid.cfg_max_height_desc": "超过的部分等比缩小；点图可以放大查看"
 }
