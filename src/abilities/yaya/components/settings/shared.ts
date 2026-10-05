@@ -35,6 +35,10 @@ export function providerTypeItems(
       ),
       value: 'openai'
     },
+    {
+      title: t('yaya.settings.type_anthropic', 'Anthropic 原生（Claude Messages API）'),
+      value: 'anthropic'
+    },
     { title: t('yaya.settings.type_ollama', 'Ollama（本地部署）'), value: 'ollama' },
     {
       title: t('yaya.settings.type_codex_proxy', 'Codex Proxy（本地代理）'),

@@ -39,6 +39,12 @@ const saveApi = inject<YayaSettingsSaveApi | null>(YAYA_SAVE_API_KEY, null)
 const providerTypes = computed(() => providerTypeItems(t))
 
 /** 思考强度参数格式（各家不统一；auto 按地址猜） */
+/** 原生协议：思考参数由 Provider 自己决定，不需要选格式 */
+const nativeProtocol = computed(() => props.provider.type === 'anthropic')
+const baseUrlPlaceholder = computed(() =>
+  props.provider.type === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'
+)
+
 const reasoningStyles = computed(() => [
   { value: 'auto', title: t('yaya.settings.reasoning_style_auto', '自动（按地址识别）') },
   { value: 'openai', title: 'OpenAI / Ollama（reasoning_effort）' },
@@ -138,11 +144,12 @@ const filteredModels = computed(() => {
     <v-text-field
       v-model="provider.baseUrl"
       :label="t('yaya.settings.base_url', 'API Base URL')"
-      placeholder="https://api.openai.com/v1"
+      :placeholder="baseUrlPlaceholder"
       variant="outlined"
     />
 
     <v-select
+      v-if="!nativeProtocol"
       v-model="reasoningStyle"
       :items="reasoningStyles"
       :label="t('yaya.settings.reasoning_style', '思考强度参数格式')"

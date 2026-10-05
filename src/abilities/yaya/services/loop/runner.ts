@@ -45,7 +45,7 @@ import {
   toolNeedsApproval,
   type ResolvedTool
 } from '../plugins/registry'
-import type { ProviderMessage, ProviderTool } from '../providers/types'
+import type { NativeState, ProviderMessage, ProviderTool } from '../providers/types'
 import type { ToolSessionContext } from '../plugins/types'
 import { sessionMentions } from '../plugins/mention'
 import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
@@ -496,7 +496,12 @@ export class WorkflowRunner {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       status: toolCalls.length > 0 ? 'tool_executing' : 'completed',
       usage: result.usage,
-      meta: { ...getMessage(messageId)?.meta, model: this.model, provider: this.ctx.provider.id }
+      meta: {
+        ...getMessage(messageId)?.meta,
+        model: this.model,
+        provider: this.ctx.provider.id,
+        native: result.native
+      }
     })
     if (result.usage) this.lastUsage = result.usage
     this.endStep(step, 'ok', result.usage?.total)
@@ -788,10 +793,16 @@ export function sanitizeHistory(nodes: import('../../types').MessageNode[]): Pro
       name: n.name,
       toolCallId: n.toolCallId,
       toolCalls: n.toolCalls,
-      attachments: n.attachments
+      attachments: n.attachments,
+      ...(n.role === 'assistant' && isNativeState(n.meta?.native) ? { native: n.meta.native } : {})
     })
     if (n.role === 'assistant') pending = (n.toolCalls ?? []).map((c) => c.id)
   }
   flushMissing()
   return out
+}
+
+function isNativeState(v: unknown): v is NativeState {
+  const x = v as NativeState | undefined
+  return Boolean(x && typeof x.type === 'string' && typeof x.model === 'string')
 }

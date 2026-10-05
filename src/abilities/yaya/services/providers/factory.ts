@@ -1,6 +1,7 @@
 import type { ProviderConfig } from '../../types'
 import type { AIProvider } from './types'
 import { OpenAICompatibleProvider } from './openai'
+import { AnthropicProvider } from './anthropic'
 
 const providerInstances = new Map<string, AIProvider>()
 
@@ -11,6 +12,9 @@ export function getProviderInstance(config: ProviderConfig): AIProvider {
 
   let instance: AIProvider
   switch (config.type) {
+    case 'anthropic':
+      instance = new AnthropicProvider(config)
+      break
     case 'openai':
     case 'codex-proxy':
     case 'ollama':
