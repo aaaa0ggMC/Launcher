@@ -592,6 +592,7 @@
   "aidj.btchat.main_playlist": "Main page playlist",
   "aidj.btchat.resend": "Resend",
   "aidj.btchat.generating": "AI is generating the first playlist…",
+  "aidj.btchat.message_placeholder": "Message…",
   "aidj.btchat.input_placeholder": "Type a message, Enter to send (/discard_follows discards pending songs)",
   "aidj.btchat.clear_memory_text": "After clearing, AI will no longer remember songs it already recommended and may recommend them again.",
   "aidj.btchat.confirm_clear": "Confirm clear",

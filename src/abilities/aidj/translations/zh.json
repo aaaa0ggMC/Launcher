@@ -592,6 +592,7 @@
   "aidj.btchat.main_playlist": "主界面歌单",
   "aidj.btchat.resend": "重新发送",
   "aidj.btchat.generating": "AI 正在生成首个歌单…",
+  "aidj.btchat.message_placeholder": "输入消息…",
   "aidj.btchat.input_placeholder": "输入消息，回车发送 (/discard_follows 丢弃后续待播)",
   "aidj.btchat.clear_memory_text": "清空后 AI 将不再记住已推荐过的歌曲，可能重复推荐。",
   "aidj.btchat.confirm_clear": "确认清空",

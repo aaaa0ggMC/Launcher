@@ -427,7 +427,9 @@ onBeforeUnmount(() => {
 <template>
   <v-dialog v-model="visible" content-class="bt-overlay" scrim="rgba(13, 17, 23, 0.45)">
     <v-card class="bt-dialog" rounded="xl">
-      <v-card-title class="d-flex align-center flex-wrap ga-3 text-subtitle-1 px-5 pt-4 pb-3">
+      <v-card-title
+        class="bt-heading d-flex align-center flex-wrap ga-3 text-subtitle-1 px-5 pt-4 pb-3"
+      >
         <v-icon color="primary">mdi-tray-full</v-icon>
         <span class="text-body-1 font-weight-medium">{{ t('bt.dialogTitle') }}</span>
         <v-chip v-if="runningCount" variant="tonal" color="primary" class="bt-title-chip">
@@ -437,6 +439,7 @@ onBeforeUnmount(() => {
         <v-tooltip v-if="finishedCount > 0" :text="t('bt.clearFinishedTip')" location="bottom">
           <template #activator="{ props: tp }">
             <v-btn
+              density="default"
               v-bind="tp"
               variant="tonal"
               color="secondary"
@@ -450,7 +453,7 @@ onBeforeUnmount(() => {
         </v-tooltip>
         <v-tooltip :text="t('bt.tooltip')" location="bottom">
           <template #activator="{ props: tp }">
-            <v-btn v-bind="tp" variant="text" icon @click="visible = false">
+            <v-btn v-bind="tp" size="small" variant="text" icon @click="visible = false">
               <v-icon>mdi-close</v-icon>
             </v-btn>
           </template>
@@ -595,13 +598,18 @@ onBeforeUnmount(() => {
         <div class="bt-detail">
           <!-- 窄屏主从布局：选中后只显示详情，这里是回列表的入口（宽屏隐藏） -->
           <div v-if="selected" class="bt-back px-2 pt-2">
-            <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="selectedId = null">
+            <v-btn
+              density="default"
+              variant="text"
+              prepend-icon="mdi-arrow-left"
+              @click="selectedId = null"
+            >
               {{ t('bt.back', '返回列表') }}
             </v-btn>
           </div>
           <template v-if="selected">
             <template v-if="selected.type === 'task'">
-              <div class="d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
+              <div class="bt-toolbar d-flex align-center ga-2 px-4 pt-3 pb-3 flex-wrap">
                 <span class="text-subtitle-2 font-weight-medium">{{ selected.task.name }}</span>
                 <v-chip variant="tonal" :color="statusColor(selected.task.status)">
                   {{ statusLabel(selected.task.status) }}
@@ -653,9 +661,10 @@ onBeforeUnmount(() => {
                 </div>
 
                 <!-- lifecycle actions (text buttons, separated) -->
-                <div class="d-flex align-center ga-2">
+                <div class="bt-actions d-flex align-center ga-2 flex-wrap">
                   <v-btn
                     v-if="selected.task.kind === 'process'"
+                    density="default"
                     variant="tonal"
                     color="primary"
                     prepend-icon="mdi-restart"
@@ -666,6 +675,7 @@ onBeforeUnmount(() => {
                   </v-btn>
                   <v-btn
                     v-if="selected.task.status === 'running'"
+                    density="default"
                     variant="tonal"
                     color="warning"
                     prepend-icon="mdi-stop-circle-outline"
@@ -676,6 +686,7 @@ onBeforeUnmount(() => {
                   </v-btn>
                   <v-btn
                     v-if="selected.task.kind === 'process' && selected.task.status === 'running'"
+                    density="default"
                     variant="tonal"
                     color="error"
                     prepend-icon="mdi-close-octagon-outline"
@@ -685,6 +696,7 @@ onBeforeUnmount(() => {
                   </v-btn>
                   <v-btn
                     v-if="selected.task.status !== 'running'"
+                    density="default"
                     variant="tonal"
                     prepend-icon="mdi-archive-arrow-up-outline"
                     @click="removeSelected"
@@ -751,6 +763,8 @@ onBeforeUnmount(() => {
 .bt-dialog {
   height: 100%;
   max-height: 100%;
+  min-height: 0;
+  overflow: hidden !important;
   display: flex;
   flex-direction: column;
   background: rgba(var(--v-theme-surface), var(--glass-a, 0.55)) !important;
@@ -786,14 +800,28 @@ onBeforeUnmount(() => {
 .bt-detail {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 .bt-back {
   display: none;
 }
+.bt-heading,
+.bt-toolbar {
+  flex-shrink: 0;
+}
+.bt-toolbar > .text-subtitle-2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 /* 窄屏（手机 / 缩小的窗口）：主从布局——没选任务时只显示列表，选中后只显示详情 + 「返回列表」 */
 @media (max-width: 720px) {
+  .bt-heading {
+    padding-inline: 12px !important;
+    gap: 8px !important;
+  }
   .bt-body {
     flex-direction: column;
   }
@@ -939,7 +967,9 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 720px) {
   .v-dialog > .bt-overlay {
+    margin: 12px 8px !important;
     width: calc(100% - 16px) !important;
+    max-width: calc(100% - 16px) !important;
     height: calc(var(--app-vh, 100vh) - 24px) !important;
     max-height: calc(var(--app-vh, 100vh) - 24px) !important;
   }

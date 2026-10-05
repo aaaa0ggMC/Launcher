@@ -360,8 +360,8 @@ watch(
 </script>
 
 <template>
-  <div class="d-flex flex-column" style="height: 100%">
-    <div class="d-flex align-center ga-2 px-4 pt-3 pb-2">
+  <div class="bt-chat d-flex flex-column">
+    <div class="chat-toolbar d-flex align-center flex-wrap ga-2 px-4 py-3">
       <v-icon size="16" color="primary">mdi-radio-tower</v-icon>
       <span class="text-body-2 font-weight-medium">{{ t('aidj.btchat.title', '持续模式') }}</span>
       <v-spacer />
@@ -379,11 +379,17 @@ watch(
         :placeholder="t('aidj.btchat.target', '发送目标')"
         @update:model-value="selectTarget"
       />
-      <v-chip v-else size="small" variant="flat" class="chat-player-chip">
+      <v-chip v-else density="default" variant="flat" class="chat-player-chip">
         <v-icon start size="14">mdi-music</v-icon>
         <span>{{ t('aidj.player_mode.web', '内置播放器') }}</span>
       </v-chip>
-      <v-chip v-if="thinking" size="small" variant="flat" color="primary" class="thinking-chip">
+      <v-chip
+        v-if="thinking"
+        density="default"
+        variant="flat"
+        color="primary"
+        class="thinking-chip"
+      >
         <v-progress-circular indeterminate size="12" width="2" />
         <span class="ml-1">{{ t('aidj.heading', 'AI DJ') }}</span>
         <span v-if="agentStep" class="ml-1">· {{ agentStep }}</span>
@@ -482,7 +488,7 @@ watch(
           <v-chip
             v-bind="tip"
             variant="flat"
-            size="small"
+            density="default"
             class="status-chip"
             :aria-label="t('aidj.chat.title_tokens_total', '累计所有请求的 tokens 总和')"
           >
@@ -496,7 +502,7 @@ watch(
       </v-tooltip>
       <v-chip
         variant="flat"
-        size="small"
+        density="default"
         class="status-chip"
         :title="t('aidj.chat.title_context', '单次请求的上下文输入 tokens')"
       >
@@ -505,7 +511,7 @@ watch(
       </v-chip>
       <v-chip
         variant="flat"
-        size="small"
+        density="default"
         class="status-chip"
         :title="t('aidj.chat.title_output_tokens', '单次请求的输出 tokens')"
       >
@@ -514,7 +520,7 @@ watch(
       </v-chip>
       <v-chip
         variant="flat"
-        size="small"
+        density="default"
         class="status-chip clickable"
         :title="t('aidj.chat.title_clear_memory', '点击清空已播记忆')"
         @click="memoryConfirm = true"
@@ -526,14 +532,15 @@ watch(
 
     <v-divider />
 
-    <div class="d-flex align-center ga-2 px-4 py-3">
+    <div class="chat-composer d-flex align-end ga-2 px-4 py-4">
       <v-textarea
         v-model="inputText"
         rows="1"
         :max-rows="3"
         auto-grow
         no-resize
-        :placeholder="
+        :placeholder="t('aidj.btchat.message_placeholder', '输入消息…')"
+        :title="
           t('aidj.btchat.input_placeholder', '输入消息，回车发送 (/discard_follows 丢弃后续待播)')
         "
         hide-details
@@ -546,7 +553,7 @@ watch(
         variant="elevated"
         :disabled="!inputText.trim()"
         class="flex-shrink-0"
-        style="height: 36px"
+        density="default"
         @click="send"
       >
         <v-icon start>mdi-send</v-icon>
@@ -589,8 +596,28 @@ watch(
 </template>
 
 <style scoped>
+.bt-chat {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: bt-chat;
+}
+.chat-toolbar,
+.chat-composer {
+  flex-shrink: 0;
+}
+.chat-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .chat-scroll {
   min-height: 0;
+  flex-basis: 0;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   /* No smooth scroll: programmatic scroll-to-bottom on a long history would
      animate the whole distance and take seconds. Instant jump instead. */
   scroll-behavior: auto;
@@ -670,6 +697,7 @@ watch(
 .aidj-status-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 16px;
   flex-shrink: 0;
@@ -717,5 +745,31 @@ watch(
 .msg-markdown td {
   border: 1px solid rgba(var(--v-theme-surface-bright), 0.5);
   padding: 4px 8px;
+}
+@container bt-chat (max-width: 480px) {
+  .chat-toolbar > .v-spacer {
+    display: none;
+  }
+  .chat-player-select {
+    flex: 1 1 140px;
+    max-width: 100%;
+  }
+  .thinking-chip {
+    margin-left: auto;
+  }
+  .aidj-status-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .status-chip {
+    max-width: 100%;
+  }
+  .chat-composer .v-btn {
+    min-width: 48px;
+    padding-inline: 12px;
+  }
+  .chat-composer .v-btn :deep(.v-icon--start) {
+    display: none;
+  }
 }
 </style>

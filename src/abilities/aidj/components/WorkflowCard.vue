@@ -217,6 +217,8 @@ function pretty(v: unknown): string {
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   background: rgba(var(--v-theme-surface-variant), 0.3);
   overflow: hidden;
+  container-type: inline-size;
+  container-name: workflow;
 }
 .wf-card.wf-error {
   border-color: rgba(var(--v-theme-error), 0.45);
@@ -323,7 +325,8 @@ function pretty(v: unknown): string {
   color: rgb(var(--v-theme-success));
 }
 .wf-label {
-  flex-shrink: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .wf-summary {
   min-width: 0;
@@ -346,5 +349,29 @@ function pretty(v: unknown): string {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+@container workflow (max-width: 480px) {
+  .wf-step-row {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start !important;
+    padding-block: 8px !important;
+  }
+  .wf-step-row > .v-spacer {
+    display: none;
+  }
+  .wf-summary {
+    grid-column: 2;
+  }
+  .wf-ms,
+  .wf-step-row > .v-progress-circular {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .wf-badge-playbook {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 </style>
