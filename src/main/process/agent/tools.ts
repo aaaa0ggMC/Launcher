@@ -102,15 +102,18 @@ export function isHeadless(): boolean {
 }
 
 /**
- * 无头（网页）宿主里**能实现**的界面工具（B5）：页面里的 DOM 桥提供这些。
- * 截图 / 自由鼠标 / 拖动 / 输入时间轴依赖 Electron 的可信输入与截图，无头下不暴露，
- * 调用也会被明确拒绝（不假成功）。
+ * 无头（网页）宿主里**能实现**的界面工具（B5）：页面里的 DOM 桥提供这些（截图是 DOM 光栅化）。
+ * 只有输入时间轴依赖主进程精确派发可信输入，无头下不暴露，调用也会被明确拒绝（不假成功）。
  */
 export const HEADLESS_UI_TOOLS = new Set([
   'ui_snapshot',
+  'ui_screenshot',
   'ui_navigate',
   'ui_click',
   'ui_click_at',
+  'ui_move',
+  'ui_mouse',
+  'ui_drag',
   'ui_type',
   'ui_key',
   'ui_scroll',
@@ -125,7 +128,14 @@ const HEADLESS_TOOL_NOTES: Record<string, string> = {
   ui_click:
     ' Headless: synthetic JS click (isTrusted=false) — cannot open file pickers or native menus; focus the element first like a real click would.',
   ui_click_at:
-    ' Headless: coordinates are CSS pixels (there are no screenshots in headless); the click is synthetic (isTrusted=false).',
+    ' Headless: coordinates are CSS pixels (= ui_screenshot pixels, scale 1); the click is synthetic (isTrusted=false).',
+  ui_screenshot:
+    ' Headless: the page renders its own DOM to a JPEG (1 image pixel = 1 CSS pixel, so coordinates go straight to ui_click_at / ui_move / ui_drag). Protected regions are painted over; WebGL canvases may come out blank.',
+  ui_move: ' Headless: synthetic pointer/mouse move events at CSS-pixel coordinates.',
+  ui_mouse:
+    ' Headless: synthetic pointerdown/mousedown (with the same privacy hit-test as ui_click_at) or pointerup/mouseup; a matching down+up on the same element also fires click.',
+  ui_drag:
+    ' Headless: synthetic pointer drag in CSS pixels; neither end may be inside a forbidden / unapproved privacy region.',
   ui_type:
     ' Headless: sets the value through the native input setter plus input/change events (works with Vue); synthetic events are isTrusted=false.',
   ui_key: ' Headless: synthetic KeyboardEvents (isTrusted=false).',
@@ -134,7 +144,7 @@ const HEADLESS_TOOL_NOTES: Record<string, string> = {
 }
 
 const HEADLESS_USAGE_NOTE =
-  ' Headless browser mode: ui_screenshot / ui_move / ui_mouse / ui_drag / ui_input_timeline are NOT available (no screenshots, no trusted input) — and calling them fails clearly. The page bridge offers DOM snapshot / navigate / click (ref or CSS coordinates) / type / key / scroll / wait with synthetic (isTrusted=false) events; coordinates are CSS pixels, mouse moves and drags cannot be scripted. Only YAYA running in the browser tab that started the workflow may operate that tab.'
+  ' Headless browser mode: the page bridge offers snapshot / screenshot (DOM rendered to an image) / navigate / click (ref or CSS coordinates) / move / mouse / drag / type / key / scroll / wait with synthetic (isTrusted=false) events; coordinates are CSS pixels and match screenshot pixels. Only ui_input_timeline is NOT available (it needs trusted, precisely timed input) — calling it fails clearly. Only YAYA running in the browser tab that started the workflow may operate that tab.'
 
 function withHeadlessNotes(tool: AgentTool): AgentTool {
   const note = HEADLESS_TOOL_NOTES[tool.name]

@@ -67,9 +67,11 @@ function modifiers(v: unknown): Modifier[] {
     .filter((x): x is Modifier => ['Shift', 'Control', 'Alt', 'Meta'].includes(x))
 }
 
+/** 无头下仍不可用的命令（目前只有输入时间轴）：原因写具体，别让 AI 以为整个界面检查都不能用 */
 const headlessGate = {
   enabled: () => process.env.COCKPIT_HEADLESS !== '1',
-  unavailableReason: '无头（Headless）模式下已禁用 UI 渲染与检查'
+  unavailableReason:
+    '无头（网页）宿主不支持输入时间轴：它需要主进程按毫秒精确派发可信输入。其余 ui.* 命令（快照 / 截图 / 点击 / 移动 / 拖动 / 输入 / 按键 / 滚动）都可用，可以用多次 ui.key / ui.click 代替'
 }
 
 /**

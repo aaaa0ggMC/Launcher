@@ -37,12 +37,17 @@ import {
   browserUiCall,
   browserUiGuardedCall,
   BrowserUiError,
+  currentBrowserClient,
   type BrowserUiReply
 } from './browser-ui'
 import { t } from './i18n'
 
-/** 无头（网页）宿主：界面在用户的浏览器标签页里，改走 DOM 桥（B5）。 */
-const headless = (): boolean => process.env.COCKPIT_HEADLESS === '1'
+/**
+ * 走 DOM 桥（B5）：无头宿主；或 Electron 内嵌网页服务时，本次调用来自某个浏览器标签页
+ * （YAYA 在网页里发起的运行）——界面在那个标签页里，不是桌面窗口。
+ */
+const headless = (): boolean =>
+  process.env.COCKPIT_HEADLESS === '1' || currentBrowserClient() !== null
 
 /** agent 输入后，渲染端 IPC 被标成 agent-ui 的时长（覆盖 点击 → 处理函数 → IPC）。 */
 const AGENT_INPUT_TAG_MS = 3000
@@ -91,7 +96,7 @@ function agentTargetSession(): string | null {
  */
 function mainContents(): WebContents {
   if (process.env.COCKPIT_HEADLESS === '1') {
-    throw new Error('无头（Headless）模式下已禁用 UI 渲染与检查')
+    throw new Error('无头（网页）宿主里没有 Electron 窗口：这项操作只能在桌面版里执行')
   }
   const s = agentTargetSession()
   const view = s ? agentViewContents(s) : null
@@ -1697,6 +1702,10 @@ export async function inputTimeline(
   rawEvents: unknown,
   opts: { space?: CoordSpace; save?: boolean } = {}
 ): Promise<TimelineResult> {
+  if (headless())
+    throw new Error(
+      '浏览器标签页里不支持输入时间轴（需要主进程按毫秒精确派发可信输入）；请用多次 ui.key / ui.click / ui.drag 代替'
+    )
   const events = parseTimeline(rawEvents)
   const wc = mainContents()
   const cdp = cdpFor(wc)
