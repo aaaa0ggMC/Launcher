@@ -52,11 +52,20 @@ function guardUpdateConfig(spec: CommandSpec): CommandSpec {
   }
 }
 
+/**
+ * 规范名：快捷别名 `aidj-xxx` 与 `aidj.xxx` 等价。别名的 run 直接调用原命令的 run，
+ * 绕过了注册表的隐私中间件——所以别名必须和原命令套上**同一份**声明，否则 agent 能经别名
+ * 做原命令禁止它做的事（曾经：AI 可经 aidj-approve-ncm 替用户签署免责声明）。
+ */
+export function canonicalAidjName(name: string): string {
+  return name.replace(/^aidj-/, 'aidj.')
+}
+
 /** 给 aidj 的命令套上隐私声明。 */
 export function withPrivacy(specs: CommandSpec[]): CommandSpec[] {
   return specs.map((s) => {
-    if (s.name === 'aidj.update-config') return guardUpdateConfig(s)
-    const decl = DECLARATIONS[s.name]
+    if (canonicalAidjName(s.name) === 'aidj.update-config') return guardUpdateConfig(s)
+    const decl = DECLARATIONS[canonicalAidjName(s.name)]
     return decl ? { ...s, privacy: decl } : s
   })
 }
