@@ -46,6 +46,8 @@ export interface PluginUi {
   fences?: Record<string, Lazy>
   /** 设置 → 插件详情里的配置界面（没有就用 schema 自动生成的表单） */
   settingsView?: Lazy
+  /** 插件详情页里配置下面的附加面板（如「测试搜索」），props: { pluginId, info } */
+  settingsPanel?: Lazy
   /** Composer extension: receives PluginInputProps, registers triggers/hooks and owns its UI. */
   inputExtension?: Lazy
 }

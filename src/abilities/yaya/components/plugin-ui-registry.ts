@@ -106,6 +106,14 @@ export function settingsViewFor(pluginId: string, kind?: PluginKind): Component 
   return lazy(`settings:${ui!.pluginId}`, loader)
 }
 
+/** 插件详情页配置下面的附加面板（没有返回 null） */
+export function settingsPanelFor(pluginId: string, kind?: PluginKind): Component | null {
+  const ui = uiFor(pluginId, kind)
+  const loader = ui?.settingsPanel
+  if (!loader) return null
+  return lazy(`panel:${ui!.pluginId}`, loader)
+}
+
 export interface ResolvedToolView {
   component: Component
   pluginId: string

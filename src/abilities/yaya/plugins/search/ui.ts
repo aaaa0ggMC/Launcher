@@ -11,5 +11,6 @@ export default definePluginUi({
   pluginId: 'search',
   toolViews: {
     search: () => import('./SearchResultView.vue')
-  }
+  },
+  settingsPanel: () => import('./SearchTestPanel.vue')
 })
