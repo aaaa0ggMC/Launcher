@@ -1769,6 +1769,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+.sidebar-swipeable {
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sidebar-swipeable input,
+.sidebar-swipeable textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 html,
 body,
 #app {
