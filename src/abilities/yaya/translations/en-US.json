@@ -85,7 +85,7 @@
   "yaya.io.section_tool_args": "Arguments",
   "yaya.io.section_tool_error": "Error",
   "yaya.io.section_tool_result": "Result",
-  "yaya.io.tool_call": "Tool",
+  "yaya.io.tool_call": "Tool call",
   "yaya.io.tool_result_truncated": "(result truncated — too long)",
   "yaya.io.workflow": "Workflow",
   "yaya.jump_bottom": "Jump to bottom",
@@ -696,5 +696,17 @@
   "yaya.wf.perspectives_desc": "Expert, skeptic and pragmatist sub-agents answer in parallel; the main agent synthesizes and verifies with tools when needed. Good for hard questions and choosing approaches",
   "yaya.wf.persp.expert": "Expert view",
   "yaya.wf.persp.skeptic": "Skeptic view",
-  "yaya.wf.persp.pragmatist": "Pragmatic view"
+  "yaya.wf.persp.pragmatist": "Pragmatic view",
+  "yaya.import_title_any": "Choose a file to import (ChatGPT / Claude / DeepSeek export, Rikkahub backup)",
+  "yaya.import_filter": "Chat exports",
+  "yaya.io.cmd_import_any_desc": "Import chats from other apps: conversations.json or the whole zip exported by ChatGPT / Claude / DeepSeek, or a Rikkahub backup zip / database (auto-detected, runs as a background task)",
+  "yaya.io.job_import_any_title": "Import chats",
+  "yaya.io.import_detected": "Format: {format}, {total} conversations",
+  "yaya.io.err_rikkahub_json": "Rikkahub needs the backup zip or database file, not JSON",
+  "yaya.io.err_import_unknown": "Unrecognized import format: supported are conversations.json (or the whole zip) exported by ChatGPT / Claude / DeepSeek, and Rikkahub backups",
+  "yaya.io.err_zip_no_conversations": "The archive contains neither conversations.json nor rikka_hub.db",
+  "yaya.io.import_default_title_claude": "Imported Claude chat",
+  "yaya.io.import_default_title_deepseek": "Imported DeepSeek chat",
+  "yaya.io.import_default_title_rikkahub": "Imported Rikkahub chat",
+  "yaya.sessions.import_any": "Import chats (ChatGPT / Claude / DeepSeek / Rikkahub)"
 }

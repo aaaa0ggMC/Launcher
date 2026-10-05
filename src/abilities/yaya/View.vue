@@ -609,12 +609,18 @@ async function handleRename(id: string, title: string): Promise<void> {
 
 async function handleImport(): Promise<void> {
   const path = await window.cockpit.pickFile({
-    title: t('yaya.import_title', '选择 ChatGPT 导出的 conversations.json'),
-    filters: [{ name: 'JSON', extensions: ['json'] }]
+    title: t(
+      'yaya.import_title_any',
+      '选择要导入的文件（ChatGPT / Claude / DeepSeek 导出，Rikkahub 备份）'
+    ),
+    filters: [
+      { name: t('yaya.import_filter', '聊天记录导出'), extensions: ['json', 'zip', 'db'] },
+      { name: 'JSON', extensions: ['json'] }
+    ]
   })
   if (!path) return
   try {
-    await window.cockpit.command('yaya.import-openai', { path })
+    await window.cockpit.command('yaya.import', { path })
     showNotice(t('yaya.import_started', '已开始导入，进度见后台任务面板'))
   } catch (e) {
     showNotice(errText(e), true)

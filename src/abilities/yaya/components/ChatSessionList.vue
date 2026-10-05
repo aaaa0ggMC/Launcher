@@ -225,8 +225,12 @@ function doDelete(): void {
         icon="mdi-import"
         variant="text"
         density="comfortable"
-        :title="t('yaya.sessions.import', '导入 ChatGPT 记录')"
-        :aria-label="t('yaya.sessions.import', '导入 ChatGPT 记录')"
+        :title="
+          t('yaya.sessions.import_any', '导入聊天记录（ChatGPT / Claude / DeepSeek / Rikkahub）')
+        "
+        :aria-label="
+          t('yaya.sessions.import_any', '导入聊天记录（ChatGPT / Claude / DeepSeek / Rikkahub）')
+        "
         @click="emit('import')"
       />
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="emit('createSession')">

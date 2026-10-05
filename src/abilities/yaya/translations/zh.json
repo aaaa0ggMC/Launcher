@@ -85,7 +85,7 @@
   "yaya.io.section_tool_args": "参数",
   "yaya.io.section_tool_error": "错误",
   "yaya.io.section_tool_result": "结果",
-  "yaya.io.tool_call": "工具",
+  "yaya.io.tool_call": "工具调用",
   "yaya.io.tool_result_truncated": "（结果过长已截断）",
   "yaya.io.workflow": "工作流",
   "yaya.jump_bottom": "回到底部",
@@ -696,5 +696,17 @@
   "yaya.wf.perspectives_desc": "专家 / 质疑 / 实用三个子 Agent 并行作答，主 Agent 综合并按需用工具核实；适合方案选择与难题",
   "yaya.wf.persp.expert": "专家视角",
   "yaya.wf.persp.skeptic": "质疑视角",
-  "yaya.wf.persp.pragmatist": "实用视角"
+  "yaya.wf.persp.pragmatist": "实用视角",
+  "yaya.import_title_any": "选择要导入的文件（ChatGPT / Claude / DeepSeek 导出，Rikkahub 备份）",
+  "yaya.import_filter": "聊天记录导出",
+  "yaya.io.cmd_import_any_desc": "导入其它聊天应用的会话：ChatGPT / Claude / DeepSeek 导出的 conversations.json 或整个 zip、Rikkahub 备份 zip / 数据库（自动识别，后台任务）",
+  "yaya.io.job_import_any_title": "导入会话",
+  "yaya.io.import_detected": "格式：{format}，共 {total} 个会话",
+  "yaya.io.err_rikkahub_json": "Rikkahub 需要备份 zip 或数据库文件，不是 JSON",
+  "yaya.io.err_import_unknown": "认不出导入文件的格式：支持 ChatGPT / Claude / DeepSeek 导出的 conversations.json（或整个 zip）与 Rikkahub 备份",
+  "yaya.io.err_zip_no_conversations": "压缩包里没有 conversations.json 或 rikka_hub.db",
+  "yaya.io.import_default_title_claude": "导入的 Claude 会话",
+  "yaya.io.import_default_title_deepseek": "导入的 DeepSeek 会话",
+  "yaya.io.import_default_title_rikkahub": "导入的 Rikkahub 会话",
+  "yaya.sessions.import_any": "导入聊天记录（ChatGPT / Claude / DeepSeek / Rikkahub）"
 }

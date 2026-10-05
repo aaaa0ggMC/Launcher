@@ -140,7 +140,7 @@
 - **支持导入源**：
   1. **OpenAI**：解析 `conversations.json`，还原 mapping 字典中的树状分支关系。
   2. **Claude**：解析 Anthropic 导出格式，映射为 YAYA 节点。
-  3. **DeepSeek / Rikkahub**：解析标准导出会话格式。
+  3. **DeepSeek / Rikkahub**：解析标准导出会话格式。【已完成：`services/importers/`，Rikkahub 读备份 zip 里的 SQLite】
 
 ---
 
@@ -250,7 +250,7 @@
 | :--- | :--- | :---: | :--- |
 | **OpenAI 导入** | `conversations.json` → 消息树（re-parent、current_node、去重、事务） | `[x]` | `services/importers/openai.ts` |
 | | 后台任务运行（进度 / 停止） | `[x]` | `jobs.ts` `yaya.import-openai` |
-| **Claude / DeepSeek / Rikkahub 导入** | | `[ ]` | |
+| **Claude / DeepSeek / Rikkahub 导入** | | `[x]` | `yaya.import` 自动识别 json / zip / db；格式按公开结构推断，未用真实导出样本实测 |
 
 ---
 
@@ -259,8 +259,8 @@
 > 2026-10-05 核对：MCP 客户端、Mermaid / SVG、GenericSearch、Mention、插件配置与子分组都已完成（见第五、六节），原来的「中期 / 长期」只剩下面几项。
 
 1. **短期**：实机走一遍（桌面 + 400px / 650px 窄屏），重点看流式输出、工具审批、分支切换、附件。
-2. **中期**：Anthropic / Gemini 原生 Provider；长文档 Slot（摘要 + 检索工具）；更多工作流；`yaya-asset://` 协议。
-3. **长期**：Claude / DeepSeek / Rikkahub 导入器；HTML 小部件沙箱；Android Controller 插件。
+2. ~~**中期**：Anthropic / Gemini 原生 Provider；长文档 Slot；更多工作流；`yaya-asset://` 协议。~~（已完成）
+3. **长期**：~~Claude / DeepSeek / Rikkahub 导入器~~（已完成）；HTML 小部件沙箱；Android Controller 插件。
 
 
 ---
