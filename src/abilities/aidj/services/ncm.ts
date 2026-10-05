@@ -3,9 +3,10 @@ import { loadActiveVocab } from '../sanitize/store'
 import { vocabPromptHint } from '../sanitize/vocab'
 import { makeLogger } from '../../../main/process/logger'
 import { ncmSearch, ncmLyric, ncmComments } from '../ncm_api'
-import type { SongMeta, MetadataSyncCounts, MetadataSyncProgress } from '../types'
+import type { SongMeta, MetadataSyncCounts, MetadataSyncProgress, LoudnessInfo } from '../types'
 import { appendMetadata } from './library'
 import { appendLyric, yrcToInlineLrc } from './lyrics'
+import { analyzeLoudness } from './loudness'
 
 const log = makeLogger('aidj-ncm')
 
@@ -167,12 +168,35 @@ async function searchNcmApiBuiltin(keywords: string): Promise<NcmSearchResultT> 
   }
 }
 
+/** LUFS ranges used to ground the coarse loudness tag in a real measurement. */
+const LOUDNESS_BANDS: { tag: string; hint: string }[] = [
+  { tag: 'soft', hint: 'softer than about -16 LUFS' },
+  { tag: 'medium', hint: 'roughly -16 to -11 LUFS' },
+  { tag: 'loud', hint: 'louder than about -11 LUFS' }
+]
+
+/**
+ * Prompt line describing a measured integrated loudness, for the extraction
+ * prompts. Returns '' when there is nothing measured (no ffmpeg / analysis
+ * failed) — the model then judges by style alone, exactly as before.
+ */
+export function measuredLoudnessHint(measured?: LoudnessInfo | null): string {
+  const lufs = measured?.integrated_lufs
+  if (lufs == null) return ''
+  const peak = measured?.peak_db
+  const bands = LOUDNESS_BANDS.map((b) => `${b.tag} ≈ ${b.hint}`).join('; ')
+  return `\n- MEASURED loudness of this exact file: integrated ${lufs} LUFS${
+    peak != null ? `, true peak ${peak} dBFS` : ''
+  }. Use it as the primary evidence for "loudness" (${bands}); only fall back to style when the number contradicts an obvious reading.`
+}
+
 export async function extractMetadataAi(
   client: OpenAI,
   name: string,
   lyric: string,
   model: string,
-  comments?: string[]
+  comments?: string[],
+  measured?: LoudnessInfo | null
 ): Promise<{ meta: SongMeta | null; error?: string }> {
   const started = Date.now()
   try {
@@ -191,7 +215,7 @@ export async function extractMetadataAi(
 - "language": string — the dominant language of the song, e.g. "Chinese", "English", "Japanese", "Cantonese". Use "Unknown" when the lyrics are empty.
 - "emotion": string or string[] — one to three concise mood keywords, e.g. "nostalgic", "upbeat", "melancholic".
 - "genre": string or string[] — one to three genre tags, e.g. "indie rock", "city pop", "folk".
-- "loudness": string — a coarse intensity descriptor: "soft", "medium", or "loud". Infer it from the song style implied by the title and lyrics, never from the lyrics text itself.
+- "loudness": string — a coarse intensity descriptor: "soft", "medium", or "loud". Infer it from the song style implied by the title and lyrics, never from the lyrics text itself.${measuredLoudnessHint(measured)}
 - "review": string — a vivid 1-2 sentence review of the song. GROUND IT in the hot_comments when present (synthesize their sentiment/observations); never invent facts about the artist, release year, or awards.
 
 RULES:
@@ -280,10 +304,28 @@ export async function syncMetadata(
             }
             continue
           }
-          const { meta, error } = await extractMetadataAi(client, name, lyric, model, comments)
+          const loudness = await analyzeLoudness(entries[j][1])
+          const { meta, error } = await extractMetadataAi(
+            client,
+            name,
+            lyric,
+            model,
+            comments,
+            loudness
+          )
           if (meta) {
-            metadata.set(name, meta)
-            await appendMetadata(name, meta)
+            // 实测响度作为长期参考一起落库（ffprobe 缺失/失败时字段缺席，向后兼容）
+            const withLoudness: SongMeta = loudness
+              ? {
+                  ...meta,
+                  ...(loudness.integrated_lufs != null
+                    ? { loudness_lufs: loudness.integrated_lufs }
+                    : {}),
+                  ...(loudness.peak_db != null ? { loudness_peak_db: loudness.peak_db } : {})
+                }
+              : meta
+            metadata.set(name, withLoudness)
+            await appendMetadata(name, withLoudness)
             counts.ok++
             onProgress?.({
               done: ++done,
@@ -292,7 +334,7 @@ export async function syncMetadata(
               status: 'ok',
               sid,
               lyricLen: lyric.length,
-              meta
+              meta: withLoudness
             })
           } else {
             counts.failed++

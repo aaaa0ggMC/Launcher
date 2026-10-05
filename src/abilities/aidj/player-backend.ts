@@ -12,7 +12,8 @@ import {
   loadAidjConfig,
   saveAidjConfig,
   loadLibrary,
-  LoudnessCache,
+  analyzeLoudness,
+  VolBal,
   bumpFrequency,
   findEqProfile
 } from './service'
@@ -205,14 +206,19 @@ export class WebPlayerBackend implements PlayerBackend {
   private queueTotal = 0
 
   // -- continuous-playback auxiliaries (mirror `aidj.continuous` semantics) ---
-  private volbalEnabled = false
-  private volbalMethod: 'lufs' | 'linear' = 'lufs'
-  private volbalCurve = 3.0
-  private volCache: LoudnessCache | null = null
-  /** volbal anchor established (first track measured). */
-  private volbalActive = false
+  private volbal = new VolBal({
+    measure: (path) => analyzeLoudness(path),
+    setVolume: (v) => void this.setVolume(v),
+    log: (level, msg, data) => {
+      if (level === 'warn') log.warn(msg, data)
+      else log.info(msg, data)
+    }
+  })
   private recordFreq = false
   private lastTrackPath: string | null = null
+  /** Persisted default volume — pushed to a freshly created engine (which
+   *  starts at its own hardcoded 0.8) when loudness balance is off. */
+  private defaultVol = 0.8
 
   // -- M4 playback features (forwarded to the renderer engine) ---------------
   private crossfadeEnabled = false
@@ -230,21 +236,18 @@ export class WebPlayerBackend implements PlayerBackend {
   /** Load the shared volbal / recordFreq preferences into the web backend. */
   async syncPrefs(): Promise<void> {
     const config = await loadAidjConfig()
-    this.volbalEnabled = config?.preferences.dynamic_balance_volume ?? false
-    this.volbalMethod = config?.preferences.sound_adjust_method ?? 'lufs'
-    // HTML5 <audio>.volume is LINEAR amplitude (f(v) = v), so the volume_curve
-    // knob — tuned for external MPRIS players' non-linear (≈cubic) response —
-    // must be neutralized here: curve 1.0 → computeVolume = baseVol * gain,
-    // i.e. true linear loudness balance.
-    this.volbalCurve = 1.0
+    this.volbal.configure(
+      config?.preferences.dynamic_balance_volume ?? false,
+      config?.preferences.sound_adjust_method ?? 'lufs'
+    )
     this.recordFreq = config?.preferences.record_freq ?? false
-    this.volCache = new LoudnessCache(this.volbalMethod, this.volbalCurve)
     // M4 prefs.
     this.crossfadeEnabled = config?.preferences.crossfade?.enabled ?? false
     this.crossfadeSeconds = config?.preferences.crossfade?.seconds ?? 2.5
     this.eqPreset = config?.preferences.eq_preset ?? 'flat'
     this.playbackRate = config?.preferences.playback_rate ?? 1.0
     const defaultVol = config?.preferences.default_volume ?? 0.8
+    this.defaultVol = defaultVol
     this.lastStatus.volume = defaultVol
     this.lastDetail.volume = defaultVol
     // Push the persisted feature prefs into the renderer engine.
@@ -274,6 +277,7 @@ export class WebPlayerBackend implements PlayerBackend {
 
   /** Store a state report pushed up by the renderer engine. */
   report(state: WebPlayerReport): void {
+    const engineJustCameUp = !this.engineOnline
     this.lastEngineSeen = Date.now()
     this.lastStatus = {
       status: state.status,
@@ -312,6 +316,15 @@ export class WebPlayerBackend implements PlayerBackend {
     // Track-change side effects: record play frequency + apply loudness balance
     // (the engine auto-advances, so the backend watches the reported track).
     const path = state.path ?? null
+    if (engineJustCameUp) {
+      // A freshly created engine starts at its own default (0.8) — push the
+      // volume it SHOULD be at once, so the first track never starts loud:
+      // the volbal base (50%) when loudness balance is on, the persisted
+      // default volume otherwise. Only on bring-up: re-pushing on the 30s
+      // heartbeat would fight the user's manual volume changes.
+      if (this.volbal.isEnabled) void this.volbal.apply(path ?? this.lastTrackPath ?? '')
+      else void this.setVolume(this.defaultVol)
+    }
     if (path && path !== this.lastTrackPath) {
       this.lastTrackPath = path
       if (state.track) {
@@ -320,56 +333,8 @@ export class WebPlayerBackend implements PlayerBackend {
       if (this.recordFreq && state.track) {
         void bumpFrequency([state.track]).catch(() => {})
       }
-      if (this.volbalEnabled) void this.applyVolbal(path)
+      if (this.volbal.isEnabled) void this.volbal.apply(path)
     }
-  }
-
-  /** Per-track loudness balance: first track establishes the anchor at 0.5,
-   *  subsequent tracks adjust relative to it (LoudnessCache via ffprobe). */
-  private async applyVolbal(path: string): Promise<void> {
-    const cache = this.volCache
-    if (!cache) return
-    if (!this.volbalActive) {
-      const anchor = await cache.setAnchor(path, 0.5)
-      if (anchor != null) {
-        this.volbalActive = true
-        await this.setVolume(0.5)
-        log.info('web volbal anchor', { path, anchor, method: this.volbalMethod })
-      }
-    } else {
-      const v = await cache.targetVolume(path)
-      if (v != null) {
-        await this.setVolume(v)
-        log.debug('web volbal adjust', { path, target: v })
-      }
-    }
-  }
-
-  /** Live-configure volbal (toggle/method) and re-apply to the current track. */
-  async setVolbal(enabled: boolean, method?: 'lufs' | 'linear'): Promise<boolean> {
-    this.volbalEnabled = enabled
-    if (method && method !== this.volbalMethod) {
-      this.volbalMethod = method
-      this.volCache = new LoudnessCache(method, this.volbalCurve)
-      this.volbalActive = false
-    }
-    if (!this.volbalEnabled) return true
-    // Re-apply immediately to the currently playing track.
-    const current = this.lastDetail.track
-    const path = this.lastTrackPath
-    if (path && current) {
-      if (!this.volbalActive) {
-        const anchor = await this.volCache?.setAnchor(path, 0.5)
-        if (anchor != null) {
-          this.volbalActive = true
-          await this.setVolume(0.5)
-        }
-      } else {
-        const v = await this.volCache?.targetVolume(path)
-        if (v != null) await this.setVolume(v)
-      }
-    }
-    return true
   }
 
   /** Volbal state snapshot for the player page. */
@@ -379,20 +344,29 @@ export class WebPlayerBackend implements PlayerBackend {
     anchor: number | null
     baseVolume: number
   } {
-    return {
-      enabled: this.volbalEnabled,
-      method: this.volbalMethod,
-      anchor: this.volCache?.anchorVal ?? null,
-      baseVolume: this.volCache?.baseVolume ?? 0.5
-    }
+    return this.volbal.state()
+  }
+
+  /** Live-configure volbal (toggle/method) and re-apply to the current track. */
+  async setVolbal(enabled: boolean, method?: 'lufs' | 'linear'): Promise<boolean> {
+    this.volbal.configure(enabled, method ?? (this.volbal.state().method as 'lufs' | 'linear'))
+    if (!this.volbal.isEnabled) return true
+    // Re-apply to the currently playing track right away — enabling used to do
+    // nothing until the next track change.
+    const path = this.lastTrackPath
+    if (path) await this.volbal.apply(path)
+    return true
   }
 
   /** Anchor repositioning: make the given volume the new base of the balance
    *  curve (the "50% reference"), keeping the anchor — mirror of
-   *  `aidj.continuous-rebase`'s `setContinuousBaseVol`. */
+   *  `aidj.continuous-rebase`'s `setContinuousBaseVol`. The CURRENT track is
+   *  recomputed right away (it used to only take effect on the next track). */
   async rebase(baseVol: number): Promise<boolean> {
-    this.volCache?.setBaseVol(Math.max(0.05, Math.min(1, baseVol)))
-    log.info('web volbal rebase', { baseVol, anchor: this.volCache?.anchorVal ?? null })
+    await this.volbal.rebase(baseVol)
+    if (this.volbal.isEnabled && this.volbal.anchor != null && this.lastTrackPath) {
+      await this.volbal.apply(this.lastTrackPath)
+    }
     return true
   }
 

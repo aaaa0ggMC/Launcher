@@ -378,6 +378,12 @@ export interface SongMeta {
   genre?: string | string[]
   loudness?: string
   review?: string
+  /** Measured integrated loudness (LUFS) — long-term reference written by the
+   *  metadata sync / `aidj.loudness-backfill` when ffmpeg is available. Optional:
+   *  older entries without it keep working, nothing downstream requires it. */
+  loudness_lufs?: number
+  /** Measured true peak (dBFS) of the same analysis. */
+  loudness_peak_db?: number
 }
 
 /** Per-sync counters returned by syncMetadata. networkError = NCM API unreachable. */

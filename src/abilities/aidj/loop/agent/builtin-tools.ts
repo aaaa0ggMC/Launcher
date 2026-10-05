@@ -65,7 +65,10 @@ export function brief(ctx: DjToolContext, name: string): Record<string, unknown>
     key: name,
     emotion: tagsOf(m, 'emotion'),
     genre: tagsOf(m, 'genre'),
-    language: m?.language ?? null
+    language: m?.language ?? null,
+    // 实测响度（元数据里有时才给）：AI 选 softer / louder 曲目时的硬参考
+    ...(m?.loudness_lufs != null ? { loudness_lufs: m.loudness_lufs } : {}),
+    ...(m?.loudness_peak_db != null ? { loudness_peak_db: m.loudness_peak_db } : {})
   }
 }
 
