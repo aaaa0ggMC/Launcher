@@ -16,6 +16,7 @@ import type {
 import { SEPARATOR, LYRICS_WINDOW_ID, DEFAULT_LYRICS_CFG } from '../types'
 import {
   loadAidjConfig,
+  saveAidjConfig,
   loadLibrary,
   scanMusicFiles,
   findMissingSongs,
@@ -43,6 +44,21 @@ import { planBatch } from '../loop/planner'
 import { agentHistory, rememberAgentTurn, withNetworkRetry } from '../services/session'
 
 export const log = makeLogger('aidj')
+
+/**
+ * Persist preference changes on a fresh copy of the on-disk config AND mirror
+ * them into the cached `state.config`. Player toggles (crossfade / volbal /
+ * rate / EQ) used to write only the disk copy, so the next `aidj.save-config`
+ * (settings page, sidebar toggles) wrote the stale cache back and silently
+ * reverted them — then `syncPrefs` pushed the reverted value into the engine.
+ */
+export async function savePreferences(patch: Partial<AidjConfig['preferences']>): Promise<void> {
+  const config = await loadAidjConfig()
+  if (!config) return
+  Object.assign(config.preferences, patch)
+  await saveAidjConfig(config)
+  if (state.config) Object.assign(state.config.preferences, patch)
+}
 
 export interface CommandRuntimeState {
   client: OpenAI | null

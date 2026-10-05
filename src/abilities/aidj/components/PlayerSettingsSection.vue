@@ -25,7 +25,9 @@ const rateItems = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((r) => ({
 }))
 
 let loaded = false
-let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** One debounce timer PER preference: a shared timer let a quick second change
+ *  (e.g. rate right after crossfade) cancel the first one's save. */
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 onMounted(async () => {
   const r = (await window.cockpit.command('aidj.get-config').catch(() => null)) as Record<
@@ -62,16 +64,21 @@ onMounted(async () => {
 /** Persist a preference then push it live into the running engine (best-effort). */
 function apply(path: string, value: unknown, live?: () => Promise<unknown>): void {
   if (!loaded) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(async () => {
-    try {
-      await window.cockpit.command('aidj.update-config', { path, value })
-      await window.cockpit.command('aidj.save-config')
-    } catch {
-      /* keep last saved state */
-    }
-    if (live) await live().catch(() => {})
-  }, 300)
+  const pending = saveTimers.get(path)
+  if (pending) clearTimeout(pending)
+  saveTimers.set(
+    path,
+    setTimeout(async () => {
+      saveTimers.delete(path)
+      try {
+        await window.cockpit.command('aidj.update-config', { path, value })
+        await window.cockpit.command('aidj.save-config')
+      } catch {
+        /* keep last saved state */
+      }
+      if (live) await live().catch(() => {})
+    }, 300)
+  )
 }
 
 watch(crossfadeEnabled, (v) =>
