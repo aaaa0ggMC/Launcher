@@ -86,6 +86,11 @@
 
 - A3 冒烟测试：`src/headless/server.test.ts`（鉴权 + 广播载荷改写）已进 `pnpm test`；`build:headless` 本身还没进 CI。
 - 已修：SSE 广播载荷里的自定义协议地址（网页里点播放没反应）、COOP/COEP（掌机）。
-- A1 / A2 / A4–A8 未开始。
 
-**待你决定**：A1（把网页服务内嵌进 Electron）是下一步最大的稳定性收益。
+## 9. 进度（2026-10-05）
+
+- **SSE 断线**：同一 clientId 重连改为顶替旧连接（原来回 409 → 浏览器永久放弃重连）；页面侧退避重连 + 45s 无帧（含 15s 具名 ping）主动重建 + 前台 / 联网时检查，重连后派发 `cockpit:host-reconnected` 供页面重新同步。
+- **A3 完成**：`pnpm test:web`（`scripts/smoke-web.mjs`）构建到 `out/.smoke`（`build-headless --out`，不覆盖正在用的 `out/`），临时 HOME 启动，检查静态页 / 401 / 命令 / SSE / `/_p/` Range / `web.status` / 宿主锁。
+- **A1 完成（待实机验证）**：`src/main/process/web-host.ts`，`config.json` 的 `web: { enabled, host, port }`（默认关，设置 → 外观 → 网页服务；agent 不能改 `web`）。复用 `src/headless/server.ts`，自定义协议经 `net.fetch` 走 `protocol.handle`；Electron 的 `broadcast` 同时推 SSE；授权请求桌面窗口与网页悬浮窗同时显示；来自浏览器标签页的 `ui.*` 走该标签页的 DOM 桥。网页资源 `pnpm build:web`（`pnpm build` 已包含）。几处 `getAllWindows()` 广播改走广播中心。
+- **A2 完成**：`~/.config/LinuxCockpit/host.lock`（`src/headless/host-lock.ts`）。无头宿主发现另一个宿主在跑时拒绝启动并提示（`--force` 继续）；Electron 发现无头宿主在跑时不开网页服务（状态里给出原因）。
+- 未做：A4–A8。

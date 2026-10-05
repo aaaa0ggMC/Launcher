@@ -27,6 +27,8 @@ import {
 import { readJson } from './process/util'
 import { CONFIG_JSON } from './process/paths'
 import { setLogBroadcast, log } from './process/logger'
+import { initWebHost, pushWebEvent, shutdownWebHost } from './process/web-host'
+import { releaseHostLock } from '../headless/host-lock'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -90,6 +92,8 @@ function broadcast(channel: string, ...args: unknown[]): void {
   }
   // agent 视图（WebContentsView）不在 getAllWindows 里，要显式广播（主题 / 配置 / 会话变化等）
   for (const wc of allAgentViewContents()) wc.send(channel, ...args)
+  // 内嵌网页服务的浏览器客户端（没开 / 没连接时立即返回）
+  pushWebEvent(channel, ...args)
 }
 
 async function createWindow(): Promise<void> {
@@ -210,6 +214,8 @@ if (!gotLock) {
     registerIpc()
     // Privacy SDK: consent window presenter + policy from config.json (agent.privacy).
     initPrivacyConsent()
+    // 内嵌网页服务（设置 → 网页服务；默认关）：浏览器 / 手机连到同一个宿主
+    void initWebHost()
     // Remote / MCP (off by default; settings or --with-remote / --with-mcp for this run).
     void initAgentServices(process.argv)
     // Abilities self-start (watchers, eager bindings) via registered hooks.
@@ -250,4 +256,6 @@ app.on('will-quit', () => {
   shutdownBackgroundTasks()
   closeAllChildren()
   destroyAllAgentViews()
+  void shutdownWebHost()
+  releaseHostLock()
 })

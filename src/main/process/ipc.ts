@@ -37,6 +37,7 @@ function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 import { makeLogger } from './logger'
+import { getBroadcast } from './broadcast'
 import {
   createChildWindow,
   destroyChildWindow,
@@ -317,11 +318,7 @@ export function registerIpc(): void {
         // GATED commands are silent (not exposed ≠ broken), so no toast.
         if (err instanceof UnknownCommandError) {
           log.warn('unknown command', err.commandName)
-          if (!err.silent) {
-            for (const win of BrowserWindow.getAllWindows()) {
-              win.webContents.send('cockpit:command-error', err.commandName)
-            }
-          }
+          if (!err.silent) getBroadcast()('cockpit:command-error', err.commandName)
         } else {
           log.error(`${name} failed`, err instanceof Error ? err.message : String(err))
         }

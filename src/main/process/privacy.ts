@@ -582,6 +582,11 @@ export function setConsentPresenter(fn: Presenter): void {
   presenter = fn
 }
 
+/** 当前呈现器（Electron 内嵌网页服务时与网页悬浮窗组合使用：桌面窗口 + 网页同时显示） */
+export function getConsentPresenter(): Presenter {
+  return presenter
+}
+
 export interface PrivacyAuditEvent {
   type: 'redact' | 'request' | 'decide' | 'expire' | 'auto-deny' | 'deny-agent'
   scope?: string

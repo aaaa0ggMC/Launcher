@@ -237,5 +237,8 @@
   "agent.presence.no_args": "拿不到参数（请求可能已经处理）",
   "agent.presence.approve_more": "更多批准方式",
   "agent.presence.approve_run": "本次执行都允许",
-  "agent.presence.approve_session": "本对话都允许"
+  "agent.presence.approve_session": "本对话都允许",
+  "web.err_not_built": "网页资源还没构建：先运行 pnpm build:web（或 pnpm build）",
+  "web.err_headless_running": "无头宿主正在运行（pid {pid}），先关掉它再开启网页服务",
+  "web.err_not_running": "网页服务未运行"
 }

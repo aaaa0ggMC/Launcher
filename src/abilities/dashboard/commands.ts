@@ -1,5 +1,5 @@
 import { SCOPE_CONTROL } from '../../main/process/privacy'
-import { BrowserWindow } from 'electron'
+import { getBroadcast } from '../../main/process/broadcast'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { getDashboardLayout, setDashboardLayout, resetDashboardLayout } from './ui-state'
 import { systemStats } from './system'
@@ -120,9 +120,7 @@ export default [
     usage: 'dashboard.reset-layout',
     run: async () => {
       await resetDashboardLayout()
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('cockpit:dashboard-reset')
-      }
+      getBroadcast()('cockpit:dashboard-reset')
       return { ok: true }
     }
   }

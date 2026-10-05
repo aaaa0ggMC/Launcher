@@ -15,7 +15,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "dev:lts": "node scripts/dev-lts.mjs",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run typecheck && electron-vite build && npm run build:web",
     "build:win": "npm run build && electron-builder --win",
     "build:win:portable": "npm run build && electron-builder --win portable",
     "build:linux": "npm run build && electron-builder --linux",
@@ -24,7 +24,8 @@
     "start:headless": "node out/headless/index.js",
     "dev:web": "node scripts/build-headless.mjs && node out/headless/index.js",
     "pack:headless": "node scripts/build-headless.mjs --pack",
-    "test:web": "node scripts/smoke-web.mjs"
+    "test:web": "node scripts/smoke-web.mjs",
+    "build:web": "node scripts/build-headless.mjs --web-only"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

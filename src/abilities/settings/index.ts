@@ -128,6 +128,14 @@ export default {
           component: defineAsyncComponent(() => import('./items/LaunchSection.vue'))
         },
         {
+          key: 'web',
+          label: '网页服务',
+          icon: 'mdi-web',
+          description: '在浏览器 / 手机上打开同一个 Cockpit',
+          keywords: ['网页', '浏览器', '手机', '远程', 'web', 'browser', 'phone', 'lan', 'http'],
+          component: defineAsyncComponent(() => import('./items/WebHostSection.vue'))
+        },
+        {
           key: 'screenshot',
           label: '截图模式',
           icon: 'mdi-camera-outline',

@@ -72,7 +72,10 @@ try {
   step('鉴权：无 token 401，有 token 200')
 
   const cmds = await (await fetch(`${base}/api/commands`, { headers: auth })).json()
-  assert.ok(Array.isArray(cmds) && cmds.some((c) => c.name === 'logs.query'), '命令表里没有 logs.query')
+  assert.ok(
+    Array.isArray(cmds) && cmds.some((c) => c.name === 'logs.query'),
+    '命令表里没有 logs.query'
+  )
   const run = await (
     await fetch(`${base}/api/command`, {
       method: 'POST',
@@ -108,6 +111,41 @@ try {
   assert.equal(ranged.status, 206)
   assert.equal((await ranged.arrayBuffer()).byteLength, 100)
   step('/_p/ 协议转发 + Range 206')
+
+  const st = await (
+    await fetch(`${base}/api/command`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'web.status', args: {} })
+    })
+  ).json()
+  assert.equal(st.result?.mode, 'headless')
+  step('web.status = headless')
+
+  // A2：同一份配置目录上再起一个宿主 → 拒绝启动（退出码 1）
+  const second = spawn(
+    process.execPath,
+    [join(out, 'headless/index.js'), '--port', String(port + 1)],
+    {
+      env: { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config') },
+      stdio: ['ignore', 'ignore', 'pipe']
+    }
+  )
+  let err2 = ''
+  second.stderr.on('data', (d) => (err2 += d))
+  const code = await new Promise((res) => {
+    const timer = setTimeout(() => {
+      second.kill('SIGKILL')
+      res('timeout')
+    }, 15_000)
+    second.on('exit', (c) => {
+      clearTimeout(timer)
+      res(c)
+    })
+  })
+  assert.equal(code, 1, `第二个宿主应拒绝启动，实际 ${code}\n${err2}`)
+  assert.match(err2, /--force/)
+  step('第二个宿主拒绝启动（host.lock）')
 
   console.log('[smoke] OK')
 } catch (e) {

@@ -106,9 +106,19 @@ function rewriteUrls(v: unknown): unknown {
 }
 
 /** `/_p/cockpit-icon/<编码后的路径>?x` → 调用 Electron 版注册的协议处理器，把 Response 管回去 */
+/**
+ * 自定义协议的取数方式：无头宿主用替身记下的处理器；Electron 内嵌时由调用方注入
+ * （`net.fetch` 会走 `protocol.handle` 注册的处理器）。
+ */
+let protocolFetch: ((scheme: string, req: Request) => Promise<Response> | null) | null = null
+
 async function serveProtocol(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const m = /^\/_p\/(cockpit-(?:icon|audio|tile))\/(.*)$/s.exec(req.url ?? '')
-  const handler = m && getProtocolHandler(m[1])
+  const handler = m
+    ? protocolFetch
+      ? (r: Request) => protocolFetch!(m[1], r) as Promise<Response>
+      : getProtocolHandler(m[1])
+    : null
   if (!m || !handler) return json(res, 404, { error: 'unknown protocol' })
   const headers = new Headers()
   if (req.headers.range) headers.set('Range', String(req.headers.range))
@@ -200,8 +210,11 @@ export function startServer(opts: {
   port: number
   token: string
   webRoot: string
+  /** Electron 内嵌：自定义协议改由 net.fetch 取（缺省用无头替身记下的处理器） */
+  protocolFetch?: (scheme: string, req: Request) => Promise<Response>
 }): Promise<Server> {
   const { host, port, token, webRoot } = opts
+  if (opts.protocolFetch) protocolFetch = opts.protocolFetch
   const server = createServer((req, res) => {
     let url: URL
     try {

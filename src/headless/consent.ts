@@ -50,9 +50,14 @@ export function pendingConsentFrames(): ConsentRequestWire[] {
 
 /** 启动时调用（在 initPrivacyConsent 之后，替换掉 Electron 的窗口呈现器） */
 export function initHeadlessConsent(
-  push: (channel: string, list: ConsentRequestWire[]) => void
+  push: (channel: string, list: ConsentRequestWire[]) => void,
+  /** Electron 内嵌网页服务：桌面授权窗口照常弹，网页悬浮窗同时显示（任一处决定都生效） */
+  also?: (list: ConsentRequest[]) => void
 ): void {
-  setConsentPresenter((list) => push(CONSENT_CHANNEL, views(list)))
+  setConsentPresenter((list) => {
+    also?.(list)
+    push(CONSENT_CHANNEL, views(list))
+  })
 }
 
 const DECISIONS: ReadonlySet<string> = new Set(['deny', 'once', 'agent', 'session'])

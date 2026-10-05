@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { getBroadcast } from '../../main/process/broadcast'
 import { existsSync } from 'fs'
 import { copyFile } from 'fs/promises'
 import type { CommandSpec } from '../../main/process/commands/types'
@@ -21,6 +21,7 @@ import {
 import { isAgentOrigin, PrivacyDeniedError } from '../../main/process/privacy'
 import { reloadPrivacyPolicy } from '../../main/process/privacy-consent'
 import { reloadAgentServices } from '../../main/process/agent'
+import { reloadWebHost } from '../../main/process/web-host'
 import { rewrapMasterToScrypt, vaultStatus } from '../../main/process/encrypt'
 
 const log = makeLogger('settings')
@@ -83,6 +84,10 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
   if (isAgentOrigin() && patch && typeof patch === 'object' && 'outsider' in patch) {
     throw new PrivacyDeniedError('agent_denied', [], 'agent may not modify outsider settings')
   }
+  // 网页服务（是否开放、监听地址）同理：agent 不能把宿主暴露到局域网
+  if (isAgentOrigin() && patch && typeof patch === 'object' && 'web' in patch) {
+    throw new PrivacyDeniedError('agent_denied', [], 'agent may not modify web host settings')
+  }
   try {
     const existed = existsSync(CONFIG_JSON)
     const current = await readJson<Record<string, unknown>>(CONFIG_JSON)
@@ -101,11 +106,11 @@ async function applyConfigPatch(patch: Record<string, unknown>): Promise<Record<
     }
     const changedKeys = Object.keys(patch).filter((k) => cfg[k] !== patch[k])
     await writeJsonAtomic(CONFIG_JSON, merged)
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('cockpit:config-changed', merged)
-    }
+    // 经广播中心：桌面窗口、agent 视图、网页客户端（内嵌网页服务 / 无头宿主）都收得到
+    getBroadcast()('cockpit:config-changed', merged)
     if ('agent' in patch || 'uiScale' in patch) await reloadPrivacyPolicy()
     if ('agent' in patch) void reloadAgentServices()
+    if ('web' in patch) void reloadWebHost()
     log.info('config.set broadcast', { keys: Object.keys(merged) })
     log.debug('config.set changed', { changedKeys, previousKeys: Object.keys(cfg) })
     return merged
@@ -131,9 +136,7 @@ async function loadSidebarOrder(): Promise<string[]> {
 
 async function saveSidebarOrder(order: string[]): Promise<void> {
   await writeJsonAtomic(SIDEBAR_ORDER_JSON, order)
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('cockpit:sidebar-order-changed', order)
-  }
+  getBroadcast()('cockpit:sidebar-order-changed', order)
 }
 
 export default [

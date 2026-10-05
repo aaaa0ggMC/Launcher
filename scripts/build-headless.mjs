@@ -11,6 +11,7 @@ import { build, loadConfigFromFile } from 'vite'
 //                   help / privacy / agent / inspector / cli / logs）总会保留，否则依赖
 //                   background-tasks 的能力会被加载器判定为缺少能力而禁用
 //   --pack          额外生成 out/cockpit-headless.tgz
+//   --web-only      只构建网页渲染端（out/web）：Electron 内嵌网页服务用（pnpm build:web）
 //   --out <dir>     输出目录（缺省 out/）：冒烟测试构建到临时目录，不覆盖正在使用的 out/
 const argv = process.argv.slice(2)
 const BASE_ABILITIES = [
@@ -55,29 +56,31 @@ const mainPlugins = (cfg.main.plugins ?? [])
     (p) => p && p.name !== 'vite-plugin-externalize-deps' && !/externalize/.test(p.name ?? '')
   )
 
-await build({
-  configFile: false,
-  root,
-  logLevel: 'info',
-  plugins: mainPlugins,
-  resolve: {
-    alias: { ...cfg.main.resolve.alias, electron: resolve(root, 'src/headless/electron-stub.ts') }
-  },
-  define: cfg.main.define,
-  ssr: { noExternal: true, external: external.filter((e) => typeof e === 'string') },
-  build: {
-    ssr: resolve(root, 'src/headless/index.ts'),
-    outDir: resolve(outDir, 'headless'),
-    emptyOutDir: true,
-    target: 'node22',
-    minify: false,
-    reportCompressedSize: false,
-    rollupOptions: {
-      external,
-      output: { format: 'cjs', entryFileNames: 'index.js', dynamicImportInCjs: false }
+const webOnly = argv.includes('--web-only')
+if (!webOnly)
+  await build({
+    configFile: false,
+    root,
+    logLevel: 'info',
+    plugins: mainPlugins,
+    resolve: {
+      alias: { ...cfg.main.resolve.alias, electron: resolve(root, 'src/headless/electron-stub.ts') }
+    },
+    define: cfg.main.define,
+    ssr: { noExternal: true, external: external.filter((e) => typeof e === 'string') },
+    build: {
+      ssr: resolve(root, 'src/headless/index.ts'),
+      outDir: resolve(outDir, 'headless'),
+      emptyOutDir: true,
+      target: 'node22',
+      minify: false,
+      reportCompressedSize: false,
+      rollupOptions: {
+        external,
+        output: { format: 'cjs', entryFileNames: 'index.js', dynamicImportInCjs: false }
+      }
     }
-  }
-})
+  })
 
 const shimPlugin = {
   name: 'cockpit-web-shim',
