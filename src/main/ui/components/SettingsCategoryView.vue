@@ -6,11 +6,11 @@
  * `highlight`：要定位的设置项 id —— 滚动到可见并短暂高亮。
  * 通过 `itemRef` 把每个设置项组件实例交给父级（用于 toMarkdown 深入导出）。
  */
-import { inject, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import type { ComponentPublicInstance, Ref } from 'vue'
 import type { SettingsCategory, SettingsItem } from '../ability-registry'
 import AbilityIcon from './AbilityIcon.vue'
-import { translate } from '../i18n'
+import { translate, translateTemplate } from '../i18n'
 
 const props = defineProps<{
   category: SettingsCategory
@@ -28,6 +28,25 @@ const emit = defineEmits<{
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+
+/*
+ * 标题可点：跳回该设置所属的能力页，和能力页里的「设置」入口形成闭环。
+ * 只在那个能力有侧栏页面、且当前不在它页面上时可点（设置浮窗是从该能力自己打开的）。
+ */
+const abilitiesCtx = inject<{
+  list: Ref<{ id: string }[]>
+  current: Ref<{ id: string } | null | undefined>
+  open: (id: string) => void
+} | null>('cockpit:abilities', null)
+const linkTarget = computed<string | null>(() => {
+  const id = props.category.abilityId
+  if (!abilitiesCtx || id === 'settings') return null
+  if (abilitiesCtx.current.value?.id === id) return null
+  return abilitiesCtx.list.value.some((a) => a.id === id) ? id : null
+})
+function goAbility(): void {
+  if (linkTarget.value) abilitiesCtx?.open(linkTarget.value)
+}
 const flash = ref<string | null>(null)
 
 function isMdi(icon: string): boolean {
@@ -53,10 +72,23 @@ watch(
 
 <template>
   <div>
-    <div
+    <component
+      :is="linkTarget ? 'button' : 'div'"
       v-if="!hideHeader"
-      class="d-flex align-center flex-wrap ga-2"
-      :class="compactHeader ? 'pb-2' : 'pb-4'"
+      :type="linkTarget ? 'button' : undefined"
+      class="category-header d-flex align-center flex-wrap ga-2"
+      :class="[compactHeader ? 'pb-2' : 'pb-4', { 'category-header--link': linkTarget }]"
+      :title="
+        linkTarget
+          ? translateTemplate(
+              uiLang,
+              'settings.openAbility',
+              { name: category.abilityName },
+              '打开 {name}'
+            )
+          : undefined
+      "
+      @click="goAbility"
     >
       <v-icon v-if="isMdi(category.icon)" :size="compactHeader ? 16 : 22">{{
         category.icon
@@ -68,7 +100,10 @@ watch(
       <span v-if="compactHeader" class="text-body-2 on-surface-variant">
         · {{ category.abilityName }}
       </span>
-    </div>
+      <v-icon v-if="linkTarget" class="category-header-go" :size="compactHeader ? 14 : 18">
+        mdi-arrow-top-right
+      </v-icon>
+    </component>
     <div v-if="!compactHeader && category.description" class="text-body-2 on-surface-variant pb-4">
       {{ translate(uiLang, 'desc.' + category.id, category.description) }}
     </div>
@@ -92,6 +127,34 @@ watch(
 </template>
 
 <style scoped>
+.category-header {
+  border: 0;
+  background: none;
+  padding-left: 0;
+  padding-right: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.category-header--link {
+  cursor: pointer;
+}
+.category-header-go {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+.category-header--link:hover .category-header-go,
+.category-header--link:focus-visible .category-header-go {
+  opacity: 1;
+}
+.category-header--link:hover > span:first-of-type {
+  color: rgb(var(--v-theme-primary));
+}
+.category-header--link:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 .settings-item {
   border-radius: 12px;
   transition: box-shadow 0.4s ease;

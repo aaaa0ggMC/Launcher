@@ -1212,6 +1212,8 @@ provide('cockpit:abilities', {
   current: currentAbility,
   configs: abilityConfigs,
   activate,
+  /** 纯跳转（等价于点侧栏），不给目标页传 onActivate 载荷 */
+  open: openAbility,
   listCommands: (): Promise<{ name: string; description: string; usage?: string }[]> =>
     window.cockpit.listCommands()
 })
