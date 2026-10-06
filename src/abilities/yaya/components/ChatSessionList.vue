@@ -222,7 +222,6 @@ function doDelete(): void {
   <div class="session-drawer-content d-flex flex-column h-100 pa-3">
     <!-- 头部：标题 + 导入 / 新建 -->
     <div class="d-flex align-center ga-2 flex-shrink-0 pb-3">
-      <v-icon icon="mdi-chat-processing-outline" color="primary" size="20" />
       <span class="text-subtitle-2 font-weight-bold">{{ t('yaya.sessions.title', '会话') }}</span>
       <v-spacer />
       <v-btn
@@ -275,20 +274,6 @@ function doDelete(): void {
             class="session-item"
             @click="onItemClick(s)"
           >
-            <template #prepend>
-              <span
-                v-if="isRunning(s.id)"
-                class="session-running-dot mr-3"
-                :title="t('yaya.sessions.running', '生成中')"
-                :aria-label="t('yaya.sessions.running', '生成中')"
-              />
-              <v-icon
-                v-else
-                :icon="s.id === activeSessionId ? 'mdi-message-text' : 'mdi-message-text-outline'"
-                size="18"
-                class="mr-2"
-              />
-            </template>
 
             <template v-if="editingId === s.id">
               <v-text-field
@@ -320,6 +305,12 @@ function doDelete(): void {
               <v-list-item-subtitle
                 class="text-caption text-medium-emphasis d-flex align-center ga-1"
               >
+                <span
+                  v-if="isRunning(s.id)"
+                  class="session-running-dot"
+                  :title="t('yaya.sessions.running', '生成中')"
+                  :aria-label="t('yaya.sessions.running', '生成中')"
+                />
                 <span>{{ formatRelative(s.updatedAt) }}</span>
                 <span v-if="isRunning(s.id)">{{ t('yaya.sessions.running', '生成中') }}</span>
                 <span v-if="(contentHits.get(s.id)?.matches ?? 0) > 1">
@@ -456,8 +447,8 @@ function doDelete(): void {
 
 /* 生成中会话的脉冲指示点 */
 .session-running-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: rgb(var(--v-theme-primary));
   animation: session-dot-pulse 1.4s ease-in-out infinite;

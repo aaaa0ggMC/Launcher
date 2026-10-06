@@ -1670,7 +1670,7 @@ watch(isRunning, (now, before) => {
   top: 0;
   bottom: 0;
   left: 0;
-  width: min(320px, 86%);
+  width: min(300px, 78%);
   transform: translateX(-100%);
   background: rgb(var(--v-theme-surface));
   box-shadow: 0 0 32px rgba(0, 0, 0, 0.3);
