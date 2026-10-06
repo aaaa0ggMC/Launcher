@@ -191,6 +191,12 @@
   "android.device": "Device",
   "android.host": "Host",
   "android.keep_alive": "Keep running in background (ongoing notification keeps playback and the connection alive)",
+  "android.pin_title": "Add to home screen",
+  "android.pin_hint": "Put a page on the phone's home screen; tapping it opens the app straight on that page.",
+  "android.pin_page": "Page",
+  "android.pin_label": "Name",
+  "android.pin_button": "Add",
+  "android.pin_sent": "Sent to the home screen: confirm the system dialog (an existing shortcut with the same name is updated)",
   "android.switch_host": "Switch host",
   "label.Android 客户端": "Android client"
 }

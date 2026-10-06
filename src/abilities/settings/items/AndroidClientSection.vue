@@ -6,9 +6,11 @@
  */
 defineOptions({ name: 'cockpit-settings-android-client' })
 
-import { inject, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import AbilityIcon from '@ui/components/AbilityIcon.vue'
+import { iconToDataUrl } from './shortcut-icon'
 
 interface ClientInfo {
   version: string
@@ -16,6 +18,14 @@ interface ClientInfo {
   device: string
   url: string
   keepAlive: boolean
+  /** 启动器支持固定快捷方式（0.6.0+ 才有这个字段） */
+  pinShortcuts?: boolean
+}
+
+interface AbilityItem {
+  id: string
+  name: string
+  icon: string | null
 }
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -49,6 +59,45 @@ async function setKeepAlive(on: boolean | null): Promise<void> {
 
 function switchHost(): void {
   void window.cockpit.client?.call('openConnect')
+}
+
+/* ---- 添加到桌面：某个能力页的快捷方式（点了直接打开 App 并跳到这一页） ---- */
+const abilitiesCtx = inject<{ list: Ref<AbilityItem[]> } | null>('cockpit:abilities', null)
+const pageOptions = computed(() =>
+  (abilitiesCtx?.list.value ?? []).map((a) => ({ value: a.id, title: a.name, icon: a.icon }))
+)
+const pinAbility = ref<string | null>(null)
+const pinLabel = ref('')
+const pinMsg = ref('')
+const pinBusy = ref(false)
+const iconEl = ref<HTMLElement | null>(null)
+const pinIcon = computed(() => pageOptions.value.find((o) => o.value === pinAbility.value)?.icon)
+watch(pinAbility, (id) => {
+  pinLabel.value = pageOptions.value.find((o) => o.value === id)?.title ?? ''
+  pinMsg.value = ''
+})
+
+async function pinPage(): Promise<void> {
+  const client = window.cockpit.client
+  if (!client || !pinAbility.value) return
+  pinBusy.value = true
+  pinMsg.value = ''
+  try {
+    const icon = iconEl.value ? await iconToDataUrl(iconEl.value) : null
+    await client.call('shortcut.pin', {
+      ability: pinAbility.value,
+      label: pinLabel.value.trim() || pinAbility.value,
+      ...(icon ? { icon } : {})
+    })
+    pinMsg.value = tr(
+      'android.pin_sent',
+      '已发送到桌面：按系统弹窗确认即可（已存在同名快捷方式时直接更新）'
+    )
+  } catch (e) {
+    pinMsg.value = String((e as Error).message ?? e)
+  } finally {
+    pinBusy.value = false
+  }
 }
 </script>
 
@@ -84,6 +133,47 @@ function switchHost(): void {
 
       <p v-if="error" class="text-caption text-error">{{ error }}</p>
 
+      <template v-if="info?.pinShortcuts">
+        <div class="text-subtitle-2 pt-1">{{ tr('android.pin_title', '添加到桌面') }}</div>
+        <p class="text-caption text-medium-emphasis">
+          {{ tr('android.pin_hint', '把某个页面放到手机桌面，点它直接打开 App 并跳到这一页。') }}
+        </p>
+        <div class="d-flex flex-wrap align-center ga-2">
+          <div ref="iconEl" class="pin-icon" aria-hidden="true">
+            <AbilityIcon v-if="pinAbility" :icon="pinIcon" :size="32" />
+          </div>
+          <v-select
+            v-model="pinAbility"
+            :items="pageOptions"
+            :label="tr('android.pin_page', '页面')"
+            variant="outlined"
+            density="compact"
+            hide-details
+            class="pin-field"
+          />
+          <v-text-field
+            v-model="pinLabel"
+            :label="tr('android.pin_label', '名字')"
+            variant="outlined"
+            density="compact"
+            hide-details
+            class="pin-field"
+            :disabled="!pinAbility"
+          />
+          <v-btn
+            variant="tonal"
+            color="primary"
+            prepend-icon="mdi-cellphone-arrow-down"
+            :disabled="!pinAbility"
+            :loading="pinBusy"
+            @click="pinPage"
+          >
+            {{ tr('android.pin_button', '添加') }}
+          </v-btn>
+        </div>
+        <p v-if="pinMsg" class="text-caption">{{ pinMsg }}</p>
+      </template>
+
       <div class="d-flex flex-wrap ga-2">
         <v-btn variant="tonal" prepend-icon="mdi-swap-horizontal" @click="switchHost">
           {{ tr('android.switch_host', '切换宿主') }}
@@ -94,6 +184,19 @@ function switchHost(): void {
 </template>
 
 <style scoped>
+.pin-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: rgb(var(--v-theme-primary));
+}
+.pin-field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
 .info-grid {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
