@@ -32,6 +32,8 @@ setInterval(() => {
   // 自己也停了一大段：整个进程被系统暂停过（记下来给主线程恢复后判断）
   if (gap > 20) Atomics.store(shared, ${WORKER_GAP}, Math.max(Atomics.load(shared, ${WORKER_GAP}), gap))
   const stuck = t - Atomics.load(shared, ${MAIN_BEAT})
+  // 看门狗自己这一拍也是刚从停顿里醒来（整个进程被暂停过）：主线程还没来得及跳，不算卡住
+  if (gap > 20) return
   if (stuck > 150) {
     if (t - reportedAt >= 300) {
       reportedAt = t
