@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { AssistantTurn, ProcessItem } from './turns'
 import { processItems, summarizeArgs } from './turns'
@@ -32,6 +32,48 @@ const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 
 const open = ref(false)
+
+/**
+ * 展开 / 收起：预览和完整过程共用一个容器，只对容器高度做一次过渡（旧高度 → 新高度），
+ * 新内容淡入。以前两个 v-expand-transition 同时跑（预览收起、过程展开），过程从预览下面
+ * 长出来再跳上去，还要同时量两块的高度，手机上一卡一卡。
+ */
+const swapEl = ref<HTMLElement | null>(null)
+let swapEnd: (() => void) | null = null
+watch(
+  open,
+  () => {
+    const el = swapEl.value
+    if (!el || document.documentElement.classList.contains('motion-off')) return
+    swapEnd?.()
+    const from = el.getBoundingClientRect().height
+    void nextTick(() => {
+      const to = el.scrollHeight
+      if (Math.abs(to - from) < 1) return
+      el.style.height = `${from}px`
+      el.style.overflow = 'hidden'
+      void el.offsetHeight
+      el.classList.add('is-swapping')
+      el.style.height = `${to}px`
+      const done = (): void => {
+        el.classList.remove('is-swapping')
+        el.style.height = ''
+        el.style.overflow = ''
+        el.removeEventListener('transitionend', onEnd)
+        clearTimeout(timer)
+        swapEnd = null
+      }
+      const onEnd = (e: TransitionEvent): void => {
+        if (e.target === el && e.propertyName === 'height') done()
+      }
+      const timer = setTimeout(done, 400)
+      el.addEventListener('transitionend', onEnd)
+      swapEnd = done
+    })
+  },
+  { flush: 'pre' }
+)
+onBeforeUnmount(() => swapEnd?.())
 const openDetails = ref<Record<string, boolean>>({})
 
 const items = computed<ProcessItem[]>(() => props.items ?? processItems(props.turn))
@@ -240,10 +282,11 @@ function toolColor(call: ToolCallItem): string | undefined {
       <v-icon icon="mdi-chevron-down" size="18" class="wf-chevron" :class="{ 'is-open': open }" />
     </button>
 
-    <v-expand-transition>
+    <div ref="swapEl" class="wf-swap">
       <div
         v-if="!open && previewRows.length"
-        class="wf-preview"
+        key="preview"
+        class="wf-preview wf-fade"
         role="button"
         tabindex="0"
         :title="t('yaya.wf.expand', '展开过程')"
@@ -279,10 +322,8 @@ function toolColor(call: ToolCallItem): string | undefined {
           </span>
         </p>
       </div>
-    </v-expand-transition>
 
-    <v-expand-transition>
-      <div v-if="open" class="wf-body">
+      <div v-else-if="open" key="body" class="wf-body wf-fade">
         <ol class="wf-timeline">
           <li v-for="item in items" :key="item.key" class="wf-item">
             <span class="wf-dot" :class="`is-${item.rec?.status ?? 'ok'}`" />
@@ -367,7 +408,7 @@ function toolColor(call: ToolCallItem): string | undefined {
           </li>
         </ol>
       </div>
-    </v-expand-transition>
+    </div>
   </div>
 </template>
 
@@ -431,6 +472,17 @@ function toolColor(call: ToolCallItem): string | undefined {
 }
 .wf-chevron.is-open {
   transform: rotate(180deg);
+}
+.wf-swap.is-swapping {
+  transition: height 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+.wf-swap.is-swapping .wf-fade {
+  animation: wf-fade-in 0.24s ease-out both;
+}
+@keyframes wf-fade-in {
+  from {
+    opacity: 0;
+  }
 }
 .wf-body {
   padding: 4px 12px 12px;
