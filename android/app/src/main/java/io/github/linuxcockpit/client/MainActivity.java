@@ -409,7 +409,23 @@ public class MainActivity extends Activity {
             root.removeView(web);
             web.destroy();
         }
-        web = new WebView(this);
+        web = new WebView(this) {
+            /**
+             * 保活开着时，App 切到后台 / 锁屏也让网页以为自己仍然可见。否则 Chromium 会在页面隐藏后
+             * 暂停一切带视频轨的媒体（AIDJ 放 mp4 / mkv 时引擎的 <audio> 也算，几秒后就停了；
+             * 纯音频不受影响），还会降低定时器 / 渲染进程的优先级。网页侧改由 onResume 的 resume 事件
+             * 得知「回到前台」（见 web-shim.ts）。
+             */
+            @Override
+            protected void onWindowVisibilityChanged(int visibility) {
+                if (visibility != View.VISIBLE && prefs.getBoolean("keepAlive", true)) {
+                    super.onWindowVisibilityChanged(View.VISIBLE);
+                    return;
+                }
+                super.onWindowVisibilityChanged(visibility);
+            }
+        };
+        applyRendererPriority();
         // index 0：转圈进度条（createSpinner 加的）永远盖在网页上面
         root.addView(web, 0, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -434,6 +450,16 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         web.setDownloadListener((url, ua, cd, mime, len) -> openExternal(url));
+    }
+
+    /**
+     * 后台时 WebView 的渲染进程默认会被降为可回收 / 可冻结的优先级：页面里的流式会话停住、事件流断开。
+     * 保活开着时保持「重要」，且不随界面不可见而放弃；关掉保活则恢复系统默认。
+     */
+    void applyRendererPriority() {
+        if (prefs.getBoolean("keepAlive", true))
+            web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        else web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true);
     }
 
     private class Client extends WebViewClient {
@@ -554,6 +580,7 @@ public class MainActivity extends Activity {
         showLoading(true);
         if (prefs.getBoolean("keepAlive", true)) startKeepAlive();
         else stopService(new Intent(this, KeepAliveService.class));
+        applyRendererPriority();
         new Thread(() -> {
             String err = probe(base, token);
             runOnUiThread(() -> {
@@ -623,6 +650,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         web.onResume();
+        // 网页在后台也「可见」（见 createWebView），收不到 visibilitychange：告诉它回到前台了，
+        // 由它检查事件流是否断过、找回等待中的命令结果
+        if (pageReady) sendEvent("resume", "{}");
     }
 
     @Override
@@ -684,6 +714,7 @@ public class MainActivity extends Activity {
                         runOnUiThread(() -> {
                             if (on) startKeepAlive();
                             else stopService(new Intent(this, KeepAliveService.class));
+                            applyRendererPriority();
                         });
                     }
                     JSONObject o = new JSONObject();
