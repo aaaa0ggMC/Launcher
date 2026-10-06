@@ -25,7 +25,9 @@ import {
   saveYayaConfig
 } from '../../services/config'
 import type { PluginInfo, PluginStatus, PluginTool, YayaPlugin } from '../../services/plugins/types'
-import type { McpServerConfig, McpTransport, YayaConfig } from '../../types'
+import type { McpServerConfig, McpTransport, YayaAssistant, YayaConfig } from '../../types'
+import { getSession } from '../../services/db'
+import { assistantConfig, sessionAssistantId } from '../../assistants'
 
 const PLUGIN_ID = 'plugins'
 /** 单个插件 docs 的返回上限 */
@@ -99,11 +101,6 @@ function transportOf(raw: unknown, fallback: McpTransport): McpTransport {
   return fallback
 }
 
-/** 插件 id (`mcp-<id>`) → 服务器 id；不是 MCP 插件时返回 null */
-function mcpServerIdOf(pluginId: string): string | null {
-  return pluginId.startsWith('mcp-') ? pluginId.slice(4) : null
-}
-
 /** 给模型看的 MCP 服务器视图（不含请求头值） */
 function serverView(server: McpServerConfig): Record<string, unknown> {
   return {
@@ -134,6 +131,25 @@ function pluginView(plugin: PluginInfo): Record<string, unknown> {
       approval: tool.approval ?? tool.defaultApproval
     }))
   }
+}
+
+/** 本次对话的助手 id（启用状态按它读、改也改它自己的） */
+function assistantIdOf(sessionId: string): string {
+  return sessionAssistantId(getSession(sessionId))
+}
+
+/** 本次对话的生效配置（助手叠加到全局上） */
+function sessionConfig(sessionId: string): YayaConfig {
+  return assistantConfig(loadYayaConfig(), assistantIdOf(sessionId))
+}
+
+/**
+ * 启用开关写到哪：本次对话的助手（MCP 地址、Skill 目录等其余配置仍是全局的）。
+ * 配置里没有助手（不会发生，读配置时会迁移出一个）时退回全局字段。
+ */
+function enableTarget(next: YayaConfig, sessionId: string): YayaAssistant | YayaConfig {
+  const id = assistantIdOf(sessionId)
+  return next.assistants?.find((a) => a.id === id) ?? next.assistants?.[0] ?? next
 }
 
 /**
@@ -195,7 +211,7 @@ const tools: PluginTool[] = [
     run: async (args, ctx) => {
       ctx.signal.throwIfAborted()
       const id = str(args.id).trim()
-      const all = listPluginInfo(loadYayaConfig())
+      const all = listPluginInfo(sessionConfig(ctx.sessionId))
       if (!id) return { count: all.length, plugins: all.map(pluginView) }
       const found = all.find((p) => p.id === id)
       if (!found) {
@@ -234,7 +250,7 @@ const tools: PluginTool[] = [
         )
       }
       const config = loadYayaConfig()
-      if (!listPluginInfo(config).some((p) => p.id === id)) {
+      if (!listPluginInfo(sessionConfig(ctx.sessionId)).some((p) => p.id === id)) {
         return fail(te('yaya.plugin.plugins.err_unknown_plugin', { id }, `插件不存在：${id}`))
       }
       const denied = await guardOrFail(
@@ -243,12 +259,10 @@ const tools: PluginTool[] = [
       )
       if (denied) return denied
 
+      // 只改本次对话这个助手的开关：别的助手不受影响
       const next = clone(config)
-      next.pluginEnabled = { ...(next.pluginEnabled ?? {}), [id]: enabled }
-      // MCP 服务器的启用态与它的插件停用保持一致（设置页的开关就是这么做的）
-      const serverId = mcpServerIdOf(id)
-      const server = serverId ? next.mcpServers.find((m) => m.id === serverId) : undefined
-      if (server) server.enabled = enabled
+      const target = enableTarget(next, ctx.sessionId)
+      target.pluginEnabled = { ...(target.pluginEnabled ?? {}), [id]: enabled }
       return applyConfig(next)
     }
   },
@@ -272,7 +286,7 @@ const tools: PluginTool[] = [
       const enabled = bool(args.enabled, true)
       if (!wireName) return fail(t('yaya.plugin.plugins.err_need_tool', '缺少工具 wire name'))
       const config = loadYayaConfig()
-      const all = listPluginInfo(config)
+      const all = listPluginInfo(sessionConfig(ctx.sessionId))
       const owner = all.find((p) => p.tools.some((tool) => tool.wireName === wireName))
       if (!owner) {
         return fail(
@@ -294,10 +308,11 @@ const tools: PluginTool[] = [
       if (denied) return denied
 
       const next = clone(config)
-      const off = new Set(next.disabledTools ?? [])
+      const target = enableTarget(next, ctx.sessionId)
+      const off = new Set(target.disabledTools ?? [])
       if (enabled) off.delete(wireName)
       else off.add(wireName)
-      next.disabledTools = [...off].sort()
+      target.disabledTools = [...off].sort()
       return applyConfig(next)
     }
   },
@@ -494,9 +509,12 @@ const tools: PluginTool[] = [
       const next = clone(config)
       next.mcpServers = (next.mcpServers ?? []).filter((m) => m.id !== id)
       const pluginKey = `mcp-${sanitizeServerId(id)}`
-      const overrides = { ...(next.pluginEnabled ?? {}) }
-      delete overrides[pluginKey]
-      next.pluginEnabled = overrides
+      // 服务器没了：默认值和每个助手里它的开关都清掉
+      for (const target of [next, ...(next.assistants ?? [])]) {
+        const overrides = { ...(target.pluginEnabled ?? {}) }
+        delete overrides[pluginKey]
+        target.pluginEnabled = overrides
+      }
       return { ...applyConfig(next), id }
     }
   },
@@ -532,7 +550,7 @@ const tools: PluginTool[] = [
     run: async (_args, ctx) => {
       ctx.signal.throwIfAborted()
       const config = loadYayaConfig()
-      const all = listPluginInfo(config)
+      const all = listPluginInfo(sessionConfig(ctx.sessionId))
       const skills = all
         .filter((p) => p.kind === 'skill' && p.id !== 'skills')
         .map((p) => ({ id: p.id, name: p.label, description: p.description, enabled: p.enabled }))

@@ -12,6 +12,8 @@ defineOptions({ name: 'cockpit-yaya-settings-policy' })
 
 const props = defineProps<{
   config: YayaConfig
+  /** 某个助手的执行策略页：不显示界面显示类的全局设置（过程卡片预览步数） */
+  assistantScope?: boolean
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -48,6 +50,14 @@ function onPreviewSteps(v: number | null): void {
 
 <template>
   <div class="section-page d-flex flex-column ga-2">
+    <div v-if="!assistantScope" class="text-caption text-medium-emphasis mb-2">
+      {{
+        t(
+          'yaya.settings.policy_defaults_note',
+          '工具确认与最大步数是新建助手的默认值；已有的助手在「助手 → 执行策略」里各自设置。'
+        )
+      }}
+    </div>
     <div class="text-caption text-medium-emphasis mb-2">
       {{ t('yaya.settings.policy_desc', '控制工具调用的确认方式与单次任务的思考步数') }}
     </div>
@@ -101,7 +111,7 @@ function onPreviewSteps(v: number | null): void {
       @keydown.enter.prevent="commitSteps"
     />
 
-    <div class="mt-6">
+    <div v-if="!assistantScope" class="mt-6">
       <div class="d-flex align-center ga-3">
         <span class="text-body-2 font-weight-medium">
           {{ t('yaya.settings.preview_steps', '收起时显示最近几步') }}

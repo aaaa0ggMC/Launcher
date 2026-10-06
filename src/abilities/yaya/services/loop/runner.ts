@@ -37,6 +37,7 @@ import {
   updateSession
 } from '../db'
 import { loadYayaConfig, normalizeAssistantName, resolveSystemPrompt } from '../config'
+import { assistantConfig, sessionAssistantId } from '../../assistants'
 import { collectPromptVars, type PromptVar } from '../prompt-vars'
 import { normalizeProfile } from '../../profile'
 import { saveAsset } from '../assets'
@@ -850,7 +851,7 @@ export class WorkflowRunner {
 
       const start = Date.now()
       // 插件数据流钩子（SecretPlugin 等）：参数在执行前变换，结果在入库前变换
-      const cfg = loadYayaConfig()
+      const cfg = assistantConfig(loadYayaConfig(), sessionAssistantId(this.session))
       const scrub = <T>(value: T): T =>
         applyToolResultHooks(this.ctx.sessionId, call.name, value, cfg)
       touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', undefined, call.name)

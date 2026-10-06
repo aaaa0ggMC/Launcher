@@ -20,6 +20,7 @@ import type {
   ApprovalScope,
   MessageAttachment,
   ReasoningEffort,
+  YayaAssistant,
   YayaConfig,
   WorkflowInfo
 } from './types'
@@ -37,7 +38,15 @@ import SelectTextDialog from './components/SelectTextDialog.vue'
 import type { TreeTurn } from './types'
 import type { ContextState } from './services/context'
 import ContextMarker from './components/ContextMarker.vue'
+import AvatarBadge from './components/AvatarBadge.vue'
+import { modelMonogram } from './profile'
 import { ensurePluginMap } from './components/plugin-ui-registry'
+import {
+  assistantConfig,
+  DEFAULT_ASSISTANT_ID,
+  findAssistant,
+  sessionAssistantId
+} from './assistants'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
 defineOptions({ name: 'cockpit-yaya-view' })
@@ -46,7 +55,8 @@ const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 const settings = useSettings()
 
-const config = ref<YayaConfig | null>(null)
+/** 原始配置（含助手列表）；页面读的 `config` 是当前会话的助手叠加后的生效配置 */
+const rawConfig = ref<YayaConfig | null>(null)
 const sessions = ref<Session[]>([])
 /** null = 新对话草稿（首次发送 / 添加附件时才真正创建会话，避免空会话堆积） */
 const activeSessionId = ref<string | null>(null)
@@ -172,6 +182,19 @@ const scrimStyle = computed(() =>
 watch([drawerOpen, wide], resetDrawerSwipe)
 
 // ---- 派生状态 ----
+const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
+/** 当前会话的助手；新对话 = 活动助手 */
+const currentAssistantId = computed(() =>
+  activeSession.value
+    ? sessionAssistantId(activeSession.value)
+    : rawConfig.value?.activeAssistantId || DEFAULT_ASSISTANT_ID
+)
+const currentAssistant = computed(() =>
+  rawConfig.value ? findAssistant(rawConfig.value, currentAssistantId.value) : undefined
+)
+const config = computed<YayaConfig | null>(() =>
+  rawConfig.value ? assistantConfig(rawConfig.value, currentAssistantId.value) : null
+)
 const assistantName = computed(() => config.value?.assistantName?.trim() || 'YAYA')
 
 // 外壳 App bar 标题 / 侧栏条目跟随助手名（默认名就恢复能力原名）
@@ -180,7 +203,6 @@ const setShellTitle = inject<(id: string, title: string | null) => void>(
   () => {}
 )
 watch(assistantName, (name) => setShellTitle('yaya', name === 'YAYA' ? null : name))
-const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
 /** 上下文管理的切点（设置里关掉时不显示） */
 const contextBoundary = computed<ContextState | null>(() => {
   if (!config.value?.context?.mode || config.value.context.mode === 'off') return null
@@ -333,7 +355,7 @@ async function scrollToBottom(force = false): Promise<void> {
 // ---- 数据加载 ----
 async function loadConfig(): Promise<void> {
   try {
-    config.value = (await window.cockpit.command('yaya.config-get')) as YayaConfig
+    rawConfig.value = (await window.cockpit.command('yaya.config-get')) as YayaConfig
   } catch (e) {
     console.error('[yaya] load config failed', e)
   }
@@ -578,6 +600,31 @@ async function selectSession(id: string): Promise<void> {
   void scrollToBottom(true)
 }
 
+function assistantAvatar(a: YayaAssistant): {
+  image: string
+  monogram: { text: string; hue: number } | null
+} {
+  const mode = a.profile?.assistantAvatarMode
+  return {
+    image: mode === 'custom' ? a.profile?.assistantAvatar || '' : '',
+    monogram:
+      mode === 'model' ? modelMonogram(a.activeModel || rawConfig.value?.activeModel || '') : null
+  }
+}
+
+/**
+ * 切换助手：记成新对话默认用的助手，并开一个新对话
+ * （对话一旦开始就固定用它的助手，旧对话不受影响）
+ */
+async function switchAssistant(id: string): Promise<void> {
+  if (!rawConfig.value) return
+  if (activeSession.value) newChat()
+  if (rawConfig.value.activeAssistantId !== id) {
+    rawConfig.value.activeAssistantId = id
+    await saveConfig()
+  }
+}
+
 function newChat(): void {
   drawerOpen.value = false
   activeSessionId.value = null
@@ -593,6 +640,7 @@ async function ensureSession(): Promise<string> {
   if (activeSessionId.value) return activeSessionId.value
   const s = (await window.cockpit.command('yaya.session-create', {
     title: t('yaya.new_chat', '新对话'),
+    assistant: currentAssistantId.value,
     model: config.value?.activeModel,
     provider: config.value?.activeProviderId,
     workflow: draftWorkflow.value || undefined,
@@ -901,26 +949,27 @@ async function handleModelSelect(payload: { model: string; providerId: string })
       s.providerId = providerId
     }
   }
-  // 同时作为之后新对话的默认模型
-  if (config.value) {
-    config.value.activeModel = model
-    config.value.activeProviderId = providerId
+  // 同时作为这个助手之后新对话的模型
+  const assistant = currentAssistant.value
+  if (assistant) {
+    assistant.activeModel = model
+    assistant.activeProviderId = providerId
     await saveConfig()
   }
 }
 
 async function handleAddCustomModel(payload: { model: string; providerId: string }): Promise<void> {
-  const provider = config.value?.providers.find((p) => p.id === payload.providerId)
+  const provider = rawConfig.value?.providers.find((p) => p.id === payload.providerId)
   if (!provider || provider.models.includes(payload.model)) return
   provider.models.push(payload.model)
   await saveConfig()
 }
 
 async function saveConfig(): Promise<void> {
-  if (!config.value) return
+  if (!rawConfig.value) return
   try {
     await window.cockpit.command('yaya.config-save', {
-      config: JSON.parse(JSON.stringify(config.value))
+      config: JSON.parse(JSON.stringify(rawConfig.value))
     })
   } catch (e) {
     showNotice(errText(e), true)
@@ -1178,7 +1227,7 @@ onMounted(async () => {
       runningIds.value = (payload as { sessionIds: string[] }).sessionIds
     }),
     window.cockpit.on('cockpit:yaya-config-changed', (payload: unknown) => {
-      config.value = payload as YayaConfig
+      rawConfig.value = payload as YayaConfig
     }),
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()
@@ -1286,7 +1335,41 @@ watch(isRunning, (now, before) => {
         </v-btn>
 
         <div class="title-block">
-          <div class="assistant-name">{{ assistantName }}</div>
+          <!-- 点助手名切换助手（新对话用它；当前对话已有内容时开一个新对话） -->
+          <v-menu location="bottom start" :close-on-content-click="true">
+            <template #activator="{ props: menuProps }">
+              <button
+                v-bind="menuProps"
+                type="button"
+                class="assistant-switch"
+                :title="t('yaya.assistants.switch', '切换助手')"
+                :aria-label="`${t('yaya.assistants.switch', '切换助手')}: ${assistantName}`"
+              >
+                <span class="assistant-name">{{ assistantName }}</span>
+                <v-icon icon="mdi-chevron-down" size="18" class="flex-shrink-0" />
+              </button>
+            </template>
+            <v-list density="compact" min-width="220" max-width="320" class="py-1 yaya-pop">
+              <v-list-item
+                v-for="a in rawConfig?.assistants ?? []"
+                :key="a.id"
+                :active="a.id === currentAssistantId"
+                color="primary"
+                @click="switchAssistant(a.id)"
+              >
+                <template #prepend>
+                  <AvatarBadge v-bind="assistantAvatar(a)" :size="28" class="mr-3" />
+                </template>
+                <v-list-item-title>{{ a.assistantName }}</v-list-item-title>
+              </v-list-item>
+              <v-divider class="my-1" />
+              <v-list-item
+                prepend-icon="mdi-account-cog-outline"
+                :title="t('yaya.assistants.manage', '管理助手')"
+                @click="settings.open('yaya')"
+              />
+            </v-list>
+          </v-menu>
           <div class="session-title text-medium-emphasis" :title="sessionTitle">
             {{ sessionTitle }}
           </div>
@@ -1729,7 +1812,22 @@ watch(isRunning, (now, before) => {
   min-width: 0;
   padding-left: 4px;
 }
+.assistant-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 6px 0 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+.assistant-switch:hover {
+  background: rgba(var(--v-theme-on-surface), 0.06);
+}
 .assistant-name {
+  min-width: 0;
   font-weight: 700;
   font-size: 1.05rem;
   line-height: 1.3;

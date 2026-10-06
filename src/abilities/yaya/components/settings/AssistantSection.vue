@@ -15,6 +15,8 @@ defineOptions({ name: 'cockpit-yaya-settings-assistant' })
 const props = defineProps<{
   /** 同一个 reactive 配置对象，子组件直接改字段，无需 emit */
   config: YayaConfig
+  /** 某个助手的「提示词」页：只要系统提示词和变量（名字在基本设置页，形象 / 上下文各有一页） */
+  promptOnly?: boolean
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -57,11 +59,17 @@ async function insertVar(key: string): Promise<void> {
 
 <template>
   <div class="section-page d-flex flex-column ga-4">
-    <div class="text-caption text-medium-emphasis">
-      {{ t('yaya.settings.assistant_desc', '配置助手的显示名称与默认系统提示词') }}
+    <div v-if="!promptOnly" class="text-caption text-medium-emphasis">
+      {{
+        t(
+          'yaya.settings.defaults_desc',
+          '这里是新建助手时的初始设置（名称、提示词、助手形象、上下文）。已有的助手在「助手」里各自修改；你的名字和头像对所有助手生效。'
+        )
+      }}
     </div>
 
     <v-text-field
+      v-if="!promptOnly"
       v-model="config.assistantName"
       :label="t('yaya.settings.assistant_name', '助手名称')"
       :placeholder="t('yaya.settings.assistant_name_placeholder', 'YAYA')"
@@ -81,14 +89,10 @@ async function insertVar(key: string): Promise<void> {
       ref="promptField"
       v-model="config.systemPrompt"
       :label="t('yaya.settings.system_prompt', '系统提示词')"
-      :hint="
-        t(
-          'yaya.settings.system_prompt_hint',
-          '所有新会话的默认提示词，可以插入下面的变量，发送时替换成实际值'
-        )
-      "
+      :hint="t('yaya.settings.system_prompt_hint', '可以插入下面的变量，发送时替换成实际值')"
       variant="outlined"
-      rows="3"
+      :rows="promptOnly ? 8 : 3"
+      auto-grow
       persistent-hint
     />
 
@@ -117,11 +121,13 @@ async function insertVar(key: string): Promise<void> {
       </div>
     </div>
 
-    <v-divider />
-    <ProfileSection :config="config" />
+    <template v-if="!promptOnly">
+      <v-divider />
+      <ProfileSection :config="config" />
 
-    <v-divider />
-    <ContextSection :config="config" />
+      <v-divider />
+      <ContextSection :config="config" />
+    </template>
   </div>
 </template>
 

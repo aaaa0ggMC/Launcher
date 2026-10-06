@@ -197,6 +197,35 @@ export interface YayaProfile {
   assistantNameVisible?: boolean
 }
 
+/**
+ * 一个助手：名字 / 头像 / 系统提示词 / 模型 / 插件与 MCP 开关 / 工具审批 / 上下文等「人设」相关的设置。
+ * 字段名与 YayaConfig 同名，运行时叠加到全局配置上（见 assistants.ts 的 `assistantConfig`）。
+ * 全局配置里的同名字段 = 新建助手时的默认值。
+ */
+export interface YayaAssistant {
+  id: string
+  createdAt: number
+  assistantName: string
+  systemPrompt: string
+  /** 空 = 跟随「默认模型」 */
+  activeProviderId?: string
+  activeModel?: string
+  defaultWorkflow?: string
+  reasoningEffort?: ReasoningEffort
+  autoApproveTools: boolean
+  maxLoopSteps: number
+  pluginEnabled?: Record<string, boolean>
+  pluginGroupEnabled?: Record<string, boolean>
+  disabledTools?: string[]
+  toolApproval?: Record<string, ToolApprovalMode>
+  context?: import('./services/context').ContextConfig
+  /** 只有助手那一半（头像 / 署名 / 名字是否告诉 AI）；你的名字和头像是全局的 */
+  profile?: Pick<
+    YayaProfile,
+    'assistantAvatar' | 'assistantAvatarMode' | 'assistantLabel' | 'assistantNameVisible'
+  >
+}
+
 export interface YayaConfig {
   /** 助手显示名（页面顶部 / 消息署名 / 系统提示词里的 {name}），默认 YAYA */
   assistantName: string
@@ -245,6 +274,10 @@ export interface YayaConfig {
   mcpServers: McpServerConfig[]
   headlessPort?: number
   headlessHost?: string
+  /** 助手列表（至少一个；旧配置读取时用上面的全局字段生成 id = default 的第一个助手） */
+  assistants?: YayaAssistant[]
+  /** 新会话默认用的助手 */
+  activeAssistantId?: string
 }
 
 export type LoopEvent =

@@ -12,6 +12,7 @@ import type { McpServerConfig, ProviderConfig, YayaConfig } from '../types'
 import { applyPromptVars, type PromptVar } from './prompt-vars'
 import { normalizeProfile } from '../profile'
 import { normalizeContextConfig } from './context'
+import { normalizeAssistants } from '../assistants'
 
 const log = makeLogger('yaya-config')
 
@@ -83,6 +84,7 @@ export function loadYayaConfig(): YayaConfig {
   const file = getYayaConfigPath()
   if (!existsSync(file)) {
     cachedConfig = structuredClone(DEFAULT_YAYA_CONFIG)
+    normalizeAssistants(cachedConfig)
     saveYayaConfig(cachedConfig)
     return cachedConfig
   }
@@ -103,6 +105,7 @@ export function loadYayaConfig(): YayaConfig {
     cfg.processPreviewSteps = normalizeProcessPreviewSteps(cfg.processPreviewSteps)
     cfg.profile = normalizeProfile(cfg.profile)
     cfg.context = normalizeContextConfig(cfg.context)
+    normalizeAssistants(cfg)
     // 仅传输字段不该出现在内存配置里（旧版本可能落过盘）
     delete cfg.pluginSecretsSet
     delete cfg.pluginClearSecrets
@@ -154,6 +157,7 @@ export function loadYayaConfig(): YayaConfig {
   } catch (err) {
     log.error('Failed to read YAYA config, using defaults', { error: String(err) })
     cachedConfig = structuredClone(DEFAULT_YAYA_CONFIG)
+    normalizeAssistants(cachedConfig)
     return cachedConfig
   }
 }
@@ -424,6 +428,12 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
   next.processPreviewSteps = normalizeProcessPreviewSteps(next.processPreviewSteps)
   next.profile = normalizeProfile(next.profile)
   next.context = normalizeContextConfig(next.context)
+  // 没带助手列表的提交（旧页面）不能把已有助手清掉
+  if (!Array.isArray(incoming.assistants)) {
+    next.assistants = current.assistants
+    next.activeAssistantId ??= current.activeAssistantId
+  }
+  normalizeAssistants(next)
   next.providers = (next.providers ?? []).map((p) => {
     const prev = current.providers.find((c) => c.id === p.id)
     let apiKey = p.apiKey
