@@ -13,7 +13,7 @@
  *   每步开始、每次工具调用前过暂停闸门；
  * - 组装历史时修复悬空的 tool_calls（打断后缺结果的调用补一条「已中断」），打断不需要回滚。
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { normalizeEffort } from '../providers/reasoning'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
@@ -38,6 +38,8 @@ import {
 } from '../db'
 import { loadYayaConfig, normalizeAssistantName, resolveSystemPrompt } from '../config'
 import { collectPromptVars, type PromptVar } from '../prompt-vars'
+import { normalizeProfile } from '../../profile'
+import { saveAsset } from '../assets'
 import {
   applyToolArgsHooks,
   applyToolResultHooks,
@@ -355,6 +357,7 @@ export class WorkflowRunner {
     )
 
     try {
+      await this.prepareAvatar().catch((e) => log.warn('user avatar skipped', { error: String(e) }))
       // 提示词变量（日期 / 时间 / 电量…）整次运行取一次，多步调用之间提示词不变
       this.promptVars = await collectPromptVars(this.rawSystemPrompt, {
         name: normalizeAssistantName(this.ctx.config.assistantName),
@@ -414,7 +417,42 @@ export class WorkflowRunner {
   }
 
   private history(): ProviderMessage[] {
-    return sanitizeHistory(getMessageBranch(this.parentId))
+    const out = sanitizeHistory(getMessageBranch(this.parentId))
+    // 「AI 能看到你的头像」：头像作为图片挂在第一条用户消息上（每次请求都一样，缓存照常命中）
+    const avatar = this.avatarAttachment
+    const first = avatar ? out.find((m) => m.role === 'user') : undefined
+    if (avatar && first) {
+      first.attachments = [avatar, ...(first.attachments ?? [])]
+      first.content = `[The first image is the user's profile picture.]\n\n${first.content}`
+    }
+    return out
+  }
+
+  /** 用户头像在本会话资产里的副本（头像改了才重新存一份） */
+  private avatarAttachment: MessageAttachment | null = null
+
+  private async prepareAvatar(): Promise<void> {
+    const profile = normalizeProfile(this.ctx.config.profile)
+    if (!profile.userAvatarVisible || !profile.userAvatar) return
+    const hash = createHash('sha1').update(profile.userAvatar).digest('hex').slice(0, 16)
+    const meta = this.session?.meta ?? {}
+    const saved = meta.userAvatar as { hash?: string; att?: MessageAttachment } | undefined
+    if (saved?.hash === hash && saved.att) {
+      this.avatarAttachment = saved.att
+      return
+    }
+    const m = profile.userAvatar.match(/^data:(image\/[a-z]+);base64,(.*)$/)
+    if (!m) return
+    const att = await saveAsset(
+      this.ctx.sessionId,
+      'user-avatar',
+      Buffer.from(m[2], 'base64'),
+      m[1]
+    )
+    this.avatarAttachment = att
+    const next = { ...(getSession(this.ctx.sessionId)?.meta ?? {}), userAvatar: { hash, att } }
+    updateSession(this.ctx.sessionId, { meta: next })
+    if (this.session) this.session.meta = next
   }
 
   private get rawSystemPrompt(): string {

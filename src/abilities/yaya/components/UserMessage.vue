@@ -2,7 +2,8 @@
 import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
-import type { MessageNode } from '../types'
+import type { MessageNode, YayaProfile } from '../types'
+import AvatarBadge from './AvatarBadge.vue'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
@@ -15,6 +16,8 @@ const props = defineProps<{
   busy: boolean
   /** 这条消息正载入在底部输入框里编辑（只用来高亮） */
   editing?: boolean
+  /** 形象设置：设了名字 / 头像时在气泡上方显示 */
+  profile?: YayaProfile
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +108,10 @@ function openPreview(id: string): void {
 
 <template>
   <div class="user-msg">
+    <div v-if="profile?.userName || profile?.userAvatar" class="user-head">
+      <span v-if="profile.userName" class="user-name">{{ profile.userName }}</span>
+      <AvatarBadge v-if="profile.userAvatar" :image="profile.userAvatar" :size="24" />
+    </div>
     <div v-if="message.attachments?.length" class="attachments">
       <button
         v-for="att in imageAttachments"
@@ -187,6 +194,21 @@ function openPreview(id: string): void {
 </template>
 
 <style scoped>
+.user-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.86em;
+  opacity: 0.75;
+}
+.user-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .mentions {
   display: flex;
   flex-wrap: wrap;

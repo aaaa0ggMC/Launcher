@@ -13,6 +13,7 @@ import { readConfigLang } from '../../../main/process/i18n'
 
 export const PROMPT_VARS = [
   'name',
+  'user',
   'model',
   'provider',
   'date',

@@ -3,6 +3,7 @@ import { useI18n } from '@ui/i18n'
 import { computed, inject, nextTick, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { YayaConfig } from '../../types'
+import ProfileSection from './ProfileSection.vue'
 
 defineOptions({ name: 'cockpit-yaya-settings-assistant' })
 
@@ -22,6 +23,7 @@ const { t } = useI18n(lang)
 const VARS = computed<{ key: string; token: string; label: string }[]>(() =>
   [
     { key: 'name', label: t('yaya.settings.var_name', '助手名称') },
+    { key: 'user', label: t('yaya.settings.var_user', '你的名字（「形象」里设置）') },
     { key: 'model', label: t('yaya.settings.var_model', '当前模型') },
     { key: 'provider', label: t('yaya.settings.var_provider', '模型服务商') },
     { key: 'date', label: t('yaya.settings.var_date', '日期，如 2026-10-06') },
@@ -113,6 +115,9 @@ async function insertVar(key: string): Promise<void> {
         }}
       </div>
     </div>
+
+    <v-divider />
+    <ProfileSection :config="config" />
   </div>
 </template>
 
