@@ -1284,7 +1284,6 @@ watch(isRunning, (now, before) => {
                 <v-list-item
                   v-bind="groupProps"
                   prepend-icon="mdi-at"
-                  @click="stopEvent"
                   :title="
                     te(
                       'yaya.mention.session_title',
@@ -1292,6 +1291,7 @@ watch(isRunning, (now, before) => {
                       '本对话点名启用（{n}）'
                     )
                   "
+                  @click="stopEvent"
                 />
               </template>
               <v-list-item
