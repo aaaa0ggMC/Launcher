@@ -808,7 +808,9 @@ const hasTrack = computed(() => track.value !== '')
   color: rgb(var(--v-theme-on-surface-variant));
 }
 .track-title {
-  max-width: 560px;
+  /* 居中列里的子项宽度由内容决定，只写 560px 上限时长标题会撑出屏幕、text-truncate 不生效；
+     再限制到父宽 100%，省略号才会出现 */
+  max-width: min(560px, 100%);
 }
 .seek-slider {
   flex: 1 1 auto;
@@ -903,6 +905,16 @@ const hasTrack = computed(() => track.value !== '')
      会被解成一个很小的值（封面变成细长药丸）。所以先让它占满行宽，百分比才有可解析的参照。 */
   .cover-wrap {
     width: 100%;
+  }
+  /* 手机上标题最多两行、居中，超出才省略，比单行截断能多看到一截歌名 */
+  .track-title {
+    white-space: normal !important;
+    text-align: center;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
   }
   .cover-img {
     /* 容器窄于封面时不要溢出；高度用 aspect-ratio 跟随，object-fit: cover 裁切、画面不变形 */
