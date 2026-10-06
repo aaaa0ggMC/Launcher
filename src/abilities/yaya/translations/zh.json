@@ -776,5 +776,15 @@
   "yaya.settings.var_power": "电量与充电状态",
   "yaya.settings.var_language": "界面语言",
   "yaya.settings.var_insert": "插入变量",
-  "yaya.settings.var_hint": "变量在每次运行开始时取值。{time}、{power} 这类会变的变量会让每次运行的提示词都不同，提示词缓存会失效，费用更高。"
+  "yaya.settings.var_hint": "变量在每次运行开始时取值。{time}、{power} 这类会变的变量会让每次运行的提示词都不同，提示词缓存会失效，费用更高。",
+  "yaya.plugin.providers.label": "模型服务商",
+  "yaya.plugin.providers.desc": "让助手查看与配置自己的模型服务商（只能停用，不能删除）",
+  "yaya.plugin.providers.err_need_name": "缺少服务商名称（name）",
+  "yaya.plugin.providers.err_bad_url": "服务商地址只支持 http / https",
+  "yaya.plugin.providers.err_unknown": "服务商不存在：{id}",
+  "yaya.plugin.providers.guard_add": "添加模型服务商：把请求和密钥发往这个地址",
+  "yaya.plugin.providers.guard_credential": "修改模型服务商的地址 / 密钥",
+  "yaya.plugin.providers.guard_config": "修改模型服务商的设置",
+  "yaya.plugin.providers.note_key_cleared": "地址改了但没有给新密钥：已保存的密钥已清除。请向用户要密钥（#Secret），或让用户在设置里填写。",
+  "yaya.plugin.providers.note_disabled_active": "这是当前正在用的服务商。停用后它会从模型选择里消失；已经在用它的对话会继续使用，直到用户换模型。"
 }

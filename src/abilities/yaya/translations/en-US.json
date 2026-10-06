@@ -776,5 +776,15 @@
   "yaya.settings.var_power": "Battery level and charging state",
   "yaya.settings.var_language": "UI language",
   "yaya.settings.var_insert": "Insert variable",
-  "yaya.settings.var_hint": "Variables are filled in when each run starts. Changing ones like {time} or {power} make the prompt differ on every run, so prompt caching stops working and costs more."
+  "yaya.settings.var_hint": "Variables are filled in when each run starts. Changing ones like {time} or {power} make the prompt differ on every run, so prompt caching stops working and costs more.",
+  "yaya.plugin.providers.label": "Model providers",
+  "yaya.plugin.providers.desc": "Lets the assistant view and configure its own model providers (disable only, never delete)",
+  "yaya.plugin.providers.err_need_name": "Missing provider name (name)",
+  "yaya.plugin.providers.err_bad_url": "Provider URLs must be http or https",
+  "yaya.plugin.providers.err_unknown": "No such provider: {id}",
+  "yaya.plugin.providers.guard_add": "Add a model provider: requests and the API key will be sent to this address",
+  "yaya.plugin.providers.guard_credential": "Change a model provider’s address / API key",
+  "yaya.plugin.providers.guard_config": "Change model provider settings",
+  "yaya.plugin.providers.note_key_cleared": "Base URL changed without a new key: the stored API key was cleared. Ask the user for a key (#Secret) or let them enter it in settings.",
+  "yaya.plugin.providers.note_disabled_active": "This is the active provider. Disabled providers disappear from the model picker; conversations already using it keep it until the user picks another model."
 }
