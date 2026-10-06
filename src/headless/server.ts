@@ -46,6 +46,94 @@ const MIME: Record<string, string> = {
 }
 
 const clients = new Set<ServerResponse>()
+
+/**
+ * 广播帧补发：每帧带 `id: <进程纪元>-<序号>`，最近一段留在内存里。手机切后台 / 换网络后事件流断开，
+ * 页面重连时带上最后收到的 id，这里把期间错过的帧原样补上（流式 token、工作流进度、播放指令都不丢）；
+ * 补不上（太久、宿主重启过）时在 hello 帧里说明，页面再整体重新拉取状态。
+ */
+const EPOCH = randomBytes(4).toString('hex')
+let eventSeq = 0
+const backlog: { seq: number; frame: string }[] = []
+let backlogBytes = 0
+const BACKLOG_MAX_FRAMES = 5000
+const BACKLOG_MAX_BYTES = 8 * 1024 * 1024
+/** 还没有任何页面连过就不攒（纯命令行用的宿主不必为广播付内存） */
+let everHadClient = false
+/**
+ * 单个连接积压的未发出字节上限：对端冻结（后台 WebView）或半开时 write 只会在内存里越堆越多。
+ * 超过就断开它——页面回来重连时按 id 补发，比在宿主里无限堆积安全。
+ */
+const SSE_MAX_PENDING_BYTES = 4 * 1024 * 1024
+
+function writeSse(res: ServerResponse, frame: string): void {
+  if (res.writableEnded || res.destroyed) return
+  if (res.writableLength > SSE_MAX_PENDING_BYTES) {
+    log.warn('event stream stalled, dropping client', { pending: res.writableLength })
+    clients.delete(res)
+    res.destroy()
+    return
+  }
+  res.write(frame)
+}
+
+function remember(frame: string): void {
+  backlog.push({ seq: eventSeq, frame })
+  backlogBytes += frame.length
+  while (backlog.length > BACKLOG_MAX_FRAMES || backlogBytes > BACKLOG_MAX_BYTES) {
+    backlogBytes -= backlog.shift()!.frame.length
+  }
+}
+
+/** `<纪元>-<序号>` → 需要补发的帧；null = 补不上（纪元不同 / 已被挤出缓冲） */
+function replayAfter(lastId: string): string[] | null {
+  const m = /^([0-9a-f]{8})-(\d+)$/.exec(lastId)
+  if (!m || m[1] !== EPOCH) return null
+  const after = Number(m[2])
+  if (after > eventSeq) return null
+  if (after === eventSeq) return []
+  const first = backlog[0]?.seq ?? eventSeq + 1
+  if (after + 1 < first) return null
+  return backlog.filter((f) => f.seq > after).map((f) => f.frame)
+}
+
+/**
+ * 命令结果暂存：长命令（aidj.generate 等，一跑几分钟）的 HTTP 连接在手机切后台时可能断掉，
+ * 宿主照样跑完，但结果写进了一个死连接。页面给每次调用带 reqId，拿不到响应时用
+ * /api/command-result 取回。完成后保留一段时间。
+ */
+const REQ_ID_RE = /^[0-9a-z-]{8,64}$/i
+const COMMAND_RESULT_TTL_MS = 15 * 60 * 1000
+const COMMAND_RESULT_MAX = 200
+const COMMAND_RESULT_MAX_BYTES = 8 * 1024 * 1024
+const commandResults = new Map<string, { done: boolean; body?: string; at: number }>()
+
+function pruneCommandResults(): void {
+  const now = Date.now()
+  for (const [id, r] of commandResults) {
+    if (r.done && now - r.at > COMMAND_RESULT_TTL_MS) commandResults.delete(id)
+  }
+  if (commandResults.size <= COMMAND_RESULT_MAX) return
+  for (const [id, r] of commandResults) {
+    if (commandResults.size <= COMMAND_RESULT_MAX) break
+    if (r.done) commandResults.delete(id)
+  }
+}
+
+function sendCommandResult(res: ServerResponse, reqId: string | null, payload: unknown): void {
+  const body = JSON.stringify(payload)
+  if (reqId) {
+    commandResults.set(reqId, {
+      done: true,
+      body: body.length <= COMMAND_RESULT_MAX_BYTES ? body : undefined,
+      at: Date.now()
+    })
+    pruneCommandResults()
+  }
+  if (res.destroyed || res.writableEnded) return
+  res.writeHead(200, { 'content-type': 'application/json' })
+  res.end(body)
+}
 /** 浏览器 UI 桥 clientId → 当前持有它的 SSE 连接（重连时新连接顶替旧连接） */
 const bridgeOwners = new Map<string, ServerResponse>()
 
@@ -129,19 +217,19 @@ async function serveProtocol(req: IncomingMessage, res: ServerResponse): Promise
   r.headers.forEach((val, key) => (out[key] = val))
   res.writeHead(r.status, out)
   if (!r.body) return void res.end()
-  const body = Readable.fromWeb(r.body as never)
-  req.on('close', () => body.destroy())
-  body.on('error', () => res.destroy())
-  body.pipe(res)
+  // pipeline：客户端中途断开（切歌、拖动、切后台）时两端都销毁，文件句柄不泄漏
+  await pipeline(Readable.fromWeb(r.body as never), res).catch(() => {})
 }
 
 /** broadcast(channel, ...args) → 所有 SSE 客户端 */
 export function pushEvent(channel: string, ...args: unknown[]): void {
-  if (!clients.size) return
+  if (!everHadClient) return
   // 广播载荷里同样可能带 cockpit-*:// 地址（如 aidj 的 cockpit:aidj-webplayer 里的 audioUrl），
   // 和命令返回值一样要改写成 /_p/ 路由，否则浏览器的 <audio> / <img> 加载不了
-  const frame = `data: ${JSON.stringify({ channel, args: rewriteUrls(args) })}\n\n`
-  for (const res of clients) res.write(frame)
+  eventSeq++
+  const frame = `data: ${JSON.stringify({ channel, args: rewriteUrls(args) })}\nid: ${EPOCH}-${eventSeq}\n\n`
+  remember(frame)
+  for (const res of clients) writeSse(res, frame)
 }
 
 function authorized(req: IncomingMessage, url: URL, token: string): boolean {
@@ -204,7 +292,8 @@ function serveStatic(webRoot: string, pathname: string, res: ServerResponse): vo
     'cross-origin-opener-policy': 'same-origin',
     'cross-origin-embedder-policy': 'credentialless'
   })
-  createReadStream(file).pipe(res)
+  // pipeline 而不是 .pipe()：页面加载到一半被打断时 .pipe() 不会关掉读流，文件句柄会一直漏
+  pipeline(createReadStream(file), res).catch(() => {})
 }
 
 export function startServer(opts: {
@@ -271,10 +360,8 @@ export function startServer(opts: {
         return json(res, 400, { ok: false, error: 'invalid clientId' })
       }
       if (bridgeId) {
-        const send = (channel: string, args: unknown[]): void => {
-          if (res.writableEnded || res.destroyed) return
-          res.write(`data: ${JSON.stringify({ channel, args })}\n\n`)
-        }
+        const send = (channel: string, args: unknown[]): void =>
+          writeSse(res, `data: ${JSON.stringify({ channel, args })}\n\n`)
         // EventSource 断线后会用同一个 clientId 自动重连，此时旧连接的 close 可能还没触发：
         // 新连接顶替旧连接（同 token 才能走到这里），绝不能回 409——浏览器收到非 200 会永久放弃重连
         const old = bridgeOwners.get(bridgeId)
@@ -293,8 +380,21 @@ export function startServer(opts: {
         'x-accel-buffering': 'no'
       })
       req.socket.setNoDelay(true)
-      res.write(': ok\n\n')
+      // 半开连接（对端已消失但没发 FIN/RST）靠 TCP 保活尽快发现
+      req.socket.setKeepAlive(true, 30_000)
+      // 断线重连：EventSource 自动重连带 Last-Event-ID 头，页面手动重建连接带 ?lastEventId=
+      const lastId = String(
+        req.headers['last-event-id'] ?? url.searchParams.get('lastEventId') ?? ''
+      )
+      const replay = lastId ? replayAfter(lastId) : null
+      // hello：告诉页面这次是否接上了（resumed=false 且之前连过 → 页面需要整体重新拉取状态）
+      res.write(`: ok\n\nevent: hello\ndata: ${JSON.stringify({ resumed: replay !== null })}\n\n`)
+      if (replay?.length) {
+        log.info('event stream resumed', { replayed: replay.length })
+        res.write(replay.join(''))
+      } else if (lastId && !replay) log.info('event stream gap, client will resync')
       clients.add(res)
+      everHadClient = true
       // 新连上的页面补发待处理的授权请求（含一次性 nonce，只走 SSE）
       const pendingConsent = pendingConsentFrames()
       if (pendingConsent.length)
@@ -303,8 +403,10 @@ export function startServer(opts: {
         )
       // 具名 ping 事件（注释行 EventSource 读不到）：页面靠它判断连接是否还活着——
       // 手机切后台 / 换网络后 TCP 可能半开，readyState 仍是 OPEN 却再也收不到东西
-      const ping = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15000)
-      req.on('close', () => {
+      const ping = setInterval(() => writeSse(res, 'event: ping\ndata: {}\n\n'), 15000)
+      // 半开 / 被顶替的连接上写失败不能变成未处理的 error 事件
+      res.on('error', () => {})
+      res.on('close', () => {
         clearInterval(ping)
         clients.delete(res)
         // 已被新连接顶替的旧连接关闭时，不能注销新连接
@@ -380,11 +482,28 @@ export function startServer(opts: {
         )
       return
     }
+    if (url.pathname === '/api/command-result' && req.method === 'POST') {
+      readJson(req, 4096)
+        .then((body) => {
+          const id = typeof body.reqId === 'string' ? body.reqId : ''
+          const r = REQ_ID_RE.test(id) ? commandResults.get(id) : undefined
+          if (!r) return json(res, 200, { state: 'unknown' })
+          if (!r.done) return json(res, 200, { state: 'pending' })
+          if (r.body === undefined) return json(res, 200, { state: 'lost' })
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(`{"state":"done","response":${r.body}}`)
+        })
+        .catch(() => json(res, 400, { ok: false, error: 'bad request' }))
+      return
+    }
     if (url.pathname === '/api/command' && req.method === 'POST') {
       readJson(req)
         .then(async (body) => {
           const name = String(body.name ?? '')
           const args = (body.args ?? {}) as Record<string, unknown>
+          const reqId =
+            typeof body.reqId === 'string' && REQ_ID_RE.test(body.reqId) ? body.reqId : null
+          if (reqId) commandResults.set(reqId, { done: false, at: Date.now() })
           log.info(name)
           try {
             // 网页客户端等同于本机 UI（用户来源）；agent 降权标记仍只能降不能升
@@ -397,10 +516,13 @@ export function startServer(opts: {
             const result = await withBrowserClient(browserClientOf(body), () =>
               withOrigin(origin, () => runCommand(name, args))
             )
-            json(res, 200, { ok: true, result: result === undefined ? null : rewriteUrls(result) })
+            sendCommandResult(res, reqId, {
+              ok: true,
+              result: result === undefined ? null : rewriteUrls(result)
+            })
           } catch (err) {
             const unknown = err instanceof UnknownCommandError
-            json(res, 200, {
+            sendCommandResult(res, reqId, {
               ok: false,
               error: err instanceof Error ? err.message : String(err),
               unknown,
@@ -413,11 +535,21 @@ export function startServer(opts: {
     }
     json(res, 404, { ok: false, error: 'not found' })
   })
-  server.on('clientError', (err, socket) => {
-    log.warn('client error', String(err))
-    if (!socket.destroyed) {
-      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+  server.on('clientError', (err: NodeJS.ErrnoException, socket) => {
+    // 对端已经没了（手机切后台 / 断网后连接被系统回收）：EPIPE / ECONNRESET 只是连接死了，
+    // 不是坏请求。直接销毁，不能再往死连接里写 400（那只会再触发一次错误）。
+    if (
+      err.code === 'EPIPE' ||
+      err.code === 'ECONNRESET' ||
+      err.code === 'ETIMEDOUT' ||
+      !socket.writable
+    ) {
+      log.info('client connection lost', { code: err.code ?? String(err), streams: clients.size })
+      socket.destroy()
+      return
     }
+    log.warn('client error', String(err))
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
   })
   return new Promise((resolveP, reject) => {
     server.once('error', reject)

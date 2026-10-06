@@ -59,15 +59,111 @@ function randomClientId(): string {
 }
 const clientId = randomClientId()
 
-async function api<T>(path: string, body?: unknown): Promise<T> {
+async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { ...authHeaders, 'content-type': 'application/json' },
     // clientId 让宿主把本次调用关联到本标签页（YAYA 工作流因此能继续操作这个页面）
-    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), clientId })
+    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), clientId }),
+    signal
   })
   if (res.status === 401) throw new Error('unauthorized: 缺少或错误的 token')
   return (await res.json()) as T
+}
+
+/**
+ * 命令调用，带结果找回。长命令（aidj.generate 一跑几分钟）期间手机切后台 / 换网络，
+ * 承载它的连接可能已经死了：宿主照样跑完，结果却写进了死连接，页面永远等不到（界面卡在「思考中」）。
+ * 所以每次调用带一个 reqId；等得久了、或连接报错时，改用 /api/command-result 向宿主取结果。
+ */
+const RECOVER_AFTER_MS = 20_000
+const RECOVER_EVERY_MS = 10_000
+type CommandReply = {
+  ok: boolean
+  result?: unknown
+  error?: string
+  unknown?: boolean
+  silent?: boolean
+}
+const inflight = new Map<string, () => void>()
+
+function commandCall(body: Record<string, unknown>): Promise<CommandReply> {
+  const reqId = randomClientId()
+  const ctl = new AbortController()
+  return new Promise<CommandReply>((resolve, reject) => {
+    let settled = false
+    let networkError: unknown = null
+    let unknownCount = 0
+    let checking = false
+    const timers: {
+      first?: ReturnType<typeof setTimeout>
+      poll?: ReturnType<typeof setInterval>
+    } = {}
+    const finish = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timers.first)
+      clearInterval(timers.poll)
+      inflight.delete(reqId)
+      fn()
+    }
+    const check = async (): Promise<void> => {
+      if (settled || checking) return
+      checking = true
+      try {
+        // 取结果的请求自己也可能落在死连接上：限时，下一轮重试
+        const r = await api<{ state: string; response?: CommandReply }>(
+          '/api/command-result',
+          { reqId },
+          AbortSignal.timeout(8000)
+        )
+        if (r.state === 'done' && r.response) {
+          ctl.abort()
+          finish(() => resolve(r.response!))
+        } else if (r.state === 'lost') {
+          ctl.abort()
+          finish(() => reject(new Error('命令已完成，但结果太大无法找回（连接中断过）')))
+        } else if (r.state === 'unknown') {
+          // 宿主不认识这个 reqId：请求没送到，或宿主重启过。连着两次才算（请求可能还在路上）
+          if (++unknownCount >= 2 || networkError) {
+            ctl.abort()
+            finish(() =>
+              reject(networkError ?? new Error('与宿主的连接中断，命令结果丢失（宿主可能已重启）'))
+            )
+          }
+        } else unknownCount = 0
+      } catch {
+        /* 宿主暂时连不上：下一轮再问 */
+      } finally {
+        checking = false
+      }
+    }
+    const startPolling = (): void => {
+      if (timers.poll !== undefined || settled) return
+      timers.poll = setInterval(() => void check(), RECOVER_EVERY_MS)
+      void check()
+    }
+    timers.first = setTimeout(startPolling, RECOVER_AFTER_MS)
+    // 页面从后台回来 / 事件流重连时立即问一次（见 recoverInflight）
+    inflight.set(reqId, () => {
+      if (timers.poll === undefined) startPolling()
+      else void check()
+    })
+    api<CommandReply>('/api/command', { ...body, reqId }, ctl.signal).then(
+      (r) => finish(() => resolve(r)),
+      (e) => {
+        if (settled) return
+        // 连接被重置（EPIPE / 切网络）：命令可能仍在宿主上执行或已完成——去取结果
+        networkError = e
+        startPolling()
+      }
+    )
+  })
+}
+
+/** 连接可能刚断过：所有还在等的命令立即去宿主取一次结果 */
+function recoverInflight(): void {
+  for (const kick of inflight.values()) kick()
 }
 
 /** 浏览器 UI 桥用：带鉴权的 POST（自动带上本标签页的 clientId）。 */
@@ -138,6 +234,12 @@ function signalNativeReady(): void {
 }
 // 兜底：没有任何页面监听分享（比如外壳没挂载起来）也别让原生事件永远排队
 if (nativeClient) setTimeout(signalNativeReady, 10_000)
+// App 回到前台（原生 onResume）：检查事件流、找回等待中的命令结果。onResumed 在下面定义，调用时已初始化
+if (nativeClient) {
+  let set = listeners.get('cockpit:client-resume')
+  if (!set) listeners.set('cockpit:client-resume', (set = new Set()))
+  set.add(() => onResumed())
+}
 
 /**
  * 真实用户操作（isTrusted）立即清除 agent 输入标记：之后的命令 / IPC 按用户来源计。
@@ -164,6 +266,8 @@ let es: EventSource | null = null
 let lastFrameAt = Date.now()
 let everOpened = false
 let lostSince = 0
+/** 最后收到的广播帧 id：手动重建连接时带给宿主，补发断线期间错过的帧 */
+let lastEventId = ''
 let retryDelay = 1000
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -171,21 +275,35 @@ function openEvents(): void {
   if (retryTimer) clearTimeout(retryTimer)
   retryTimer = null
   es?.close()
+  const resume = lastEventId ? `&lastEventId=${encodeURIComponent(lastEventId)}` : ''
   const source = new EventSource(
-    `/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}`
+    `/api/events?token=${encodeURIComponent(token)}&clientId=${clientId}${resume}`
   )
   es = source
   lastFrameAt = Date.now()
   source.onopen = () => {
     lastFrameAt = Date.now()
     retryDelay = 1000
+  }
+  // 宿主连上后的第一帧：resumed = 断线期间的广播已按 lastEventId 补发，页面状态是连续的；
+  // 否则（宿主重启过 / 断太久）派发 host-reconnected，各页面整体重新拉取
+  source.addEventListener('hello', (ev) => {
+    lastFrameAt = Date.now()
+    let resumed = false
+    try {
+      resumed = Boolean((JSON.parse((ev as MessageEvent).data) as { resumed?: boolean }).resumed)
+    } catch {
+      /* 旧宿主 */
+    }
     if (everOpened && lostSince) {
-      console.warn(`[web-shim] event stream reconnected after ${Date.now() - lostSince} ms`)
-      emit('cockpit:host-reconnected', { downMs: Date.now() - lostSince })
+      const downMs = Date.now() - lostSince
+      console.warn(`[web-shim] event stream reconnected after ${downMs} ms, resumed=${resumed}`)
+      if (!resumed) emit('cockpit:host-reconnected', { downMs })
+      recoverInflight()
     }
     everOpened = true
     lostSince = 0
-  }
+  })
   source.onerror = () => {
     if (!lostSince) lostSince = Date.now()
     // CONNECTING = 浏览器自己在重连；CLOSED = 它放弃了，由我们接手
@@ -203,14 +321,23 @@ function scheduleReconnect(): void {
   retryDelay = Math.min(retryDelay * 2, 15_000)
 }
 
-function checkStale(): void {
-  if (Date.now() - lastFrameAt < SSE_STALE_MS) return
+function checkStale(staleMs = SSE_STALE_MS): void {
+  if (Date.now() - lastFrameAt < staleMs) return
   if (!lostSince) lostSince = lastFrameAt
   openEvents()
 }
-setInterval(checkStale, 5000)
+setInterval(() => checkStale(), 5000)
+/**
+ * 回到前台：宿主每 15s 发一次 ping，20s 没收到任何帧就说明连接在后台断过，立即重建（带 lastEventId 补帧），
+ * 不再等 45s。安卓 App 保活时页面在后台也保持「可见」（为了视频能在后台继续放），
+ * 收不到 visibilitychange，由原生在 onResume 时发 resume 事件。
+ */
+function onResumed(): void {
+  checkStale(20_000)
+  recoverInflight()
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkStale()
+  if (document.visibilityState === 'visible') onResumed()
 })
 window.addEventListener('online', () => {
   if (es?.readyState !== EventSource.OPEN) openEvents()
@@ -233,6 +360,7 @@ function onConsentFrame(raw: unknown): Record<string, unknown>[] {
 
 function onEventFrame(ev: MessageEvent): void {
   lastFrameAt = Date.now()
+  if (ev.lastEventId) lastEventId = ev.lastEventId
   try {
     const { channel, args } = JSON.parse(ev.data) as { channel: string; args: unknown[] }
     if (channel === 'privacy:pending') {
@@ -278,13 +406,7 @@ const cockpit = createCockpit({
     switch (channel) {
       case 'command:run': {
         const [name, cmdArgs, meta] = args as [string, Record<string, unknown>, unknown]
-        const r = await api<{
-          ok: boolean
-          result?: unknown
-          error?: string
-          unknown?: boolean
-          silent?: boolean
-        }>('/api/command', { name, args: cmdArgs ?? {}, meta })
+        const r = await commandCall({ name, args: cmdArgs ?? {}, meta })
         if (r.ok) return r.result
         if (r.unknown && !r.silent) emit('cockpit:command-error', name)
         throw new Error(r.error ?? 'command failed')
