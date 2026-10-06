@@ -506,7 +506,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
               <v-icon icon="mdi-chevron-up" size="16" />
             </button>
           </template>
-          <v-list density="comfortable" max-width="340" class="wf-menu">
+          <v-list density="comfortable" max-width="340" class="wf-menu yaya-pop">
             <v-list-item
               v-for="w in workflows"
               :key="w.id"
@@ -533,7 +533,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
               <v-icon icon="mdi-chevron-up" size="16" />
             </button>
           </template>
-          <v-list density="comfortable" max-width="300" class="wf-menu">
+          <v-list density="comfortable" max-width="300" class="wf-menu yaya-pop">
             <v-list-subheader>{{ t('yaya.reasoning.title', '思考强度') }}</v-list-subheader>
             <v-list-item
               v-for="o in REASONING_OPTIONS"
@@ -703,6 +703,15 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
   white-space: normal !important;
   -webkit-line-clamp: 3 !important;
   line-height: 1.4;
+}
+/* 手机上菜单收紧一档（见 pop.css），说明最多两行 */
+@media (max-width: 720px), (pointer: coarse) {
+  .wf-desc {
+    -webkit-line-clamp: 2 !important;
+  }
+  .wf-menu :deep(.v-list-item) {
+    min-height: 40px;
+  }
 }
 .input-textarea :deep(textarea) {
   font-size: 0.95rem;

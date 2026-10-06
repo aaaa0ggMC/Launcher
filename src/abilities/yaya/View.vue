@@ -12,6 +12,7 @@ import {
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
 import { DrawerSwipe } from '../../main/ui/composables/drawer-swipe'
+import './components/pop.css'
 import type {
   Session,
   MessageNode,
@@ -1252,7 +1253,7 @@ watch(isRunning, (now, before) => {
               <v-icon icon="mdi-dots-vertical" />
             </v-btn>
           </template>
-          <v-list density="compact" min-width="190" class="yaya-menu">
+          <v-list density="compact" min-width="190" class="yaya-menu yaya-pop">
             <v-list-item
               prepend-icon="mdi-language-markdown-outline"
               :title="t('yaya.export_md', '导出为 Markdown')"
@@ -1482,7 +1483,7 @@ watch(isRunning, (now, before) => {
       max-width="420"
       @update:model-value="(v: boolean) => !v && (pendingDelete = null)"
     >
-      <v-card class="pa-2">
+      <v-card class="pa-2 yaya-pop">
         <v-card-title class="text-h6">{{ t('yaya.menu.delete_title', '删除消息') }}</v-card-title>
         <v-card-text class="text-body-2">
           {{

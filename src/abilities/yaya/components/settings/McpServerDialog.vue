@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../pop.css'
 import { useI18n } from '@ui/i18n'
 import { computed, inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
@@ -241,7 +242,7 @@ function close(): void {
     transition="dialog-bottom-transition"
     @update:model-value="emit('update:modelValue', $event === true)"
   >
-    <v-card class="mcp-dialog-card pa-4 rounded-lg">
+    <v-card class="mcp-dialog-card yaya-pop pa-4 rounded-lg">
       <v-card-title class="px-0 pt-0 text-h6 font-weight-bold d-flex align-center ga-2">
         <v-icon icon="mdi-connection" color="primary" />
         <span>

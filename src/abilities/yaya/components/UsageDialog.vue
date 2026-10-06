@@ -158,7 +158,7 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
 
 <template>
   <v-dialog v-model="open" :fullscreen="narrow" :max-width="narrow ? undefined : 820" scrollable>
-    <v-card class="usage-card" :rounded="narrow ? 0 : 'xl'">
+    <v-card class="usage-card yaya-pop" :rounded="narrow ? 0 : 'xl'">
       <div class="usage-head">
         <v-icon icon="mdi-chart-box-outline" />
         <div class="usage-title min-w-0">

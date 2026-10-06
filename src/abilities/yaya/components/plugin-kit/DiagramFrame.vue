@@ -6,6 +6,7 @@
  * 图一律用 data URL 的 <img> 显示：模型输出是不可信内容，不 v-html 插入 SVG。
  * 容器 < 520px（窄消息气泡）时工具栏收进「⋯」菜单。
  */
+import '../pop.css'
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { useI18n } from '@ui/i18n'
@@ -225,7 +226,7 @@ onBeforeUnmount(() => {
             <v-icon icon="mdi-dots-horizontal" size="18" />
           </v-btn>
         </template>
-        <v-list density="default" min-width="180">
+        <v-list density="default" min-width="180" class="yaya-pop">
           <v-list-item
             :title="t('yaya.diagram.copy_source', '复制源码')"
             :aria-label="t('yaya.diagram.copy_source', '复制源码')"

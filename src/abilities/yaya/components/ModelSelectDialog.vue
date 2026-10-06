@@ -200,7 +200,7 @@ watch(isOpen, (v) => {
     transition="dialog-bottom-transition"
     class="model-select-dialog"
   >
-    <v-card class="model-select-card d-flex flex-column">
+    <v-card class="model-select-card yaya-pop d-flex flex-column">
       <!-- 头部：标题 + 关闭 -->
       <v-card-title class="d-flex align-center ga-2 px-5 pt-4 pb-2 flex-shrink-0">
         <v-icon icon="mdi-robot-outline" color="primary" size="24" />

@@ -1,0 +1,48 @@
+/*
+ * YAYA 的弹出菜单 / 对话框在手机上收紧一档（只在窄屏或触屏生效，桌面外观不变）。
+ *
+ * 菜单与对话框都 teleport 到 body 下，组件的 scoped 样式管不到 Vuetify 内部结构，
+ * 所以这里是全局样式，只认 `.yaya-pop` 这个类：给菜单的 v-list、对话框的 v-card 加上它即可。
+ * Vuetify 的排版工具类（text-h6 等）带 !important，覆盖它们也必须 !important。
+ * @ 点名选择器（plugins/mention）自己有一套紧凑样式，不在这里。
+ */
+@media (max-width: 720px), (pointer: coarse) {
+  /* ---- 菜单 ---- */
+  .v-list.yaya-pop {
+    padding-block: 4px;
+  }
+  .v-list.yaya-pop .v-list-item {
+    min-height: 40px !important;
+    padding-inline: 12px !important;
+    padding-block: 6px !important;
+  }
+  .v-list.yaya-pop .v-list-item-title {
+    font-size: 0.875rem !important;
+    line-height: 1.35 !important;
+  }
+  .v-list.yaya-pop .v-list-item-subtitle {
+    font-size: 0.75rem !important;
+    line-height: 1.35 !important;
+  }
+  .v-list.yaya-pop .v-list-item__prepend > .v-icon {
+    font-size: 20px !important;
+  }
+  .v-list.yaya-pop .v-list-item__spacer {
+    width: 12px !important;
+  }
+  .v-list.yaya-pop .v-list-subheader {
+    min-height: 32px !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* ---- 对话框 ---- */
+  .v-card.yaya-pop .v-card-title,
+  .v-card.yaya-pop .v-card-title .text-h6,
+  .v-card.yaya-pop .v-card-title.text-h6 {
+    font-size: 1.05rem !important;
+    line-height: 1.4 !important;
+  }
+  .v-card.yaya-pop .v-card-text {
+    font-size: 0.875rem !important;
+  }
+}

@@ -751,7 +751,7 @@ watch(narrow, () => {
       max-width="440"
       @update:model-value="(v: boolean) => !v && (picked = null)"
     >
-      <v-card v-if="picked" class="pa-2" rounded="xl">
+      <v-card v-if="picked" class="pa-2 yaya-pop" rounded="xl">
         <v-card-title class="text-h6">
           {{
             picked.kind === 'user'

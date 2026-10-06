@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../pop.css'
 import { useI18n } from '@ui/i18n'
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
@@ -208,7 +209,7 @@ function onRowActivate(id: string): void {
       :fullscreen="narrow"
       transition="dialog-bottom-transition"
     >
-      <v-card class="add-dialog-card pa-4 rounded-lg">
+      <v-card class="add-dialog-card yaya-pop pa-4 rounded-lg">
         <v-card-title class="px-0 pt-0 text-h6 font-weight-bold d-flex align-center ga-2">
           <v-icon icon="mdi-plus-box-outline" color="primary" />
           <span>{{ t('yaya.settings.add_dialog_title', '添加服务商') }}</span>
