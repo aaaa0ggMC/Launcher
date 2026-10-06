@@ -6,7 +6,8 @@ import type { ApprovalScope, ToolCallItem } from '../types'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
-import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
+import { applyInlineTokensHtml, fenceLangs, fenceViewFor } from './plugin-ui-registry'
+import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowCard from './WorkflowCard.vue'
@@ -38,9 +39,18 @@ const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
 const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
+
+/** Markdown 分段 + 插件的正文记号（如 [[secret_xxxx]]）：只改显示 */
+function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
+  const ctx = { sessionId: props.turn.steps[0]?.sessionId ?? '', role: 'assistant' as const, t }
+  return renderSegments(text, fenceLangs.value, labels.value).map((part) =>
+    part.kind === 'html' ? { ...part, html: applyInlineTokensHtml(part.html, ctx) } : part
+  )
+}
+
 /** 回答切段：插件接管的代码块（```mermaid 等）渲染成组件，其余是 Markdown HTML */
 const answerSegments = computed(() =>
-  answer.value?.content ? renderSegments(answer.value.content, fenceLangs.value, labels.value) : []
+  answer.value?.content ? renderWithTokens(answer.value.content) : []
 )
 
 /**
@@ -50,9 +60,7 @@ const answerSegments = computed(() =>
 const segments = computed(() =>
   showProcess.value
     ? turnSegments(props.turn).map((seg) =>
-        seg.kind === 'text'
-          ? { ...seg, parts: renderSegments(seg.node.content, fenceLangs.value, labels.value) }
-          : seg
+        seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
       )
     : []
 )

@@ -36,9 +36,11 @@ import {
   getSession,
   updateSession
 } from '../db'
-import { normalizeAssistantName, resolveSystemPrompt } from '../config'
+import { loadYayaConfig, normalizeAssistantName, resolveSystemPrompt } from '../config'
 import { collectPromptVars, type PromptVar } from '../prompt-vars'
 import {
+  applyToolArgsHooks,
+  applyToolResultHooks,
   buildPluginInstructions,
   normalizeToolResult,
   resolveTools,
@@ -700,6 +702,10 @@ export class WorkflowRunner {
       persist()
 
       const start = Date.now()
+      // 插件数据流钩子（SecretPlugin 等）：参数在执行前变换，结果在入库前变换
+      const cfg = loadYayaConfig()
+      const scrub = <T>(value: T): T =>
+        applyToolResultHooks(this.ctx.sessionId, call.name, value, cfg)
       touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', undefined, call.name)
       try {
         // 以 local-agent 身份执行：命令注册表里的隐私声明、脱敏、授权窗口全部生效；
@@ -708,7 +714,7 @@ export class WorkflowRunner {
           this.browserClient,
           () =>
             withOrigin(this.origin, () =>
-              runPluginTool(def, args, {
+              runPluginTool(def, applyToolArgsHooks(this.ctx.sessionId, call.name, args, cfg), {
                 sessionId: this.ctx.sessionId,
                 signal: this.abortController.signal,
                 context: () => this.toolContext()
@@ -716,7 +722,12 @@ export class WorkflowRunner {
             ),
           this.abortController.signal
         )
-        const out = await normalizeToolResult(raw, this.ctx.sessionId)
+        const normalized = await normalizeToolResult(raw, this.ctx.sessionId)
+        const out = {
+          ...normalized,
+          text: scrub(normalized.text),
+          display: scrub(normalized.display)
+        }
         call.status = out.isError ? 'failed' : 'success'
         call.result = out.display
         if (out.isError) call.error = out.text.slice(0, 2000)
@@ -724,7 +735,7 @@ export class WorkflowRunner {
         this.recordToolMessage(call, out.text, out.images)
       } catch (e: unknown) {
         call.status = 'failed'
-        call.error = e instanceof Error ? e.message : String(e)
+        call.error = scrub(e instanceof Error ? e.message : String(e))
         this.recordToolMessage(call, JSON.stringify({ error: call.error }))
       }
       call.ms = Date.now() - start

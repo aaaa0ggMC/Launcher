@@ -18,6 +18,7 @@ import {
 } from '../db'
 import { mergeSessionMentions, resolveMentions, sessionMentions } from '../plugins/mention'
 import { loadYayaConfig } from '../config'
+import { applyUserTextHooks } from '../plugins/registry'
 import { getProviderInstance } from '../providers/factory'
 import { WorkflowRunner } from './runner'
 import type { WorkflowSnapshot } from './types'
@@ -89,13 +90,16 @@ export async function startWorkflow(
     }
   }
 
+  // 插件数据流钩子（SecretPlugin 把 #Secret("…") 换成引用等），入库的就是变换后的正文
+  const content = applyUserTextHooks(sessionId, userPrompt, loadYayaConfig())
+
   const userMsgId = randomUUID()
   insertMessage({
     id: userMsgId,
     sessionId,
     parentId: parentId ?? null,
     role: 'user',
-    content: userPrompt,
+    content,
     attachments,
     status: 'completed',
     createdAt: Date.now(),

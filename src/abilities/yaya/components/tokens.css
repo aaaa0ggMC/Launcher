@@ -1,0 +1,31 @@
+/*
+ * 插件正文记号（PluginUi.inlineTokens，如 SecretPlugin 的 [[secret_xxxx]]）。
+ * 回答是 v-html 渲染的，scoped 样式够不到，所以放全局。
+ */
+.yaya-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 8px;
+  border-radius: 999px;
+  vertical-align: baseline;
+  font-size: 0.85em;
+  font-weight: 600;
+  line-height: 1.6;
+  color: rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.12);
+  word-break: break-all;
+}
+.yaya-token .mdi {
+  font-size: 1.05em;
+}
+.yaya-token.is-text {
+  padding: 0;
+  border-radius: 0;
+  font-weight: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  text-decoration: underline dotted rgba(var(--v-theme-primary), 0.6);
+}

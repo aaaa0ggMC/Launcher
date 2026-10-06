@@ -6,6 +6,8 @@ import type { MessageNode } from '../types'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
+import { inlineTokenParts } from './plugin-ui-registry'
+import './tokens.css'
 
 const props = defineProps<{
   message: MessageNode
@@ -45,6 +47,15 @@ function onContextMenu(ev: MouseEvent): void {
 function onLongPress(p: LongPressPoint): void {
   openMenu(p.clientX, p.clientY)
 }
+
+/** 正文切成文字 / 插件记号（如 [[secret_xxxx]] 显示成标签） */
+const contentParts = computed(() =>
+  inlineTokenParts(props.message.content, {
+    sessionId: props.message.sessionId,
+    role: 'user',
+    t
+  })
+)
 
 /** 这条消息里的 @ 点名（只显示；附注 mentionNote 只给模型看） */
 const mentionList = computed(() => {
@@ -124,7 +135,21 @@ function openPreview(id: string): void {
       :class="{ 'is-editing': editing }"
       @contextmenu="onContextMenu"
     >
-      {{ message.content }}
+      <template v-for="(part, i) in contentParts" :key="i">
+        <template v-if="part.kind === 'text'">{{ part.text }}</template>
+        <span
+          v-else
+          v-privacy="part.view.privacy || null"
+          class="yaya-token"
+          :class="{ 'is-text': part.view.tone === 'text' }"
+          :title="part.view.title"
+          ><v-icon
+            v-if="part.view.icon && part.view.tone !== 'text'"
+            :icon="part.view.icon"
+            size="14"
+          />{{ part.view.text }}</span
+        >
+      </template>
     </div>
 
     <div class="user-actions">

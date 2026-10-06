@@ -597,7 +597,17 @@ async function handleSend(
     const firstMessage = !activeSessionId.value || messages.value.length === 0
     const id = await ensureSession()
     if (firstMessage) {
-      const title = (prompt || attachments[0]?.name || '').replace(/\s+/g, ' ').trim().slice(0, 40)
+      // #Secret("…") 的内容不能进标题（标题是明文存的）
+      const title = (
+        prompt
+          .replace(/#Secret\(\s*("(?:[^"\\]|\\.)*"|“[^”]*”|'(?:[^'\\]|\\.)*')\s*\)/g, '🔒')
+          .replace(/#Secret\(.*/g, '🔒') ||
+        attachments[0]?.name ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40)
       if (title) {
         await window.cockpit.command('yaya.session-update', { id, title })
         const s = sessions.value.find((x) => x.id === id)

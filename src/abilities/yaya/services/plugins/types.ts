@@ -187,10 +187,28 @@ export interface YayaPlugin {
    * 效果只作用于**这条用户消息及之后**，不改系统提示词（提示词缓存不失效）。
    */
   mention?: (ctx: MentionContext) => MentionEffect | Promise<MentionEffect>
+  /**
+   * 数据流钩子（插件启用时才调用，按插件注册顺序串起来）。只能做确定性的文本变换：
+   * 结果会入库、会发给模型，不能依赖时间 / 随机（提示词缓存）。
+   */
+  hooks?: PluginHooks
   /** 启用后首次需要工具前调用（连接 MCP 等）；失败抛错，status 应反映错误 */
   start?: () => Promise<void>
   /** 禁用 / 配置变化 / 退出时调用 */
   stop?: () => Promise<void>
+}
+
+export interface PluginHooks {
+  /** 用户消息入库前改写正文（如把 `#Secret("…")` 换成引用）。编辑重发 / 新消息都会经过 */
+  userText?: (ctx: { sessionId: string; text: string }) => string
+  /** 工具执行前改写参数。只影响这次执行：库里与模型看到的仍是原参数 */
+  toolArgs?: (ctx: {
+    sessionId: string
+    tool: string
+    args: Record<string, unknown>
+  }) => Record<string, unknown>
+  /** 工具结果（给模型的文本 / 界面显示 / 错误）入库前改写 */
+  toolResult?: <T>(ctx: { sessionId: string; tool: string; value: T }) => T
 }
 
 export interface MentionContext {

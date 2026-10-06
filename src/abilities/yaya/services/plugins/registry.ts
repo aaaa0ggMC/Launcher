@@ -429,6 +429,69 @@ export function toolNeedsApproval(
   return typeof a === 'function' ? a(args) : a === 'ask'
 }
 
+// ---------------------------------------------------------------------------
+// 数据流钩子（YayaPlugin.hooks）
+// ---------------------------------------------------------------------------
+
+function hookPlugins(config: YayaConfig): YayaPlugin[] {
+  return current.filter((p) => p.hooks && isPluginEnabled(p, config))
+}
+
+/** 用户消息入库前 */
+export function applyUserTextHooks(sessionId: string, text: string, config: YayaConfig): string {
+  let out = text
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.userText
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, text: out })
+    } catch (e) {
+      log.warn('plugin userText hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 工具执行前 */
+export function applyToolArgsHooks(
+  sessionId: string,
+  tool: string,
+  args: Record<string, unknown>,
+  config: YayaConfig
+): Record<string, unknown> {
+  let out = args
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.toolArgs
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, tool, args: out })
+    } catch (e) {
+      log.warn('plugin toolArgs hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 工具结果入库 / 交给模型前 */
+export function applyToolResultHooks<T>(
+  sessionId: string,
+  tool: string,
+  value: T,
+  config: YayaConfig
+): T {
+  let out = value
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.toolResult
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, tool, value: out })
+    } catch (e) {
+      log.warn('plugin toolResult hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
 /** 带超时与中止地执行工具；顺带把插件当前配置（默认值已填、secret 已解密）放进 ctx.config */
 export async function runPluginTool(
   resolved: ResolvedTool,
