@@ -64,7 +64,8 @@ const draftWorkflow = ref<string | null>(null)
 const draftReasoning = ref<ReasoningEffort | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
-const editingId = ref<string | null>(null)
+/** 正在编辑的已发送消息：内容载入底部输入框，发送时从它的父节点开新分支 */
+const editTarget = ref<MessageNode | null>(null)
 const pendingDelete = ref<{ messageId: string; kind: 'user' | 'assistant' } | null>(null)
 
 const shellEl = ref<HTMLElement | null>(null)
@@ -72,6 +73,11 @@ const scrollEl = ref<HTMLElement | null>(null)
 const inputRef = ref<{
   focus: () => void
   acceptShare: (share: { paths?: string[]; text?: string; error?: string }) => Promise<void>
+  loadForEdit: (message: {
+    text: string
+    attachments: MessageAttachment[]
+    mentions: { ref: string; label: string; kind: string }[]
+  }) => void
 } | null>(null)
 
 // ---- 布局：按容器宽度（不是窗口宽度）决定侧栏常驻还是弹出 ----
@@ -585,6 +591,7 @@ async function handleSend(
   attachments: MessageAttachment[],
   mentions: string[] = []
 ): Promise<void> {
+  if (editTarget.value) return sendEdit(editTarget.value, prompt, attachments, mentions)
   try {
     const firstMessage = !activeSessionId.value || messages.value.length === 0
     const id = await ensureSession()
@@ -610,16 +617,32 @@ async function handleSend(
   }
 }
 
-async function handleEdit(message: MessageNode, text: string): Promise<void> {
+/** 编辑：把消息的文字 / 附件 / 点名载入底部输入框，在那里改完再发 */
+function startEdit(message: MessageNode): void {
+  if (isRunning.value || !inputRef.value) return
+  editTarget.value = message
+  inputRef.value.loadForEdit({
+    text: message.content,
+    attachments: JSON.parse(JSON.stringify(message.attachments ?? [])),
+    mentions: messageMentionRecords(message)
+  })
+}
+
+async function sendEdit(
+  message: MessageNode,
+  prompt: string,
+  attachments: MessageAttachment[],
+  mentions: string[]
+): Promise<void> {
   if (!activeSessionId.value) return
+  editTarget.value = null
   try {
     await window.cockpit.command('yaya.workflow-start', {
       session: activeSessionId.value,
-      prompt: text,
-      attachments: JSON.parse(JSON.stringify(message.attachments ?? [])),
+      prompt,
+      attachments,
       parent: message.parentId,
-      // 编辑重发保留原消息的 @ 点名
-      mentions: messageMentionRefs(message)
+      ...(mentions.length ? { mentions } : {})
     })
     markRunning(activeSessionId.value)
     await loadMessages()
@@ -628,6 +651,8 @@ async function handleEdit(message: MessageNode, text: string): Promise<void> {
     showNotice(te('yaya.send_failed', { error: errText(e) }, '发送失败：{error}'), true)
   }
 }
+
+watch(activeSessionId, () => (editTarget.value = null))
 
 async function handleRegenerate(fromMessageId: string): Promise<void> {
   if (!activeSessionId.value) return
@@ -665,13 +690,19 @@ async function handleApprove(
   })
 }
 
-function messageMentionRefs(message: MessageNode): string[] {
+function messageMentionRecords(
+  message: MessageNode
+): { ref: string; label: string; kind: string }[] {
   const list = message.meta?.mentions
-  return Array.isArray(list)
-    ? list
-        .map((m) => (m as { ref?: unknown }).ref)
-        .filter((r): r is string => typeof r === 'string')
-    : []
+  if (!Array.isArray(list)) return []
+  return list
+    .map((m) => m as { ref?: unknown; label?: unknown; kind?: unknown })
+    .filter((m): m is { ref: string; label?: unknown; kind?: unknown } => typeof m.ref === 'string')
+    .map((m) => ({
+      ref: m.ref,
+      label: typeof m.label === 'string' ? m.label : m.ref,
+      kind: typeof m.kind === 'string' ? m.kind : 'builtin'
+    }))
 }
 
 /** 本对话被 @ 点名强制启用的插件 / 工具 */
@@ -933,7 +964,10 @@ async function onMenuSelect(key: string): Promise<void> {
       selectText.value = { text: req.text, fullText: req.fullText }
       break
     case 'edit':
-      editingId.value = req.messageId
+      {
+        const target = messages.value.find((m) => m.id === req.messageId)
+        if (target) startEdit(target)
+      }
       break
     case 'regenerate':
       await handleRegenerate(req.messageId)
@@ -1380,10 +1414,9 @@ watch(isRunning, (now, before) => {
               :data-turn-key="turn.key"
               :message="turn.message"
               :busy="isRunning"
-              :editing="editingId === turn.message.id"
-              @update:editing="(on: boolean) => (editingId = on ? turn.message.id : null)"
+              :editing="editTarget?.id === turn.message.id"
               @switch-branch="handleSwitchBranch"
-              @edit="(text) => handleEdit(turn.message, text)"
+              @edit="startEdit(turn.message)"
               @menu="(req) => (menuRequest = req)"
             />
             <AssistantTurn
@@ -1465,7 +1498,9 @@ watch(isRunning, (now, before) => {
           :session-id="activeSessionId || ''"
           :ensure-session="ensureSession"
           :assistant-name="assistantName"
+          :editing="!!editTarget"
           @send="handleSend"
+          @cancel-edit="editTarget = null"
           @abort="handleAbort"
         />
       </div>

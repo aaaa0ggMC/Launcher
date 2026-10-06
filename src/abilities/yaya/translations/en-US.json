@@ -761,5 +761,6 @@
   "yaya.plugin.mermaid.theme_dark": "Dark",
   "yaya.plugin.mermaid.cfg_max_height": "Maximum diagram height (px)",
   "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom",
-  "yaya.tree.pan_hint_touch": "Drag to pan · pinch to zoom"
+  "yaya.tree.pan_hint_touch": "Drag to pan · pinch to zoom",
+  "yaya.input.editing": "Editing a message. Sending starts a new branch from here."
 }

@@ -761,5 +761,6 @@
   "yaya.plugin.mermaid.theme_dark": "暗色",
   "yaya.plugin.mermaid.cfg_max_height": "图的最大显示高度（像素）",
   "yaya.plugin.mermaid.cfg_max_height_desc": "超过的部分等比缩小；点图可以放大查看",
-  "yaya.tree.pan_hint_touch": "拖动平移 · 双指缩放"
+  "yaya.tree.pan_hint_touch": "拖动平移 · 双指缩放",
+  "yaya.input.editing": "正在编辑消息，发送后会从这里开一个新分支"
 }
