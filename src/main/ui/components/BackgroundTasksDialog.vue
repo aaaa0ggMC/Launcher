@@ -5,6 +5,7 @@ import type { BtOutputMessage, BtTaskInfo, BtStats, ChildWindowInfo } from '@sha
 import { translate, translateTemplate } from '@ui/i18n'
 import { scoreFields } from '@ui/composables/search'
 import { resolveBtView } from '@ui/bt-views'
+import { copyExportText, pickExportTarget } from '@ui/composables/export'
 import BtWindowView from './BackgroundTaskViews/BtWindowView.vue'
 import BtResourceView from './BackgroundTaskViews/BtResourceView.vue'
 
@@ -258,12 +259,24 @@ async function exportConsole(): Promise<void> {
       .toISOString()
       .slice(0, 19)
       .replace(/[:T]/g, '-')}.log`
-    const path = await window.cockpit.pickSaveFile({
+    const target = await pickExportTarget({
       title: t('bt.exportTitle'),
       defaultPath: defaultName,
       filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
     })
-    if (!path) return
+    if (!target) return
+    if (target.kind === 'clipboard') {
+      // 与 background.export 写进文件的内容相同
+      const out = (await window.cockpit.btOutput(id)) as { messages?: BtOutputMessage[] } | null
+      const body = (out?.messages ?? [])
+        .map((m) => m.line ?? (m.data !== undefined ? JSON.stringify(m.data) : ''))
+        .join('\n')
+      await copyExportText(body)
+      exportSnackText.value = te('bt.copied', { name: selName })
+      exportSnackOpen.value = true
+      return
+    }
+    const path = target.path
     // CLI-first: export through the registered command (main process writes the
     // authoritative buffered output), like ft.export / logs.export.
     const res = (await window.cockpit.btExport(id, path)) as {

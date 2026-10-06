@@ -249,5 +249,13 @@
   "settings.openAbility": "打开 {name}",
   "autosave.saved": "已自动保存",
   "autosave.failed": "保存失败",
-  "autosave.idle": "修改后自动保存"
+  "autosave.idle": "修改后自动保存",
+  "hostpick.toClipboard": "复制到剪贴板",
+  "export.title": "导出",
+  "export.desc": "保存为文件，或者直接复制到剪贴板。",
+  "export.cancel": "取消",
+  "export.clipboard": "复制到剪贴板",
+  "export.file": "保存为文件…",
+  "export.copied": "已复制到剪贴板",
+  "bt.copied": "已把「{name}」的输出复制到剪贴板"
 }

@@ -1,7 +1,7 @@
 import { SCOPE_EXEC, scrubForAgent } from '../../main/process/privacy'
 import type { CommandSpec } from '../../main/process/commands/types'
 import type { LogLevel } from './types'
-import { queryLogs, exportLogs, logAt, makeLogger } from '../../main/process/logger'
+import { queryLogs, exportLogs, exportLogsText, logAt, makeLogger } from '../../main/process/logger'
 
 const log = makeLogger('logs')
 
@@ -58,6 +58,19 @@ export default [
       if (result.ok) log.info('logs.export', { path, count: result.count })
       else log.error('logs.export failed', { path, count: result.count, error: result.error })
       return result
+    }
+  },
+  {
+    name: 'logs.export-text',
+    privacy: {},
+    description:
+      '以文本返回当前会话日志（与 logs.export 写出的内容相同，用于复制到剪贴板） (--level)',
+    usage: 'logs.export-text --level info',
+    related: ['logs.export'],
+    run: async (ctx) => {
+      const level = (ctx.named.level as LogLevel | undefined) ?? undefined
+      // agent 读取：日志里出现的已知凭据值替换成占位符
+      return { ok: true, ...scrubForAgent(exportLogsText({ level })) }
     }
   },
   {

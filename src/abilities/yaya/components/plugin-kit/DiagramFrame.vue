@@ -91,13 +91,19 @@ async function exportSvg(): Promise<void> {
     await fallbackCopy()
     return
   }
-  const ok = await downloadTextToLocal(
+  const done = await downloadTextToLocal(
     props.svgText,
     `${props.exportName}.svg`,
     t('yaya.diagram.export_svg', '导出 SVG'),
     [{ name: 'SVG', extensions: ['svg'] }]
   )
-  flash(ok ? t('yaya.diagram.exported', '已导出') : t('yaya.diagram.export_failed', '导出失败'))
+  flash(
+    done === 'clipboard'
+      ? t('yaya.diagram.copied', '已复制')
+      : done
+        ? t('yaya.diagram.exported', '已导出')
+        : t('yaya.diagram.export_failed', '导出失败')
+  )
 }
 
 async function exportPng(): Promise<void> {

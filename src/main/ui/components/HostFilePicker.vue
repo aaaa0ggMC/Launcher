@@ -15,11 +15,13 @@ interface PickOpts {
   any?: boolean
   defaultPath?: string
   filters?: { name: string; extensions: string[] }[]
+  /** 保存模式：多给一个「复制到剪贴板」（导出类调用，见 composables/export.ts） */
+  clipboard?: boolean
 }
 interface PickRequest {
   mode: 'open' | 'save' | 'open-multi'
   opts?: PickOpts
-  resolve: (path: string | string[] | null) => void
+  resolve: (path: string | string[] | { clipboard: true } | null) => void
 }
 interface Listing {
   path: string
@@ -326,7 +328,7 @@ function onRequest(ev: Event): void {
 onMounted(() => window.addEventListener('cockpit:host-pick', onRequest))
 onBeforeUnmount(() => window.removeEventListener('cockpit:host-pick', onRequest))
 
-function finish(path: string | string[] | null): void {
+function finish(path: string | string[] | { clipboard: true } | null): void {
   cancelUpload()
   const r = req.value
   req.value = null
@@ -581,6 +583,14 @@ function size(n?: number): string {
           :label="t('hostpick.showHidden', '显示隐藏文件')"
         />
         <v-spacer />
+        <v-btn
+          v-if="mode === 'save' && opts.clipboard"
+          variant="tonal"
+          prepend-icon="mdi-content-copy"
+          @click="finish({ clipboard: true })"
+        >
+          {{ t('hostpick.toClipboard', '复制到剪贴板') }}
+        </v-btn>
         <v-btn variant="text" @click="finish(null)">{{ t('hostpick.cancel', '取消') }}</v-btn>
         <span v-if="multi && picked.length" class="text-caption text-medium-emphasis">
           {{ te('hostpick.picked', { n: String(picked.length) }, '已选 {n} 个') }}

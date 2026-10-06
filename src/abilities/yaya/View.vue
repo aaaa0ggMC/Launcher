@@ -12,6 +12,7 @@ import {
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
 import { DrawerSwipe } from '../../main/ui/composables/drawer-swipe'
+import { copyExportText, pickExportTarget } from '../../main/ui/composables/export'
 import './components/pop.css'
 import type {
   Session,
@@ -831,19 +832,29 @@ async function exportSession(format: 'md' | 'jsonl'): Promise<void> {
   if (!activeSessionId.value) return
   const ext = format === 'md' ? 'md' : 'jsonl'
   const base = (activeSession.value?.title || 'chat').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60)
-  const out = await window.cockpit.pickSaveFile({
+  const target = await pickExportTarget({
     title: t('yaya.export_title', '导出会话'),
     defaultPath: `${base}.${ext}`,
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
   })
-  if (!out) return
+  if (!target) return
   try {
+    if (target.kind === 'clipboard') {
+      const res = (await window.cockpit.command('yaya.session-export', {
+        session: activeSessionId.value,
+        format
+      })) as { ok: boolean; content?: string; error?: string }
+      if (!res.ok) throw new Error(res.error)
+      await copyExportText(res.content ?? '')
+      showNotice(t('yaya.exported_clipboard', '已复制到剪贴板'))
+      return
+    }
     await window.cockpit.command('yaya.session-export-file', {
       session: activeSessionId.value,
       format,
-      out
+      out: target.path
     })
-    showNotice(te('yaya.exported', { path: out }, '已导出到 {path}'))
+    showNotice(te('yaya.exported', { path: target.path }, '已导出到 {path}'))
   } catch (e) {
     showNotice(errText(e), true)
   }

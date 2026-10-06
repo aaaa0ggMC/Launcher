@@ -9,7 +9,7 @@
   "pg.url": "URL template",
   "pg.headers": "Headers",
   "pg.body": "Body",
-  "pg.copyFrom": "Copy from another template",
+  "pg.copyFrom": "Copy from",
   "pg.copyAll": "All",
   "pg.copyHeaders": "Headers",
   "pg.copyBody": "Body",
@@ -83,7 +83,6 @@
   "pg.saveLocal": "Save to local",
   "pg.clickToExpand": "〔click to expand〕",
   "pg.noActive": "Select or create a request template",
-  "pg.copyFrom": "Copy from",
   "pg.chooseSource": "Choose source template",
   "pg.templateNamePlaceholder": "Template name…",
   "pg.headersPerLine": "Headers (one Key: value per line)",
@@ -125,5 +124,6 @@
   "pg.mdImages": "- Images: {n}",
   "pg.mdAudio": "- Audio: {n}",
   "pg.mdVideo": "- Video: {n}",
-  "pg.mdTemplateList": "## Request Templates"
+  "pg.mdTemplateList": "## Request Templates",
+  "pg.copiedExport": "Config copied to clipboard"
 }
