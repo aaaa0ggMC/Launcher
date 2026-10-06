@@ -151,61 +151,71 @@ function pretty(v: unknown): string {
         >{{ formatTokens(batchTokens) }} tokens</span
       >
       <span class="text-caption text-medium-emphasis">{{ formatMs(elapsed) }}</span>
-      <v-icon size="18" class="text-medium-emphasis">
-        {{ open ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+      <v-icon size="18" class="text-medium-emphasis wf-chevron" :class="{ 'is-open': open }">
+        mdi-chevron-down
       </v-icon>
     </button>
 
-    <div v-if="open" class="wf-body px-3 pb-3">
-      <div v-if="wf.goal" class="text-caption text-medium-emphasis pt-1 pb-2 wf-goal">
-        {{ t('aidj.wf.goal', '目标') }}：{{ wf.goal }}
-      </div>
-      <div v-if="!wf.steps.length && running" class="text-caption text-medium-emphasis py-2">
-        {{ t('aidj.wf.thinking', 'LoopAgent 思考中…') }}
-      </div>
-      <ol class="wf-steps">
-        <li v-for="s in wf.steps" :key="s.id" class="wf-step">
-          <button
-            type="button"
-            class="wf-step-row d-flex align-center ga-2 py-1"
-            :title="t('aidj.wf.step_toggle', '展开 / 收起参数与结果')"
-            :aria-label="`${AGENT_NAME[s.agent]} ${tt(s.label)}`"
-            :aria-expanded="expanded.has(s.id)"
-            @click="toggleStep(s.id)"
-          >
-            <span class="wf-dot" :class="`wf-dot-${s.status}`" />
-            <span class="wf-badge" :class="`wf-agent-${s.agent}`">{{ AGENT_NAME[s.agent] }}</span>
-            <span class="text-body-2 wf-label">{{ tt(s.label) }}</span>
-            <span v-if="s.summary" class="text-caption text-medium-emphasis wf-summary">
-              {{ tt(s.summary) }}
-            </span>
-            <v-progress-circular
-              v-else-if="s.status === 'running'"
-              indeterminate
-              size="12"
-              width="2"
-              color="primary"
-            />
-            <v-spacer />
-            <span v-if="s.ms != null" class="text-caption text-medium-emphasis wf-ms">
-              {{ formatMs(s.ms) }}
-            </span>
-          </button>
-          <div v-if="expanded.has(s.id)" class="wf-detail pa-3 mb-2">
-            <div class="text-caption text-medium-emphasis mb-1">
-              {{ t('aidj.btchat.tool_args', '参数') }}
-            </div>
-            <pre class="wf-pre">{{ pretty(s.args) }}</pre>
-            <template v-if="s.result != null">
-              <div class="text-caption text-medium-emphasis mt-3 mb-1">
-                {{ t('aidj.btchat.tool_result', '结果') }}
-              </div>
-              <pre class="wf-pre">{{ pretty(s.result) }}</pre>
-            </template>
+    <v-expand-transition>
+      <div v-if="open" class="wf-body">
+        <div class="px-3 pb-3">
+          <div v-if="wf.goal" class="text-caption text-medium-emphasis pt-1 pb-2 wf-goal">
+            {{ t('aidj.wf.goal', '目标') }}：{{ wf.goal }}
           </div>
-        </li>
-      </ol>
-    </div>
+          <div v-if="!wf.steps.length && running" class="text-caption text-medium-emphasis py-2">
+            {{ t('aidj.wf.thinking', 'LoopAgent 思考中…') }}
+          </div>
+          <ol class="wf-steps">
+            <li v-for="s in wf.steps" :key="s.id" class="wf-step">
+              <button
+                type="button"
+                class="wf-step-row d-flex align-center ga-2 py-1"
+                :title="t('aidj.wf.step_toggle', '展开 / 收起参数与结果')"
+                :aria-label="`${AGENT_NAME[s.agent]} ${tt(s.label)}`"
+                :aria-expanded="expanded.has(s.id)"
+                @click="toggleStep(s.id)"
+              >
+                <span class="wf-dot" :class="`wf-dot-${s.status}`" />
+                <span class="wf-badge" :class="`wf-agent-${s.agent}`">{{
+                  AGENT_NAME[s.agent]
+                }}</span>
+                <span class="text-body-2 wf-label">{{ tt(s.label) }}</span>
+                <span v-if="s.summary" class="text-caption text-medium-emphasis wf-summary">
+                  {{ tt(s.summary) }}
+                </span>
+                <v-progress-circular
+                  v-else-if="s.status === 'running'"
+                  indeterminate
+                  size="12"
+                  width="2"
+                  color="primary"
+                />
+                <v-spacer />
+                <span v-if="s.ms != null" class="text-caption text-medium-emphasis wf-ms">
+                  {{ formatMs(s.ms) }}
+                </span>
+              </button>
+              <v-expand-transition>
+                <div v-if="expanded.has(s.id)" class="wf-detail-wrap">
+                  <div class="wf-detail pa-3 mb-2">
+                    <div class="text-caption text-medium-emphasis mb-1">
+                      {{ t('aidj.btchat.tool_args', '参数') }}
+                    </div>
+                    <pre class="wf-pre">{{ pretty(s.args) }}</pre>
+                    <template v-if="s.result != null">
+                      <div class="text-caption text-medium-emphasis mt-3 mb-1">
+                        {{ t('aidj.btchat.tool_result', '结果') }}
+                      </div>
+                      <pre class="wf-pre">{{ pretty(s.result) }}</pre>
+                    </template>
+                  </div>
+                </div>
+              </v-expand-transition>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </v-expand-transition>
   </div>
 </template>
 
@@ -237,6 +247,12 @@ function pretty(v: unknown): string {
 }
 .wf-head-summary {
   min-width: 0;
+}
+.wf-chevron {
+  transition: transform 0.2s ease;
+}
+.wf-chevron.is-open {
+  transform: rotate(180deg);
 }
 /* 窄屏：头部一行元素（状态点 + 标题 + playbook + 摘要 + tokens + 耗时 + 箭头）放不下，
    让「摘要」单独占一整行，避免被 flex-shrink 挤成一条缝。 */
