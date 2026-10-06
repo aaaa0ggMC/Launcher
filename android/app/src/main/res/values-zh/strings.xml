@@ -4,7 +4,7 @@
     <string name="keepalive_title">Cockpit 正在后台运行</string>
     <string name="keepalive_text">保持与宿主的连接和播放</string>
     <string name="shortcut_connect">连接设置</string>
-    <string name="err_unreachable">连不上宿主。Termux 里的宿主启动了吗？</string>
+    <string name="err_unreachable">连不上宿主。Termux 里的宿主启动了吗？如果它本来在运行，可能是系统把后台的 Termux 冻结了：切到 Termux 看一眼再回来重试，并把 Termux 锁定在后台、电池设为无限制。</string>
     <string name="err_token">宿主拒绝了这个 token。</string>
     <string name="err_http">宿主返回错误：</string>
     <string name="err_disconnected">与宿主的连接断开了</string>
