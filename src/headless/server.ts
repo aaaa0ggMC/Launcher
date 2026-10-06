@@ -417,8 +417,11 @@ export function startServer(opts: {
       })
       return
     }
-    if (url.pathname === '/api/info')
+    if (url.pathname === '/api/info') {
+      // App 连接前的探测也走这里：日志里有它，才能分清「请求没到宿主」还是「宿主没回」
+      log.info('info probe')
       return json(res, 200, { platform: process.platform, headless: true })
+    }
     if (url.pathname === '/api/commands' && req.method === 'GET') {
       return json(
         res,

@@ -7,6 +7,7 @@
  * 到 ./electron-stub（不支持的窗口 / 对话框 / 全局快捷键等一律 nop）。
  */
 import { join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
 import { setBroadcast } from '../main/process/broadcast'
 import { setLogBroadcast, log } from '../main/process/logger'
 import { setBackgroundBroadcast, shutdownBackgroundTasks } from '../main/process/background-tasks'
@@ -23,6 +24,7 @@ import { setStubBroadcast } from './electron-stub'
 import { initPrivacyConsent } from '../main/process/privacy-consent'
 import { initAgentServices } from '../main/process/agent'
 import { initWebHost } from '../main/process/web-host'
+import { startWatchdog } from './watchdog'
 import { loadWebToken, otherHost, releaseHostLock, writeHostLock } from './host-lock'
 
 function arg(name: string, dflt: string): string {
@@ -43,21 +45,26 @@ process.on('unhandledRejection', (reason) => {
   })
 })
 
-/** 事件循环被同步代码长时间占住时，所有请求（包括 App 的连接探测）都会超时：记下来便于排查 */
-function watchEventLoop(): void {
-  let last = Date.now()
-  setInterval(() => {
-    const now = Date.now()
-    const lag = now - last - 1000
-    last = now
-    // 手机深度休眠时进程整体暂停也会表现为一次长延迟
-    if (lag > 3000) log.warn('event loop stalled (blocked or device asleep)', { ms: lag })
-  }, 1000).unref()
+/**
+ * Termux：申请 wake lock，屏幕关掉 / 切到别的 App 时 CPU 不进深度休眠、宿主不被暂停。
+ * （等价于手动运行 termux-wake-lock；`--no-wake-lock` 关闭。厂商 ROM 的后台冻结仍需把 Termux 锁定在后台）
+ */
+function termuxWakeLock(): void {
+  if (!process.env.TERMUX_VERSION && !(process.env.PREFIX ?? '').includes('com.termux')) return
+  if (process.argv.includes('--no-wake-lock')) return
+  try {
+    const child = spawn('termux-wake-lock', [], { stdio: 'ignore', detached: true })
+    child.on('spawn', () => log.info('termux wake lock requested'))
+    child.on('error', (e) => log.warn('termux-wake-lock failed', String(e)))
+    child.unref()
+  } catch (e) {
+    log.warn('termux-wake-lock failed', String(e))
+  }
 }
 
 async function main(): Promise<void> {
   process.env.COCKPIT_HEADLESS = '1'
-  watchEventLoop()
+  startWatchdog()
   const host = arg('host', '127.0.0.1')
   const port = Number(arg('port', '47810'))
   const webRoot = resolve(arg('web', join(__dirname, '../web')))
@@ -105,6 +112,7 @@ async function main(): Promise<void> {
 
   await startServer({ host, port, token, webRoot })
   writeHostLock('headless', { host, port })
+  termuxWakeLock()
   process.on('exit', releaseHostLock)
   log.info('headless started', { platform: process.platform, node: process.version })
   console.log(`\n  Cockpit headless → http://${host}:${port}/?token=${token}\n`)
