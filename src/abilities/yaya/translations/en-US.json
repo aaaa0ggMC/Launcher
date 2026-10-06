@@ -225,7 +225,7 @@
   "yaya.settings.sub_providers": "Endpoint & key",
   "yaya.settings.sub_tools": "Toggles & search",
   "yaya.settings.system_prompt": "System prompt",
-  "yaya.settings.system_prompt_hint": "Default prompt for new conversations; use {name} as a placeholder for the assistant name",
+  "yaya.settings.system_prompt_hint": "Default prompt for new conversations. You can insert the variables below; they are filled in when a message is sent",
   "yaya.settings.title_assistant": "Assistant",
   "yaya.settings.title_model": "Default model",
   "yaya.settings.title_policy": "Execution policy",
@@ -763,5 +763,18 @@
   "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom",
   "yaya.tree.pan_hint_touch": "Drag to pan · pinch to zoom",
   "yaya.input.editing": "Editing a message. Sending starts a new branch from here.",
-  "yaya.exported_clipboard": "Copied to clipboard"
+  "yaya.exported_clipboard": "Copied to clipboard",
+  "yaya.settings.var_name": "Assistant name",
+  "yaya.settings.var_model": "Current model",
+  "yaya.settings.var_provider": "Model provider",
+  "yaya.settings.var_date": "Date, e.g. 2026-10-06",
+  "yaya.settings.var_time": "Time, e.g. 14:05",
+  "yaya.settings.var_datetime": "Date and time",
+  "yaya.settings.var_weekday": "Day of the week",
+  "yaya.settings.var_timezone": "Time zone",
+  "yaya.settings.var_system": "Operating system, e.g. Arch Linux / Android",
+  "yaya.settings.var_power": "Battery level and charging state",
+  "yaya.settings.var_language": "UI language",
+  "yaya.settings.var_insert": "Insert variable",
+  "yaya.settings.var_hint": "Variables are filled in when each run starts. Changing ones like {time} or {power} make the prompt differ on every run, so prompt caching stops working and costs more."
 }

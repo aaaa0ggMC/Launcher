@@ -37,6 +37,7 @@ import {
   updateSession
 } from '../db'
 import { normalizeAssistantName, resolveSystemPrompt } from '../config'
+import { collectPromptVars, type PromptVar } from '../prompt-vars'
 import {
   buildPluginInstructions,
   normalizeToolResult,
@@ -352,6 +353,14 @@ export class WorkflowRunner {
     )
 
     try {
+      // 提示词变量（日期 / 时间 / 电量…）整次运行取一次，多步调用之间提示词不变
+      this.promptVars = await collectPromptVars(this.rawSystemPrompt, {
+        name: normalizeAssistantName(this.ctx.config.assistantName),
+        model: this.model,
+        provider:
+          this.ctx.config.providers.find((p) => p.id === this.ctx.provider.id)?.name ||
+          this.ctx.provider.id
+      })
       // 本会话被 @ 点名强制启用的插件 / 工具（追加在工具表末尾，见 mention.ts）
       const forced = sessionMentions(this.session?.meta).map((m) => m.ref)
       this.tools = workflow.usesTools ? await resolveTools(this.ctx.config, forced) : []
@@ -406,11 +415,15 @@ export class WorkflowRunner {
     return sanitizeHistory(getMessageBranch(this.parentId))
   }
 
+  private get rawSystemPrompt(): string {
+    return this.session?.systemPrompt || this.ctx.config.systemPrompt
+  }
+
+  /** 系统提示词变量的快照（run() 开始时取） */
+  private promptVars: Partial<Record<PromptVar, string>> = {}
+
   private systemPrompt(extra?: string): string {
-    const base = resolveSystemPrompt(
-      this.session?.systemPrompt || this.ctx.config.systemPrompt,
-      this.ctx.config
-    )
+    const base = resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
     const plugins = buildPluginInstructions(this.ctx.config)
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }

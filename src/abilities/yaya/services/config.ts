@@ -9,6 +9,7 @@ import { decryptSecret, encryptSecret, isEncryptedSecret } from '../../../main/p
 import { makeLogger } from '../../../main/process/logger'
 import { getBroadcast } from '../../../main/process/broadcast'
 import type { McpServerConfig, ProviderConfig, YayaConfig } from '../types'
+import { applyPromptVars, type PromptVar } from './prompt-vars'
 
 const log = makeLogger('yaya-config')
 
@@ -236,9 +237,15 @@ export function normalizeProcessPreviewSteps(v: unknown): number {
   return Math.min(PROCESS_PREVIEW_STEPS_MAX, Math.max(0, Math.round(n)))
 }
 
-/** 系统提示词：`{name}` 替换为助手名 */
-export function resolveSystemPrompt(prompt: string, config: YayaConfig): string {
-  return prompt.split('{name}').join(normalizeAssistantName(config.assistantName))
+/**
+ * 系统提示词：`{name}` 替换为助手名；`vars` 是运行开始时取的其余变量快照（见 prompt-vars.ts）
+ */
+export function resolveSystemPrompt(
+  prompt: string,
+  config: YayaConfig,
+  vars: Partial<Record<PromptVar, string>> = {}
+): string {
+  return applyPromptVars(prompt, { ...vars, name: normalizeAssistantName(config.assistantName) })
 }
 
 /** 给渲染端 / agent 的配置视图：去掉密钥明文，只给 apiKeySet */

@@ -225,7 +225,7 @@
   "yaya.settings.sub_providers": "端点与密钥",
   "yaya.settings.sub_tools": "开关与搜索",
   "yaya.settings.system_prompt": "系统提示词",
-  "yaya.settings.system_prompt_hint": "所有新会话的默认提示词，可用 {name} 占位符代表助手名称",
+  "yaya.settings.system_prompt_hint": "所有新会话的默认提示词，可以插入下面的变量，发送时替换成实际值",
   "yaya.settings.title_assistant": "助手",
   "yaya.settings.title_model": "默认模型",
   "yaya.settings.title_policy": "执行策略",
@@ -763,5 +763,18 @@
   "yaya.plugin.mermaid.cfg_max_height_desc": "超过的部分等比缩小；点图可以放大查看",
   "yaya.tree.pan_hint_touch": "拖动平移 · 双指缩放",
   "yaya.input.editing": "正在编辑消息，发送后会从这里开一个新分支",
-  "yaya.exported_clipboard": "已复制到剪贴板"
+  "yaya.exported_clipboard": "已复制到剪贴板",
+  "yaya.settings.var_name": "助手名称",
+  "yaya.settings.var_model": "当前模型",
+  "yaya.settings.var_provider": "模型服务商",
+  "yaya.settings.var_date": "日期，如 2026-10-06",
+  "yaya.settings.var_time": "时间，如 14:05",
+  "yaya.settings.var_datetime": "日期和时间",
+  "yaya.settings.var_weekday": "星期几",
+  "yaya.settings.var_timezone": "时区",
+  "yaya.settings.var_system": "操作系统，如 Arch Linux / Android",
+  "yaya.settings.var_power": "电量与充电状态",
+  "yaya.settings.var_language": "界面语言",
+  "yaya.settings.var_insert": "插入变量",
+  "yaya.settings.var_hint": "变量在每次运行开始时取值。{time}、{power} 这类会变的变量会让每次运行的提示词都不同，提示词缓存会失效，费用更高。"
 }
