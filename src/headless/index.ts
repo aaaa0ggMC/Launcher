@@ -30,8 +30,34 @@ function arg(name: string, dflt: string): string {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : dflt
 }
 
+/**
+ * 长期运行的宿主（Termux 上一挂就是一整天）不能因为某个连接 / 能力里漏掉的一个异常整个退出——
+ * 退出后手机 App 只会一直连不上，直到手动重启后端。与 Electron 主进程一样：记日志，继续跑。
+ */
+process.on('uncaughtException', (err) => {
+  log.error('uncaughtException', { error: err?.stack ?? String(err) })
+})
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandledRejection', {
+    error: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
+  })
+})
+
+/** 事件循环被同步代码长时间占住时，所有请求（包括 App 的连接探测）都会超时：记下来便于排查 */
+function watchEventLoop(): void {
+  let last = Date.now()
+  setInterval(() => {
+    const now = Date.now()
+    const lag = now - last - 1000
+    last = now
+    // 手机深度休眠时进程整体暂停也会表现为一次长延迟
+    if (lag > 3000) log.warn('event loop stalled (blocked or device asleep)', { ms: lag })
+  }, 1000).unref()
+}
+
 async function main(): Promise<void> {
   process.env.COCKPIT_HEADLESS = '1'
+  watchEventLoop()
   const host = arg('host', '127.0.0.1')
   const port = Number(arg('port', '47810'))
   const webRoot = resolve(arg('web', join(__dirname, '../web')))

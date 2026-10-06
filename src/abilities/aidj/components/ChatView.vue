@@ -168,11 +168,14 @@ async function runCurateCommand(count: number, userText: string): Promise<void> 
   scrollToBottom()
 
   let charTimer: ReturnType<typeof setInterval> | null = null
+  let polling = false
   charTimer = setInterval(async () => {
     if (!sending.value) {
       if (charTimer) clearInterval(charTimer)
       return
     }
+    if (polling) return
+    polling = true
     try {
       const r = (await window.cockpit.command('aidj.stream-status')) as Record<string, unknown>
       if (r?.ok) {
@@ -187,6 +190,8 @@ async function runCurateCommand(count: number, userText: string): Promise<void> 
       }
     } catch {
       /* noop */
+    } finally {
+      polling = false
     }
   }, 200)
 
@@ -860,9 +865,14 @@ async function sendMessage(): Promise<void> {
   // Agent workflow events of this request, pulled incrementally with the
   // stream status and shown as a live card above the reply.
   const wfEvents: Record<string, unknown>[] = []
-  const takeWorkflow = (r: Record<string, unknown> | null): void => {
+  // `since` = the offset the poll asked from. Polls can overlap or arrive late
+  // (slow / backgrounded phone), so only append what is beyond what we have —
+  // appending blindly repeated the same workflow steps over and over.
+  const takeWorkflow = (r: Record<string, unknown> | null, since: number): void => {
     if (!r?.ok || !Array.isArray(r.workflow) || !r.workflow.length) return
-    wfEvents.push(...(r.workflow as Record<string, unknown>[]))
+    const fresh = (r.workflow as Record<string, unknown>[]).slice(wfEvents.length - since)
+    if (!fresh.length) return
+    wfEvents.push(...fresh)
     const m = messages.value[placeholderIdx]
     if (m) m.workflow = [...wfEvents]
     // Live tokens: every finished LLM call of this request; context = latest LoopAgent call.
@@ -871,16 +881,22 @@ async function sendMessage(): Promise<void> {
     if (lastLoop) lastContext.value = { prompt: lastLoop.prompt, completion: lastLoop.completion }
   }
   let charTimer: ReturnType<typeof setInterval> | null = null
+  let polling = false
   charTimer = setInterval(async () => {
     if (!sending.value) {
       if (charTimer) clearInterval(charTimer)
       return
     }
+    // One poll at a time: the 200ms tick must not pile up requests while the
+    // host / network is slow.
+    if (polling) return
+    polling = true
     try {
+      const since = wfEvents.length
       const r = (await window.cockpit.command('aidj.stream-status', {
-        since: wfEvents.length
+        since
       })) as Record<string, unknown>
-      takeWorkflow(r)
+      takeWorkflow(r, since)
       if (r?.ok) {
         const msg = messages.value[placeholderIdx]
         if (!msg) return
@@ -893,6 +909,8 @@ async function sendMessage(): Promise<void> {
       }
     } catch {
       /* noop */
+    } finally {
+      polling = false
     }
   }, 200)
   try {
@@ -901,10 +919,13 @@ async function sendMessage(): Promise<void> {
     })) as Record<string, unknown>
     if (messages.value[placeholderIdx] == null) return
     // Final events (the poll may have missed the last few).
+    const since = wfEvents.length
     takeWorkflow(
-      (await window.cockpit
-        .command('aidj.stream-status', { since: wfEvents.length })
-        .catch(() => null)) as Record<string, unknown> | null
+      (await window.cockpit.command('aidj.stream-status', { since }).catch(() => null)) as Record<
+        string,
+        unknown
+      > | null,
+      since
     )
     const workflow = wfEvents.length ? [...wfEvents] : undefined
     if (result?.ok) {
