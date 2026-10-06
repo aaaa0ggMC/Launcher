@@ -1134,7 +1134,19 @@ onBeforeUnmount(() => localAgentUnsub?.())
 // 注册监听本身就是给原生的「页面就绪」信号（之前到达的分享在原生排队，不会丢）。
 if (window.cockpit.client && !agentView) {
   let shareUnsub: (() => void) | null = null
+  let openUnsub: (() => void) | null = null
   onMounted(() => {
+    // 桌面快捷方式 / 深链接 linuxcockpit://open?ability=…：跳到那个能力页（先于 shared 注册，
+    // 因为注册 shared 就是「页面就绪」信号，原生随即把排队的事件一起发过来）
+    openUnsub = window.cockpit.on('cockpit:client-open', (payload: unknown) => {
+      const req = (payload ?? {}) as { ability?: string; target?: Record<string, unknown> }
+      if (!req.ability || !abilities.value.some((a) => a.id === req.ability)) {
+        console.warn('[open] unknown ability', req.ability)
+        return
+      }
+      if (req.target && Object.keys(req.target).length) activate(req.ability, req.target)
+      else openAbility(req.ability)
+    })
     shareUnsub = window.cockpit.on('cockpit:client-shared', (payload: unknown) => {
       const share = payload as { paths?: string[]; text?: string; error?: string }
       const metas = new Map(sidebarReport.value.loaded.map((m) => [m.id, m]))
@@ -1146,7 +1158,10 @@ if (window.cockpit.client && !agentView) {
       activate(target.id, { share })
     })
   })
-  onBeforeUnmount(() => shareUnsub?.())
+  onBeforeUnmount(() => {
+    shareUnsub?.()
+    openUnsub?.()
+  })
 }
 
 // 网页版隐私授权（无头宿主没有授权窗口）：模态外壳悬浮窗，AI 禁区 + 只认真实手势

@@ -75,3 +75,15 @@ it('输入文字：空格写成 %s，单引号安全转义', () => {
   assert.equal(mod.inputTextCommand("it's"), "input text 'it'\\''s'")
   assert.equal(mod.shQuote("a'b"), "'a'\\''b'")
 })
+
+it('桌面快捷方式：深链接参数校验与编码', () => {
+  assert.equal(
+    mod.pinShortcutUrl({ package: 'com.tencent.mm', label: '聊天 & 工作' }),
+    'linuxcockpit://pin?package=com.tencent.mm&label=%E8%81%8A%E5%A4%A9+%26+%E5%B7%A5%E4%BD%9C'
+  )
+  assert.equal(mod.pinShortcutUrl({ ability: 'aidj' }), 'linuxcockpit://pin?ability=aidj')
+  assert.throws(() => mod.pinShortcutUrl({}), /exactly one/)
+  assert.throws(() => mod.pinShortcutUrl({ package: 'a.b', ability: 'aidj' }), /exactly one/)
+  assert.throws(() => mod.pinShortcutUrl({ package: 'x; rm' }), /invalid package/)
+  assert.throws(() => mod.pinShortcutUrl({ ability: 'aidj', icon_url: 'file:///x' }), /http/)
+})

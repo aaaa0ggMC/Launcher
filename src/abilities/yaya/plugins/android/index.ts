@@ -76,6 +76,26 @@ export function inputTextCommand(text: string): string {
 
 const PKG_RE = /^[A-Za-z][\w]*(\.[A-Za-z_][\w]*)+$/
 
+/** Cockpit 安卓 App 的固定快捷方式深链接（App 0.6.0 的 linuxcockpit://pin） */
+export function pinShortcutUrl(a: Record<string, unknown>): string {
+  const pkg = typeof a.package === 'string' ? a.package.trim() : ''
+  const ability = typeof a.ability === 'string' ? a.ability.trim() : ''
+  if (!pkg === !ability) throw new Error('give exactly one of package / ability')
+  if (pkg && !PKG_RE.test(pkg)) throw new Error('invalid package name')
+  if (ability && !/^[\w-]+$/.test(ability)) throw new Error('invalid ability id')
+  const q = new URLSearchParams()
+  if (pkg) q.set('package', pkg)
+  else q.set('ability', ability)
+  const label = typeof a.label === 'string' ? a.label.trim() : ''
+  if (label) q.set('label', label.slice(0, 40))
+  const icon = typeof a.icon_url === 'string' ? a.icon_url.trim() : ''
+  if (icon) {
+    if (!/^https?:\/\//i.test(icon)) throw new Error('icon_url must be http(s)')
+    q.set('icon', icon)
+  }
+  return `linuxcockpit://pin?${q}`
+}
+
 function termux(
   cmd: string,
   args: string[],
@@ -292,6 +312,32 @@ const tools: PluginTool[] = [
       if (/^tel:/i.test(url)) throw new Error('phone calls are not available to the assistant')
       await guard(SCOPE_CONTROL)
       return termux('termux-open-url', [url], ctx.signal)
+    }
+  },
+
+  {
+    name: 'pin_shortcut',
+    group: T,
+    description:
+      'Put a shortcut on the phone home screen (needs the Cockpit Android app 0.6.0+; the user confirms ' +
+      'a system dialog). Either `package` (launch another app — a custom `label` / `icon_url` is how to ' +
+      '"rename" or "re-icon" an app, since other apps\' own icons cannot be changed) or `ability` (open ' +
+      'a Cockpit page, e.g. "aidj"). Same target + same label again updates the existing shortcut.',
+    parameters: {
+      type: 'object',
+      properties: {
+        package: { type: 'string', description: 'Android package name (see list_apps)' },
+        ability: { type: 'string', description: 'Cockpit ability id to open' },
+        label: { type: 'string', description: 'Shortcut name (default: app / page name)' },
+        icon_url: { type: 'string', description: 'http(s) image URL for the icon (optional)' }
+      }
+    },
+    approval: 'ask',
+    run: async (a, ctx) => {
+      const url = pinShortcutUrl(a)
+      await guard(SCOPE_CONTROL)
+      await termux('termux-open-url', [url], ctx.signal)
+      return { ok: true, note: 'Shortcut request sent; the user confirms it on the phone.' }
     }
   },
 

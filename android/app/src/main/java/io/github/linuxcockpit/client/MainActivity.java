@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.net.Uri;
@@ -35,6 +36,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
@@ -73,6 +75,8 @@ public class MainActivity extends Activity {
     private static final int REQ_DIR = 4;
 
     private FrameLayout root;
+    /** 打开着的网页登录页（webLogin RPC）；同一时间最多一个 */
+    private WebLogin webLogin;
     private WebView web;
     /** 系统媒体控制（通知栏 / 锁屏）；页面经 media.update 驱动 */
     private MediaBridge media;
@@ -165,10 +169,49 @@ public class MainActivity extends Activity {
         handleIntent(intent);
     }
 
-    /** linuxcockpit://connect?url=…&token=… 只预填连接页；启动器快捷方式「连接设置」打开连接页 */
+    /**
+     * 外部进来的 intent：
+     * <ul>
+     *   <li>{@code linuxcockpit://connect?url=…&token=…} 只预填连接页；启动器快捷方式「连接设置」打开连接页；</li>
+     *   <li>{@code linuxcockpit://open?ability=…&target=…} 跳到某个能力页（桌面快捷方式用；页面没就绪时排队）；</li>
+     *   <li>{@code linuxcockpit://pin?package=…|ability=…&label=…&icon=…} 请求固定桌面快捷方式
+     *       （Termux 里 {@code termux-open-url} 就能触发，YAYA 的安卓插件用它）。</li>
+     * </ul>
+     * open / pin 不占用这次启动：照常连接宿主。
+     */
     private boolean handleIntent(Intent intent) {
         if (intent == null) return false;
         Uri data = intent.getData();
+        if (data != null && "linuxcockpit".equals(data.getScheme()) && "open".equals(data.getHost())) {
+            String ability = data.getQueryParameter("ability");
+            if (ability != null && !ability.isEmpty()) {
+                try {
+                    JSONObject o = new JSONObject();
+                    o.put("ability", ability);
+                    String target = data.getQueryParameter("target");
+                    if (target != null && !target.isEmpty()) o.put("target", new JSONObject(target));
+                    emit("open", o);
+                } catch (JSONException ignored) {
+                }
+            }
+            setIntent(new Intent(this, MainActivity.class));
+            return false;
+        }
+        if (data != null && "linuxcockpit".equals(data.getScheme()) && "pin".equals(data.getHost())) {
+            final String pkg = data.getQueryParameter("package");
+            final String ability = data.getQueryParameter("ability");
+            final String label = data.getQueryParameter("label");
+            final String iconUrl = data.getQueryParameter("icon");
+            io.execute(() -> {
+                Bitmap icon = Shortcuts.download(iconUrl);
+                runOnUiThread(() -> {
+                    String err = Shortcuts.pin(this, ability, null, pkg, label, icon);
+                    if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show();
+                });
+            });
+            setIntent(new Intent(this, MainActivity.class));
+            return false;
+        }
         if (data != null && "linuxcockpit".equals(data.getScheme())) {
             prefill = new JSONObject();
             try {
@@ -348,6 +391,10 @@ public class MainActivity extends Activity {
     void onBack() {
         if (imeVisible()) {
             hideIme();
+            return;
+        }
+        if (webLogin != null) {
+            webLogin.back();
             return;
         }
         web.evaluateJavascript(JS_DISMISS_OVERLAY, handled -> {
@@ -674,9 +721,42 @@ public class MainActivity extends Activity {
                     o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                     o.put("url", prefs.getString("url", DEFAULT_URL));
                     o.put("keepAlive", prefs.getBoolean("keepAlive", true));
+                    o.put("pinShortcuts", Shortcuts.supported(this));
                     reply(id, true, o);
                     return;
                 }
+                case "shortcut.pin": {
+                    // 固定桌面快捷方式（0.6.0）：{ability, target?} 或 {package}；label / icon（data URL）可选
+                    final String ability = args.optString("ability", "");
+                    final String pkg = args.optString("package", "");
+                    final String label = args.optString("label", "");
+                    final JSONObject target = args.optJSONObject("target");
+                    final Bitmap icon = Shortcuts.fromDataUrl(args.optString("icon", ""));
+                    runOnUiThread(() -> {
+                        String err = Shortcuts.pin(this, ability, target == null ? null : target.toString(), pkg, label, icon);
+                        if (err == null) reply(id, true, new JSONObject());
+                        else reply(id, false, errorJson(err));
+                    });
+                    return;
+                }
+                case "webLogin":
+                    // 网页登录页（0.6.0）：{url, doneHosts, cookieUrls, title} → {cookies:[{url,cookie}], cancelled}
+                    runOnUiThread(() -> {
+                        if (webLogin != null) {
+                            reply(id, false, errorJson("busy"));
+                            return;
+                        }
+                        String u = args.optString("url", "");
+                        if (!u.startsWith("https://")) {
+                            reply(id, false, errorJson("url must be https"));
+                            return;
+                        }
+                        webLogin = new WebLogin(this, root, args, result -> {
+                            webLogin = null;
+                            reply(id, true, result);
+                        });
+                    });
+                    return;
                 case "settings.set": {
                     if (args.has("keepAlive")) {
                         boolean on = args.getBoolean("keepAlive");
