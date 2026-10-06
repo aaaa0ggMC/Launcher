@@ -274,7 +274,6 @@ function doDelete(): void {
             class="session-item"
             @click="onItemClick(s)"
           >
-
             <template v-if="editingId === s.id">
               <v-text-field
                 v-model="editingTitle"
