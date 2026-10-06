@@ -18,6 +18,7 @@ import {
 } from '../db'
 import { mergeSessionMentions, resolveMentions, sessionMentions } from '../plugins/mention'
 import { loadYayaConfig } from '../config'
+import { assistantConfig, sessionAssistantId } from '../../assistants'
 import { applyUserTextHooks } from '../plugins/registry'
 import { getProviderInstance } from '../providers/factory'
 import { WorkflowRunner } from './runner'
@@ -91,7 +92,11 @@ export async function startWorkflow(
   }
 
   // 插件数据流钩子（SecretPlugin 把 #Secret("…") 换成引用等），入库的就是变换后的正文
-  const content = applyUserTextHooks(sessionId, userPrompt, loadYayaConfig())
+  const content = applyUserTextHooks(
+    sessionId,
+    userPrompt,
+    assistantConfig(loadYayaConfig(), sessionAssistantId(getSession(sessionId)))
+  )
 
   const userMsgId = randomUUID()
   insertMessage({
@@ -155,7 +160,8 @@ function launchRunner(sessionId: string, userMsgId: string): string {
     createdAt: Date.now()
   })
 
-  const config = loadYayaConfig()
+  // 会话自己的助手叠加到全局配置上：名字 / 提示词 / 模型 / 插件开关 / 审批都按助手来
+  const config = assistantConfig(loadYayaConfig(), sessionAssistantId(session))
   const providerConfig =
     config.providers.find((p) => p.id === (session.providerId || config.activeProviderId)) ||
     config.providers.find((p) => p.enabled) ||

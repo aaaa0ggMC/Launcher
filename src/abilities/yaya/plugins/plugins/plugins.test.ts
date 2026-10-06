@@ -145,3 +145,28 @@ it('mcp_add 接受 https 地址并落盘（加密后再读回仍只有头名）'
 it('context_info 在没有宿主上下文时返回 available: false', async () => {
   assert.deepEqual(await run('context_info', {}), { available: false })
 })
+
+it('启用开关只改本次对话的助手，别的助手和默认值不变', async () => {
+  const db = await import('../../services/db')
+  const { assistantFromDefaults } = await import('../../assistants')
+  const cfg = config.loadYayaConfig()
+  cfg.assistants = [...(cfg.assistants ?? []), assistantFromDefaults(cfg, 'coder')]
+  config.saveYayaConfig(cfg)
+  db.createSession({ id: 'coder-chat', title: 'x', meta: { assistantId: 'coder' } })
+  const ctx: ToolRunContext = {
+    sessionId: 'coder-chat',
+    pluginId: 'plugins',
+    signal: new AbortController().signal
+  }
+  registry.registerPlugin({ ...plugin, id: 'demo-p', label: 'Demo', tools: () => [] })
+  registry.refreshPlugins(config.loadYayaConfig())
+  const ok = await tool('set_plugin_enabled').run({ id: 'demo-p', enabled: false }, ctx)
+  assert.ok(!isError(ok), textOf(ok))
+  const saved = config.loadYayaConfig()
+  assert.equal(saved.assistants?.find((a) => a.id === 'coder')?.pluginEnabled?.['demo-p'], false)
+  assert.equal(
+    saved.assistants?.find((a) => a.id === 'default')?.pluginEnabled?.['demo-p'],
+    undefined
+  )
+  assert.equal(saved.pluginEnabled?.['demo-p'], undefined)
+})

@@ -38,6 +38,12 @@ import type { TreeTurn } from './types'
 import type { ContextState } from './services/context'
 import ContextMarker from './components/ContextMarker.vue'
 import { ensurePluginMap } from './components/plugin-ui-registry'
+import {
+  assistantConfig,
+  DEFAULT_ASSISTANT_ID,
+  findAssistant,
+  sessionAssistantId
+} from './assistants'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
 defineOptions({ name: 'cockpit-yaya-view' })
@@ -46,7 +52,8 @@ const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 const settings = useSettings()
 
-const config = ref<YayaConfig | null>(null)
+/** 原始配置（含助手列表）；页面读的 `config` 是当前会话的助手叠加后的生效配置 */
+const rawConfig = ref<YayaConfig | null>(null)
 const sessions = ref<Session[]>([])
 /** null = 新对话草稿（首次发送 / 添加附件时才真正创建会话，避免空会话堆积） */
 const activeSessionId = ref<string | null>(null)
@@ -64,6 +71,8 @@ const notice = ref<{ text: string; error?: boolean } | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
 /** 新对话草稿里选的工作流（会话创建时带上） */
 const draftWorkflow = ref<string | null>(null)
+/** 还没建会话时选的助手（null = 活动助手） */
+const draftAssistantId = ref<string | null>(null)
 const draftReasoning = ref<ReasoningEffort | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
@@ -172,6 +181,19 @@ const scrimStyle = computed(() =>
 watch([drawerOpen, wide], resetDrawerSwipe)
 
 // ---- 派生状态 ----
+const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
+/** 当前会话的助手；新对话 = 草稿里选的助手 → 活动助手 */
+const currentAssistantId = computed(() =>
+  activeSession.value
+    ? sessionAssistantId(activeSession.value)
+    : draftAssistantId.value || rawConfig.value?.activeAssistantId || DEFAULT_ASSISTANT_ID
+)
+const currentAssistant = computed(() =>
+  rawConfig.value ? findAssistant(rawConfig.value, currentAssistantId.value) : undefined
+)
+const config = computed<YayaConfig | null>(() =>
+  rawConfig.value ? assistantConfig(rawConfig.value, currentAssistantId.value) : null
+)
 const assistantName = computed(() => config.value?.assistantName?.trim() || 'YAYA')
 
 // 外壳 App bar 标题 / 侧栏条目跟随助手名（默认名就恢复能力原名）
@@ -180,7 +202,6 @@ const setShellTitle = inject<(id: string, title: string | null) => void>(
   () => {}
 )
 watch(assistantName, (name) => setShellTitle('yaya', name === 'YAYA' ? null : name))
-const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
 /** 上下文管理的切点（设置里关掉时不显示） */
 const contextBoundary = computed<ContextState | null>(() => {
   if (!config.value?.context?.mode || config.value.context.mode === 'off') return null
@@ -333,7 +354,7 @@ async function scrollToBottom(force = false): Promise<void> {
 // ---- 数据加载 ----
 async function loadConfig(): Promise<void> {
   try {
-    config.value = (await window.cockpit.command('yaya.config-get')) as YayaConfig
+    rawConfig.value = (await window.cockpit.command('yaya.config-get')) as YayaConfig
   } catch (e) {
     console.error('[yaya] load config failed', e)
   }
@@ -593,6 +614,7 @@ async function ensureSession(): Promise<string> {
   if (activeSessionId.value) return activeSessionId.value
   const s = (await window.cockpit.command('yaya.session-create', {
     title: t('yaya.new_chat', '新对话'),
+    assistant: currentAssistantId.value,
     model: config.value?.activeModel,
     provider: config.value?.activeProviderId,
     workflow: draftWorkflow.value || undefined,
@@ -901,26 +923,27 @@ async function handleModelSelect(payload: { model: string; providerId: string })
       s.providerId = providerId
     }
   }
-  // 同时作为之后新对话的默认模型
-  if (config.value) {
-    config.value.activeModel = model
-    config.value.activeProviderId = providerId
+  // 同时作为这个助手之后新对话的模型
+  const assistant = currentAssistant.value
+  if (assistant) {
+    assistant.activeModel = model
+    assistant.activeProviderId = providerId
     await saveConfig()
   }
 }
 
 async function handleAddCustomModel(payload: { model: string; providerId: string }): Promise<void> {
-  const provider = config.value?.providers.find((p) => p.id === payload.providerId)
+  const provider = rawConfig.value?.providers.find((p) => p.id === payload.providerId)
   if (!provider || provider.models.includes(payload.model)) return
   provider.models.push(payload.model)
   await saveConfig()
 }
 
 async function saveConfig(): Promise<void> {
-  if (!config.value) return
+  if (!rawConfig.value) return
   try {
     await window.cockpit.command('yaya.config-save', {
-      config: JSON.parse(JSON.stringify(config.value))
+      config: JSON.parse(JSON.stringify(rawConfig.value))
     })
   } catch (e) {
     showNotice(errText(e), true)
@@ -1178,7 +1201,7 @@ onMounted(async () => {
       runningIds.value = (payload as { sessionIds: string[] }).sessionIds
     }),
     window.cockpit.on('cockpit:yaya-config-changed', (payload: unknown) => {
-      config.value = payload as YayaConfig
+      rawConfig.value = payload as YayaConfig
     }),
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()

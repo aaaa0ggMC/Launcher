@@ -29,6 +29,7 @@ import {
 } from './services/db'
 import { computeSessionUsage, type ToolRisk } from './services/usage'
 import { normalizeContextConfig } from './services/context'
+import { assistantConfig, findAssistant, sessionAssistantId } from './assistants'
 import {
   startWorkflow,
   regenerateWorkflow,
@@ -230,8 +231,13 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-create',
     description: '创建一个新的 YAYA 聊天会话',
     usage:
-      'yaya.session-create [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <id>] [--reasoning <effort>]',
+      'yaya.session-create [--title <title>] [--assistant <助手 id>] [--model <model>] [--provider <providerId>] [--workflow <id>] [--reasoning <effort>]',
     run: async (ctx) => {
+      // 不指定助手 = 当前活动助手（会话记住它，之后换活动助手不影响这个会话）
+      const assistant = findAssistant(
+        loadYayaConfig(),
+        typeof ctx.named.assistant === 'string' ? ctx.named.assistant : undefined
+      )
       const title = (ctx.named.title as string) || '新会话'
       const model = ctx.named.model as string | undefined
       const providerId = ctx.named.provider as string | undefined
@@ -243,6 +249,7 @@ const commands: CommandSpec[] = [
         model,
         providerId,
         meta: {
+          ...(assistant ? { assistantId: assistant.id } : {}),
           ...(workflow ? { workflow } : {}),
           ...(reasoning !== undefined ? { reasoning: normalizeEffort(reasoning) } : {})
         }
@@ -483,8 +490,15 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.plugins-list',
     description: '列出所有插件（内置 / MCP / Skill）及其工具、启用状态、连接状态',
-    usage: 'yaya.plugins-list',
-    run: async () => listPluginInfo(loadYayaConfig())
+    usage: 'yaya.plugins-list [--assistant <助手 id>]',
+    // --assistant：启用状态 / 分组开关按这个助手的设置算（设置 → 助手 → 插件 / MCP）
+    run: async (ctx) => {
+      const cfg = loadYayaConfig()
+      const assistant = ctx.named.assistant
+      return listPluginInfo(
+        typeof assistant === 'string' && assistant ? assistantConfig(cfg, assistant) : cfg
+      )
+    }
   },
 
   {
@@ -550,8 +564,9 @@ const commands: CommandSpec[] = [
     name: 'yaya.plugin-group-set',
     description:
       '启用 / 禁用一个插件的子分组（如 Android Controller 的 Shizuku / Termux:API）。关掉后该分组的工具不再提供给助手',
-    usage: 'yaya.plugin-group-set --id <pluginId> --group <分组 id> --enabled true|false',
-    ui: ['设置 → 插件 → 插件详情 → 分组 → 开关'],
+    usage:
+      'yaya.plugin-group-set --id <pluginId> --group <分组 id> --enabled true|false [--assistant <助手 id>]',
+    ui: ['设置 → 插件 → 插件详情 → 分组 → 开关', '设置 → 助手 → 插件 → 插件详情 → 分组'],
     privacy: { agent: 'deny' },
     run: async (ctx) => {
       const id = String(ctx.named.id ?? '')
@@ -569,12 +584,20 @@ const commands: CommandSpec[] = [
         throw new Error(t('yaya.plugin.cmd_err_unknown_group', `分组不存在：${id}/${groupId}`))
 
       const next = JSON.parse(JSON.stringify(loadYayaConfig())) as YayaConfig
-      const overrides: Record<string, boolean> = { ...(next.pluginGroupEnabled ?? {}) }
+      // 指定了助手：改这个助手自己的分组开关；否则改「新助手的默认值」
+      const assistantId = typeof ctx.named.assistant === 'string' ? ctx.named.assistant : ''
+      const target: { pluginGroupEnabled?: Record<string, boolean> } = assistantId
+        ? (next.assistants?.find((a) => a.id === assistantId) ??
+          (() => {
+            throw new Error(`Assistant ${assistantId} not found`)
+          })())
+        : next
+      const overrides: Record<string, boolean> = { ...(target.pluginGroupEnabled ?? {}) }
       const key = `${id}/${groupId}`
       // 与插件启用开关同一约定：等于分组的 defaultEnabled 时删键（恢复缺省值）
       if (enabled === (group.defaultEnabled ?? true)) delete overrides[key]
       else overrides[key] = enabled
-      next.pluginGroupEnabled = overrides
+      target.pluginGroupEnabled = overrides
       return applyPluginConfigChange(next)
     }
   },
@@ -615,7 +638,9 @@ const commands: CommandSpec[] = [
       const session = getSession(String(ctx.named.session ?? ''))
       if (!session) throw new Error('Session not found')
       return {
-        config: normalizeContextConfig(loadYayaConfig().context),
+        config: normalizeContextConfig(
+          assistantConfig(loadYayaConfig(), sessionAssistantId(session)).context
+        ),
         state: (session.meta as { context?: unknown } | undefined)?.context ?? null
       }
     }

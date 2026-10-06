@@ -10,6 +10,7 @@ import { makeLogger } from '../../../main/process/logger'
 import { t, te } from '../../../main/process/i18n'
 import { getMessageBranch, getSession, getSessionMessages } from './db'
 import { loadYayaConfig } from './config'
+import { assistantConfig, sessionAssistantId } from '../assistants'
 import type { MessageNode, Session } from '../types'
 
 const log = makeLogger('yaya-io')
@@ -283,7 +284,7 @@ export function exportSessionMarkdown(sessionId: string, scope?: ExportScope): s
   const sc = resolveScope(scope)
   const session = loadSessionOrThrow(sessionId)
   const messages = messagesFor(session, sc)
-  const assistantName = loadYayaConfig().assistantName
+  const assistantName = assistantConfig(loadYayaConfig(), sessionAssistantId(session)).assistantName
   const toolResults = collectToolResults(messages)
   const consumed = consumedToolResults(messages, toolResults)
 
