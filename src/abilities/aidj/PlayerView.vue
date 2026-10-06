@@ -14,6 +14,8 @@ import { translate } from '../../main/ui/i18n'
 import { ensureWebPlayerEngine } from './web-player/engine'
 import PlayerMenu from './components/PlayerMenu.vue'
 import EqEditorDialog from './components/EqEditorDialog.vue'
+import SongInfoDialog from './components/SongInfoDialog.vue'
+import { vLongPress } from '../../main/ui/directives/long-press'
 import type { EqProfile } from './types'
 
 defineOptions({ name: 'cockpit-aidj-player' })
@@ -33,6 +35,11 @@ const queueTotal = ref(0)
 const queueTracks = ref<string[]>([])
 const coverUrl = ref('')
 const coverPath = ref('')
+/** 歌曲信息 for the current track (right-click / long-press the cover or title). */
+const infoOpen = ref(false)
+function openInfo(): void {
+  if (coverPath.value) infoOpen.value = true
+}
 
 // -- page menu (mirrors the aidj main page: top-center handle → subpages) -----
 const menuOpen = ref(false)
@@ -595,6 +602,8 @@ const hasTrack = computed(() => track.value !== '')
       @toggle-web-remote="toggleWebRemote"
     />
 
+    <SongInfoDialog v-model="infoOpen" :path="coverPath" :name="track" />
+
     <EqEditorDialog
       v-model="eqEditorOpen"
       :profile="eqEditing"
@@ -605,14 +614,23 @@ const hasTrack = computed(() => track.value !== '')
 
     <!-- main player body: cover/track up top, progress + controls pinned low -->
     <div class="player-body d-flex flex-column align-center flex-grow-1 min-h-0 pb-6">
-      <div class="cover-wrap d-flex align-center justify-center mb-4">
+      <div
+        v-long-press="openInfo"
+        class="cover-wrap d-flex align-center justify-center mb-4"
+        @contextmenu.prevent="openInfo"
+      >
         <img v-if="coverUrl" :src="coverUrl" class="cover-img" :alt="track" />
         <div v-else class="cover-img cover-placeholder d-flex align-center justify-center">
           <v-icon size="52">mdi-music-note</v-icon>
         </div>
       </div>
 
-      <div class="track-title text-h6 font-weight-medium text-truncate mb-2" :title="track">
+      <div
+        v-long-press="openInfo"
+        class="track-title text-h6 font-weight-medium text-truncate mb-2"
+        :title="track"
+        @contextmenu.prevent="openInfo"
+      >
         {{ hasTrack ? track : t('aidj.player.empty', '—') }}
       </div>
       <v-chip
@@ -808,7 +826,9 @@ const hasTrack = computed(() => track.value !== '')
   color: rgb(var(--v-theme-on-surface-variant));
 }
 .track-title {
-  max-width: 560px;
+  /* 居中列里的子项宽度由内容决定，只写 560px 上限时长标题会撑出屏幕、text-truncate 不生效；
+     再限制到父宽 100%，省略号才会出现 */
+  max-width: min(560px, 100%);
 }
 .seek-slider {
   flex: 1 1 auto;
@@ -903,6 +923,16 @@ const hasTrack = computed(() => track.value !== '')
      会被解成一个很小的值（封面变成细长药丸）。所以先让它占满行宽，百分比才有可解析的参照。 */
   .cover-wrap {
     width: 100%;
+  }
+  /* 手机上标题最多两行、居中，超出才省略，比单行截断能多看到一截歌名 */
+  .track-title {
+    white-space: normal !important;
+    text-align: center;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
   }
   .cover-img {
     /* 容器窄于封面时不要溢出；高度用 aspect-ratio 跟随，object-fit: cover 裁切、画面不变形 */

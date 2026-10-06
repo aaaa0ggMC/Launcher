@@ -7,7 +7,8 @@ import {
   getDbusManager,
   bumpFrequency,
   getCurrentDbusTrackInfo,
-  getCoverArt
+  getCoverArt,
+  getSongFileInfo
 } from '../service'
 import { getActiveBackend, getPlayerMode, setPlayerMode, WebPlayerBackend } from '../player-backend'
 import { state, DBUS_ONLY } from './shared'
@@ -250,6 +251,25 @@ export const playbackCommands: CommandSpec[] = [
       if (!path) return { ok: false, error: '需要 --path 参数' }
       const url = await getCoverArt(path)
       return { ok: true, url }
+    }
+  },
+  {
+    name: 'aidj.song-info',
+    description: '查看歌曲信息（标签、时长、码率、文件大小 + 曲库元数据）',
+    usage: 'aidj.song-info --path <filepath>',
+    run: async (ctx) => {
+      const path = ctx.named.path as string
+      if (!path) return { ok: false, error: '需要 --path 参数' }
+      const info = await getSongFileInfo(path)
+      // Library metadata / lyrics are keyed by file name; a library that is
+      // still scanning just leaves them out rather than blocking the dialog.
+      const lib = isLibraryLoading() ? null : await loadLibrary().catch(() => null)
+      return {
+        ok: true,
+        info,
+        meta: lib?.metadata.get(info.name) ?? null,
+        hasLyrics: lib ? lib.lyrics.has(info.name) || lib.karaoke.has(info.name) : null
+      }
     }
   }
 ]
