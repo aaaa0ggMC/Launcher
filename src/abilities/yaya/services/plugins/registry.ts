@@ -525,20 +525,24 @@ export function collectModelHints(
   for (const { providerId, model } of pairs) {
     const badges: string[] = []
     const titles: string[] = []
+    let contextWindow: number | undefined
     for (const p of plugins) {
       try {
         const hint = p.hooks!.modelHint!({ providerId, model })
         if (!hint) continue
         badges.push(...(hint.badges ?? []))
         if (hint.title) titles.push(hint.title)
+        if (!contextWindow && hint.contextWindow && hint.contextWindow > 0)
+          contextWindow = hint.contextWindow
       } catch (e) {
         log.warn('plugin modelHint hook failed', { plugin: p.id, error: String(e) })
       }
     }
-    if (badges.length || titles.length)
+    if (badges.length || titles.length || contextWindow)
       out[`${providerId}/${model}`] = {
         badges,
-        ...(titles.length ? { title: titles.join('\n') } : {})
+        ...(titles.length ? { title: titles.join('\n') } : {}),
+        ...(contextWindow ? { contextWindow } : {})
       }
   }
   return out

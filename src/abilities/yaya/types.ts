@@ -237,6 +237,8 @@ export interface YayaConfig {
   processPreviewSteps?: number
   /** 用户 / 助手的形象（名字、头像）与它们对 AI 是否可见，见 profile.ts */
   profile?: YayaProfile
+  /** 上下文太长时丢弃 / 压缩较早的消息，见 services/context.ts */
+  context?: import('./services/context').ContextConfig
   maxLoopSteps: number
   streamOutput: boolean
   providers: ProviderConfig[]

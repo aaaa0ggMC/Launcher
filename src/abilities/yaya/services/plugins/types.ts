@@ -233,6 +233,8 @@ export interface ModelHint {
   badges?: string[]
   /** 悬停说明 */
   title?: string
+  /** 模型的上下文长度（token）；上下文管理的「自动」预算按它算 */
+  contextWindow?: number
 }
 
 export interface MentionContext {

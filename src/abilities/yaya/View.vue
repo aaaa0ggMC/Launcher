@@ -35,6 +35,8 @@ import UsageDialog from './components/UsageDialog.vue'
 import ConversationTree from './components/tree/ConversationTree.vue'
 import SelectTextDialog from './components/SelectTextDialog.vue'
 import type { TreeTurn } from './types'
+import type { ContextState } from './services/context'
+import ContextMarker from './components/ContextMarker.vue'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
@@ -179,6 +181,21 @@ const setShellTitle = inject<(id: string, title: string | null) => void>(
 )
 watch(assistantName, (name) => setShellTitle('yaya', name === 'YAYA' ? null : name))
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
+/** 上下文管理的切点（设置里关掉时不显示） */
+const contextBoundary = computed<ContextState | null>(() => {
+  if (!config.value?.context?.mode || config.value.context.mode === 'off') return null
+  const st = (activeSession.value?.meta as { context?: ContextState } | undefined)?.context
+  return st?.boundaryId ? st : null
+})
+async function resetContext(): Promise<void> {
+  const id = activeSessionId.value
+  if (!id) return
+  try {
+    await window.cockpit.command('yaya.context-reset', { session: id })
+  } catch (e) {
+    console.warn('[yaya] context reset failed', e)
+  }
+}
 const isRunning = computed(
   () => !!activeSessionId.value && runningIds.value.includes(activeSessionId.value)
 )
@@ -1166,6 +1183,16 @@ onMounted(async () => {
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()
     }),
+    window.cockpit.on('cockpit:yaya-context-changed', (payload: unknown) => {
+      const p = payload as { sessionId: string; state: ContextState | null }
+      sessions.value = sessions.value.map((s) => {
+        if (s.id !== p.sessionId) return s
+        const meta = { ...(s.meta ?? {}) } as Record<string, unknown>
+        if (p.state) meta.context = p.state
+        else delete meta.context
+        return { ...s, meta }
+      })
+    }),
     // 网页版事件流断线重连：期间的 token / 状态推送都丢了，重新同步
     window.cockpit.on('cockpit:host-reconnected', () => {
       void resync()
@@ -1429,6 +1456,15 @@ watch(isRunning, (now, before) => {
           </div>
 
           <template v-for="turn in turns" :key="turn.key">
+            <ContextMarker
+              v-if="
+                turn.kind === 'user' &&
+                contextBoundary &&
+                turn.message.id === contextBoundary.boundaryId
+              "
+              :state="contextBoundary"
+              @reset="resetContext"
+            />
             <UserMessage
               v-if="turn.kind === 'user'"
               class="turn-item"

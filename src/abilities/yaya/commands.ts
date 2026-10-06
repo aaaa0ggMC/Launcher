@@ -28,6 +28,7 @@ import {
   getMessageBranch
 } from './services/db'
 import { computeSessionUsage, type ToolRisk } from './services/usage'
+import { normalizeContextConfig } from './services/context'
 import {
   startWorkflow,
   regenerateWorkflow,
@@ -600,6 +601,40 @@ const commands: CommandSpec[] = [
       const usage = computeSessionUsage(getSessionMessages(id), activeIds, riskOf, onlyActive)
       const sections = await collectUsageSections(id, usage, loadYayaConfig())
       return sections.length ? { ...usage, sections } : usage
+    }
+  },
+
+  {
+    name: 'yaya.context-state',
+    description:
+      '会话的上下文管理状态：切点（从哪条消息开始发给模型）、压缩摘要、切之前 / 之后的估算 token',
+    usage: 'yaya.context-state --session <会话 id>',
+    ui: ['YAYA 对话里「以上内容已压缩 / 已丢弃」的分隔条'],
+    related: ['yaya.context-reset'],
+    run: (ctx) => {
+      const session = getSession(String(ctx.named.session ?? ''))
+      if (!session) throw new Error('Session not found')
+      return {
+        config: normalizeContextConfig(loadYayaConfig().context),
+        state: (session.meta as { context?: unknown } | undefined)?.context ?? null
+      }
+    }
+  },
+
+  {
+    name: 'yaya.context-reset',
+    description: '清除会话的上下文切点与摘要：下次运行重新发送完整历史（超出预算时会重新切）',
+    usage: 'yaya.context-reset --session <会话 id>',
+    related: ['yaya.context-state'],
+    run: (ctx) => {
+      const id = String(ctx.named.session ?? '')
+      const session = getSession(id)
+      if (!session) throw new Error('Session not found')
+      const meta = { ...(session.meta ?? {}) } as Record<string, unknown>
+      delete meta.context
+      updateSession(id, { meta })
+      getBroadcast()('cockpit:yaya-context-changed', { sessionId: id, state: null })
+      return { ok: true }
     }
   },
 

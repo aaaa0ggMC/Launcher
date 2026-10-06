@@ -11,6 +11,7 @@ import { getBroadcast } from '../../../main/process/broadcast'
 import type { McpServerConfig, ProviderConfig, YayaConfig } from '../types'
 import { applyPromptVars, type PromptVar } from './prompt-vars'
 import { normalizeProfile } from '../profile'
+import { normalizeContextConfig } from './context'
 
 const log = makeLogger('yaya-config')
 
@@ -101,6 +102,7 @@ export function loadYayaConfig(): YayaConfig {
     cfg.assistantName = normalizeAssistantName(cfg.assistantName)
     cfg.processPreviewSteps = normalizeProcessPreviewSteps(cfg.processPreviewSteps)
     cfg.profile = normalizeProfile(cfg.profile)
+    cfg.context = normalizeContextConfig(cfg.context)
     // 仅传输字段不该出现在内存配置里（旧版本可能落过盘）
     delete cfg.pluginSecretsSet
     delete cfg.pluginClearSecrets
@@ -421,6 +423,7 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
   next.assistantName = normalizeAssistantName(next.assistantName)
   next.processPreviewSteps = normalizeProcessPreviewSteps(next.processPreviewSteps)
   next.profile = normalizeProfile(next.profile)
+  next.context = normalizeContextConfig(next.context)
   next.providers = (next.providers ?? []).map((p) => {
     const prev = current.providers.find((c) => c.id === p.id)
     let apiKey = p.apiKey

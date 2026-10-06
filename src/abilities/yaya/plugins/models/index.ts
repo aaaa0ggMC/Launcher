@@ -242,7 +242,13 @@ function hintOf(meta: ModelMeta | null): ModelHint | null {
       )
     )
   }
-  return badges.length ? { badges, title: lines.join('\n') } : null
+  return badges.length
+    ? {
+        badges,
+        title: lines.join('\n'),
+        ...(meta.contextWindow ? { contextWindow: meta.contextWindow } : {})
+      }
+    : null
 }
 
 const plugin: YayaPlugin = {

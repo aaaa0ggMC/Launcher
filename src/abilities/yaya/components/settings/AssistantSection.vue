@@ -4,6 +4,7 @@ import { computed, inject, nextTick, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { YayaConfig } from '../../types'
 import ProfileSection from './ProfileSection.vue'
+import ContextSection from './ContextSection.vue'
 
 defineOptions({ name: 'cockpit-yaya-settings-assistant' })
 
@@ -118,6 +119,9 @@ async function insertVar(key: string): Promise<void> {
 
     <v-divider />
     <ProfileSection :config="config" />
+
+    <v-divider />
+    <ContextSection :config="config" />
   </div>
 </template>
 

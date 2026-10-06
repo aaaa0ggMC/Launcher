@@ -41,9 +41,21 @@ import { collectPromptVars, type PromptVar } from '../prompt-vars'
 import { normalizeProfile } from '../../profile'
 import { saveAsset } from '../assets'
 import {
+  boundaryIndex,
+  contextPreamble,
+  estimateTokens,
+  normalizeContextConfig,
+  planContext,
+  renderTranscript,
+  resolveBudget,
+  SUMMARY_SYSTEM,
+  type ContextState
+} from '../context'
+import {
   applyToolArgsHooks,
   applyToolResultHooks,
   buildPluginInstructions,
+  collectModelHints,
   normalizeToolResult,
   resolveTools,
   runPluginTool,
@@ -417,7 +429,16 @@ export class WorkflowRunner {
   }
 
   private history(): ProviderMessage[] {
-    const out = sanitizeHistory(getMessageBranch(this.parentId))
+    let nodes = getMessageBranch(this.parentId)
+    // 上下文管理：从记下的切点开始发，切点前的内容换成摘要 / 一句说明（切点不在这条分支上就发完整历史）
+    const state = this.contextState()
+    const cut = state ? boundaryIndex(nodes, state) : -1
+    if (cut > 0) nodes = nodes.slice(cut)
+    const out = sanitizeHistory(nodes)
+    if (cut > 0 && state) {
+      const first = out.find((m) => m.role === 'user')
+      if (first) first.content = contextPreamble(state) + first.content
+    }
     // 「AI 能看到你的头像」：头像作为图片挂在第一条用户消息上（每次请求都一样，缓存照常命中）
     const avatar = this.avatarAttachment
     const first = avatar ? out.find((m) => m.role === 'user') : undefined
@@ -426,6 +447,92 @@ export class WorkflowRunner {
       first.content = `[The first image is the user's profile picture.]\n\n${first.content}`
     }
     return out
+  }
+
+  /** 会话里记下的上下文切点（设置里关掉上下文管理时不生效） */
+  private contextState(): ContextState | null {
+    if (normalizeContextConfig(this.ctx.config.context).mode === 'off') return null
+    const st = (this.session?.meta as { context?: ContextState } | undefined)?.context
+    return st && typeof st.boundaryId === 'string' ? st : null
+  }
+
+  /**
+   * 每次调用模型前检查：估算超出预算就移动切点（drop 直接切，compress 先让模型写摘要）。
+   * 没超出什么都不做，切点不动，前缀不变（提示词缓存）。
+   */
+  private async manageContext(): Promise<void> {
+    const cfg = normalizeContextConfig(this.ctx.config.context)
+    if (cfg.mode === 'off') return
+    const nodes = getMessageBranch(this.parentId)
+    const hint = collectModelHints(
+      [{ providerId: this.ctx.provider.id, model: this.model }],
+      this.ctx.config
+    )
+    const budget = resolveBudget(cfg, hint[`${this.ctx.provider.id}/${this.model}`]?.contextWindow)
+    const overhead =
+      estimateTokens(this.systemPrompt()) +
+      estimateTokens(JSON.stringify(this.stepTools('enabled')))
+    const state = this.contextState()
+    const valid = state && boundaryIndex(nodes, state) > 0 ? state : null
+    const plan = planContext(nodes, {
+      budget,
+      keepTurns: cfg.keepTurns,
+      overhead,
+      mode: cfg.mode,
+      state: valid
+    })
+    if (!plan) return
+
+    let summary: string | undefined
+    let mode = cfg.mode
+    if (mode === 'compress') {
+      try {
+        const res = await this.subAgent({
+          agent: 'context',
+          label: t('yaya.context.step_compress', '压缩上下文'),
+          system: SUMMARY_SYSTEM,
+          messages: [
+            {
+              role: 'user',
+              content: renderTranscript(
+                plan.cut,
+                valid?.mode === 'compress' ? valid.summary : undefined
+              )
+            }
+          ]
+        })
+        summary = res.content.trim()
+        if (!summary) throw new Error('empty summary')
+      } catch (e) {
+        if (this.aborted) throw e
+        log.warn('context compress failed, dropping instead', { error: String(e) })
+        mode = 'drop'
+      }
+    }
+    const next: ContextState = {
+      boundaryId: nodes[plan.index].id,
+      dropped: plan.index,
+      mode,
+      ...(summary ? { summary } : {}),
+      at: Date.now(),
+      before: plan.before,
+      after: plan.after
+    }
+    if (mode === 'drop')
+      this.addStep({
+        agent: 'context',
+        kind: 'note',
+        label: te(
+          'yaya.context.step_drop',
+          { n: String(plan.index) },
+          '上下文太长：较早的 {n} 条消息不再发给 AI'
+        ),
+        status: 'ok'
+      })
+    const meta = { ...(getSession(this.ctx.sessionId)?.meta ?? {}), context: next }
+    updateSession(this.ctx.sessionId, { meta })
+    if (this.session) this.session.meta = meta
+    getBroadcast()('cockpit:yaya-context-changed', { sessionId: this.ctx.sessionId, state: next })
   }
 
   /** 用户头像在本会话资产里的副本（头像改了才重新存一份） */
@@ -516,6 +623,8 @@ export class WorkflowRunner {
     opts: AssistantStepOptions = {}
   ): Promise<AssistantStepResult> {
     await this.gate()
+    if (this.aborted) throw new Error('aborted')
+    await this.manageContext()
     if (this.aborted) throw new Error('aborted')
     this.stepCount++
     const tools = this.stepTools(opts.tools)
