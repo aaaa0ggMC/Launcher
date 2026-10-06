@@ -9,6 +9,7 @@ import {
   upsertProfile,
   removeProfile,
   checkProfileStatus,
+  importProfileCookies,
   loginProfileProvider,
   logoutProfileProvider,
   openProfileWindow,
@@ -215,6 +216,28 @@ const specs = [
       const provider = String(ctx.named.provider ?? 'openai').trim() as BalanceProviderType
       const url = ctx.named.url ? String(ctx.named.url).trim() : undefined
       return await loginProfileProvider(id, provider, url)
+    }
+  },
+  {
+    name: 'balance.profiles.import-cookies',
+    // 凭据：只能由用户本人操作（安卓 App 原生登录页取回 cookie 后调用）
+    privacy: { agent: 'deny' },
+    description: '把登录取回的 cookie 写进 Profile（安卓 App 网页登录用）',
+    usage:
+      'balance.profiles.import-cookies --id <profileId> --provider <provider> --cookies <[{url, cookie}]>',
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? 'default').trim()
+      const provider = String(ctx.named.provider ?? '').trim() as BalanceProviderType
+      const raw = ctx.named.cookies
+      const list = (typeof raw === 'string' ? JSON.parse(raw) : raw) as unknown
+      if (!Array.isArray(list)) throw new Error('cookies must be an array of {url, cookie}')
+      const cookies = list
+        .filter(
+          (c): c is { url: string; cookie: string } =>
+            !!c && typeof c.url === 'string' && typeof c.cookie === 'string'
+        )
+        .filter((c) => /^https:\/\//.test(c.url))
+      return await importProfileCookies(id, provider, cookies)
     }
   },
   {

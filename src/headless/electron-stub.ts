@@ -11,6 +11,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { Readable } from 'node:stream'
+import { fromPartition } from './session-jar'
 
 /**
  * 没有显式实现的成员被**调用**时，每个路径只警告一次（A4）：把「网页里点了没反应」
@@ -155,7 +156,24 @@ export const protocol = {
   registerFileProtocol: noop,
   unhandle: (scheme: string): void => void protocolHandlers.delete(scheme)
 }
-export const session = makeNop('session')
+/**
+ * `session.fromPartition()` 返回带 cookie 罐的会话（session-jar.ts）：登录取回的 cookie 存这里，
+ * 能力照常读。没实现的会话成员仍是 nop；`defaultSession` 等其它成员也是 nop。
+ */
+function withNopFallback<T extends object>(target: T, path: string): T {
+  return new Proxy(target, {
+    get: (t, k) =>
+      k in t ? (t as Record<string | symbol, unknown>)[k] : makeNop(`${path}.${String(k)}`)
+  })
+}
+const sessionNop = makeNop('session')
+export const session = new Proxy(
+  {
+    fromPartition: (partition: string) =>
+      withNopFallback(fromPartition(partition), `session.fromPartition(${partition})`)
+  } as Record<string, unknown>,
+  { get: (t, k) => (k in t ? t[k as string] : sessionNop[k as string]) }
+)
 export const shell = makeNop('shell')
 export const nativeImage = makeNop('nativeImage')
 export const Notification = makeNop('Notification')

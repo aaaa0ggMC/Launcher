@@ -191,6 +191,12 @@
   "android.device": "设备",
   "android.host": "宿主",
   "android.keep_alive": "后台保持运行（常驻通知，切到后台时播放器与连接不断）",
+  "android.pin_title": "添加到桌面",
+  "android.pin_hint": "把某个页面放到手机桌面，点它直接打开 App 并跳到这一页。",
+  "android.pin_page": "页面",
+  "android.pin_label": "名字",
+  "android.pin_button": "添加",
+  "android.pin_sent": "已发送到桌面：按系统弹窗确认即可（已存在同名快捷方式时直接更新）",
   "android.switch_host": "切换宿主",
   "label.Android 客户端": "Android 客户端"
 }

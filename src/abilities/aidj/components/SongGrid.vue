@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { inject, ref, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import { translate } from '../../../main/ui/i18n'
+import { vLongPress } from '../../../main/ui/directives/long-press'
 import type { PlaylistEntry } from '../types'
+import SongInfoDialog from './SongInfoDialog.vue'
 
 /**
  * Shared song grid used by both the main chat playlist (with covers) and the
@@ -15,9 +17,8 @@ import type { PlaylistEntry } from '../types'
  * Touch has no HTML5 drag, so under `(pointer: coarse)` every row also carries
  * 上移/下移 buttons (they reuse the same splice-and-emit path as the drop).
  *
- * FUTURE: per-song right-click menu — attach a `contextmenu` handler on the
- * cell (and emit `contextMenu(e, song, index)`) without touching this file;
- * the cell markup is already a stable hook for it.
+ * Right-click (desktop) or long-press (touch) on a cell opens the song's
+ * 歌曲信息 dialog.
  */
 defineOptions({ name: 'AidjSongGrid' })
 
@@ -41,6 +42,13 @@ const emit = defineEmits<{
 }>()
 
 const covers = ref<Record<string, string>>({})
+
+const infoOpen = ref(false)
+const infoSong = ref<PlaylistEntry | null>(null)
+function openInfo(song: PlaylistEntry): void {
+  infoSong.value = song
+  infoOpen.value = true
+}
 const dragIdx = ref(-1)
 const gridEl = ref<HTMLElement | null>(null)
 
@@ -232,6 +240,7 @@ onBeforeUnmount(() => {
     <div
       v-for="(song, idx) in songs"
       :key="song.path"
+      v-long-press="() => openInfo(song)"
       draggable="true"
       class="song-card d-flex align-center ga-2 px-3 py-2"
       :class="{
@@ -242,6 +251,7 @@ onBeforeUnmount(() => {
       @dragover.prevent
       @drop="onDrop($event, idx)"
       @dragend="cleanupDrag"
+      @contextmenu.prevent="openInfo(song)"
     >
       <span
         class="text-caption text-medium-emphasis flex-shrink-0"
@@ -297,6 +307,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </TransitionGroup>
+  <SongInfoDialog v-model="infoOpen" :path="infoSong?.path ?? ''" :name="infoSong?.name" />
 </template>
 
 <style scoped>

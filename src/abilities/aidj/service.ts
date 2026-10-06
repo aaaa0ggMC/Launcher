@@ -14,6 +14,7 @@
 
 export * from './services/config'
 export * from './services/cover'
+export * from './services/song-info'
 export * from './services/loudness'
 export * from './services/lyrics'
 export * from './services/library'

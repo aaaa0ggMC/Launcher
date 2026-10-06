@@ -579,6 +579,12 @@ export async function loginProfileProvider(
   provider: BalanceProviderType,
   customUrl?: string
 ): Promise<{ ok: boolean; loggedIn: boolean }> {
+  // 无头宿主没有浏览器窗口：登录要在安卓 App 里走原生登录页（页面侧处理），这里直接说清楚，
+  // 别让调用方等一个永远不会出现的窗口
+  if (process.env.COCKPIT_HEADLESS === '1')
+    throw new Error(
+      '网页模式没有登录窗口：请在 Cockpit 安卓 App 里登录（0.6.0+），或改填 API Key / Cookie'
+    )
   const partition = getProfilePartition(profileId)
   const ses = session.fromPartition(partition)
 
@@ -893,6 +899,51 @@ export async function loginProfileProvider(
   }
 
   return { ok: false, loggedIn: false }
+}
+
+/**
+ * 把外部取回的 cookie（安卓 App 原生登录页：每个 URL 一条 `a=1; b=2` 形式的 Cookie 头）写进
+ * Profile 分区。CookieManager 不给属性，域取 URL 的上一级注册域、一年有效、HttpOnly + Secure。
+ */
+export async function importProfileCookies(
+  profileId: string,
+  provider: BalanceProviderType,
+  cookies: { url: string; cookie: string }[]
+): Promise<{ ok: boolean; imported: number; loggedIn: boolean }> {
+  const ses = session.fromPartition(getProfilePartition(profileId))
+  const expirationDate = Math.floor(Date.now() / 1000) + 365 * 24 * 3600
+  let imported = 0
+  for (const { url, cookie } of cookies) {
+    let host: string
+    try {
+      host = new URL(url).hostname
+    } catch {
+      continue
+    }
+    const parts = host.split('.')
+    const domain = `.${parts.length > 2 ? parts.slice(-2).join('.') : host}`
+    for (const piece of cookie.split(';')) {
+      const eq = piece.indexOf('=')
+      if (eq <= 0) continue
+      const name = piece.slice(0, eq).trim()
+      if (!name) continue
+      await ses.cookies.set({
+        url,
+        name,
+        value: piece.slice(eq + 1).trim(),
+        domain,
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        expirationDate
+      })
+      imported++
+    }
+  }
+  await ses.cookies.flushStore()
+  const loggedIn = await detectProviderAuth(ses, provider)
+  log.info(`Imported ${imported} ${provider} cookies into profile: ${profileId}`)
+  return { ok: true, imported, loggedIn }
 }
 
 /**

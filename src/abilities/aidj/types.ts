@@ -415,6 +415,27 @@ export interface SongEntry {
   path: string
 }
 
+/** What the 歌曲信息 dialog shows about one file (tags + stream + size). */
+export interface SongFileInfo {
+  /** File name without extension — the key library metadata is stored under. */
+  name: string
+  path: string
+  /** Bytes; null when the file can't be stat'ed. */
+  size: number | null
+  /** Seconds; null when ffprobe is missing or reports none. */
+  duration: number | null
+  /** bits/s of the whole file. */
+  bitRate: number | null
+  /** Container, e.g. "mp3", "flac", "mov,mp4,m4a,3gp,3g2,mj2". */
+  format: string | null
+  /** Audio codec of the first audio stream. */
+  codec: string | null
+  sampleRate: number | null
+  channels: number | null
+  /** Common tags, lower-cased keys (title / artist / album / date / genre / …). */
+  tags: Record<string, string>
+}
+
 export interface PlaylistEntry {
   name: string
   path: string

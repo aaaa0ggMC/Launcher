@@ -1,4 +1,35 @@
-import type { BalanceResult } from './types'
+import type { BalanceProviderType, BalanceResult } from './types'
+
+/**
+ * 安卓 App 里的网页登录（无头宿主没有浏览器窗口）：App 开一个原生登录页，登录完把这些 URL 下的
+ * cookie 取回来交给宿主（balance.profiles.import-cookies）。只列余额靠 cookie 取的厂商——
+ * OpenAI 网页版靠拦截请求头、Google 不允许在 WebView 里登录，这两家在 App 里用不了网页登录。
+ */
+export interface WebLoginSpec {
+  /** 打开的第一页 */
+  url: string
+  /** 登录完会回到的站点；离开过它（去了登录页）再回来且已加载完 → 自动完成 */
+  doneHosts: string[]
+  /** 取 cookie 的 URL（覆盖登录涉及的各个域） */
+  cookieUrls: string[]
+}
+
+export const WEB_LOGIN: Partial<Record<BalanceProviderType, WebLoginSpec>> = {
+  mimo: {
+    url: 'https://platform.xiaomimimo.com/console/balance',
+    doneHosts: ['platform.xiaomimimo.com'],
+    cookieUrls: [
+      'https://platform.xiaomimimo.com/',
+      'https://xiaomimimo.com/',
+      'https://account.xiaomi.com/'
+    ]
+  },
+  bigmodel: {
+    url: 'https://bigmodel.cn/finance-center/finance/overview',
+    doneHosts: ['bigmodel.cn', 'www.bigmodel.cn'],
+    cookieUrls: ['https://bigmodel.cn/', 'https://www.bigmodel.cn/', 'https://open.bigmodel.cn/']
+  }
+}
 
 export interface SupportedPlatformType {
   type: string

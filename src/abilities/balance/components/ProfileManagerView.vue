@@ -3,6 +3,7 @@ import { ref, computed, onMounted, inject, type Ref } from 'vue'
 import type { BalanceConfig, BalanceProfile, BalanceProviderType, PlatformConfig } from '../types'
 import AbilityIcon from '../../../main/ui/components/AbilityIcon.vue'
 import { translate, translateTemplate } from '../../../main/ui/i18n'
+import { WEB_LOGIN } from '../shared'
 
 defineOptions({ name: 'ProfileManagerView' })
 
@@ -213,6 +214,12 @@ async function checkAllProfiles(): Promise<void> {
 async function handleLogin(profileId: string, provider: BalanceProviderType): Promise<void> {
   loggingIn.value[profileId] = provider
   try {
+    // 安卓 App 里没有 Electron 登录窗口：交给原生登录页，登完把 cookie 带回来导入宿主
+    const client = window.cockpit.client
+    if (client) {
+      await loginInApp(client, profileId, provider)
+      return
+    }
     const res = (await window.cockpit.command('balance.profiles.login', {
       id: profileId,
       provider
@@ -229,6 +236,41 @@ async function handleLogin(profileId: string, provider: BalanceProviderType): Pr
     showToast(`登录失败: ${String(err)}`, 'error')
   } finally {
     loggingIn.value[profileId] = null
+  }
+}
+
+async function loginInApp(
+  client: NonNullable<typeof window.cockpit.client>,
+  profileId: string,
+  provider: BalanceProviderType
+): Promise<void> {
+  const spec = WEB_LOGIN[provider]
+  if (!spec) {
+    showToast('这个平台在 App 里没法网页登录，请在桌面版登录，或改用 API Key', 'info')
+    return
+  }
+  const res = await client.call<{ cookies?: { url: string; cookie: string }[] }>('webLogin', {
+    url: spec.url,
+    doneHosts: spec.doneHosts,
+    cookieUrls: spec.cookieUrls,
+    title: provider
+  })
+  const cookies = (res?.cookies ?? []).filter((c) => c.cookie)
+  if (!cookies.length) {
+    showToast('登录页已关闭', 'info')
+    return
+  }
+  const imp = (await window.cockpit.command('balance.profiles.import-cookies', {
+    id: profileId,
+    provider,
+    cookies
+  })) as { ok: boolean; loggedIn: boolean } | null
+  if (imp?.loggedIn) {
+    showToast('登录成功！')
+    await checkSingleProfile(profileId)
+    emit('updated')
+  } else {
+    showToast('没检测到登录状态，请在登录页登录完再点「完成」', 'error')
   }
 }
 
@@ -254,6 +296,8 @@ async function openConsoleWindow(
   provider: BalanceProviderType,
   name: string
 ): Promise<void> {
+  // App 里没有独立窗口：同一个原生网页页打开控制台，关掉时顺手把会话同步回宿主
+  if (window.cockpit.client) return handleLogin(profileId, provider)
   try {
     await window.cockpit.command('balance.profiles.open_window', {
       id: profileId,
