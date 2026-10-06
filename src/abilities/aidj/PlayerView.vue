@@ -14,6 +14,8 @@ import { translate } from '../../main/ui/i18n'
 import { ensureWebPlayerEngine } from './web-player/engine'
 import PlayerMenu from './components/PlayerMenu.vue'
 import EqEditorDialog from './components/EqEditorDialog.vue'
+import SongInfoDialog from './components/SongInfoDialog.vue'
+import { vLongPress } from '../../main/ui/directives/long-press'
 import type { EqProfile } from './types'
 
 defineOptions({ name: 'cockpit-aidj-player' })
@@ -33,6 +35,11 @@ const queueTotal = ref(0)
 const queueTracks = ref<string[]>([])
 const coverUrl = ref('')
 const coverPath = ref('')
+/** 歌曲信息 for the current track (right-click / long-press the cover or title). */
+const infoOpen = ref(false)
+function openInfo(): void {
+  if (coverPath.value) infoOpen.value = true
+}
 
 // -- page menu (mirrors the aidj main page: top-center handle → subpages) -----
 const menuOpen = ref(false)
@@ -595,6 +602,8 @@ const hasTrack = computed(() => track.value !== '')
       @toggle-web-remote="toggleWebRemote"
     />
 
+    <SongInfoDialog v-model="infoOpen" :path="coverPath" :name="track" />
+
     <EqEditorDialog
       v-model="eqEditorOpen"
       :profile="eqEditing"
@@ -605,14 +614,23 @@ const hasTrack = computed(() => track.value !== '')
 
     <!-- main player body: cover/track up top, progress + controls pinned low -->
     <div class="player-body d-flex flex-column align-center flex-grow-1 min-h-0 pb-6">
-      <div class="cover-wrap d-flex align-center justify-center mb-4">
+      <div
+        v-long-press="openInfo"
+        class="cover-wrap d-flex align-center justify-center mb-4"
+        @contextmenu.prevent="openInfo"
+      >
         <img v-if="coverUrl" :src="coverUrl" class="cover-img" :alt="track" />
         <div v-else class="cover-img cover-placeholder d-flex align-center justify-center">
           <v-icon size="52">mdi-music-note</v-icon>
         </div>
       </div>
 
-      <div class="track-title text-h6 font-weight-medium text-truncate mb-2" :title="track">
+      <div
+        v-long-press="openInfo"
+        class="track-title text-h6 font-weight-medium text-truncate mb-2"
+        :title="track"
+        @contextmenu.prevent="openInfo"
+      >
         {{ hasTrack ? track : t('aidj.player.empty', '—') }}
       </div>
       <v-chip
