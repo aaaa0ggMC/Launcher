@@ -20,6 +20,11 @@ const props = defineProps<{
   loading: boolean
   /** 外壳转来的「打开编辑器」请求：'new' 或服务器 id */
   pendingEdit: string | null
+  /**
+   * 某个助手的 MCP 页：开关只改这个助手的启用状态（config 是助手视图），
+   * 不改服务器的默认启用，也不在这里增删 / 编辑服务器（它们是所有助手共用的）
+   */
+  assistantScope?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -122,7 +127,7 @@ function transportLabel(server: McpServerConfig): string {
 
 /** 服务器开关 = `server.enabled` 与插件启用（mcp-<id>）一起改 */
 function toggleServer(server: McpServerConfig, on: boolean): void {
-  server.enabled = on
+  if (!props.assistantScope) server.enabled = on
   const plugin = pluginOf(server)
   if (plugin) setPluginEnabled(props.config, plugin, on)
   // 插件列表里还没有这个服务器（刚添加、列表未刷新）时上面没有 plugin 可写；
@@ -130,6 +135,12 @@ function toggleServer(server: McpServerConfig, on: boolean): void {
   const next: Record<string, boolean> = { ...(props.config.pluginEnabled ?? {}) }
   next[`mcp-${server.id}`] = on
   props.config.pluginEnabled = next
+}
+
+/** 开关显示的值：助手页 = 这个助手的启用状态（没单独设过 = 服务器的默认启用） */
+function serverOn(server: McpServerConfig): boolean {
+  if (!props.assistantScope) return server.enabled
+  return props.config.pluginEnabled?.[`mcp-${server.id}`] ?? server.enabled
 }
 
 function saveServer(server: McpServerConfig): void {
@@ -169,14 +180,25 @@ function doDeleteServer(server: McpServerConfig): void {
     <div class="d-flex flex-wrap align-center ga-2">
       <div class="text-caption text-medium-emphasis mcp-desc">
         {{
-          t(
-            'yaya.settings.plugins.mcp_desc',
-            '连接 MCP 服务器后，它提供的工具会加入助手，可在插件详情里逐个启停'
-          )
+          assistantScope
+            ? t(
+                'yaya.assistants.mcp_desc',
+                '选择这个助手能用哪些 MCP 服务器。添加 / 编辑服务器在「设置 → 插件 → MCP」，所有助手共用'
+              )
+            : t(
+                'yaya.settings.plugins.mcp_desc',
+                '连接 MCP 服务器后，它提供的工具会加入助手，可在插件详情里逐个启停'
+              )
         }}
       </div>
       <v-spacer />
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openEditor('new')">
+      <v-btn
+        v-if="!assistantScope"
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-plus"
+        @click="openEditor('new')"
+      >
         {{ t('yaya.settings.plugins.mcp_add', '添加服务器') }}
       </v-btn>
     </div>
@@ -248,7 +270,7 @@ function doDeleteServer(server: McpServerConfig): void {
               {{ t('yaya.settings.plugins.enable_plugin', '启用该插件') }}
             </span>
             <v-switch
-              :model-value="server.enabled"
+              :model-value="serverOn(server)"
               color="primary"
               hide-details
               density="compact"
@@ -285,7 +307,12 @@ function doDeleteServer(server: McpServerConfig): void {
           >
             {{ t('yaya.settings.plugins.mcp_details', '详情') }}
           </v-btn>
-          <v-btn variant="text" prepend-icon="mdi-pencil-outline" @click="openEditor(server.id)">
+          <v-btn
+            v-if="!assistantScope"
+            variant="text"
+            prepend-icon="mdi-pencil-outline"
+            @click="openEditor(server.id)"
+          >
             {{
               narrow
                 ? t('yaya.settings.plugins.mcp_edit_short', '编辑')
@@ -293,7 +320,7 @@ function doDeleteServer(server: McpServerConfig): void {
             }}
           </v-btn>
           <v-spacer />
-          <template v-if="confirmDeleteId === server.id">
+          <template v-if="!assistantScope && confirmDeleteId === server.id">
             <v-btn variant="text" color="error" @click="doDeleteServer(server)">
               {{ t('yaya.settings.delete_confirm', '确认删除？') }}
             </v-btn>
@@ -302,7 +329,7 @@ function doDeleteServer(server: McpServerConfig): void {
             </v-btn>
           </template>
           <v-btn
-            v-else
+            v-else-if="!assistantScope"
             icon="mdi-delete-outline"
             size="small"
             :title="t('yaya.settings.plugins.mcp_delete', '删除该服务器')"

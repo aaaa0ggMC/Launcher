@@ -17,6 +17,8 @@ const props = defineProps<{
   config: YayaConfig
   /** 正在重新连接该插件 */
   restarting?: boolean
+  /** 某个助手的插件页：分组开关改这个助手的 */
+  assistantId?: string
 }>()
 
 const emit = defineEmits<{
@@ -82,7 +84,12 @@ function groupUnavailableReason(group: PluginGroupInfo): string {
 /** 分组开关：直接调命令（保存 / 刷新 / 广播都在主进程做） */
 function toggleGroup(group: PluginGroupInfo, on: boolean): void {
   void window.cockpit
-    .command('yaya.plugin-group-set', { id: props.plugin.id, group: group.id, enabled: on })
+    .command('yaya.plugin-group-set', {
+      id: props.plugin.id,
+      group: group.id,
+      enabled: on,
+      ...(props.assistantId ? { assistant: props.assistantId } : {})
+    })
     .catch((err) => console.error('failed to toggle plugin group', err))
 }
 
@@ -173,6 +180,7 @@ function onDocsClick(ev: MouseEvent): void {
         {{ t('yaya.settings.plugins.reconnect', '重新连接') }}
       </v-btn>
       <v-btn
+        v-if="!assistantId"
         variant="text"
         prepend-icon="mdi-pencil-outline"
         @click="emit('editServer', plugin.id)"

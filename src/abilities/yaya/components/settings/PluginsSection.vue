@@ -11,9 +11,13 @@ import SkillsPanel from './SkillsPanel.vue'
 
 defineOptions({ name: 'cockpit-yaya-settings-plugins' })
 
-defineProps<{
+const props = defineProps<{
   /** 同一个 reactive 配置对象，子组件直接改字段，无需 emit */
   config: YayaConfig
+  /** 某个助手的插件页：config 是这个助手的视图，启用 / 分组状态按它算 */
+  assistantId?: string
+  /** 只显示这几个分页（助手页把 MCP 单独放一页） */
+  only?: PluginsTab[]
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -21,7 +25,7 @@ const { t } = useI18n(lang)
 
 type PluginsTab = 'plugins' | 'mcp' | 'skills'
 
-const tabs = computed<{ value: PluginsTab; title: string; icon: string }[]>(() => [
+const allTabs = computed<{ value: PluginsTab; title: string; icon: string }[]>(() => [
   {
     value: 'plugins',
     title: t('yaya.settings.plugins.tab_plugins', '插件'),
@@ -35,12 +39,16 @@ const tabs = computed<{ value: PluginsTab; title: string; icon: string }[]>(() =
   }
 ])
 
+const tabs = computed(() =>
+  props.only?.length ? allTabs.value.filter((x) => props.only!.includes(x.value)) : allTabs.value
+)
+
 const plugins = ref<PluginInfo[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 
-const tab = ref<PluginsTab>('plugins')
+const tab = ref<PluginsTab>(props.only?.[0] ?? 'plugins')
 /** 正在查看详情的插件 id（三个分页共用） */
 const selectedId = ref<string | null>(null)
 const restartingId = ref<string | null>(null)
@@ -58,8 +66,10 @@ async function loadPlugins(): Promise<void> {
   loading.value = true
   loadError.value = null
   try {
-    const res = (await window.cockpit.command('yaya.plugins-list')) as
-      PluginInfo[] | { plugins?: PluginInfo[] } | null
+    const res = (await window.cockpit.command(
+      'yaya.plugins-list',
+      props.assistantId ? { assistant: props.assistantId } : {}
+    )) as PluginInfo[] | { plugins?: PluginInfo[] } | null
     if (sequence !== loadSequence) return
     plugins.value = Array.isArray(res) ? res : (res?.plugins ?? [])
   } catch (err) {
@@ -145,6 +155,7 @@ function closeDetail(): void {
       :key="selectedPlugin.id"
       :plugin="selectedPlugin"
       :config="config"
+      :assistant-id="assistantId"
       :restarting="restartingId === selectedPlugin.id"
       @back="closeDetail"
       @restart="restart"
@@ -152,11 +163,24 @@ function closeDetail(): void {
     />
 
     <template v-else>
+      <div v-if="!assistantId" class="text-caption text-medium-emphasis">
+        {{
+          t(
+            'yaya.settings.plugins.defaults_note',
+            '这里的启用开关是新建助手的默认值；已有的助手在「助手 → 插件 / MCP」里各自设置。插件配置、MCP 服务器和 Skill 所有助手共用。'
+          )
+        }}
+      </div>
       <v-alert v-if="loadError" color="error" variant="tonal" density="compact" class="mb-1">
         {{ t('yaya.settings.plugins.load_failed', '插件列表加载失败') }}
       </v-alert>
 
-      <v-tabs v-model="tab" class="plugins-tabs" selected-class="text-primary">
+      <v-tabs
+        v-if="tabs.length > 1"
+        v-model="tab"
+        class="plugins-tabs"
+        selected-class="text-primary"
+      >
         <v-tab v-for="item in tabs" :key="item.value" :value="item.value">
           <v-icon :icon="item.icon" size="small" start />
           {{ item.title }}
@@ -176,6 +200,7 @@ function closeDetail(): void {
         :plugins="plugins"
         :loading="loading"
         :pending-edit="mcpEdit"
+        :assistant-scope="!!assistantId"
         @select-plugin="selectedId = $event"
         @clear-edit="mcpEdit = null"
       />

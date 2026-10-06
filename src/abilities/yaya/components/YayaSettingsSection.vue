@@ -14,6 +14,7 @@ import {
 import type { Ref } from 'vue'
 import type { ProviderConfig, YayaConfig } from '../types'
 import AssistantSection from './settings/AssistantSection.vue'
+import AssistantsSection from './settings/AssistantsSection.vue'
 import ModelSection from './settings/ModelSection.vue'
 import PluginsSection from './settings/PluginsSection.vue'
 import PolicySection from './settings/PolicySection.vue'
@@ -29,7 +30,7 @@ defineOptions({ name: 'cockpit-yaya-settings' })
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t, te } = useI18n(lang)
 
-type SectionId = 'assistant' | 'model' | 'providers' | 'plugins' | 'policy'
+type SectionId = 'assistants' | 'assistant' | 'model' | 'providers' | 'plugins' | 'policy'
 
 interface SectionDef {
   id: SectionId
@@ -43,12 +44,20 @@ interface SectionDef {
 /** 分区固定顺序 */
 const sections: SectionDef[] = [
   {
+    id: 'assistants',
+    icon: 'mdi-account-multiple-outline',
+    titleKey: 'yaya.settings.title_assistants',
+    titleFallback: '助手',
+    subKey: 'yaya.settings.sub_assistants',
+    subFallback: '每个助手的提示词、模型与插件'
+  },
+  {
     id: 'assistant',
     icon: 'mdi-account-circle-outline',
-    titleKey: 'yaya.settings.title_assistant',
-    titleFallback: '助手',
-    subKey: 'yaya.settings.sub_assistant',
-    subFallback: '名称与提示词'
+    titleKey: 'yaya.settings.title_defaults',
+    titleFallback: '新助手默认',
+    subKey: 'yaya.settings.sub_defaults',
+    subFallback: '名称、提示词与你的形象'
   },
   {
     id: 'model',
@@ -300,7 +309,7 @@ const statusProps = computed(() => ({
 
 const STORAGE_KEY = 'yaya-settings-section'
 
-const activeSection = ref<SectionId>('assistant')
+const activeSection = ref<SectionId>('assistants')
 /** 窄屏层级：0 = 分区列表，1 = 分区页，2 = 服务商详情 */
 const layer = ref(0)
 /** 过渡方向：1 = 向前进入，-1 = 返回 */
@@ -647,6 +656,7 @@ onBeforeUnmount(() => {
             />
 
             <!-- 分区内容（宽屏右侧 / 窄屏第二层） -->
+            <AssistantsSection v-else-if="activeSection === 'assistants'" :config="config" />
             <AssistantSection v-else-if="activeSection === 'assistant'" :config="config" />
             <ModelSection v-else-if="activeSection === 'model'" :config="config" />
             <ProvidersSection

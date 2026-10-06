@@ -20,6 +20,7 @@ import type {
   ApprovalScope,
   MessageAttachment,
   ReasoningEffort,
+  YayaAssistant,
   YayaConfig,
   WorkflowInfo
 } from './types'
@@ -37,6 +38,8 @@ import SelectTextDialog from './components/SelectTextDialog.vue'
 import type { TreeTurn } from './types'
 import type { ContextState } from './services/context'
 import ContextMarker from './components/ContextMarker.vue'
+import AvatarBadge from './components/AvatarBadge.vue'
+import { modelMonogram } from './profile'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import {
   assistantConfig,
@@ -71,8 +74,6 @@ const notice = ref<{ text: string; error?: boolean } | null>(null)
 const workflows = ref<WorkflowInfo[]>([])
 /** 新对话草稿里选的工作流（会话创建时带上） */
 const draftWorkflow = ref<string | null>(null)
-/** 还没建会话时选的助手（null = 活动助手） */
-const draftAssistantId = ref<string | null>(null)
 const draftReasoning = ref<ReasoningEffort | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
@@ -182,11 +183,11 @@ watch([drawerOpen, wide], resetDrawerSwipe)
 
 // ---- 派生状态 ----
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
-/** 当前会话的助手；新对话 = 草稿里选的助手 → 活动助手 */
+/** 当前会话的助手；新对话 = 活动助手 */
 const currentAssistantId = computed(() =>
   activeSession.value
     ? sessionAssistantId(activeSession.value)
-    : draftAssistantId.value || rawConfig.value?.activeAssistantId || DEFAULT_ASSISTANT_ID
+    : rawConfig.value?.activeAssistantId || DEFAULT_ASSISTANT_ID
 )
 const currentAssistant = computed(() =>
   rawConfig.value ? findAssistant(rawConfig.value, currentAssistantId.value) : undefined
@@ -597,6 +598,31 @@ async function selectSession(id: string): Promise<void> {
   await Promise.all([loadMessages(), refreshSnapshot()])
   loadingMessages.value = false
   void scrollToBottom(true)
+}
+
+function assistantAvatar(a: YayaAssistant): {
+  image: string
+  monogram: { text: string; hue: number } | null
+} {
+  const mode = a.profile?.assistantAvatarMode
+  return {
+    image: mode === 'custom' ? a.profile?.assistantAvatar || '' : '',
+    monogram:
+      mode === 'model' ? modelMonogram(a.activeModel || rawConfig.value?.activeModel || '') : null
+  }
+}
+
+/**
+ * 切换助手：记成新对话默认用的助手，并开一个新对话
+ * （对话一旦开始就固定用它的助手，旧对话不受影响）
+ */
+async function switchAssistant(id: string): Promise<void> {
+  if (!rawConfig.value) return
+  if (activeSession.value) newChat()
+  if (rawConfig.value.activeAssistantId !== id) {
+    rawConfig.value.activeAssistantId = id
+    await saveConfig()
+  }
 }
 
 function newChat(): void {
@@ -1309,7 +1335,41 @@ watch(isRunning, (now, before) => {
         </v-btn>
 
         <div class="title-block">
-          <div class="assistant-name">{{ assistantName }}</div>
+          <!-- 点助手名切换助手（新对话用它；当前对话已有内容时开一个新对话） -->
+          <v-menu location="bottom start" :close-on-content-click="true">
+            <template #activator="{ props: menuProps }">
+              <button
+                v-bind="menuProps"
+                type="button"
+                class="assistant-switch"
+                :title="t('yaya.assistants.switch', '切换助手')"
+                :aria-label="`${t('yaya.assistants.switch', '切换助手')}: ${assistantName}`"
+              >
+                <span class="assistant-name">{{ assistantName }}</span>
+                <v-icon icon="mdi-chevron-down" size="18" class="flex-shrink-0" />
+              </button>
+            </template>
+            <v-list density="compact" min-width="220" max-width="320" class="py-1 yaya-pop">
+              <v-list-item
+                v-for="a in rawConfig?.assistants ?? []"
+                :key="a.id"
+                :active="a.id === currentAssistantId"
+                color="primary"
+                @click="switchAssistant(a.id)"
+              >
+                <template #prepend>
+                  <AvatarBadge v-bind="assistantAvatar(a)" :size="28" class="mr-3" />
+                </template>
+                <v-list-item-title>{{ a.assistantName }}</v-list-item-title>
+              </v-list-item>
+              <v-divider class="my-1" />
+              <v-list-item
+                prepend-icon="mdi-account-cog-outline"
+                :title="t('yaya.assistants.manage', '管理助手')"
+                @click="settings.open('yaya')"
+              />
+            </v-list>
+          </v-menu>
           <div class="session-title text-medium-emphasis" :title="sessionTitle">
             {{ sessionTitle }}
           </div>
@@ -1752,7 +1812,22 @@ watch(isRunning, (now, before) => {
   min-width: 0;
   padding-left: 4px;
 }
+.assistant-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 6px 0 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+.assistant-switch:hover {
+  background: rgba(var(--v-theme-on-surface), 0.06);
+}
 .assistant-name {
+  min-width: 0;
   font-weight: 700;
   font-size: 1.05rem;
   line-height: 1.3;
