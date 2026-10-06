@@ -678,6 +678,9 @@ const sessionMentionList = computed(() => {
   const list = activeSession.value?.meta?.mentions
   return Array.isArray(list) ? (list as { ref: string; label: string }[]) : []
 })
+function stopEvent(e: Event): void {
+  e.stopPropagation()
+}
 async function removeSessionMention(ref: string): Promise<void> {
   const s = activeSession.value
   if (!s) return
@@ -1277,9 +1280,11 @@ watch(isRunning, (now, before) => {
             />
             <v-list-group v-if="sessionMentionList.length" value="mentions">
               <template #activator="{ props: groupProps }">
+                <!-- 菜单默认点内容就关闭：展开分组这一下要拦住，不然看起来「点了没反应」 -->
                 <v-list-item
                   v-bind="groupProps"
                   prepend-icon="mdi-at"
+                  @click="stopEvent"
                   :title="
                     te(
                       'yaya.mention.session_title',
