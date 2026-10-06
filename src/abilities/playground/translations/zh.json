@@ -9,7 +9,7 @@
   "pg.url": "URL 模板",
   "pg.headers": "请求头",
   "pg.body": "请求体",
-  "pg.copyFrom": "从其他模板复制",
+  "pg.copyFrom": "复制自",
   "pg.copyAll": "全部",
   "pg.copyHeaders": "请求头",
   "pg.copyBody": "请求体",
@@ -83,7 +83,6 @@
   "pg.saveLocal": "下载到本地",
   "pg.clickToExpand": "〔点击展开〕",
   "pg.noActive": "请选择或新建一个请求模板",
-  "pg.copyFrom": "复制自",
   "pg.chooseSource": "选择源模板",
   "pg.templateNamePlaceholder": "模板名称…",
   "pg.headersPerLine": "请求头 (每行 Key: value)",
@@ -125,5 +124,6 @@
   "pg.mdImages": "- 图片: {n} 张",
   "pg.mdAudio": "- 音频: {n} 条",
   "pg.mdVideo": "- 视频: {n} 条",
-  "pg.mdTemplateList": "## 请求模板列表"
+  "pg.mdTemplateList": "## 请求模板列表",
+  "pg.copiedExport": "配置已复制到剪贴板"
 }

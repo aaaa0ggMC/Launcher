@@ -13,6 +13,7 @@ import {
 } from './parser/variableParser'
 import { useLocalStorage } from './useLocalStorage'
 import { translate, translateTemplate } from '@ui/i18n'
+import { copyExportText, pickExportTarget } from '@ui/composables/export'
 import TemplateList from './components/TemplateList.vue'
 import TemplateEditor from './components/TemplateEditor.vue'
 import DynamicForm from './components/DynamicForm.vue'
@@ -482,12 +483,25 @@ async function handleExport(): Promise<void> {
       history: history.value
     }
   }
-  const path = await window.cockpit.pickSaveFile({
+  const target = await pickExportTarget({
     title: t('pg.export'),
     defaultPath: `playground-${Date.now()}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (!path) return
+  if (!target) return
+  if (target.kind === 'clipboard') {
+    // 与 playground.export 写进文件的内容相同（那边再包一层 version / exportedAt）
+    const payload = { version: 1, exportedAt: new Date().toISOString(), data }
+    try {
+      await copyExportText(JSON.stringify(payload, null, 2))
+      snackText.value = t('pg.copiedExport')
+    } catch (e) {
+      snackText.value = e instanceof Error ? e.message : t('pg.exportFailed')
+    }
+    snackOpen.value = true
+    return
+  }
+  const path = target.path
   const res = (await window.cockpit.command('playground.export', { path, data })) as {
     ok?: boolean
     error?: string

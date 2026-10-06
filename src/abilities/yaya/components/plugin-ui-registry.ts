@@ -8,7 +8,7 @@
  * 用户正在插件详情页里操作，那里的启用开关自己也要能点。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
-import type { PluginUi } from './plugin-ui'
+import type { InlineTokenContext, InlineTokenView, PluginUi } from './plugin-ui'
 import type { PluginInfo, PluginKind } from '../services/plugins/types'
 
 const modules = import.meta.glob<PluginUi>('../plugins/*/ui.ts', { eager: true, import: 'default' })
@@ -114,6 +114,14 @@ export function settingsPanelFor(pluginId: string, kind?: PluginKind): Component
   return lazy(`panel:${ui!.pluginId}`, loader)
 }
 
+/** 用量统计里插件分区的自定义视图（没有返回 null，只显示分区的 stats） */
+export function usageViewFor(pluginId: string): Component | null {
+  const ui = uiFor(pluginId)
+  const loader = ui?.usageView
+  if (!loader) return null
+  return lazy(`usage:${ui!.pluginId}`, loader)
+}
+
 export interface ResolvedToolView {
   component: Component
   pluginId: string
@@ -171,3 +179,80 @@ export const inputExtensions = computed(() =>
       component: lazy(`input:${ui.pluginId}`, ui.inputExtension!)
     }))
 )
+
+// ---------------------------------------------------------------------------
+// 正文记号（PluginUi.inlineTokens）
+// ---------------------------------------------------------------------------
+
+const tokenRules = uis.flatMap((u) => u.inlineTokens ?? [])
+
+export type InlineTokenPart =
+  { kind: 'text'; text: string } | { kind: 'token'; view: InlineTokenView }
+
+/** 纯文本 → 文字 / 记号片段（用户气泡用） */
+export function inlineTokenParts(text: string, ctx: InlineTokenContext): InlineTokenPart[] {
+  let parts: InlineTokenPart[] = [{ kind: 'text', text }]
+  for (const rule of tokenRules) {
+    const next: InlineTokenPart[] = []
+    for (const part of parts) {
+      if (part.kind !== 'text') {
+        next.push(part)
+        continue
+      }
+      const re = new RegExp(
+        rule.pattern.source,
+        rule.pattern.flags.includes('g') ? rule.pattern.flags : rule.pattern.flags + 'g'
+      )
+      let last = 0
+      let m: RegExpExecArray | null
+      while ((m = re.exec(part.text))) {
+        const view = rule.render(m, ctx)
+        if (!view) continue
+        if (m.index > last) next.push({ kind: 'text', text: part.text.slice(last, m.index) })
+        next.push({ kind: 'token', view })
+        last = m.index + m[0].length
+        if (!m[0].length) re.lastIndex++
+      }
+      if (last < part.text.length) next.push({ kind: 'text', text: part.text.slice(last) })
+    }
+    parts = next
+  }
+  return parts
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
+  )
+}
+
+/** 记号的 HTML（回答走 v-html；文字一律转义） */
+export function inlineTokenHtml(view: InlineTokenView): string {
+  const attrs = [
+    `class="yaya-token${view.tone === 'text' ? ' is-text' : ''}"`,
+    view.title ? `title="${escapeHtml(view.title)}"` : '',
+    view.privacy ? `data-privacy="${escapeHtml(view.privacy)}"` : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const icon =
+    view.tone !== 'text' && view.icon
+      ? `<i class="mdi ${escapeHtml(view.icon)}" aria-hidden="true"></i>`
+      : ''
+  return `<span ${attrs}>${icon}${escapeHtml(view.text)}</span>`
+}
+
+/** 已渲染的 Markdown HTML：只改标签之外的文字（文字里的 & < > 已是实体，记号本身不含这些字符） */
+export function applyInlineTokensHtml(html: string, ctx: InlineTokenContext): string {
+  if (!tokenRules.length) return html
+  return html
+    .split(/(<[^>]*>)/)
+    .map((seg) => {
+      if (!seg || seg.startsWith('<')) return seg
+      const parts = inlineTokenParts(seg, ctx)
+      if (parts.length === 1 && parts[0].kind === 'text') return seg
+      // 文字片段来自已转义的 HTML，原样拼回；记号片段按 view 渲染（其中的文字都会转义）
+      return parts.map((p) => (p.kind === 'text' ? p.text : inlineTokenHtml(p.view))).join('')
+    })
+    .join('')
+}

@@ -1,50 +1,37 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
-import type { MessageNode } from '../types'
+import type { MessageNode, YayaProfile } from '../types'
+import AvatarBadge from './AvatarBadge.vue'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
+import { inlineTokenParts } from './plugin-ui-registry'
+import './tokens.css'
 
 const props = defineProps<{
   message: MessageNode
   /** 有工作流在跑时禁止编辑重发 */
   busy: boolean
+  /** 这条消息正载入在底部输入框里编辑（只用来高亮） */
+  editing?: boolean
+  /** 形象设置：设了名字 / 头像时在气泡上方显示 */
+  profile?: YayaProfile
 }>()
 
 const emit = defineEmits<{
   (e: 'switchBranch', messageId: string): void
-  /** 编辑后重发：在原消息的父节点下开新分支 */
-  (e: 'edit', text: string): void
+  /** 编辑：内容载入底部输入框（附件 / 点名都能改），发送时在原消息的父节点下开新分支 */
+  (e: 'edit'): void
   (e: 'menu', req: MessageMenuRequest): void
 }>()
-
-/** 编辑态由父组件控制（右键菜单「编辑」也能打开） */
-const editing = defineModel<boolean>('editing', { default: false })
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t } = useI18n(lang)
 
-const draft = ref('')
 const copied = ref(false)
 const previews = ref<Record<string, string>>({})
-const editor = ref<{ focus: () => void } | null>(null)
-
-function startEdit(): void {
-  editing.value = true
-}
-
-watch(
-  editing,
-  async (on) => {
-    if (!on) return
-    draft.value = props.message.content
-    await nextTick()
-    editor.value?.focus()
-  },
-  { immediate: true }
-)
 
 function openMenu(x: number, y: number): void {
   emit('menu', {
@@ -64,23 +51,20 @@ function onLongPress(p: LongPressPoint): void {
   openMenu(p.clientX, p.clientY)
 }
 
+/** 正文切成文字 / 插件记号（如 [[secret_xxxx]] 显示成标签） */
+const contentParts = computed(() =>
+  inlineTokenParts(props.message.content, {
+    sessionId: props.message.sessionId,
+    role: 'user',
+    t
+  })
+)
+
 /** 这条消息里的 @ 点名（只显示；附注 mentionNote 只给模型看） */
 const mentionList = computed(() => {
   const list = props.message.meta?.mentions
   return Array.isArray(list) ? (list as { ref: string; label: string; kind: string }[]) : []
 })
-
-function submitEdit(): void {
-  const text = draft.value.trim()
-  if (!text) return
-  editing.value = false
-  if (text !== props.message.content.trim() || props.message.attachments?.length) emit('edit', text)
-}
-
-function onEditKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') editing.value = false
-  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitEdit()
-}
 
 async function copy(): Promise<void> {
   await window.cockpit.copyText(props.message.content)
@@ -124,99 +108,107 @@ function openPreview(id: string): void {
 
 <template>
   <div class="user-msg">
-    <div v-if="editing" class="edit-box">
-      <v-textarea
-        ref="editor"
-        v-model="draft"
-        variant="outlined"
-        auto-grow
-        rows="2"
-        max-rows="12"
-        hide-details
-        @keydown="onEditKey"
-      />
-      <div class="d-flex flex-wrap justify-end ga-2 mt-2">
-        <v-btn variant="text" @click="editing = false">{{ t('yaya.cancel', '取消') }}</v-btn>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-send" @click="submitEdit">
-          {{ t('yaya.edit_send', '发送') }}
-        </v-btn>
+    <div v-if="profile?.userName || profile?.userAvatar" class="user-head">
+      <span v-if="profile.userName" class="user-name">{{ profile.userName }}</span>
+      <AvatarBadge v-if="profile.userAvatar" :image="profile.userAvatar" :size="24" />
+    </div>
+    <div v-if="message.attachments?.length" class="attachments">
+      <button
+        v-for="att in imageAttachments"
+        :key="att.id"
+        type="button"
+        class="thumb"
+        :title="att.name"
+        :aria-label="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
+        @click="openPreview(att.id)"
+      >
+        <img :src="previews[att.id]" :alt="att.name" loading="lazy" @error="dropPreview(att.id)" />
+      </button>
+      <div v-for="att in fileAttachments" :key="att.id" class="file-chip" :title="att.name">
+        <v-icon icon="mdi-file-outline" size="16" />
+        <span class="text-truncate">{{ att.name }}</span>
       </div>
     </div>
-
-    <template v-else>
-      <div v-if="message.attachments?.length" class="attachments">
-        <button
-          v-for="att in imageAttachments"
-          :key="att.id"
-          type="button"
-          class="thumb"
-          :title="att.name"
-          :aria-label="`${t('yaya.input.image_preview_open', '查看大图')}: ${att.name}`"
-          @click="openPreview(att.id)"
+    <div v-if="mentionList.length" class="mentions">
+      <span v-for="m in mentionList" :key="m.ref" class="mention-tag">
+        <v-icon :icon="m.kind === 'tool' ? 'mdi-wrench-outline' : 'mdi-at'" size="14" />
+        {{ m.label }}
+      </span>
+    </div>
+    <div
+      v-if="message.content"
+      v-long-press="onLongPress"
+      class="bubble"
+      :class="{ 'is-editing': editing }"
+      @contextmenu="onContextMenu"
+    >
+      <template v-for="(part, i) in contentParts" :key="i">
+        <template v-if="part.kind === 'text'">{{ part.text }}</template>
+        <span
+          v-else
+          v-privacy="part.view.privacy || null"
+          class="yaya-token"
+          :class="{ 'is-text': part.view.tone === 'text' }"
+          :title="part.view.title"
+          ><v-icon
+            v-if="part.view.icon && part.view.tone !== 'text'"
+            :icon="part.view.icon"
+            size="14"
+          />{{ part.view.text }}</span
         >
-          <img
-            :src="previews[att.id]"
-            :alt="att.name"
-            loading="lazy"
-            @error="dropPreview(att.id)"
-          />
-        </button>
-        <div v-for="att in fileAttachments" :key="att.id" class="file-chip" :title="att.name">
-          <v-icon icon="mdi-file-outline" size="16" />
-          <span class="text-truncate">{{ att.name }}</span>
-        </div>
-      </div>
-      <div v-if="mentionList.length" class="mentions">
-        <span v-for="m in mentionList" :key="m.ref" class="mention-tag">
-          <v-icon :icon="m.kind === 'tool' ? 'mdi-wrench-outline' : 'mdi-at'" size="14" />
-          {{ m.label }}
-        </span>
-      </div>
-      <div
-        v-if="message.content"
-        v-long-press="onLongPress"
-        class="bubble"
-        @contextmenu="onContextMenu"
+      </template>
+    </div>
+
+    <div class="user-actions">
+      <v-btn
+        icon
+        variant="text"
+        density="comfortable"
+        :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
+        :aria-label="t('yaya.copy', '复制')"
+        @click="copy"
       >
-        {{ message.content }}
-      </div>
-
-      <div class="user-actions">
-        <v-btn
-          icon
-          variant="text"
-          density="comfortable"
-          :title="copied ? t('yaya.copied', '已复制') : t('yaya.copy', '复制')"
-          :aria-label="t('yaya.copy', '复制')"
-          @click="copy"
-        >
-          <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="20" />
-        </v-btn>
-        <v-btn
-          icon="mdi-pencil-outline"
-          variant="text"
-          density="comfortable"
-          :disabled="busy"
-          :title="t('yaya.edit', '编辑并重新发送')"
-          :aria-label="t('yaya.edit', '编辑并重新发送')"
-          @click="startEdit"
-        />
-        <v-btn
-          icon="mdi-dots-horizontal"
-          variant="text"
-          density="comfortable"
-          :title="t('yaya.more', '更多')"
-          :aria-label="t('yaya.more', '更多')"
-          @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
-        />
-      </div>
-    </template>
+        <v-icon :icon="copied ? 'mdi-check' : 'mdi-content-copy'" size="20" />
+      </v-btn>
+      <v-btn
+        icon="mdi-pencil-outline"
+        variant="text"
+        density="comfortable"
+        :disabled="busy"
+        :title="t('yaya.edit', '编辑并重新发送')"
+        :aria-label="t('yaya.edit', '编辑并重新发送')"
+        @click="emit('edit')"
+      />
+      <v-btn
+        icon="mdi-dots-horizontal"
+        variant="text"
+        density="comfortable"
+        :title="t('yaya.more', '更多')"
+        :aria-label="t('yaya.more', '更多')"
+        @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
+      />
+    </div>
 
     <ImagePreviewDialog v-model="previewOpen" :images="previewImages" :index="previewIndex" />
   </div>
 </template>
 
 <style scoped>
+.user-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.86em;
+  opacity: 0.75;
+}
+.user-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .mentions {
   display: flex;
   flex-wrap: wrap;
@@ -318,8 +310,9 @@ function openPreview(id: string): void {
     opacity: 1;
   }
 }
-.edit-box {
-  width: min(100%, 640px);
+.bubble.is-editing {
+  outline: 2px dashed rgba(var(--v-theme-primary), 0.7);
+  outline-offset: 3px;
 }
 @media (max-width: 720px) {
   .bubble,

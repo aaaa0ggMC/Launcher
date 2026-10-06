@@ -10,9 +10,14 @@ import type { YayaPlugin } from '../../services/plugins/types'
 
 const INSTRUCTIONS = [
   '## Interactive widgets',
-  'The chat UI can run a fenced ```widget code block from your reply as a small interactive HTML',
-  'widget (the user clicks Run first). Use it for calculators, small simulations, interactive charts',
-  'drawn on <canvas> or with inline SVG, and similar demos; keep ordinary code examples in ```html.',
+  'You CAN draw, animate and build small interactive things directly in your reply: the chat UI',
+  'runs a fenced ```widget code block as a live HTML widget (the user clicks Run first).',
+  'When the user asks you to draw, animate, visualize or demo something with HTML / CSS / SVG /',
+  'canvas / JavaScript (e.g. "an SVG animation of a pelican riding a bicycle", a calculator, a small',
+  'simulation, an interactive chart), answer with one ```widget block. Do not reach for tools for',
+  'this: no headless browser, Playwright, screenshots or writing files to render it - the chat',
+  'renders the block itself. Keep ordinary code examples the user will copy in ```html.',
+  '- Animations are fine: CSS animations, SVG animate elements and requestAnimationFrame all work.',
   '- Write a self-contained HTML fragment or document with inline <style> and <script>. It runs in a',
   '  sandboxed iframe with an opaque origin and a strict CSP: no network at all (no fetch, no external',
   '  scripts, fonts or images; data: URLs are fine), no cookies or storage, no popups, no forms,',

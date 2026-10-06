@@ -199,15 +199,21 @@ function formatEntry(e: LogEntry): string {
 }
 
 /** Export the current session's logs to a text file (respects optional level). */
+/** Current session log as the same text `exportLogs` writes (for copy-to-clipboard). */
+export function exportLogsText(opts: { level?: LogLevel } = {}): { count: number; text: string } {
+  const { entries } = queryLogs({ level: opts.level, limit: MAX_BUFFER })
+  const body = entries.map(formatEntry).join('\n')
+  return { count: entries.length, text: entries.length ? body + '\n' : body }
+}
+
 export async function exportLogs(
   path: string,
   opts: { level?: LogLevel } = {}
 ): Promise<{ ok: boolean; count: number; error?: string }> {
-  const { entries } = queryLogs({ level: opts.level, limit: MAX_BUFFER })
-  const body = entries.map(formatEntry).join('\n')
+  const { count, text } = exportLogsText(opts)
   try {
-    await writeFile(path, entries.length ? body + '\n' : body, 'utf-8')
-    return { ok: true, count: entries.length }
+    await writeFile(path, text, 'utf-8')
+    return { ok: true, count }
   } catch (e) {
     return { ok: false, count: 0, error: e instanceof Error ? e.message : String(e) }
   }

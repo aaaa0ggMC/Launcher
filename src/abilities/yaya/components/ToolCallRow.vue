@@ -108,82 +108,99 @@ function onReasonKey(e: KeyboardEvent): void {
       <span class="tool-summary text-medium-emphasis">{{ summary }}</span>
       <span v-if="duration" class="tool-ms text-disabled">{{ duration }}</span>
       <v-icon
-        :icon="open ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+        icon="mdi-chevron-down"
         size="18"
-        class="flex-shrink-0 text-medium-emphasis"
+        class="tool-chevron flex-shrink-0 text-medium-emphasis"
+        :class="{ 'is-open': open }"
       />
     </button>
 
-    <!-- 字段视图：参数（审批时总是展开）/ 结果 -->
-    <template
-      v-for="section in [
-        { show: awaitingApproval || open, label: t('yaya.tool.args', '参数'), fields: args },
-        { show: open && results.length > 0, label: t('yaya.tool.result', '结果'), fields: results }
-      ]"
-      :key="section.label"
-    >
-      <div v-if="section.show && section.fields.length" class="tool-section">
-        <div v-if="!awaitingApproval || section.fields !== args" class="tool-label">
-          {{ section.label }}
+    <v-expand-transition>
+      <div v-if="open || awaitingApproval" class="tool-body">
+        <!-- 字段视图：参数（审批时总是展开）/ 结果 -->
+        <template
+          v-for="section in [
+            { show: awaitingApproval || open, label: t('yaya.tool.args', '参数'), fields: args },
+            {
+              show: open && results.length > 0,
+              label: t('yaya.tool.result', '结果'),
+              fields: results
+            }
+          ]"
+          :key="section.label"
+        >
+          <div v-if="section.show && section.fields.length" class="tool-section">
+            <div v-if="!awaitingApproval || section.fields !== args" class="tool-label">
+              {{ section.label }}
+            </div>
+            <div class="fields">
+              <template v-for="(f, i) in section.fields" :key="`${f.key}-${i}`">
+                <div v-if="f.kind === 'inline'" class="field-inline">
+                  <span v-if="f.key" class="field-key">{{ f.key }}</span>
+                  <span class="field-value" :class="{ 'text-error': f.danger }">{{ f.value }}</span>
+                </div>
+                <div v-else class="field-block">
+                  <div v-if="f.key" class="field-key" :class="{ 'text-error': f.danger }">
+                    {{ f.key }}
+                  </div>
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightCode 输出已转义 -->
+                  <pre
+                    v-if="f.kind === 'code' || f.kind === 'json'"
+                    class="tool-pre hl"
+                    v-html="codeHtml(f)"
+                  />
+                  <pre v-else class="tool-pre" :class="{ 'text-error': f.danger }">{{
+                    f.value
+                  }}</pre>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="open && pluginView" class="tool-section">
+          <div class="tool-label">{{ t('yaya.tool.result', '结果') }}</div>
+          <component
+            :is="pluginView.component"
+            :call="call"
+            :plugin-id="pluginView.pluginId"
+            :tool-name="pluginView.toolName"
+          />
         </div>
-        <div class="fields">
-          <template v-for="(f, i) in section.fields" :key="`${f.key}-${i}`">
-            <div v-if="f.kind === 'inline'" class="field-inline">
-              <span v-if="f.key" class="field-key">{{ f.key }}</span>
-              <span class="field-value" :class="{ 'text-error': f.danger }">{{ f.value }}</span>
-            </div>
-            <div v-else class="field-block">
-              <div v-if="f.key" class="field-key" :class="{ 'text-error': f.danger }">
-                {{ f.key }}
-              </div>
-              <!-- eslint-disable-next-line vue/no-v-html -- highlightCode 输出已转义 -->
-              <pre
-                v-if="f.kind === 'code' || f.kind === 'json'"
-                class="tool-pre hl"
-                v-html="codeHtml(f)"
-              />
-              <pre v-else class="tool-pre" :class="{ 'text-error': f.danger }">{{ f.value }}</pre>
-            </div>
-          </template>
+
+        <div v-if="open && !pluginView && imageUrls.length" class="tool-section tool-images">
+          <button
+            v-for="(url, i) in imageUrls"
+            :key="i"
+            type="button"
+            class="tool-image-btn"
+            :title="t('yaya.tool.zoom', '查看大图')"
+            :aria-label="t('yaya.tool.zoom', '查看大图')"
+            @click="zoomed = url"
+          >
+            <img :src="url" alt="" class="tool-image" loading="lazy" />
+          </button>
+          <v-dialog
+            :model-value="zoomed !== null"
+            max-width="1200"
+            @update:model-value="(v: boolean) => !v && (zoomed = null)"
+          >
+            <img
+              v-if="zoomed"
+              :src="zoomed"
+              alt=""
+              class="tool-image-zoom"
+              @click="zoomed = null"
+            />
+          </v-dialog>
+        </div>
+
+        <div v-if="open && call.error && !results.length && !pluginView" class="tool-section">
+          <div class="tool-label text-error">{{ t('yaya.tool.error', '错误') }}</div>
+          <pre class="tool-pre text-error">{{ call.error }}</pre>
         </div>
       </div>
-    </template>
-
-    <div v-if="open && pluginView" class="tool-section">
-      <div class="tool-label">{{ t('yaya.tool.result', '结果') }}</div>
-      <component
-        :is="pluginView.component"
-        :call="call"
-        :plugin-id="pluginView.pluginId"
-        :tool-name="pluginView.toolName"
-      />
-    </div>
-
-    <div v-if="open && !pluginView && imageUrls.length" class="tool-section tool-images">
-      <button
-        v-for="(url, i) in imageUrls"
-        :key="i"
-        type="button"
-        class="tool-image-btn"
-        :title="t('yaya.tool.zoom', '查看大图')"
-        :aria-label="t('yaya.tool.zoom', '查看大图')"
-        @click="zoomed = url"
-      >
-        <img :src="url" alt="" class="tool-image" loading="lazy" />
-      </button>
-      <v-dialog
-        :model-value="zoomed !== null"
-        max-width="1200"
-        @update:model-value="(v: boolean) => !v && (zoomed = null)"
-      >
-        <img v-if="zoomed" :src="zoomed" alt="" class="tool-image-zoom" @click="zoomed = null" />
-      </v-dialog>
-    </div>
-
-    <div v-if="open && call.error && !results.length && !pluginView" class="tool-section">
-      <div class="tool-label text-error">{{ t('yaya.tool.error', '错误') }}</div>
-      <pre class="tool-pre text-error">{{ call.error }}</pre>
-    </div>
+    </v-expand-transition>
 
     <div v-if="awaitingApproval" class="approval">
       <div class="approval-hint text-medium-emphasis">
@@ -309,6 +326,12 @@ function onReasonKey(e: KeyboardEvent): void {
 }
 .tool-section {
   padding: 2px 12px 10px;
+}
+.tool-chevron {
+  transition: transform 0.2s ease;
+}
+.tool-chevron.is-open {
+  transform: rotate(180deg);
 }
 .tool-label {
   font-size: 0.75rem;

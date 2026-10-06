@@ -13,5 +13,6 @@
   "logs.loadOlder": "Load older",
   "logs.empty": "No logs yet",
   "logs.total": "{n} lines",
-  "logs.mdHeading": "## Logs"
+  "logs.mdHeading": "## Logs",
+  "logs.copied": "Log copied to clipboard"
 }

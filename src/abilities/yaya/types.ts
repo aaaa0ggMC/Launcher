@@ -178,6 +178,25 @@ export interface McpServerConfig {
   timeoutMs?: number
 }
 
+export interface YayaProfile {
+  /** 你的名字（空 = 不设） */
+  userName?: string
+  /** 你的头像：data:image/(png|jpeg|webp);base64,…（空 = 不设） */
+  userAvatar?: string
+  /** AI 能看到你的名字（系统提示词里告诉它；缺省 true） */
+  userNameVisible?: boolean
+  /** AI 能看到你的头像（作为图片随对话的第一条消息发送；缺省 false） */
+  userAvatarVisible?: boolean
+  /** 助手头像图片（assistantAvatarMode = custom 时用） */
+  assistantAvatar?: string
+  /** 助手头像：default 默认图标 / custom 自定义图片 / model 按模型名生成 */
+  assistantAvatarMode?: 'default' | 'custom' | 'model'
+  /** 每条回答上显示的名字：name 助手名 / model 这条回答用的模型 */
+  assistantLabel?: 'name' | 'model'
+  /** AI 知道自己的名字（系统提示词里的 {name}；关掉换成中性的称呼；缺省 true） */
+  assistantNameVisible?: boolean
+}
+
 export interface YayaConfig {
   /** 助手显示名（页面顶部 / 消息署名 / 系统提示词里的 {name}），默认 YAYA */
   assistantName: string
@@ -216,6 +235,10 @@ export interface YayaConfig {
    * 过程卡片收起时仍显示最近几步的预览（默认 1，0–5，0 = 完全折叠）。
    */
   processPreviewSteps?: number
+  /** 用户 / 助手的形象（名字、头像）与它们对 AI 是否可见，见 profile.ts */
+  profile?: YayaProfile
+  /** 上下文太长时丢弃 / 压缩较早的消息，见 services/context.ts */
+  context?: import('./services/context').ContextConfig
   maxLoopSteps: number
   streamOutput: boolean
   providers: ProviderConfig[]

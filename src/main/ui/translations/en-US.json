@@ -249,5 +249,13 @@
   "settings.openAbility": "Open {name}",
   "autosave.saved": "Saved automatically",
   "autosave.failed": "Save failed",
-  "autosave.idle": "Changes save automatically"
+  "autosave.idle": "Changes save automatically",
+  "hostpick.toClipboard": "Copy to clipboard",
+  "export.title": "Export",
+  "export.desc": "Save it as a file, or copy it straight to the clipboard.",
+  "export.cancel": "Cancel",
+  "export.clipboard": "Copy to clipboard",
+  "export.file": "Save as file…",
+  "export.copied": "Copied to clipboard",
+  "bt.copied": "Copied the output of \"{name}\" to the clipboard"
 }

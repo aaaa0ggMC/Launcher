@@ -44,6 +44,11 @@ export interface PluginInputHooks {
   collect?: () => { mentions?: string[] }
   hasContent?: () => boolean
   reset?: () => void
+  /**
+   * Load references back into the composer (editing a sent message). Records are what the
+   * message stored in `meta.mentions`; each extension picks the ones it understands.
+   */
+  restore?: (state: { mentions?: { ref: string; label: string; kind: string }[] }) => void
 }
 
 export interface PluginInputContext {

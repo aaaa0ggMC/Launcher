@@ -2,11 +2,14 @@
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
-import type { ApprovalScope, ToolCallItem } from '../types'
+import type { ApprovalScope, ToolCallItem, YayaProfile } from '../types'
+import { modelMonogram } from '../profile'
+import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
-import { fenceLangs, fenceViewFor } from './plugin-ui-registry'
+import { applyInlineTokensHtml, fenceLangs, fenceViewFor } from './plugin-ui-registry'
+import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowCard from './WorkflowCard.vue'
@@ -14,6 +17,8 @@ import WorkflowCard from './WorkflowCard.vue'
 const props = defineProps<{
   turn: AssistantTurn
   assistantName: string
+  /** 形象设置（头像 / 每条回答显示的名字） */
+  profile?: YayaProfile
   /** 本轮正在运行（流式 / 工具执行 / 等待确认） */
   live: boolean
   /** 正挂起等待确认的工具调用 id（Runner 活着时才有） */
@@ -38,9 +43,18 @@ const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
 const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
+
+/** Markdown 分段 + 插件的正文记号（如 [[secret_xxxx]]）：只改显示 */
+function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
+  const ctx = { sessionId: props.turn.steps[0]?.sessionId ?? '', role: 'assistant' as const, t }
+  return renderSegments(text, fenceLangs.value, labels.value).map((part) =>
+    part.kind === 'html' ? { ...part, html: applyInlineTokensHtml(part.html, ctx) } : part
+  )
+}
+
 /** 回答切段：插件接管的代码块（```mermaid 等）渲染成组件，其余是 Markdown HTML */
 const answerSegments = computed(() =>
-  answer.value?.content ? renderSegments(answer.value.content, fenceLangs.value, labels.value) : []
+  answer.value?.content ? renderWithTokens(answer.value.content) : []
 )
 
 /**
@@ -50,9 +64,7 @@ const answerSegments = computed(() =>
 const segments = computed(() =>
   showProcess.value
     ? turnSegments(props.turn).map((seg) =>
-        seg.kind === 'text'
-          ? { ...seg, parts: renderSegments(seg.node.content, fenceLangs.value, labels.value) }
-          : seg
+        seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
       )
     : []
 )
@@ -103,6 +115,23 @@ const modelUsed = computed(() => {
   }
   return ''
 })
+/** 回答上显示的名字：助手名，或这条回答用的模型 */
+const displayName = computed(() =>
+  props.profile?.assistantLabel === 'model' && modelUsed.value
+    ? modelUsed.value
+    : props.assistantName
+)
+const avatarImage = computed(() =>
+  props.profile?.assistantAvatarMode === 'custom' ? props.profile.assistantAvatar || '' : ''
+)
+const avatarMonogram = computed(() =>
+  props.profile?.assistantAvatarMode === 'model' && modelUsed.value
+    ? modelMonogram(modelUsed.value)
+    : null
+)
+/** 窄屏不显示左侧大头像；设了自定义 / 模型头像时在名字前放个小的 */
+const customAvatar = computed(() => !!avatarImage.value || !!avatarMonogram.value)
+
 const providerUsed = computed(
   () => props.turn.steps.find((s) => s.meta?.provider)?.meta?.provider ?? ''
 )
@@ -150,13 +179,18 @@ async function copyTurn(): Promise<void> {
 
 <template>
   <div class="assistant-turn">
-    <div class="avatar" aria-hidden="true">
-      <v-icon icon="mdi-robot-happy-outline" size="22" />
-    </div>
+    <AvatarBadge class="avatar" :image="avatarImage" :monogram="avatarMonogram" />
 
     <div class="turn-col">
       <div class="turn-head">
-        <span class="turn-name">{{ assistantName }}</span>
+        <AvatarBadge
+          v-if="customAvatar"
+          class="head-avatar"
+          :image="avatarImage"
+          :monogram="avatarMonogram"
+          :size="22"
+        />
+        <span class="turn-name">{{ displayName }}</span>
       </div>
 
       <div
@@ -303,16 +337,8 @@ async function copyTurn(): Promise<void> {
   gap: 12px;
   min-width: 0;
 }
-.avatar {
-  width: 38px;
-  height: 38px;
-  margin-top: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(var(--v-theme-primary), 0.16);
-  color: rgb(var(--v-theme-primary));
-  flex-shrink: 0;
+.head-avatar {
+  display: none;
 }
 .turn-col {
   flex: 1 1 auto;
@@ -641,6 +667,9 @@ async function copyTurn(): Promise<void> {
   .avatar {
     display: none;
   }
+  .head-avatar {
+    display: inline-grid;
+  }
   .bubble {
     padding: 12px 14px;
     border-radius: 16px;
@@ -653,6 +682,9 @@ async function copyTurn(): Promise<void> {
   }
   .avatar {
     display: none;
+  }
+  .head-avatar {
+    display: inline-grid;
   }
   .turn-col {
     gap: 4px;

@@ -33,6 +33,7 @@ import BackgroundTasksDialog from './components/BackgroundTasksDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import HelpDialog from './components/HelpDialog.vue'
 import HostFilePicker from './components/HostFilePicker.vue'
+import ExportTargetDialog from './components/ExportTargetDialog.vue'
 import { SETTINGS_API, normalizeTarget, type SettingsApi } from './composables/settings'
 import BackgroundLayer from './components/BackgroundLayer.vue'
 import FuseLayer from './components/FuseLayer.vue'
@@ -1743,6 +1744,7 @@ onBeforeUnmount(() => {
       :highlight="settingsDialog.highlight"
     />
     <HostFilePicker v-if="!agentView" />
+    <ExportTargetDialog v-if="!agentView" />
     <OutsiderLayer v-if="!agentView" />
     <HelpDialog v-model="helpOpen" :ability="helpAbility" :tree="helpTree" />
 

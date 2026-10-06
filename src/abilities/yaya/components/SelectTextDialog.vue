@@ -39,7 +39,7 @@ async function copyAll(): Promise<void> {
 
 <template>
   <v-dialog v-model="open" :fullscreen="narrow" :max-width="narrow ? undefined : 760" scrollable>
-    <v-card class="sel-card" :rounded="narrow ? 0 : 'xl'">
+    <v-card class="sel-card yaya-pop" :rounded="narrow ? 0 : 'xl'">
       <div class="sel-head">
         <v-icon icon="mdi-format-text" />
         <div class="text-subtitle-1 font-weight-medium flex-grow-1">

@@ -23,7 +23,7 @@ const target = computed<[number, number]>(() => [props.request?.x ?? 0, props.re
 
 <template>
   <v-menu v-model="open" :target="target" location="bottom start" :close-on-content-click="true">
-    <v-list density="compact" min-width="180" class="message-menu" role="menu">
+    <v-list density="compact" min-width="180" class="message-menu yaya-pop" role="menu">
       <template v-for="item in items" :key="item.key">
         <v-divider v-if="item.divider" class="my-1" />
         <v-list-item

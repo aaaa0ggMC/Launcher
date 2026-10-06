@@ -14,6 +14,7 @@
  * 不要在 instructions 里放时间、随机数；动态内容走工具结果。
  */
 import type { MessageAttachment, YayaConfig } from '../../types'
+import type { SessionUsage, UsageSection } from '../usage'
 
 export type PluginKind = 'builtin' | 'mcp' | 'skill'
 
@@ -187,10 +188,53 @@ export interface YayaPlugin {
    * 效果只作用于**这条用户消息及之后**，不改系统提示词（提示词缓存不失效）。
    */
   mention?: (ctx: MentionContext) => MentionEffect | Promise<MentionEffect>
+  /**
+   * 数据流钩子（插件启用时才调用，按插件注册顺序串起来）。只能做确定性的文本变换：
+   * 结果会入库、会发给模型，不能依赖时间 / 随机（提示词缓存）。
+   */
+  hooks?: PluginHooks
   /** 启用后首次需要工具前调用（连接 MCP 等）；失败抛错，status 应反映错误 */
   start?: () => Promise<void>
   /** 禁用 / 配置变化 / 退出时调用 */
   stop?: () => Promise<void>
+}
+
+export interface PluginHooks {
+  /** 用户消息入库前改写正文（如把 `#Secret("…")` 换成引用）。编辑重发 / 新消息都会经过 */
+  userText?: (ctx: { sessionId: string; text: string }) => string
+  /** 工具执行前改写参数。只影响这次执行：库里与模型看到的仍是原参数 */
+  toolArgs?: (ctx: {
+    sessionId: string
+    tool: string
+    args: Record<string, unknown>
+  }) => Record<string, unknown>
+  /** 工具结果（给模型的文本 / 界面显示 / 错误）入库前改写 */
+  toolResult?: <T>(ctx: { sessionId: string; tool: string; value: T }) => T
+  /**
+   * 用量统计（`yaya.session-usage`）里加一块：如按模型价格算出的费用。
+   * 只影响界面，不进模型上下文；返回 null = 这次不显示。数据变了可以广播
+   * `cockpit:yaya-usage-changed` 让打开着的统计窗口重新拉取。
+   */
+  usage?: (ctx: {
+    sessionId: string
+    usage: SessionUsage
+  }) => PluginUsageSection | null | Promise<PluginUsageSection | null>
+  /**
+   * 模型选择里某个模型旁边的小标签（如价格、上下文长度）。多个插件的标签会拼在一起。
+   * 数据变了广播 `cockpit:yaya-model-hints-changed`。
+   */
+  modelHint?: (ctx: { providerId: string; model: string }) => ModelHint | null
+}
+
+export type PluginUsageSection = Omit<UsageSection, 'pluginId'>
+
+export interface ModelHint {
+  /** 短标签，如「$1.25 / $10」「400K」 */
+  badges?: string[]
+  /** 悬停说明 */
+  title?: string
+  /** 模型的上下文长度（token）；上下文管理的「自动」预算按它算 */
+  contextWindow?: number
 }
 
 export interface MentionContext {

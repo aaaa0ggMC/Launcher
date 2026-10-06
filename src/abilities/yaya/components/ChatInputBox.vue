@@ -23,11 +23,14 @@ const props = defineProps<{
   /** 新对话草稿还没有会话时，添加附件前先创建会话 */
   ensureSession: () => Promise<string>
   workflows: WorkflowInfo[]
+  /** 正在编辑一条已发送的消息（内容已载入输入框，发送 = 从它的父节点开新分支） */
+  editing?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'send', prompt: string, attachments: MessageAttachment[], mentions: string[]): void
   (e: 'abort'): void
+  (e: 'cancelEdit'): void
 }>()
 
 /** 草稿由父组件持有（空状态的建议会往里填） */
@@ -147,6 +150,10 @@ function onKeyDown(e: KeyboardEvent): void {
   }
   if (e.key === 'Escape' && expanded.value) {
     expanded.value = false
+    return
+  }
+  if (e.key === 'Escape' && props.editing) {
+    emit('cancelEdit')
     return
   }
   if (e.key !== 'Enter' || e.isComposing || coarse) return
@@ -385,12 +392,68 @@ async function acceptShare(share: {
   if (share.paths?.length) await importPaths(share.paths)
 }
 
-defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
+// ---- 编辑已发送的消息 ----
+/** 进入编辑前用户正在写的草稿：编辑结束（发送或取消）后放回去，不吃掉没发的字 */
+let stash: { draft: string; attachments: MessageAttachment[] } | null = null
+
+function loadForEdit(message: {
+  text: string
+  attachments: MessageAttachment[]
+  mentions: { ref: string; label: string; kind: string }[]
+}): void {
+  if (!props.editing && !stash && (draft.value.trim() || attachments.value.length))
+    stash = { draft: draft.value, attachments: attachments.value }
+  draft.value = message.text
+  attachments.value = message.attachments.map((a) => ({ ...a }))
+  previews.value = {}
+  for (const att of attachments.value) {
+    if (att.mimeType.startsWith('image/')) previews.value[att.id] = assetUrl(att.assetPath)
+  }
+  attachError.value = ''
+  for (const hooks of inputHooks.values()) {
+    hooks.reset?.()
+    hooks.restore?.({ mentions: message.mentions })
+  }
+  void nextTick(() => textarea.value?.focus())
+}
+
+watch(
+  () => props.editing,
+  (on, was) => {
+    if (on || !was) return
+    // 编辑结束：发送已清空输入框；取消时清掉载入的内容，再把编辑前的草稿放回
+    const saved = stash
+    stash = null
+    draft.value = saved?.draft ?? ''
+    attachments.value = saved?.attachments ?? []
+    previews.value = {}
+    for (const att of attachments.value) {
+      if (att.mimeType.startsWith('image/')) previews.value[att.id] = assetUrl(att.assetPath)
+    }
+    resetExtensions()
+  }
+)
+// 换会话：暂存的草稿属于旧会话（附件在旧会话的资产目录里），不带过去
+watch(
+  () => props.sessionId,
+  () => (stash = null)
+)
+
+defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
 </script>
 
 <template>
   <div class="input-wrap" :class="{ 'is-expanded': expanded }">
     <div class="input-card" @dragover.prevent="onDragOver" @drop.prevent="onDrop">
+      <div v-if="editing" class="edit-banner" role="status">
+        <v-icon icon="mdi-pencil-outline" size="18" class="text-primary flex-shrink-0" />
+        <span class="edit-banner-text">
+          {{ t('yaya.input.editing', '正在编辑消息，发送后会从这里开一个新分支') }}
+        </span>
+        <v-btn variant="text" @pointerdown.prevent @click="emit('cancelEdit')">
+          {{ t('yaya.cancel', '取消') }}
+        </v-btn>
+      </div>
       <component
         :is="extension.component"
         v-for="extension in inputExtensions"
@@ -506,7 +569,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
               <v-icon icon="mdi-chevron-up" size="16" />
             </button>
           </template>
-          <v-list density="comfortable" max-width="340" class="wf-menu">
+          <v-list density="comfortable" max-width="340" class="wf-menu yaya-pop">
             <v-list-item
               v-for="w in workflows"
               :key="w.id"
@@ -533,7 +596,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
               <v-icon icon="mdi-chevron-up" size="16" />
             </button>
           </template>
-          <v-list density="comfortable" max-width="300" class="wf-menu">
+          <v-list density="comfortable" max-width="300" class="wf-menu yaya-pop">
             <v-list-subheader>{{ t('yaya.reasoning.title', '思考强度') }}</v-list-subheader>
             <v-list-item
               v-for="o in REASONING_OPTIONS"
@@ -624,6 +687,21 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   transition: border-color 0.15s;
 }
+.edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 8px;
+  padding: 2px 0 2px 4px;
+  border-bottom: 1px solid rgba(var(--v-theme-primary), 0.2);
+}
+.edit-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: rgba(var(--v-theme-on-surface), 0.75);
+}
 .input-card:focus-within {
   border-color: rgba(var(--v-theme-primary), 0.55);
 }
@@ -703,6 +781,15 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare })
   white-space: normal !important;
   -webkit-line-clamp: 3 !important;
   line-height: 1.4;
+}
+/* 手机上菜单收紧一档（见 pop.css），说明最多两行 */
+@media (max-width: 720px), (pointer: coarse) {
+  .wf-desc {
+    -webkit-line-clamp: 2 !important;
+  }
+  .wf-menu :deep(.v-list-item) {
+    min-height: 40px;
+  }
 }
 .input-textarea :deep(textarea) {
   font-size: 0.95rem;

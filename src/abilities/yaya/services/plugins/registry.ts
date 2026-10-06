@@ -9,7 +9,9 @@ import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, YayaConfig } from '../../types'
 import { loadYayaConfig, setPluginSecretKeysResolver } from '../config'
 import { saveAsset } from '../assets'
+import type { SessionUsage, UsageSection } from '../usage'
 import type {
+  ModelHint,
   NormalizedToolResult,
   PluginConfigField,
   PluginConfigInfo,
@@ -427,6 +429,123 @@ export function toolNeedsApproval(
   if (config.autoApproveTools) return false
   const a = resolved.tool.approval ?? 'auto'
   return typeof a === 'function' ? a(args) : a === 'ask'
+}
+
+// ---------------------------------------------------------------------------
+// 数据流钩子（YayaPlugin.hooks）
+// ---------------------------------------------------------------------------
+
+function hookPlugins(config: YayaConfig): YayaPlugin[] {
+  return current.filter((p) => p.hooks && isPluginEnabled(p, config))
+}
+
+/** 用户消息入库前 */
+export function applyUserTextHooks(sessionId: string, text: string, config: YayaConfig): string {
+  let out = text
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.userText
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, text: out })
+    } catch (e) {
+      log.warn('plugin userText hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 工具执行前 */
+export function applyToolArgsHooks(
+  sessionId: string,
+  tool: string,
+  args: Record<string, unknown>,
+  config: YayaConfig
+): Record<string, unknown> {
+  let out = args
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.toolArgs
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, tool, args: out })
+    } catch (e) {
+      log.warn('plugin toolArgs hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 工具结果入库 / 交给模型前 */
+export function applyToolResultHooks<T>(
+  sessionId: string,
+  tool: string,
+  value: T,
+  config: YayaConfig
+): T {
+  let out = value
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.toolResult
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, tool, value: out })
+    } catch (e) {
+      log.warn('plugin toolResult hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 用量统计里插件补充的分区（按插件注册顺序） */
+export async function collectUsageSections(
+  sessionId: string,
+  usage: SessionUsage,
+  config: YayaConfig
+): Promise<UsageSection[]> {
+  const out: UsageSection[] = []
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.usage
+    if (!fn) continue
+    try {
+      const section = await fn({ sessionId, usage })
+      if (section) out.push({ ...section, pluginId: p.id })
+    } catch (e) {
+      log.warn('plugin usage hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 模型选择里的标签：key = `<服务商 id>/<模型>` */
+export function collectModelHints(
+  pairs: { providerId: string; model: string }[],
+  config: YayaConfig
+): Record<string, ModelHint> {
+  const out: Record<string, ModelHint> = {}
+  const plugins = hookPlugins(config).filter((p) => p.hooks?.modelHint)
+  if (!plugins.length) return out
+  for (const { providerId, model } of pairs) {
+    const badges: string[] = []
+    const titles: string[] = []
+    let contextWindow: number | undefined
+    for (const p of plugins) {
+      try {
+        const hint = p.hooks!.modelHint!({ providerId, model })
+        if (!hint) continue
+        badges.push(...(hint.badges ?? []))
+        if (hint.title) titles.push(hint.title)
+        if (!contextWindow && hint.contextWindow && hint.contextWindow > 0)
+          contextWindow = hint.contextWindow
+      } catch (e) {
+        log.warn('plugin modelHint hook failed', { plugin: p.id, error: String(e) })
+      }
+    }
+    if (badges.length || titles.length || contextWindow)
+      out[`${providerId}/${model}`] = {
+        badges,
+        ...(titles.length ? { title: titles.join('\n') } : {}),
+        ...(contextWindow ? { contextWindow } : {})
+      }
+  }
+  return out
 }
 
 /** 带超时与中止地执行工具；顺带把插件当前配置（默认值已填、secret 已解密）放进 ctx.config */

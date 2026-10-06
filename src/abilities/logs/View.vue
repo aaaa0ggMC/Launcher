@@ -5,6 +5,7 @@ import { ref, shallowRef, computed, watch, inject, onMounted, onBeforeUnmount, n
 import type { Ref } from 'vue'
 import type { LogEntry, LogLevel, LogQueryResult } from './types'
 import { translate, translateTemplate } from '@ui/i18n'
+import { copyExportText, pickExportTarget } from '@ui/composables/export'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const t = (key: string, fallback?: string): string => translate(uiLang.value, key, fallback)
@@ -192,15 +193,22 @@ const snackOpen = ref(false)
 const snackText = ref('')
 
 async function doExport(): Promise<void> {
-  const path = await window.cockpit.pickSaveFile({
+  const target = await pickExportTarget({
     title: t('logs.exportTitle'),
     defaultPath: `cockpit-session-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`,
     filters: [{ name: 'Log', extensions: ['log'] }]
   })
-  if (!path) return
+  if (!target) return
   exporting.value = true
   try {
-    const res = (await window.cockpit.command('logs.export', { path })) as {
+    if (target.kind === 'clipboard') {
+      const res = (await window.cockpit.command('logs.export-text', {})) as { text: string }
+      await copyExportText(res.text)
+      snackText.value = t('logs.copied')
+      snackOpen.value = true
+      return
+    }
+    const res = (await window.cockpit.command('logs.export', { path: target.path })) as {
       ok?: boolean
       count?: number
       error?: string

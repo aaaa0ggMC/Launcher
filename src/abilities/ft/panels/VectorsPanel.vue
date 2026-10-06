@@ -3,6 +3,7 @@ import { inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { FtUiState, FtVector } from '../types'
 import { translate } from '@ui/i18n'
+import { copyExportText, pickExportTarget } from '@ui/composables/export'
 
 const state = inject('ft:state') as FtUiState
 const apply = inject('ft:applyVectors') as (
@@ -148,21 +149,27 @@ async function loadFile(): Promise<void> {
 /** Save-as JSON via the main-process dialog, then write through ft.export. */
 async function exportVectors(): Promise<void> {
   error.value = ''
-  const path = await window.cockpit.pickSaveFile({
+  const target = await pickExportTarget({
     title: t('ft.edit.exportTitle'),
     defaultPath: 'vectors.json',
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (!path) return
+  if (!target) return
+  const data = {
+    vectors: buildVectors(),
+    runSpeed: state.runSpeed,
+    verticesLimit: state.verticesLimit
+  }
   exporting.value = true
   try {
+    if (target.kind === 'clipboard') {
+      // 与 ft.export 写进文件的内容相同，可以直接粘贴成 vectors.json
+      await copyExportText(JSON.stringify(data, null, 2) + '\n')
+      return
+    }
     const res = (await window.cockpit.command('ft.export', {
-      path,
-      data: {
-        vectors: buildVectors(),
-        runSpeed: state.runSpeed,
-        verticesLimit: state.verticesLimit
-      }
+      path: target.path,
+      data
     })) as { ok?: boolean; error?: string } | null
     if (!res || res.ok === false) {
       throw new Error(`${t('ft.edit.exportFailed')}: ${res?.error ?? ''}`.trim())

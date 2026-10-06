@@ -10,6 +10,7 @@ import { USER_CONFIG_DIR } from '../../../main/process/paths'
 import { makeLogger } from '../../../main/process/logger'
 import type { Session, MessageNode } from '../types'
 import { deleteSessionAssets } from './assets'
+import { deleteSessionSecrets } from './secrets'
 import { getBroadcast } from '../../../main/process/broadcast'
 
 const log = makeLogger('yaya-db')
@@ -263,6 +264,7 @@ export function deleteSession(id: string): void {
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
   deleteSessionAssets(id)
+  deleteSessionSecrets(id)
   noteSessionsChanged()
 }
 

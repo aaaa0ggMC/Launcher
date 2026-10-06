@@ -226,7 +226,22 @@ onMounted(() => {
     onKeyDown: handleKey,
     collect: () => ({ mentions: selected.value.map((m) => m.ref) }),
     hasContent: () => selected.value.length > 0,
-    reset: resetAll
+    reset: resetAll,
+    // 编辑已发送的消息：把它当时的点名放回标签行（旧会话的 tool:* 记录照样带回，后端仍兼容）
+    restore: (state) => {
+      resetAll()
+      for (const m of state.mentions ?? []) {
+        if (!m.ref || selected.value.some((x) => x.ref === m.ref)) continue
+        selected.value.push({
+          ref: m.ref,
+          label: m.label || m.ref,
+          kind: m.kind as MentionCandidate['kind'],
+          description: '',
+          enabled: true,
+          tools: 0
+        })
+      }
+    }
   })
 })
 

@@ -12,6 +12,8 @@ import {
 import { useI18n } from '../../main/ui/i18n'
 import { useSettings } from '../../main/ui/composables/settings'
 import { DrawerSwipe } from '../../main/ui/composables/drawer-swipe'
+import { copyExportText, pickExportTarget } from '../../main/ui/composables/export'
+import './components/pop.css'
 import type {
   Session,
   MessageNode,
@@ -33,6 +35,8 @@ import UsageDialog from './components/UsageDialog.vue'
 import ConversationTree from './components/tree/ConversationTree.vue'
 import SelectTextDialog from './components/SelectTextDialog.vue'
 import type { TreeTurn } from './types'
+import type { ContextState } from './services/context'
+import ContextMarker from './components/ContextMarker.vue'
 import { ensurePluginMap } from './components/plugin-ui-registry'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
@@ -63,7 +67,8 @@ const draftWorkflow = ref<string | null>(null)
 const draftReasoning = ref<ReasoningEffort | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
-const editingId = ref<string | null>(null)
+/** 正在编辑的已发送消息：内容载入底部输入框，发送时从它的父节点开新分支 */
+const editTarget = ref<MessageNode | null>(null)
 const pendingDelete = ref<{ messageId: string; kind: 'user' | 'assistant' } | null>(null)
 
 const shellEl = ref<HTMLElement | null>(null)
@@ -71,6 +76,11 @@ const scrollEl = ref<HTMLElement | null>(null)
 const inputRef = ref<{
   focus: () => void
   acceptShare: (share: { paths?: string[]; text?: string; error?: string }) => Promise<void>
+  loadForEdit: (message: {
+    text: string
+    attachments: MessageAttachment[]
+    mentions: { ref: string; label: string; kind: string }[]
+  }) => void
 } | null>(null)
 
 // ---- 布局：按容器宽度（不是窗口宽度）决定侧栏常驻还是弹出 ----
@@ -171,6 +181,21 @@ const setShellTitle = inject<(id: string, title: string | null) => void>(
 )
 watch(assistantName, (name) => setShellTitle('yaya', name === 'YAYA' ? null : name))
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
+/** 上下文管理的切点（设置里关掉时不显示） */
+const contextBoundary = computed<ContextState | null>(() => {
+  if (!config.value?.context?.mode || config.value.context.mode === 'off') return null
+  const st = (activeSession.value?.meta as { context?: ContextState } | undefined)?.context
+  return st?.boundaryId ? st : null
+})
+async function resetContext(): Promise<void> {
+  const id = activeSessionId.value
+  if (!id) return
+  try {
+    await window.cockpit.command('yaya.context-reset', { session: id })
+  } catch (e) {
+    console.warn('[yaya] context reset failed', e)
+  }
+}
 const isRunning = computed(
   () => !!activeSessionId.value && runningIds.value.includes(activeSessionId.value)
 )
@@ -584,11 +609,22 @@ async function handleSend(
   attachments: MessageAttachment[],
   mentions: string[] = []
 ): Promise<void> {
+  if (editTarget.value) return sendEdit(editTarget.value, prompt, attachments, mentions)
   try {
     const firstMessage = !activeSessionId.value || messages.value.length === 0
     const id = await ensureSession()
     if (firstMessage) {
-      const title = (prompt || attachments[0]?.name || '').replace(/\s+/g, ' ').trim().slice(0, 40)
+      // #Secret("…") 的内容不能进标题（标题是明文存的）
+      const title = (
+        prompt
+          .replace(/#Secret\(\s*("(?:[^"\\]|\\.)*"|“[^”]*”|'(?:[^'\\]|\\.)*')\s*\)/g, '🔒')
+          .replace(/#Secret\(.*/g, '🔒') ||
+        attachments[0]?.name ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40)
       if (title) {
         await window.cockpit.command('yaya.session-update', { id, title })
         const s = sessions.value.find((x) => x.id === id)
@@ -609,16 +645,32 @@ async function handleSend(
   }
 }
 
-async function handleEdit(message: MessageNode, text: string): Promise<void> {
+/** 编辑：把消息的文字 / 附件 / 点名载入底部输入框，在那里改完再发 */
+function startEdit(message: MessageNode): void {
+  if (isRunning.value || !inputRef.value) return
+  editTarget.value = message
+  inputRef.value.loadForEdit({
+    text: message.content,
+    attachments: JSON.parse(JSON.stringify(message.attachments ?? [])),
+    mentions: messageMentionRecords(message)
+  })
+}
+
+async function sendEdit(
+  message: MessageNode,
+  prompt: string,
+  attachments: MessageAttachment[],
+  mentions: string[]
+): Promise<void> {
   if (!activeSessionId.value) return
+  editTarget.value = null
   try {
     await window.cockpit.command('yaya.workflow-start', {
       session: activeSessionId.value,
-      prompt: text,
-      attachments: JSON.parse(JSON.stringify(message.attachments ?? [])),
+      prompt,
+      attachments,
       parent: message.parentId,
-      // 编辑重发保留原消息的 @ 点名
-      mentions: messageMentionRefs(message)
+      ...(mentions.length ? { mentions } : {})
     })
     markRunning(activeSessionId.value)
     await loadMessages()
@@ -627,6 +679,8 @@ async function handleEdit(message: MessageNode, text: string): Promise<void> {
     showNotice(te('yaya.send_failed', { error: errText(e) }, '发送失败：{error}'), true)
   }
 }
+
+watch(activeSessionId, () => (editTarget.value = null))
 
 async function handleRegenerate(fromMessageId: string): Promise<void> {
   if (!activeSessionId.value) return
@@ -664,13 +718,19 @@ async function handleApprove(
   })
 }
 
-function messageMentionRefs(message: MessageNode): string[] {
+function messageMentionRecords(
+  message: MessageNode
+): { ref: string; label: string; kind: string }[] {
   const list = message.meta?.mentions
-  return Array.isArray(list)
-    ? list
-        .map((m) => (m as { ref?: unknown }).ref)
-        .filter((r): r is string => typeof r === 'string')
-    : []
+  if (!Array.isArray(list)) return []
+  return list
+    .map((m) => m as { ref?: unknown; label?: unknown; kind?: unknown })
+    .filter((m): m is { ref: string; label?: unknown; kind?: unknown } => typeof m.ref === 'string')
+    .map((m) => ({
+      ref: m.ref,
+      label: typeof m.label === 'string' ? m.label : m.ref,
+      kind: typeof m.kind === 'string' ? m.kind : 'builtin'
+    }))
 }
 
 /** 本对话被 @ 点名强制启用的插件 / 工具 */
@@ -678,6 +738,9 @@ const sessionMentionList = computed(() => {
   const list = activeSession.value?.meta?.mentions
   return Array.isArray(list) ? (list as { ref: string; label: string }[]) : []
 })
+function stopEvent(e: Event): void {
+  e.stopPropagation()
+}
 async function removeSessionMention(ref: string): Promise<void> {
   const s = activeSession.value
   if (!s) return
@@ -796,19 +859,29 @@ async function exportSession(format: 'md' | 'jsonl'): Promise<void> {
   if (!activeSessionId.value) return
   const ext = format === 'md' ? 'md' : 'jsonl'
   const base = (activeSession.value?.title || 'chat').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60)
-  const out = await window.cockpit.pickSaveFile({
+  const target = await pickExportTarget({
     title: t('yaya.export_title', '导出会话'),
     defaultPath: `${base}.${ext}`,
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
   })
-  if (!out) return
+  if (!target) return
   try {
+    if (target.kind === 'clipboard') {
+      const res = (await window.cockpit.command('yaya.session-export', {
+        session: activeSessionId.value,
+        format
+      })) as { ok: boolean; content?: string; error?: string }
+      if (!res.ok) throw new Error(res.error)
+      await copyExportText(res.content ?? '')
+      showNotice(t('yaya.exported_clipboard', '已复制到剪贴板'))
+      return
+    }
     await window.cockpit.command('yaya.session-export-file', {
       session: activeSessionId.value,
       format,
-      out
+      out: target.path
     })
-    showNotice(te('yaya.exported', { path: out }, '已导出到 {path}'))
+    showNotice(te('yaya.exported', { path: target.path }, '已导出到 {path}'))
   } catch (e) {
     showNotice(errText(e), true)
   }
@@ -929,7 +1002,10 @@ async function onMenuSelect(key: string): Promise<void> {
       selectText.value = { text: req.text, fullText: req.fullText }
       break
     case 'edit':
-      editingId.value = req.messageId
+      {
+        const target = messages.value.find((m) => m.id === req.messageId)
+        if (target) startEdit(target)
+      }
       break
     case 'regenerate':
       await handleRegenerate(req.messageId)
@@ -1107,6 +1183,16 @@ onMounted(async () => {
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()
     }),
+    window.cockpit.on('cockpit:yaya-context-changed', (payload: unknown) => {
+      const p = payload as { sessionId: string; state: ContextState | null }
+      sessions.value = sessions.value.map((s) => {
+        if (s.id !== p.sessionId) return s
+        const meta = { ...(s.meta ?? {}) } as Record<string, unknown>
+        if (p.state) meta.context = p.state
+        else delete meta.context
+        return { ...s, meta }
+      })
+    }),
     // 网页版事件流断线重连：期间的 token / 状态推送都丢了，重新同步
     window.cockpit.on('cockpit:host-reconnected', () => {
       void resync()
@@ -1249,7 +1335,7 @@ watch(isRunning, (now, before) => {
               <v-icon icon="mdi-dots-vertical" />
             </v-btn>
           </template>
-          <v-list density="compact" min-width="190" class="yaya-menu">
+          <v-list density="compact" min-width="190" class="yaya-menu yaya-pop">
             <v-list-item
               prepend-icon="mdi-language-markdown-outline"
               :title="t('yaya.export_md', '导出为 Markdown')"
@@ -1277,6 +1363,7 @@ watch(isRunning, (now, before) => {
             />
             <v-list-group v-if="sessionMentionList.length" value="mentions">
               <template #activator="{ props: groupProps }">
+                <!-- 菜单默认点内容就关闭：展开分组这一下要拦住，不然看起来「点了没反应」 -->
                 <v-list-item
                   v-bind="groupProps"
                   prepend-icon="mdi-at"
@@ -1287,6 +1374,7 @@ watch(isRunning, (now, before) => {
                       '本对话点名启用（{n}）'
                     )
                   "
+                  @click="stopEvent"
                 />
               </template>
               <v-list-item
@@ -1368,16 +1456,25 @@ watch(isRunning, (now, before) => {
           </div>
 
           <template v-for="turn in turns" :key="turn.key">
+            <ContextMarker
+              v-if="
+                turn.kind === 'user' &&
+                contextBoundary &&
+                turn.message.id === contextBoundary.boundaryId
+              "
+              :state="contextBoundary"
+              @reset="resetContext"
+            />
             <UserMessage
               v-if="turn.kind === 'user'"
               class="turn-item"
               :data-turn-key="turn.key"
               :message="turn.message"
               :busy="isRunning"
-              :editing="editingId === turn.message.id"
-              @update:editing="(on: boolean) => (editingId = on ? turn.message.id : null)"
+              :editing="editTarget?.id === turn.message.id"
+              :profile="config?.profile"
               @switch-branch="handleSwitchBranch"
-              @edit="(text) => handleEdit(turn.message, text)"
+              @edit="startEdit(turn.message)"
               @menu="(req) => (menuRequest = req)"
             />
             <AssistantTurn
@@ -1386,6 +1483,7 @@ watch(isRunning, (now, before) => {
               :data-turn-key="turn.key"
               :turn="turn"
               :assistant-name="assistantName"
+              :profile="config?.profile"
               :live="isRunning && turn.key === lastTurnKey"
               :pending-approval-id="turn.key === lastTurnKey ? pendingApprovalId : null"
               :is-last="turn.key === lastTurnKey"
@@ -1459,7 +1557,9 @@ watch(isRunning, (now, before) => {
           :session-id="activeSessionId || ''"
           :ensure-session="ensureSession"
           :assistant-name="assistantName"
+          :editing="!!editTarget"
           @send="handleSend"
+          @cancel-edit="editTarget = null"
           @abort="handleAbort"
         />
       </div>
@@ -1477,7 +1577,7 @@ watch(isRunning, (now, before) => {
       max-width="420"
       @update:model-value="(v: boolean) => !v && (pendingDelete = null)"
     >
-      <v-card class="pa-2">
+      <v-card class="pa-2 yaya-pop">
         <v-card-title class="text-h6">{{ t('yaya.menu.delete_title', '删除消息') }}</v-card-title>
         <v-card-text class="text-body-2">
           {{

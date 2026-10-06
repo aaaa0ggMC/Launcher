@@ -6,6 +6,7 @@ import { processItems, summarizeArgs } from './turns'
 import type { ToolCallItem } from '../types'
 import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
+import EmergeText from './EmergeText.vue'
 
 /**
  * 过程块：一段连续的思考 / 工具调用 / 子 Agent 步骤（AI 说的话在块外，见 turns.ts `turnSegments`）。
@@ -236,123 +237,137 @@ function toolColor(call: ToolCallItem): string | undefined {
       <span class="wf-spacer" />
       <span v-if="tokens" class="wf-meta wf-hide-narrow">{{ fmtTokens(tokens) }} tokens</span>
       <span v-if="elapsed" class="wf-meta">{{ fmtMs(elapsed) }}</span>
-      <v-icon :icon="open ? 'mdi-chevron-up' : 'mdi-chevron-down'" size="18" class="wf-chevron" />
+      <v-icon icon="mdi-chevron-down" size="18" class="wf-chevron" :class="{ 'is-open': open }" />
     </button>
 
-    <div
-      v-if="!open && previewRows.length"
-      class="wf-preview"
-      role="button"
-      tabindex="0"
-      :title="t('yaya.wf.expand', '展开过程')"
-      :aria-label="t('yaya.wf.expand', '展开过程')"
-      @click="open = true"
-      @keydown.enter="open = true"
-      @keydown.space.prevent="open = true"
-    >
-      <p v-for="row in previewRows" :key="row.key" class="wf-pv-row" :class="`is-${row.kind}`">
-        <v-icon
-          v-if="row.kind === 'tool' && row.call"
-          :icon="toolIcon(row.call)"
-          :color="toolColor(row.call)"
-          size="14"
-          class="wf-pv-icon"
-        />
-        <v-icon
-          v-else-if="row.kind === 'label'"
-          icon="mdi-chevron-right"
-          size="14"
-          class="wf-pv-icon"
-        />
-        <span v-if="row.kind === 'reasoning'" class="wf-pv-reasoning">{{ row.text }}</span>
-        <span v-else-if="row.kind === 'tool'" class="wf-pv-tool">{{ row.text }}</span>
-        <span v-else class="wf-pv-label">{{ row.text }}</span>
-        <span v-if="row.kind === 'tool' && row.call" class="wf-pv-args">
-          {{ summarizeArgs(row.call) }}
-        </span>
-      </p>
-    </div>
+    <v-expand-transition>
+      <div
+        v-if="!open && previewRows.length"
+        class="wf-preview"
+        role="button"
+        tabindex="0"
+        :title="t('yaya.wf.expand', '展开过程')"
+        :aria-label="t('yaya.wf.expand', '展开过程')"
+        @click="open = true"
+        @keydown.enter="open = true"
+        @keydown.space.prevent="open = true"
+      >
+        <p v-for="row in previewRows" :key="row.key" class="wf-pv-row" :class="`is-${row.kind}`">
+          <v-icon
+            v-if="row.kind === 'tool' && row.call"
+            :icon="toolIcon(row.call)"
+            :color="toolColor(row.call)"
+            size="14"
+            class="wf-pv-icon"
+          />
+          <v-icon
+            v-else-if="row.kind === 'label'"
+            icon="mdi-chevron-right"
+            size="14"
+            class="wf-pv-icon"
+          />
+          <EmergeText
+            v-if="row.kind === 'reasoning'"
+            class="wf-pv-reasoning"
+            :text="row.text"
+            :live="blockLive"
+          />
+          <span v-else-if="row.kind === 'tool'" class="wf-pv-tool">{{ row.text }}</span>
+          <span v-else class="wf-pv-label">{{ row.text }}</span>
+          <span v-if="row.kind === 'tool' && row.call" class="wf-pv-args">
+            {{ summarizeArgs(row.call) }}
+          </span>
+        </p>
+      </div>
+    </v-expand-transition>
 
-    <div v-if="open" class="wf-body">
-      <ol class="wf-timeline">
-        <li v-for="item in items" :key="item.key" class="wf-item">
-          <span class="wf-dot" :class="`is-${item.rec?.status ?? 'ok'}`" />
+    <v-expand-transition>
+      <div v-if="open" class="wf-body">
+        <ol class="wf-timeline">
+          <li v-for="item in items" :key="item.key" class="wf-item">
+            <span class="wf-dot" :class="`is-${item.rec?.status ?? 'ok'}`" />
 
-          <template v-if="item.kind === 'llm'">
-            <div v-if="item.part !== 'tools' || !item.node.reasoningContent" class="wf-row">
-              <span class="wf-agent">{{ agentName(item.rec?.agent ?? 'main') }}</span>
-              <span class="wf-label">{{
-                item.rec?.label ??
-                (item.node.toolCalls?.length
-                  ? t('yaya.wf.step.think', '思考与调用工具')
-                  : t('yaya.wf.step.answer', '生成回答'))
-              }}</span>
-              <span class="wf-spacer" />
-              <span v-if="item.rec?.tokens" class="wf-meta wf-hide-narrow">
-                {{ fmtTokens(item.rec.tokens) }} tokens
-              </span>
-              <span v-if="item.rec?.ms !== undefined" class="wf-meta">{{
-                fmtMs(item.rec.ms)
-              }}</span>
-            </div>
-            <div v-if="item.part !== 'tools' && item.node.reasoningContent" class="wf-reasoning">
-              {{ item.node.reasoningContent }}
-            </div>
-            <div
-              v-if="item.part !== 'reasoning' && !item.answer && item.node.toolCalls?.length"
-              class="wf-tools"
-            >
-              <ToolCallRow
-                v-for="call in item.node.toolCalls"
-                :key="call.id"
-                :call="call"
-                :awaiting-approval="false"
-              />
-            </div>
-          </template>
+            <template v-if="item.kind === 'llm'">
+              <div v-if="item.part !== 'tools' || !item.node.reasoningContent" class="wf-row">
+                <span class="wf-agent">{{ agentName(item.rec?.agent ?? 'main') }}</span>
+                <span class="wf-label">{{
+                  item.rec?.label ??
+                  (item.node.toolCalls?.length
+                    ? t('yaya.wf.step.think', '思考与调用工具')
+                    : t('yaya.wf.step.answer', '生成回答'))
+                }}</span>
+                <span class="wf-spacer" />
+                <span v-if="item.rec?.tokens" class="wf-meta wf-hide-narrow">
+                  {{ fmtTokens(item.rec.tokens) }} tokens
+                </span>
+                <span v-if="item.rec?.ms !== undefined" class="wf-meta">{{
+                  fmtMs(item.rec.ms)
+                }}</span>
+              </div>
+              <div v-if="item.part !== 'tools' && item.node.reasoningContent" class="wf-reasoning">
+                <EmergeText :text="item.node.reasoningContent" :live="blockLive" />
+              </div>
+              <div
+                v-if="item.part !== 'reasoning' && !item.answer && item.node.toolCalls?.length"
+                class="wf-tools"
+              >
+                <ToolCallRow
+                  v-for="call in item.node.toolCalls"
+                  :key="call.id"
+                  :call="call"
+                  :awaiting-approval="false"
+                />
+              </div>
+            </template>
 
-          <template v-else>
-            <button
-              type="button"
-              class="wf-row wf-row-btn"
-              :disabled="!item.rec.detail"
-              :aria-expanded="!!openDetails[item.key]"
-              @click="openDetails[item.key] = !openDetails[item.key]"
-            >
-              <span class="wf-agent is-sub">{{ agentName(item.rec.agent) }}</span>
-              <span class="wf-label">{{ item.rec.label }}</span>
-              <v-progress-circular
-                v-if="item.rec.status === 'running'"
-                indeterminate
-                size="12"
-                width="2"
-                color="primary"
-              />
-              <span class="wf-spacer" />
-              <span v-if="item.rec.tokens" class="wf-meta wf-hide-narrow">
-                {{ fmtTokens(item.rec.tokens) }} tokens
-              </span>
-              <span v-if="item.rec.ms !== undefined" class="wf-meta">{{ fmtMs(item.rec.ms) }}</span>
-              <v-icon
-                v-if="item.rec.detail"
-                :icon="openDetails[item.key] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-                size="16"
-                class="wf-chevron"
-              />
-            </button>
-            <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
-            <div
-              v-if="openDetails[item.key] && item.rec.detail"
-              class="wf-text"
-              v-html="md(item.rec.detail)"
-            />
-          </template>
-        </li>
-        <li v-if="items.length === 0" class="wf-item wf-empty">
-          {{ t('yaya.wf.no_steps', '还没有过程步骤') }}
-        </li>
-      </ol>
-    </div>
+            <template v-else>
+              <button
+                type="button"
+                class="wf-row wf-row-btn"
+                :disabled="!item.rec.detail"
+                :aria-expanded="!!openDetails[item.key]"
+                @click="openDetails[item.key] = !openDetails[item.key]"
+              >
+                <span class="wf-agent is-sub">{{ agentName(item.rec.agent) }}</span>
+                <span class="wf-label">{{ item.rec.label }}</span>
+                <v-progress-circular
+                  v-if="item.rec.status === 'running'"
+                  indeterminate
+                  size="12"
+                  width="2"
+                  color="primary"
+                />
+                <span class="wf-spacer" />
+                <span v-if="item.rec.tokens" class="wf-meta wf-hide-narrow">
+                  {{ fmtTokens(item.rec.tokens) }} tokens
+                </span>
+                <span v-if="item.rec.ms !== undefined" class="wf-meta">{{
+                  fmtMs(item.rec.ms)
+                }}</span>
+                <v-icon
+                  v-if="item.rec.detail"
+                  icon="mdi-chevron-down"
+                  size="16"
+                  class="wf-chevron"
+                  :class="{ 'is-open': openDetails[item.key] }"
+                />
+              </button>
+              <v-expand-transition>
+                <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+                <div
+                  v-if="openDetails[item.key] && item.rec.detail"
+                  class="wf-text"
+                  v-html="md(item.rec.detail)"
+                />
+              </v-expand-transition>
+            </template>
+          </li>
+          <li v-if="items.length === 0" class="wf-item wf-empty">
+            {{ t('yaya.wf.no_steps', '还没有过程步骤') }}
+          </li>
+        </ol>
+      </div>
+    </v-expand-transition>
   </div>
 </template>
 
@@ -412,6 +427,10 @@ function toolColor(call: ToolCallItem): string | undefined {
 .wf-chevron {
   flex-shrink: 0;
   opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+.wf-chevron.is-open {
+  transform: rotate(180deg);
 }
 .wf-body {
   padding: 4px 12px 12px;

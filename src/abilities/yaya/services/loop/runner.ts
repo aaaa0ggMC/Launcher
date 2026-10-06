@@ -13,7 +13,7 @@
  *   每步开始、每次工具调用前过暂停闸门；
  * - 组装历史时修复悬空的 tool_calls（打断后缺结果的调用补一条「已中断」），打断不需要回滚。
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { normalizeEffort } from '../providers/reasoning'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
@@ -36,9 +36,26 @@ import {
   getSession,
   updateSession
 } from '../db'
-import { normalizeAssistantName, resolveSystemPrompt } from '../config'
+import { loadYayaConfig, normalizeAssistantName, resolveSystemPrompt } from '../config'
+import { collectPromptVars, type PromptVar } from '../prompt-vars'
+import { normalizeProfile } from '../../profile'
+import { saveAsset } from '../assets'
 import {
+  boundaryIndex,
+  contextPreamble,
+  estimateTokens,
+  normalizeContextConfig,
+  planContext,
+  renderTranscript,
+  resolveBudget,
+  SUMMARY_SYSTEM,
+  type ContextState
+} from '../context'
+import {
+  applyToolArgsHooks,
+  applyToolResultHooks,
   buildPluginInstructions,
+  collectModelHints,
   normalizeToolResult,
   resolveTools,
   runPluginTool,
@@ -352,6 +369,15 @@ export class WorkflowRunner {
     )
 
     try {
+      await this.prepareAvatar().catch((e) => log.warn('user avatar skipped', { error: String(e) }))
+      // 提示词变量（日期 / 时间 / 电量…）整次运行取一次，多步调用之间提示词不变
+      this.promptVars = await collectPromptVars(this.rawSystemPrompt, {
+        name: normalizeAssistantName(this.ctx.config.assistantName),
+        model: this.model,
+        provider:
+          this.ctx.config.providers.find((p) => p.id === this.ctx.provider.id)?.name ||
+          this.ctx.provider.id
+      })
       // 本会话被 @ 点名强制启用的插件 / 工具（追加在工具表末尾，见 mention.ts）
       const forced = sessionMentions(this.session?.meta).map((m) => m.ref)
       this.tools = workflow.usesTools ? await resolveTools(this.ctx.config, forced) : []
@@ -403,14 +429,148 @@ export class WorkflowRunner {
   }
 
   private history(): ProviderMessage[] {
-    return sanitizeHistory(getMessageBranch(this.parentId))
+    let nodes = getMessageBranch(this.parentId)
+    // 上下文管理：从记下的切点开始发，切点前的内容换成摘要 / 一句说明（切点不在这条分支上就发完整历史）
+    const state = this.contextState()
+    const cut = state ? boundaryIndex(nodes, state) : -1
+    if (cut > 0) nodes = nodes.slice(cut)
+    const out = sanitizeHistory(nodes)
+    if (cut > 0 && state) {
+      const first = out.find((m) => m.role === 'user')
+      if (first) first.content = contextPreamble(state) + first.content
+    }
+    // 「AI 能看到你的头像」：头像作为图片挂在第一条用户消息上（每次请求都一样，缓存照常命中）
+    const avatar = this.avatarAttachment
+    const first = avatar ? out.find((m) => m.role === 'user') : undefined
+    if (avatar && first) {
+      first.attachments = [avatar, ...(first.attachments ?? [])]
+      first.content = `[The first image is the user's profile picture.]\n\n${first.content}`
+    }
+    return out
   }
 
-  private systemPrompt(extra?: string): string {
-    const base = resolveSystemPrompt(
-      this.session?.systemPrompt || this.ctx.config.systemPrompt,
+  /** 会话里记下的上下文切点（设置里关掉上下文管理时不生效） */
+  private contextState(): ContextState | null {
+    if (normalizeContextConfig(this.ctx.config.context).mode === 'off') return null
+    const st = (this.session?.meta as { context?: ContextState } | undefined)?.context
+    return st && typeof st.boundaryId === 'string' ? st : null
+  }
+
+  /**
+   * 每次调用模型前检查：估算超出预算就移动切点（drop 直接切，compress 先让模型写摘要）。
+   * 没超出什么都不做，切点不动，前缀不变（提示词缓存）。
+   */
+  private async manageContext(): Promise<void> {
+    const cfg = normalizeContextConfig(this.ctx.config.context)
+    if (cfg.mode === 'off') return
+    const nodes = getMessageBranch(this.parentId)
+    const hint = collectModelHints(
+      [{ providerId: this.ctx.provider.id, model: this.model }],
       this.ctx.config
     )
+    const budget = resolveBudget(cfg, hint[`${this.ctx.provider.id}/${this.model}`]?.contextWindow)
+    const overhead =
+      estimateTokens(this.systemPrompt()) +
+      estimateTokens(JSON.stringify(this.stepTools('enabled')))
+    const state = this.contextState()
+    const valid = state && boundaryIndex(nodes, state) > 0 ? state : null
+    const plan = planContext(nodes, {
+      budget,
+      keepTurns: cfg.keepTurns,
+      overhead,
+      mode: cfg.mode,
+      state: valid
+    })
+    if (!plan) return
+
+    let summary: string | undefined
+    let mode = cfg.mode
+    if (mode === 'compress') {
+      try {
+        const res = await this.subAgent({
+          agent: 'context',
+          label: t('yaya.context.step_compress', '压缩上下文'),
+          system: SUMMARY_SYSTEM,
+          messages: [
+            {
+              role: 'user',
+              content: renderTranscript(
+                plan.cut,
+                valid?.mode === 'compress' ? valid.summary : undefined
+              )
+            }
+          ]
+        })
+        summary = res.content.trim()
+        if (!summary) throw new Error('empty summary')
+      } catch (e) {
+        if (this.aborted) throw e
+        log.warn('context compress failed, dropping instead', { error: String(e) })
+        mode = 'drop'
+      }
+    }
+    const next: ContextState = {
+      boundaryId: nodes[plan.index].id,
+      dropped: plan.index,
+      mode,
+      ...(summary ? { summary } : {}),
+      at: Date.now(),
+      before: plan.before,
+      after: plan.after
+    }
+    if (mode === 'drop')
+      this.addStep({
+        agent: 'context',
+        kind: 'note',
+        label: te(
+          'yaya.context.step_drop',
+          { n: String(plan.index) },
+          '上下文太长：较早的 {n} 条消息不再发给 AI'
+        ),
+        status: 'ok'
+      })
+    const meta = { ...(getSession(this.ctx.sessionId)?.meta ?? {}), context: next }
+    updateSession(this.ctx.sessionId, { meta })
+    if (this.session) this.session.meta = meta
+    getBroadcast()('cockpit:yaya-context-changed', { sessionId: this.ctx.sessionId, state: next })
+  }
+
+  /** 用户头像在本会话资产里的副本（头像改了才重新存一份） */
+  private avatarAttachment: MessageAttachment | null = null
+
+  private async prepareAvatar(): Promise<void> {
+    const profile = normalizeProfile(this.ctx.config.profile)
+    if (!profile.userAvatarVisible || !profile.userAvatar) return
+    const hash = createHash('sha1').update(profile.userAvatar).digest('hex').slice(0, 16)
+    const meta = this.session?.meta ?? {}
+    const saved = meta.userAvatar as { hash?: string; att?: MessageAttachment } | undefined
+    if (saved?.hash === hash && saved.att) {
+      this.avatarAttachment = saved.att
+      return
+    }
+    const m = profile.userAvatar.match(/^data:(image\/[a-z]+);base64,(.*)$/)
+    if (!m) return
+    const att = await saveAsset(
+      this.ctx.sessionId,
+      'user-avatar',
+      Buffer.from(m[2], 'base64'),
+      m[1]
+    )
+    this.avatarAttachment = att
+    const next = { ...(getSession(this.ctx.sessionId)?.meta ?? {}), userAvatar: { hash, att } }
+    updateSession(this.ctx.sessionId, { meta: next })
+    if (this.session) this.session.meta = next
+  }
+
+  private get rawSystemPrompt(): string {
+    return this.session?.systemPrompt || this.ctx.config.systemPrompt
+  }
+
+  /** 系统提示词变量的快照（run() 开始时取） */
+  private promptVars: Partial<Record<PromptVar, string>> = {}
+
+  private systemPrompt(extra?: string): string {
+    const base = resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
     const plugins = buildPluginInstructions(this.ctx.config)
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }
@@ -463,6 +623,8 @@ export class WorkflowRunner {
     opts: AssistantStepOptions = {}
   ): Promise<AssistantStepResult> {
     await this.gate()
+    if (this.aborted) throw new Error('aborted')
+    await this.manageContext()
     if (this.aborted) throw new Error('aborted')
     this.stepCount++
     const tools = this.stepTools(opts.tools)
@@ -687,6 +849,10 @@ export class WorkflowRunner {
       persist()
 
       const start = Date.now()
+      // 插件数据流钩子（SecretPlugin 等）：参数在执行前变换，结果在入库前变换
+      const cfg = loadYayaConfig()
+      const scrub = <T>(value: T): T =>
+        applyToolResultHooks(this.ctx.sessionId, call.name, value, cfg)
       touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', undefined, call.name)
       try {
         // 以 local-agent 身份执行：命令注册表里的隐私声明、脱敏、授权窗口全部生效；
@@ -695,7 +861,7 @@ export class WorkflowRunner {
           this.browserClient,
           () =>
             withOrigin(this.origin, () =>
-              runPluginTool(def, args, {
+              runPluginTool(def, applyToolArgsHooks(this.ctx.sessionId, call.name, args, cfg), {
                 sessionId: this.ctx.sessionId,
                 signal: this.abortController.signal,
                 context: () => this.toolContext()
@@ -703,7 +869,12 @@ export class WorkflowRunner {
             ),
           this.abortController.signal
         )
-        const out = await normalizeToolResult(raw, this.ctx.sessionId)
+        const normalized = await normalizeToolResult(raw, this.ctx.sessionId)
+        const out = {
+          ...normalized,
+          text: scrub(normalized.text),
+          display: scrub(normalized.display)
+        }
         call.status = out.isError ? 'failed' : 'success'
         call.result = out.display
         if (out.isError) call.error = out.text.slice(0, 2000)
@@ -711,7 +882,7 @@ export class WorkflowRunner {
         this.recordToolMessage(call, out.text, out.images)
       } catch (e: unknown) {
         call.status = 'failed'
-        call.error = e instanceof Error ? e.message : String(e)
+        call.error = scrub(e instanceof Error ? e.message : String(e))
         this.recordToolMessage(call, JSON.stringify({ error: call.error }))
       }
       call.ms = Date.now() - start

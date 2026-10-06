@@ -13,5 +13,6 @@
   "logs.loadOlder": "加载更早日志",
   "logs.empty": "暂无日志",
   "logs.total": "共 {n} 条",
-  "logs.mdHeading": "## 日志"
+  "logs.mdHeading": "## 日志",
+  "logs.copied": "日志已复制到剪贴板"
 }

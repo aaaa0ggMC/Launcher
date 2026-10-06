@@ -354,7 +354,7 @@ function doDelete(): void {
                     @click.stop
                   />
                 </template>
-                <v-list density="compact" min-width="176" class="py-1">
+                <v-list density="compact" min-width="176" class="py-1 yaya-pop">
                   <v-list-item
                     prepend-icon="mdi-pencil-outline"
                     :title="t('yaya.sessions.rename', '重命名')"
@@ -392,7 +392,7 @@ function doDelete(): void {
 
     <!-- 删除确认 -->
     <v-dialog v-model="deleteDialog" max-width="400">
-      <v-card class="pa-4">
+      <v-card class="pa-4 yaya-pop">
         <v-card-title class="px-0 pt-0 text-h6">
           {{ t('yaya.sessions.deleteTitle', '删除会话') }}
         </v-card-title>

@@ -4,6 +4,8 @@
  * CORS, and the user picks the destination via the native save dialog.
  */
 
+import { copyExportText, pickExportTarget } from './export'
+
 /** Map a MIME type to a sensible file extension (React's extFromMime). */
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -85,26 +87,33 @@ export async function downloadUrlToLocal(
   }
 }
 
-/** Download inline text (raw response) to a local file. */
+/**
+ * Download inline text (raw response) to a local file — or copy it to the clipboard when the
+ * user picks that in the export dialog. Returns where it went, or false (cancelled / failed).
+ */
 export async function downloadTextToLocal(
   text: string,
   defaultName = 'response.txt',
   title?: string,
   filters?: { name: string; extensions: string[] }[]
-): Promise<boolean> {
+): Promise<false | 'file' | 'clipboard'> {
   try {
-    const path = await window.cockpit.pickSaveFile({
+    const target = await pickExportTarget({
       title: title ?? 'Download to local',
       defaultPath: defaultName,
       filters: filters ?? [{ name: 'Text', extensions: ['txt', 'log', 'json'] }]
     })
-    if (!path) return false
+    if (!target) return false
+    if (target.kind === 'clipboard') {
+      await copyExportText(text)
+      return 'clipboard'
+    }
     await window.cockpit.command('playground.download-url', {
       url: '',
-      path,
+      path: target.path,
       text
     })
-    return true
+    return 'file'
   } catch {
     return false
   }

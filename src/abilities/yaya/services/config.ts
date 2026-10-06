@@ -9,6 +9,9 @@ import { decryptSecret, encryptSecret, isEncryptedSecret } from '../../../main/p
 import { makeLogger } from '../../../main/process/logger'
 import { getBroadcast } from '../../../main/process/broadcast'
 import type { McpServerConfig, ProviderConfig, YayaConfig } from '../types'
+import { applyPromptVars, type PromptVar } from './prompt-vars'
+import { normalizeProfile } from '../profile'
+import { normalizeContextConfig } from './context'
 
 const log = makeLogger('yaya-config')
 
@@ -98,6 +101,8 @@ export function loadYayaConfig(): YayaConfig {
     }
     cfg.assistantName = normalizeAssistantName(cfg.assistantName)
     cfg.processPreviewSteps = normalizeProcessPreviewSteps(cfg.processPreviewSteps)
+    cfg.profile = normalizeProfile(cfg.profile)
+    cfg.context = normalizeContextConfig(cfg.context)
     // 仅传输字段不该出现在内存配置里（旧版本可能落过盘）
     delete cfg.pluginSecretsSet
     delete cfg.pluginClearSecrets
@@ -236,9 +241,23 @@ export function normalizeProcessPreviewSteps(v: unknown): number {
   return Math.min(PROCESS_PREVIEW_STEPS_MAX, Math.max(0, Math.round(n)))
 }
 
-/** 系统提示词：`{name}` 替换为助手名 */
-export function resolveSystemPrompt(prompt: string, config: YayaConfig): string {
-  return prompt.split('{name}').join(normalizeAssistantName(config.assistantName))
+/**
+ * 系统提示词：`{name}` 替换为助手名；`vars` 是运行开始时取的其余变量快照（见 prompt-vars.ts）
+ */
+export function resolveSystemPrompt(
+  prompt: string,
+  config: YayaConfig,
+  vars: Partial<Record<PromptVar, string>> = {}
+): string {
+  const profile = normalizeProfile(config.profile)
+  const name = profile.assistantNameVisible
+    ? normalizeAssistantName(config.assistantName)
+    : 'an AI assistant'
+  const userName = profile.userNameVisible ? (profile.userName ?? '') : ''
+  let out = applyPromptVars(prompt, { ...vars, name, user: userName || 'the user' })
+  // 设了名字、允许 AI 知道、提示词里又没用 {user}：补一句（内容稳定，不影响提示词缓存）
+  if (userName && !prompt.includes('{user}')) out += `\n\nThe user's name is ${userName}.`
+  return out
 }
 
 /** 给渲染端 / agent 的配置视图：去掉密钥明文，只给 apiKeySet */
@@ -403,6 +422,8 @@ export function mergeIncomingYayaConfig(incoming: YayaConfig): YayaConfig {
   const next: YayaConfig = JSON.parse(JSON.stringify(incoming))
   next.assistantName = normalizeAssistantName(next.assistantName)
   next.processPreviewSteps = normalizeProcessPreviewSteps(next.processPreviewSteps)
+  next.profile = normalizeProfile(next.profile)
+  next.context = normalizeContextConfig(next.context)
   next.providers = (next.providers ?? []).map((p) => {
     const prev = current.providers.find((c) => c.id === p.id)
     let apiKey = p.apiKey
