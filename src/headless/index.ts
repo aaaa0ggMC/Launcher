@@ -7,7 +7,6 @@
  * 到 ./electron-stub（不支持的窗口 / 对话框 / 全局快捷键等一律 nop）。
  */
 import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
 import { setBroadcast } from '../main/process/broadcast'
 import { setLogBroadcast, log } from '../main/process/logger'
 import { setBackgroundBroadcast, shutdownBackgroundTasks } from '../main/process/background-tasks'
@@ -25,6 +24,7 @@ import { initPrivacyConsent } from '../main/process/privacy-consent'
 import { initAgentServices } from '../main/process/agent'
 import { initWebHost } from '../main/process/web-host'
 import { startWatchdog } from './watchdog'
+import { startTermuxKeepAlive } from './termux-keepalive'
 import { loadWebToken, otherHost, releaseHostLock, writeHostLock } from './host-lock'
 
 function arg(name: string, dflt: string): string {
@@ -44,23 +44,6 @@ process.on('unhandledRejection', (reason) => {
     error: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
   })
 })
-
-/**
- * Termux：申请 wake lock，屏幕关掉 / 切到别的 App 时 CPU 不进深度休眠、宿主不被暂停。
- * （等价于手动运行 termux-wake-lock；`--no-wake-lock` 关闭。厂商 ROM 的后台冻结仍需把 Termux 锁定在后台）
- */
-function termuxWakeLock(): void {
-  if (!process.env.TERMUX_VERSION && !(process.env.PREFIX ?? '').includes('com.termux')) return
-  if (process.argv.includes('--no-wake-lock')) return
-  try {
-    const child = spawn('termux-wake-lock', [], { stdio: 'ignore', detached: true })
-    child.on('spawn', () => log.info('termux wake lock requested'))
-    child.on('error', (e) => log.warn('termux-wake-lock failed', String(e)))
-    child.unref()
-  } catch (e) {
-    log.warn('termux-wake-lock failed', String(e))
-  }
-}
 
 async function main(): Promise<void> {
   process.env.COCKPIT_HEADLESS = '1'
@@ -112,7 +95,7 @@ async function main(): Promise<void> {
 
   await startServer({ host, port, token, webRoot })
   writeHostLock('headless', { host, port })
-  termuxWakeLock()
+  startTermuxKeepAlive()
   process.on('exit', releaseHostLock)
   log.info('headless started', { platform: process.platform, node: process.version })
   console.log(`\n  Cockpit headless → http://${host}:${port}/?token=${token}\n`)

@@ -73,7 +73,7 @@ export function startWatchdog(): void {
       if (workerGapMs >= lag * 0.7)
         log.warn('host process was paused by the system (device asleep or Termux frozen)', {
           ms: lag,
-          hint: '把 Termux 锁定在后台、电池设为无限制'
+          hint: 'pkg install play-audio 后重启宿主（scripts/termux-fix.sh）；并把 Termux 锁定在后台'
         })
       else log.warn('main thread was blocked', { ms: lag })
     }, 1500)
