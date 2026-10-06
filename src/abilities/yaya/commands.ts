@@ -68,6 +68,8 @@ function formatAssetBytes(n: number): string {
 import {
   getPlugin,
   listPluginInfo,
+  collectModelHints,
+  collectUsageSections,
   pluginSecretKeys,
   refreshPlugins,
   registerPlugin,
@@ -595,7 +597,37 @@ const commands: CommandSpec[] = [
         return d === 'ask' ? 'high' : d === 'dynamic' ? 'medium' : d === 'auto' ? 'low' : 'unknown'
       }
       const onlyActive = ctx.named.branch === true || ctx.named.branch === 'true'
-      return computeSessionUsage(getSessionMessages(id), activeIds, riskOf, onlyActive)
+      const usage = computeSessionUsage(getSessionMessages(id), activeIds, riskOf, onlyActive)
+      const sections = await collectUsageSections(id, usage, loadYayaConfig())
+      return sections.length ? { ...usage, sections } : usage
+    }
+  },
+
+  {
+    name: 'yaya.model-hints',
+    description:
+      '模型选择里各模型旁边的小标签（插件 SDK hooks.modelHint，如价格、上下文长度）。key = <服务商 id>/<模型>',
+    usage: 'yaya.model-hints --pairs <[{providerId, model}] JSON>',
+    ui: ['YAYA 模型选择'],
+    run: async (ctx) => {
+      const raw = ctx.named.pairs
+      let pairs: unknown = raw
+      if (typeof raw === 'string') {
+        try {
+          pairs = JSON.parse(raw)
+        } catch {
+          pairs = []
+        }
+      }
+      const list = (Array.isArray(pairs) ? pairs : [])
+        .filter(
+          (p): p is { providerId: string; model: string } =>
+            !!p &&
+            typeof (p as { providerId?: unknown }).providerId === 'string' &&
+            typeof (p as { model?: unknown }).model === 'string'
+        )
+        .slice(0, 2000)
+      return { hints: collectModelHints(list, loadYayaConfig()) }
     }
   },
 

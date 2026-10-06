@@ -13,6 +13,8 @@ export interface UsageCall {
   messageId: string
   at: number
   model: string
+  /** 服务商 id（旧消息没记时为空） */
+  provider: string
   prompt: number
   completion: number
   cached: number
@@ -24,6 +26,7 @@ export interface UsageCall {
 
 export interface UsageModel {
   model: string
+  provider: string
   calls: number
   prompt: number
   completion: number
@@ -86,6 +89,19 @@ export interface SessionUsage {
   runs: UsageRun[]
   /** 明细是否被截断（只保留最近的 MAX_LOG 条） */
   truncated: boolean
+  /** 插件补充的分区（插件 SDK `hooks.usage`，如模型价格）；纯函数本身不填 */
+  sections?: UsageSection[]
+}
+
+/** 插件在用量统计里的一块：几个数字 + 可选的自定义视图数据（渲染端 `usageView`） */
+export interface UsageSection {
+  pluginId: string
+  title: string
+  /** mdi 图标 */
+  icon?: string
+  stats?: { label: string; value: string; sub?: string }[]
+  /** 交给插件自己的 usageView 组件；没有组件时不显示 */
+  data?: unknown
 }
 
 const MAX_LOG = 1000
@@ -138,10 +154,12 @@ export function computeSessionUsage(
     const u = m.usage
     if (u && (u.total || u.prompt || u.completion)) {
       const model = m.meta?.model ?? ''
+      const provider = m.meta?.provider ?? ''
       const call: UsageCall = {
         messageId: m.id,
         at: m.createdAt,
         model,
+        provider,
         prompt: u.prompt ?? 0,
         completion: u.completion ?? 0,
         cached: u.cached ?? 0,
@@ -156,8 +174,10 @@ export function computeSessionUsage(
       totals.cached += call.cached
       totals.reasoning += call.reasoning
       totals.total += call.total
-      const mm = models.get(model) ?? {
+      const key = `${provider}\n${model}`
+      const mm = models.get(key) ?? {
         model,
+        provider,
         calls: 0,
         prompt: 0,
         completion: 0,
@@ -169,7 +189,7 @@ export function computeSessionUsage(
       mm.completion += call.completion
       mm.cached += call.cached
       mm.total += call.total
-      models.set(model, mm)
+      models.set(key, mm)
     }
 
     const rec = m.meta?.workflow

@@ -382,6 +382,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **数据流钩子 / 正文记号**：`YayaPlugin.hooks`（`userText` 用户消息入库前、`toolArgs` 工具执行前、`toolResult` 结果入库前，按启用插件串起来，经 registry 的 `apply*Hooks`）；渲染端 `PluginUi.inlineTokens` 把正文里的记号渲染成标签 / 文字（用户气泡与回答都走，不按启用门控）。只做确定性变换，不能引入时间 / 随机（提示词缓存）。
 - **SecretPlugin**（`plugins/secret/` + `services/secrets.ts`）：`#Secret("值")`（也认 “…” / '…'）入库前换成 `[[secret_xxxx]]`，值按会话加密存 `yaya/secrets/<会话>.json`，删会话一起删；工具参数里引用 → 真值，工具结果里真值 → 引用；`replaceInChat` 打开时回答里的引用在界面上显示真值（`yaya.secret-values`，`agent: 'deny'`，带 `yaya.secret_value` 隐私标签）。会话标题生成时去掉 `#Secret(...)`。防君子不防小人。
 - **`providers` 插件**（`plugins/providers/index.ts`）：助手查看 / 添加 / 修改自己的模型服务商（用户要求）。**没有删除工具**（只能 `enabled=false` 停用，删除只归用户）；改动一律 `approval: 'ask'`，改地址 / 密钥先 `guard(SCOPE_EXEC)`、其余 `SCOPE_CONTROL`；换地址没给新密钥时清掉旧密钥（不把已存密钥发往新地址）；返回值只有 `apiKeySet`。密钥参数建议用 SecretPlugin 的 `[[secret_id]]`。
+- **用量 / 模型标签注入点**：后端 `hooks.usage({ sessionId, usage })` 返回 `{ title, icon, stats, data }`，`yaya.session-usage` 收进 `sections`，用量统计窗口按 `stats` 显示数字、再用渲染端 `definePluginUi({ usageView })` 渲染 `data`；`hooks.modelHint({ providerId, model })` 返回 `{ badges, title }`，经 `yaya.model-hints` 显示在模型选择里。数据变化分别广播 `cockpit:yaya-usage-changed` / `cockpit:yaya-model-hints-changed`。都只影响界面，不进模型上下文。参考实现 `plugins/models/`（模型元数据：价格 / 上下文长度存 `yaya/model-meta.json`，key `<服务商 id|*>/<模型>`；AI 只有 `models_list` / `models_set`（ask + `guard(SCOPE_CONTROL)`），删除只有用户界面的 `yaya.model-meta-delete`（`agent: 'deny'`））。
 
 ### AI 与远程（Remote / MCP / UI inspector）
 

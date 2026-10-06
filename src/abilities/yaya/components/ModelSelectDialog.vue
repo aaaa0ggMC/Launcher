@@ -77,6 +77,39 @@ watch(
   }
 )
 
+// 插件给模型加的小标签（插件 SDK hooks.modelHint，如价格 / 上下文长度）
+const hints = ref<Record<string, { badges?: string[]; title?: string }>>({})
+async function loadHints(): Promise<void> {
+  const pairs = enabledProviders.value.flatMap((p) =>
+    modelsOf(p).map((model) => ({ providerId: p.id, model }))
+  )
+  if (!pairs.length) return
+  try {
+    const r = (await window.cockpit.command('yaya.model-hints', {
+      pairs: JSON.stringify(pairs)
+    })) as { hints?: typeof hints.value }
+    hints.value = r.hints ?? {}
+  } catch {
+    /* 没有标签也能选模型 */
+  }
+}
+function hintOf(provider: ProviderConfig, model: string): { badges?: string[]; title?: string } {
+  return hints.value[`${provider.id}/${model}`] ?? {}
+}
+watch(
+  () => [isOpen.value, fetchedModels.value] as const,
+  ([open]) => {
+    if (open) void loadHints()
+  }
+)
+let offHints: (() => void) | undefined
+onMounted(() => {
+  offHints = window.cockpit.on('cockpit:yaya-model-hints-changed', () => {
+    if (isOpen.value) void loadHints()
+  })
+})
+onBeforeUnmount(() => offHints?.())
+
 // 轻量操作提示条（拉取成功 / 失败）
 const toast = ref<{ text: string; ok: boolean } | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -350,6 +383,13 @@ watch(isOpen, (v) => {
               <v-list-item-title class="text-body-2 font-weight-medium text-truncate">
                 {{ model }}
               </v-list-item-title>
+              <v-list-item-subtitle
+                v-if="hintOf(provider, model).badges?.length"
+                class="model-hint"
+                :title="hintOf(provider, model).title"
+              >
+                {{ hintOf(provider, model).badges!.join(' · ') }}
+              </v-list-item-subtitle>
 
               <template #append>
                 <v-chip
@@ -522,5 +562,8 @@ watch(isOpen, (v) => {
   .model-row {
     min-height: 48px;
   }
+}
+.model-hint {
+  font-variant-numeric: tabular-nums;
 }
 </style>

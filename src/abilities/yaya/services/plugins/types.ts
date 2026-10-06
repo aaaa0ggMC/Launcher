@@ -14,6 +14,7 @@
  * 不要在 instructions 里放时间、随机数；动态内容走工具结果。
  */
 import type { MessageAttachment, YayaConfig } from '../../types'
+import type { SessionUsage, UsageSection } from '../usage'
 
 export type PluginKind = 'builtin' | 'mcp' | 'skill'
 
@@ -209,6 +210,29 @@ export interface PluginHooks {
   }) => Record<string, unknown>
   /** 工具结果（给模型的文本 / 界面显示 / 错误）入库前改写 */
   toolResult?: <T>(ctx: { sessionId: string; tool: string; value: T }) => T
+  /**
+   * 用量统计（`yaya.session-usage`）里加一块：如按模型价格算出的费用。
+   * 只影响界面，不进模型上下文；返回 null = 这次不显示。数据变了可以广播
+   * `cockpit:yaya-usage-changed` 让打开着的统计窗口重新拉取。
+   */
+  usage?: (ctx: {
+    sessionId: string
+    usage: SessionUsage
+  }) => PluginUsageSection | null | Promise<PluginUsageSection | null>
+  /**
+   * 模型选择里某个模型旁边的小标签（如价格、上下文长度）。多个插件的标签会拼在一起。
+   * 数据变了广播 `cockpit:yaya-model-hints-changed`。
+   */
+  modelHint?: (ctx: { providerId: string; model: string }) => ModelHint | null
+}
+
+export type PluginUsageSection = Omit<UsageSection, 'pluginId'>
+
+export interface ModelHint {
+  /** 短标签，如「$1.25 / $10」「400K」 */
+  badges?: string[]
+  /** 悬停说明 */
+  title?: string
 }
 
 export interface MentionContext {

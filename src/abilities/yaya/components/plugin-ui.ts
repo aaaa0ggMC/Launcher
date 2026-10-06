@@ -6,6 +6,7 @@
  * - `fences`：接管回答里某种语言的代码块（如 ```mermaid），渲染成组件；
  * - `settingsView`：替换插件详情页里按 `configSchema` 自动生成的配置表单（设置 → 插件 → 详情）。
  * - `inlineTokens`：把消息正文里的某种记号（如 `[[secret_xxxx]]`）渲染成标签 / 替换文字。
+ * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
  *
  * **只做显示层变换**：数据库与发给模型的历史永远是模型 / 工具的原文，所以这里怎么渲染都不影响提示词缓存。
  * 配置值仍走命令 `yaya.plugin-config-set` 保存（schema 校验、secret 加密都在主进程）。
@@ -15,6 +16,7 @@
 import type { Component } from 'vue'
 import type { ToolCallItem } from '../types'
 import type { PluginInfo } from '../services/plugins/types'
+import type { SessionUsage, UsageSection } from '../services/usage'
 
 export interface ToolViewProps {
   call: ToolCallItem
@@ -34,6 +36,14 @@ export interface FenceViewProps {
 export interface PluginSettingsViewProps {
   pluginId: string
   info: PluginInfo
+}
+
+/** 用量统计里插件分区的视图 */
+export interface UsageViewProps {
+  pluginId: string
+  sessionId: string
+  section: UsageSection
+  usage: SessionUsage
 }
 
 type Lazy = () => Promise<{ default: Component } | Component>
@@ -81,6 +91,8 @@ export interface PluginUi {
    * 在插件关掉后也要能看懂。只改显示，数据库与模型历史不变。
    */
   inlineTokens?: InlineTokenRule[]
+  /** 用量统计里本插件分区的视图，props 见 UsageViewProps（后端 `hooks.usage` 给了分区才显示） */
+  usageView?: Lazy
 }
 
 export function definePluginUi(ui: PluginUi): PluginUi {

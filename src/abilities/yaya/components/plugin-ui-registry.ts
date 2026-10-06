@@ -114,6 +114,14 @@ export function settingsPanelFor(pluginId: string, kind?: PluginKind): Component
   return lazy(`panel:${ui!.pluginId}`, loader)
 }
 
+/** 用量统计里插件分区的自定义视图（没有返回 null，只显示分区的 stats） */
+export function usageViewFor(pluginId: string): Component | null {
+  const ui = uiFor(pluginId)
+  const loader = ui?.usageView
+  if (!loader) return null
+  return lazy(`usage:${ui!.pluginId}`, loader)
+}
+
 export interface ResolvedToolView {
   component: Component
   pluginId: string

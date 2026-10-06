@@ -9,7 +9,9 @@ import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, YayaConfig } from '../../types'
 import { loadYayaConfig, setPluginSecretKeysResolver } from '../config'
 import { saveAsset } from '../assets'
+import type { SessionUsage, UsageSection } from '../usage'
 import type {
+  ModelHint,
   NormalizedToolResult,
   PluginConfigField,
   PluginConfigInfo,
@@ -488,6 +490,56 @@ export function applyToolResultHooks<T>(
     } catch (e) {
       log.warn('plugin toolResult hook failed', { plugin: p.id, error: String(e) })
     }
+  }
+  return out
+}
+
+/** 用量统计里插件补充的分区（按插件注册顺序） */
+export async function collectUsageSections(
+  sessionId: string,
+  usage: SessionUsage,
+  config: YayaConfig
+): Promise<UsageSection[]> {
+  const out: UsageSection[] = []
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.usage
+    if (!fn) continue
+    try {
+      const section = await fn({ sessionId, usage })
+      if (section) out.push({ ...section, pluginId: p.id })
+    } catch (e) {
+      log.warn('plugin usage hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
+/** 模型选择里的标签：key = `<服务商 id>/<模型>` */
+export function collectModelHints(
+  pairs: { providerId: string; model: string }[],
+  config: YayaConfig
+): Record<string, ModelHint> {
+  const out: Record<string, ModelHint> = {}
+  const plugins = hookPlugins(config).filter((p) => p.hooks?.modelHint)
+  if (!plugins.length) return out
+  for (const { providerId, model } of pairs) {
+    const badges: string[] = []
+    const titles: string[] = []
+    for (const p of plugins) {
+      try {
+        const hint = p.hooks!.modelHint!({ providerId, model })
+        if (!hint) continue
+        badges.push(...(hint.badges ?? []))
+        if (hint.title) titles.push(hint.title)
+      } catch (e) {
+        log.warn('plugin modelHint hook failed', { plugin: p.id, error: String(e) })
+      }
+    }
+    if (badges.length || titles.length)
+      out[`${providerId}/${model}`] = {
+        badges,
+        ...(titles.length ? { title: titles.join('\n') } : {})
+      }
   }
   return out
 }

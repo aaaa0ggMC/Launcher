@@ -2,6 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { SessionUsage, ToolRisk, UsageToolCall } from '../services/usage'
+import { usageViewFor } from './plugin-ui-registry'
 
 /**
  * 会话用量统计（右上角菜单 → 用量统计）。数据来自 `yaya.session-usage`。
@@ -49,6 +50,19 @@ async function load(): Promise<void> {
 watch([open, branchOnly, () => props.sessionId], ([o]) => {
   if (o) void load()
 })
+// 插件（如模型元数据）改了影响统计的数据：打开着就重新拉
+let offUsage: (() => void) | undefined
+onMounted(() => {
+  offUsage = window.cockpit.on('cockpit:yaya-usage-changed', () => {
+    if (open.value) void load()
+  })
+})
+onBeforeUnmount(() => offUsage?.())
+
+/** 插件分区（后端 hooks.usage）+ 各自的视图组件 */
+const sections = computed(() =>
+  (data.value?.sections ?? []).map((s) => ({ section: s, view: usageViewFor(s.pluginId) }))
+)
 
 // ---- 窄屏全屏 ----
 const narrow = ref(false)
@@ -293,7 +307,7 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
           </div>
 
           <div v-if="data && data.models.length > 1" class="model-list">
-            <div v-for="m in data.models" :key="m.model" class="model-row">
+            <div v-for="m in data.models" :key="`${m.provider}/${m.model}`" class="model-row">
               <span class="model-name text-truncate">{{
                 m.model || t('yaya.usage.unknown_model', '未知模型')
               }}</span>
@@ -304,6 +318,29 @@ function statusIcon(s: UsageToolCall['status']): { icon: string; color: string }
               <span class="model-tokens">{{ fmt(m.total) }}</span>
             </div>
           </div>
+
+          <!-- 插件分区（如费用） -->
+          <template v-for="s in sections" :key="s.section.pluginId">
+            <h3 class="usage-section">
+              <v-icon v-if="s.section.icon" :icon="s.section.icon" size="18" />
+              {{ s.section.title }}
+            </h3>
+            <div v-if="s.section.stats?.length" class="stat-grid mb-3">
+              <div v-for="(st, i) in s.section.stats" :key="i" class="stat">
+                <div class="stat-label">{{ st.label }}</div>
+                <div class="stat-value">{{ st.value }}</div>
+                <div v-if="st.sub" class="stat-sub">{{ st.sub }}</div>
+              </div>
+            </div>
+            <component
+              :is="s.view"
+              v-if="s.view && data"
+              :plugin-id="s.section.pluginId"
+              :session-id="sessionId"
+              :section="s.section"
+              :usage="data"
+            />
+          </template>
 
           <!-- 工具 -->
           <h3 class="usage-section">
