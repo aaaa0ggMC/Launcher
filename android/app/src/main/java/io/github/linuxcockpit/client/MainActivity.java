@@ -75,6 +75,8 @@ public class MainActivity extends Activity {
     private static final int REQ_DIR = 4;
 
     private FrameLayout root;
+    /** 打开着的网页登录页（webLogin RPC）；同一时间最多一个 */
+    private WebLogin webLogin;
     private WebView web;
     /** 系统媒体控制（通知栏 / 锁屏）；页面经 media.update 驱动 */
     private MediaBridge media;
@@ -389,6 +391,10 @@ public class MainActivity extends Activity {
     void onBack() {
         if (imeVisible()) {
             hideIme();
+            return;
+        }
+        if (webLogin != null) {
+            webLogin.back();
             return;
         }
         web.evaluateJavascript(JS_DISMISS_OVERLAY, handled -> {
@@ -733,6 +739,24 @@ public class MainActivity extends Activity {
                     });
                     return;
                 }
+                case "webLogin":
+                    // 网页登录页（0.6.0）：{url, doneHosts, cookieUrls, title} → {cookies:[{url,cookie}], cancelled}
+                    runOnUiThread(() -> {
+                        if (webLogin != null) {
+                            reply(id, false, errorJson("busy"));
+                            return;
+                        }
+                        String u = args.optString("url", "");
+                        if (!u.startsWith("https://")) {
+                            reply(id, false, errorJson("url must be https"));
+                            return;
+                        }
+                        webLogin = new WebLogin(this, root, args, result -> {
+                            webLogin = null;
+                            reply(id, true, result);
+                        });
+                    });
+                    return;
                 case "settings.set": {
                     if (args.has("keepAlive")) {
                         boolean on = args.getBoolean("keepAlive");
