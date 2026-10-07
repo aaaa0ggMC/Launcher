@@ -35,6 +35,26 @@ interface Pos {
 
 const DOCKS: OutsiderDock[] = ['left', 'right', 'top', 'bottom']
 
+/**
+ * 网页版的页面缩放是根元素 CSS zoom：getBoundingClientRect / clientX / innerWidth 是缩放后的像素，
+ * 而 left / top 写的是缩放前的 CSS px。下面的几何计算统一换算成 CSS px。
+ */
+function zoom(): number {
+  return parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+}
+function rectOf(node: Element | null | undefined): DOMRect | undefined {
+  if (!node) return undefined
+  const r = node.getBoundingClientRect()
+  const z = zoom()
+  return z === 1 ? r : new DOMRect(r.left / z, r.top / z, r.width / z, r.height / z)
+}
+function viewW(): number {
+  return window.innerWidth / zoom()
+}
+function viewH(): number {
+  return window.innerHeight / zoom()
+}
+
 const attrs = computed(() => props.entry.attrs)
 const canDrag = computed(
   () => attrs.value.draggable !== false && !attrs.value.pinned && !attrs.value.modal
@@ -105,10 +125,10 @@ const style = computed(() => {
 
 /** 把偏移夹到可见区域内（窗口变小 / 悬浮窗变大时）；贴边的只夹沿边方向 */
 function clamp(): void {
-  const box = el.value?.getBoundingClientRect()
+  const box = rectOf(el.value)
   if (!box || attrs.value.modal) return
-  const maxX = Math.max(MARGIN, window.innerWidth - box.width - MARGIN)
-  const maxY = Math.max(MARGIN, window.innerHeight - box.height - MARGIN)
+  const maxX = Math.max(MARGIN, viewW() - box.width - MARGIN)
+  const maxY = Math.max(MARGIN, viewH() - box.height - MARGIN)
   const p = pos.value
   const x = Math.min(Math.max(p.x, MARGIN), maxX)
   const y = Math.min(Math.max(p.y, MARGIN), maxY)
@@ -121,7 +141,7 @@ async function glideFrom(from: DOMRect | undefined): Promise<void> {
   const node = el.value
   if (!from || !node || typeof node.animate !== 'function') return
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
-  const to = node.getBoundingClientRect()
+  const to = rectOf(node)!
   const dx = from.left - to.left
   const dy = from.top - to.top
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
@@ -138,7 +158,7 @@ function dockedNeighbours(side: OutsiderDock): { start: number; size: number }[]
   const out: { start: number; size: number }[] = []
   for (const n of document.querySelectorAll<HTMLElement>(`[data-outsider-dock="${side}"]`)) {
     if (n === el.value) continue
-    const r = n.getBoundingClientRect()
+    const r = rectOf(n)!
     out.push(vertical ? { start: r.top, size: r.height } : { start: r.left, size: r.width })
   }
   return out
@@ -146,8 +166,8 @@ function dockedNeighbours(side: OutsiderDock): { start: number; size: number }[]
 
 /** 贴到 `side`：`at` 是松手时的 left / top */
 function dockTo(side: OutsiderDock, at: { left: number; top: number }, box: DOMRect): Pos {
-  const W = window.innerWidth
-  const H = window.innerHeight
+  const W = viewW()
+  const H = viewH()
   if (side === 'left' || side === 'right') {
     const top = dockSlot(at.top, box.height, dockedNeighbours(side), MARGIN, H - MARGIN)
     const upper = top + box.height / 2 < H / 2
@@ -172,7 +192,7 @@ function dockTo(side: OutsiderDock, at: { left: number; top: number }, box: DOMR
 function undock(): void {
   const p = pos.value
   if (!p.dock) return
-  const from = el.value?.getBoundingClientRect()
+  const from = rectOf(el.value)
   const next: Pos = { anchor: p.anchor, x: p.x, y: p.y }
   if (p.dock === 'left' || p.dock === 'right') next.x = MARGIN
   else next.y = MARGIN
@@ -191,21 +211,27 @@ const NO_DRAG = 'input, textarea, select, [contenteditable="true"], [data-outsid
 function onPointerDown(e: PointerEvent): void {
   if (!canDrag.value || e.button !== 0) return
   if ((e.target as Element).closest(NO_DRAG)) return
-  const box = el.value!.getBoundingClientRect()
-  press = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: box.left, oy: box.top }
+  const box = rectOf(el.value)!
+  press = {
+    id: e.pointerId,
+    sx: e.clientX / zoom(),
+    sy: e.clientY / zoom(),
+    ox: box.left,
+    oy: box.top
+  }
 }
 
 function onPointerMove(e: PointerEvent): void {
   if (!press || e.pointerId !== press.id) return
-  const dx = e.clientX - press.sx
-  const dy = e.clientY - press.sy
+  const dx = e.clientX / zoom() - press.sx
+  const dy = e.clientY / zoom() - press.sy
   if (!dragAt.value) {
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return
     el.value!.setPointerCapture(e.pointerId)
   }
-  const box = el.value!.getBoundingClientRect()
-  const W = window.innerWidth
-  const H = window.innerHeight
+  const box = rectOf(el.value)!
+  const W = viewW()
+  const H = viewH()
   // 能贴边的可以拖出屏幕（至少留一条在里面），否则夹在可见区域内
   const minL = canDock.value ? DOCK_PEEK - box.width : MARGIN
   const maxL = canDock.value ? W - DOCK_PEEK : W - box.width - MARGIN
@@ -219,7 +245,7 @@ function onPointerMove(e: PointerEvent): void {
   willDock.value = canDock.value
     ? dockSideFor(
         { ...at, width: box.width, height: box.height },
-        { x: e.clientX, y: e.clientY },
+        { x: e.clientX / zoom(), y: e.clientY / zoom() },
         { width: W, height: H }
       )
     : null
@@ -233,13 +259,13 @@ function onPointerUp(e: PointerEvent): void {
   willDock.value = null
   if (!at) return
   swallowNextClick()
-  const box = el.value!.getBoundingClientRect()
+  const box = rectOf(el.value)!
   let next: Pos
   if (side) next = dockTo(side, at, box)
   else {
     // 落点换算成离最近的角的偏移：窗口缩放后仍贴着同一个角；拖出去一截的收回来
-    const W = window.innerWidth
-    const H = window.innerHeight
+    const W = viewW()
+    const H = viewH()
     const l = Math.min(Math.max(at.left, MARGIN), Math.max(MARGIN, W - box.width - MARGIN))
     const t = Math.min(Math.max(at.top, MARGIN), Math.max(MARGIN, H - box.height - MARGIN))
     const left = l + box.width / 2 < W / 2
