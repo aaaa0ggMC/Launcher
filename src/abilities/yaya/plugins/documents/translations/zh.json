@@ -1,0 +1,4 @@
+{
+  "yaya.plugin.documents.label": "长文档检索",
+  "yaya.plugin.documents.desc": "大附件不进上下文，模型按需检索 / 分段读取"
+}

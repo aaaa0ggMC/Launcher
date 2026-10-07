@@ -1,0 +1,8 @@
+{
+  "yaya.plugin.android.label": "Android control",
+  "yaya.plugin.android.desc": "Operate the phone when the host runs in Termux on it (Termux:API / Shizuku)",
+  "yaya.plugin.android.group_termux": "Termux:API",
+  "yaya.plugin.android.group_termux_desc": "Battery, notifications, vibration, flashlight, volume, brightness, speech, clipboard, location, camera",
+  "yaya.plugin.android.group_shizuku": "Shizuku",
+  "yaya.plugin.android.group_shizuku_desc": "adb-level access: screenshots, tap / swipe / type, launch apps, shell (dangerous, off by default)"
+}

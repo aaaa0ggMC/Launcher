@@ -22,6 +22,11 @@ import type { ProviderMessage } from '../providers/types'
 export interface AssistantStepOptions {
   /** 'enabled' = 本次运行可用的全部工具；'none' = 不给工具；或 wire name 白名单 */
   tools?: 'enabled' | 'none' | string[]
+  /**
+   * 替换助手的系统提示词（角色扮演这类自带人设的工作流用）；插件 instructions 与 extraSystem 照常追加。
+   * 助手原来的系统提示词可经 `ctx.assistantPrompt()` 取到，自己决定要不要作为补充说明放进去。
+   */
+  system?: string
   /** 追加到系统提示词后面的说明（如规划结果） */
   extraSystem?: string
   /** 过程记录里这一步的显示名（缺省「生成回答」/「思考与调用工具」） */
@@ -72,6 +77,8 @@ export interface WorkflowContext {
   readonly aborted: boolean
   /** 当前分支的对话历史（已过滤空节点，不含系统提示词） */
   history(): ProviderMessage[]
+  /** 助手 / 会话的系统提示词（变量已替换）；还是出厂默认提示词时为空串 */
+  assistantPrompt(): string
   /** 走一步主 Agent：流式写入一个 assistant 节点 */
   assistantStep(opts?: AssistantStepOptions): Promise<AssistantStepResult>
   /** 执行上一步产生的工具调用（含审批），结果节点接到对话树上 */

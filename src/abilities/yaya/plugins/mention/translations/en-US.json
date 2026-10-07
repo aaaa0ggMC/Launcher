@@ -1,0 +1,15 @@
+{
+  "yaya.mention.tools_count": "{n} tools",
+  "yaya.mention.kind_plugin": "Plugin",
+  "yaya.mention.kind_tool": "Tool",
+  "yaya.mention.title": "Mention a plugin",
+  "yaya.mention.empty": "No matching plugins",
+  "yaya.mention.off": "Disabled · mentioning enables it for this chat",
+  "yaya.mention.remove": "Remove mention",
+  "yaya.mention.button": "Mention a plugin (enables all its tools in this chat)",
+  "yaya.mention.search": "Search plugins, skills or MCP servers",
+  "yaya.plugin.mention.label": "@ Mentions",
+  "yaya.plugin.mention.desc": "Mention plugins, skills or MCP servers to enable their tools in this conversation",
+  "yaya.plugin.mention.docs": "# @ Mentions\n\nType @ or click the toolbar @ button to search plugins, skills and MCP servers by name, description or tool name. Selecting an item enables its tools for this conversation.\n\nDisabling the mention plugin removes its composer extension. Existing conversation mentions can be revoked from the conversation menu. Mentioning never bypasses tool approval or privacy consent.",
+  "yaya.mention.action": "Mention"
+}

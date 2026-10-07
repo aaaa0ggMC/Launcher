@@ -10,6 +10,7 @@ import {
   watch
 } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
+import { fields as searchFields, filterByQuery } from '../../../main/ui/composables/search'
 import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
@@ -237,6 +238,33 @@ function toggleExpanded(): void {
 const currentWorkflow = computed(
   () => props.workflows.find((w) => w.id === workflowId.value) ?? props.workflows[0]
 )
+
+// 工作流菜单：插件越装越多，带搜索 + 限高滚动
+const wfOpen = ref(false)
+const wfQuery = ref('')
+// 触屏上自动聚焦会顶出键盘，只在鼠标设备上自动聚焦
+const finePointer = typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches
+const filteredWorkflows = computed(() =>
+  wfQuery.value?.trim()
+    ? filterByQuery(props.workflows, wfQuery.value, (w) =>
+        searchFields(w.label, w.pluginLabel ?? '', w.description, {
+          text: w.id.toLowerCase(),
+          weight: 1
+        })
+      )
+    : props.workflows
+)
+watch(wfOpen, (open) => {
+  if (!open) wfQuery.value = ''
+})
+function pickWorkflow(id: string): void {
+  workflowId.value = id
+  wfOpen.value = false
+}
+function pickFirstWorkflow(): void {
+  const first = filteredWorkflows.value[0]
+  if (first) pickWorkflow(first.id)
+}
 
 function send(): void {
   if (!canSend.value) return
@@ -645,7 +673,12 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
           </v-card>
         </v-bottom-sheet>
         <div ref="toolbarTarget" class="plugin-input-tools" />
-        <v-menu v-if="workflows.length > 1" location="top start">
+        <v-menu
+          v-if="workflows.length > 1"
+          v-model="wfOpen"
+          location="top start"
+          :close-on-content-click="false"
+        >
           <template #activator="{ props: menuProps }">
             <button
               v-bind="menuProps"
@@ -659,24 +692,43 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               <v-icon icon="mdi-chevron-up" size="16" />
             </button>
           </template>
-          <v-list density="comfortable" max-width="340" class="wf-menu yaya-pop">
-            <v-list-item
-              v-for="w in workflows"
-              :key="w.id"
-              :active="w.id === workflowId"
-              color="primary"
-              @click="workflowId = w.id"
-            >
-              <template v-if="w.icon" #prepend>
-                <v-icon :icon="w.icon" />
-              </template>
-              <v-list-item-title class="font-weight-medium d-flex align-center ga-2">
-                <span class="text-truncate">{{ w.label }}</span>
-                <span v-if="w.pluginLabel" class="wf-plugin">{{ w.pluginLabel }}</span>
-              </v-list-item-title>
-              <v-list-item-subtitle class="wf-desc">{{ w.description }}</v-list-item-subtitle>
-            </v-list-item>
-          </v-list>
+          <v-card class="wf-card yaya-pop" max-width="360">
+            <div class="wf-search">
+              <v-text-field
+                v-model="wfQuery"
+                density="compact"
+                variant="outlined"
+                hide-details
+                clearable
+                :autofocus="finePointer"
+                prepend-inner-icon="mdi-magnify"
+                :placeholder="t('yaya.input.workflow_search', '搜索工作流')"
+                :aria-label="t('yaya.input.workflow_search', '搜索工作流')"
+                @keydown.enter.prevent="pickFirstWorkflow"
+              />
+            </div>
+            <v-list density="comfortable" class="wf-menu wf-scroll yaya-pop">
+              <v-list-item
+                v-for="w in filteredWorkflows"
+                :key="w.id"
+                :active="w.id === workflowId"
+                color="primary"
+                @click="pickWorkflow(w.id)"
+              >
+                <template v-if="w.icon" #prepend>
+                  <v-icon :icon="w.icon" />
+                </template>
+                <v-list-item-title class="font-weight-medium d-flex align-center ga-2">
+                  <span class="text-truncate">{{ w.label }}</span>
+                  <span v-if="w.pluginLabel" class="wf-plugin">{{ w.pluginLabel }}</span>
+                </v-list-item-title>
+                <v-list-item-subtitle class="wf-desc">{{ w.description }}</v-list-item-subtitle>
+              </v-list-item>
+              <div v-if="!filteredWorkflows.length" class="wf-empty">
+                {{ t('yaya.input.workflow_none', '没有匹配的工作流') }}
+              </div>
+            </v-list>
+          </v-card>
         </v-menu>
         <v-menu location="top start">
           <template #activator="{ props: menuProps }">
@@ -881,6 +933,27 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
 }
 .wf-menu :deep(.v-list-item) {
   min-height: 44px;
+}
+.wf-card {
+  display: flex;
+  flex-direction: column;
+  max-height: min(460px, calc(var(--app-vh, 100dvh) * 0.6));
+}
+.wf-search {
+  flex-shrink: 0;
+  padding: 12px 12px 4px;
+}
+.wf-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  background: transparent !important;
+}
+.wf-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.7;
 }
 .wf-desc {
   white-space: normal !important;

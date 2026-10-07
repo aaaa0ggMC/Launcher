@@ -47,7 +47,7 @@ const text = computed(() => {
     role="status"
     aria-live="polite"
   >
-    <v-progress-circircular
+    <v-progress-circular
       v-if="state === 'saving'"
       indeterminate
       size="12"

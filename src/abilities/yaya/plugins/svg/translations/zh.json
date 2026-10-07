@@ -1,0 +1,7 @@
+{
+  "yaya.plugin.svg.label": "SVG 预览",
+  "yaya.plugin.svg.desc": "把 ```svg 代码块净化后显示成图片（不执行其中的脚本），只影响显示",
+  "yaya.plugin.svg.mention": "可以直接输出 ```svg 代码块，界面会显示成图",
+  "yaya.diagram.svg_invalid": "不是合法的 SVG，无法渲染",
+  "yaya.diagram.svg_too_large": "SVG 超过 200KB，仅显示源码"
+}

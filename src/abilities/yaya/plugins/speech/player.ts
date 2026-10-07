@@ -69,6 +69,13 @@ function errText(e: unknown): string {
   return e instanceof Error && e.message ? e.message : String(e)
 }
 
+/** 角色扮演插件的主角记号 `[[main]]`：念成配置的主角显示名（没配就念「主角」） */
+function withMainName(md: string): string {
+  if (!/\[\[main\]\]/i.test(md)) return md
+  const name = String(pluginConfigValues('roleplay').main_name ?? '').trim()
+  return md.replace(/\[\[main\]\]/gi, name || (/[㐀-鿿]/.test(md) ? '主角' : 'the protagonist'))
+}
+
 export function isSpeaking(key: string): boolean {
   return tts.key === key && tts.status !== 'idle' && tts.status !== 'error'
 }
@@ -126,7 +133,7 @@ export async function speak(key: string, markdown: string): Promise<void> {
   }
   stop()
   const my = ++gen
-  const text = speechText(markdown)
+  const text = speechText(withMainName(markdown))
   const provider = engineOf(cfg().tts_engine)
   const engine = provider === 'system' ? 'system' : 'api'
   const rate = Number(cfg().tts_speed) || 1

@@ -1,0 +1,15 @@
+{
+  "yaya.mention.tools_count": "{n} 个工具",
+  "yaya.mention.kind_plugin": "插件",
+  "yaya.mention.kind_tool": "工具",
+  "yaya.mention.title": "点名插件",
+  "yaya.mention.empty": "没有匹配的插件",
+  "yaya.mention.off": "未启用 · 点名后本对话启用",
+  "yaya.mention.remove": "取消点名",
+  "yaya.mention.button": "点名插件（本对话启用它的全部工具）",
+  "yaya.mention.search": "搜索插件 / 工具",
+  "yaya.plugin.mention.label": "@ 点名",
+  "yaya.plugin.mention.desc": "输入 @ 点名插件、Skill 或 MCP 服务器，在本对话启用它们的工具",
+  "yaya.plugin.mention.docs": "# @ 点名\n\n输入 @ 或点击工具栏 @，按名字、描述或工具名过滤插件、Skill 与 MCP 服务器。选择后在当前会话启用它们的工具。\n\n停用 mention 插件会移除输入框扩展；已发出的会话点名可在会话菜单撤销。点名不会绕过工具审批与隐私授权。",
+  "yaya.mention.action": "点名"
+}

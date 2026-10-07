@@ -5,7 +5,8 @@ import { APP_ROOT, CONFIG_JSON } from './paths'
 const LANGUAGES = ['zh', 'en-US']
 
 /**
- * Translation sources: the UI framework shell + every ability + every
+ * Translation sources: the UI framework shell + every ability (and every
+ * plugin inside an ability, `abilities/<id>/plugins/<plugin>/`) + every
  * background may ship their own translations/<lang>.json. They're merged into
  * per-language tables here so main-process strings (CLI output, command
  * descriptions, dialogs) use the exact same keys as the renderer.
@@ -21,7 +22,19 @@ function translationDirs(): string[] {
       continue
     }
     for (const name of names) {
-      if (!name.startsWith('.')) dirs.push(join(base, name, 'translations'))
+      if (name.startsWith('.')) continue
+      dirs.push(join(base, name, 'translations'))
+      // 能力内部的插件（如 YAYA 的 plugins/<id>/）也可以自带 translations/<lang>.json
+      if (scope !== 'abilities') continue
+      let plugins: string[] = []
+      try {
+        plugins = readdirSync(join(base, name, 'plugins'))
+      } catch {
+        continue
+      }
+      for (const plugin of plugins) {
+        if (!plugin.startsWith('.')) dirs.push(join(base, name, 'plugins', plugin, 'translations'))
+      }
     }
   }
   return dirs

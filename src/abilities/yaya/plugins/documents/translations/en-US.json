@@ -1,0 +1,4 @@
+{
+  "yaya.plugin.documents.label": "Long documents",
+  "yaya.plugin.documents.desc": "Large attachments stay out of the context; the model searches and reads them on demand"
+}
