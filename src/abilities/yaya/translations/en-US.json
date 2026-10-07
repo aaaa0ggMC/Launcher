@@ -729,5 +729,11 @@
   "yaya.search_sources.queries": "Searched",
   "yaya.settings.model_search_on": "Has built-in web search (click to turn off)",
   "yaya.settings.model_search_off": "No built-in web search (click to mark as supported)",
-  "yaya.settings.model_search_hint": "Models with a globe icon have built-in web search (detected from type and name); click a model to change it. Used only when a chat picks \"Model's built-in search\""
+  "yaya.settings.model_search_hint": "Models with a globe icon have built-in web search (detected from type and name); click a model to change it. Used only when a chat picks \"Model's built-in search\"",
+  "yaya.settings.plugins.skills_browse_dir": "Browse folder",
+  "yaya.settings.plugins.skills_open_failed": "Can't open folder: {msg}",
+  "yaya.settings.plugins.skills_dir_title": "Skills folder",
+  "yaya.settings.plugins.skills_dir_hint": "This folder lives on the machine running Cockpit, so this device can't open it directly. Copy the path or browse it below.",
+  "yaya.settings.plugins.skills_dir_empty": "Empty folder",
+  "yaya.settings.plugins.skills_dir_close": "Close"
 }

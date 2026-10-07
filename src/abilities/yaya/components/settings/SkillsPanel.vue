@@ -5,6 +5,7 @@ import type { Ref } from 'vue'
 import type { PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import { pluginFallbackIcon, setPluginEnabled } from './plugin-state'
+import SkillsDirDialog from './SkillsDirDialog.vue'
 
 defineOptions({ name: 'cockpit-yaya-settings-skills' })
 
@@ -24,7 +25,9 @@ const emit = defineEmits<{
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { t, te } = useI18n(lang)
 
-const canOpenExternal = computed(() => window.cockpit.hasCap('external'))
+/** 系统文件管理器能打开宿主目录（Electron）；网页 / 安卓里目录在宿主机上，改用应用内浏览 */
+const canOpenFolder = computed(() => window.cockpit.hasCap('folder.open'))
+const dirDialog = ref(false)
 
 const skillsPath = ref('')
 const busy = ref<'import' | 'rescan' | null>(null)
@@ -56,17 +59,29 @@ onMounted(() => {
 async function openDir(): Promise<void> {
   if (!skillsPath.value) await loadDir()
   if (!skillsPath.value) return
-  // 路径里可能有空格 / 中文：转成合法的 file:// URL
-  await window.cockpit.openExternal('file://' + encodeURI(skillsPath.value))
-}
-
-async function copyDir(): Promise<void> {
-  if (!skillsPath.value) return
-  await window.cockpit.copyText(skillsPath.value)
-  notice.value = {
-    text: t('yaya.settings.plugins.skills_path_copied', '已复制目录路径'),
-    error: false
+  if (!canOpenFolder.value) {
+    dirDialog.value = true
+    return
   }
+  try {
+    const err = await window.cockpit.openPath(skillsPath.value)
+    if (!err) return
+    notice.value = {
+      text: te('yaya.settings.plugins.skills_open_failed', { msg: err }, '无法打开目录：{msg}'),
+      error: true
+    }
+  } catch (err) {
+    notice.value = {
+      text: te(
+        'yaya.settings.plugins.skills_open_failed',
+        { msg: String(err) },
+        '无法打开目录：{msg}'
+      ),
+      error: true
+    }
+  }
+  // 打不开（没装文件管理器等）：退回应用内浏览，至少能看到路径
+  dirDialog.value = true
 }
 
 async function importSkill(): Promise<void> {
@@ -211,27 +226,13 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
 
     <!-- 目录操作 -->
     <div class="d-flex flex-wrap align-center ga-2">
-      <v-btn
-        v-if="canOpenExternal"
-        variant="tonal"
-        prepend-icon="mdi-folder-open-outline"
-        @click="openDir"
-      >
-        {{ t('yaya.settings.plugins.skills_open_dir', '打开目录') }}
+      <v-btn variant="tonal" prepend-icon="mdi-folder-open-outline" @click="openDir">
+        {{
+          canOpenFolder
+            ? t('yaya.settings.plugins.skills_open_dir', '打开目录')
+            : t('yaya.settings.plugins.skills_browse_dir', '浏览目录')
+        }}
       </v-btn>
-      <template v-else>
-        <span v-if="skillsPath" class="text-caption text-medium-emphasis skills-path">
-          {{ te('yaya.settings.plugins.skills_dir_path', { path: skillsPath }, '目录：{path}') }}
-        </span>
-        <v-btn
-          v-if="skillsPath"
-          icon="mdi-content-copy"
-          size="small"
-          :title="t('yaya.settings.plugins.skills_copy_path', '复制目录路径')"
-          :aria-label="t('yaya.settings.plugins.skills_copy_path', '复制目录路径')"
-          @click="copyDir"
-        />
-      </template>
       <v-btn
         variant="tonal"
         prepend-icon="mdi-import"
@@ -360,6 +361,8 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
         </div>
       </div>
     </div>
+
+    <SkillsDirDialog v-model="dirDialog" :root="skillsPath" />
   </div>
 </template>
 
@@ -410,12 +413,6 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-.skills-path {
-  font-family: ui-monospace, monospace;
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 

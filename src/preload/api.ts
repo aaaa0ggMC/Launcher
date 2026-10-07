@@ -263,6 +263,9 @@ export function createCockpit(t: CockpitTransport) {
     screenshotSave: (dataUrl: string): Promise<{ file: string; copied: boolean } | null> =>
       t.invoke('screenshot:save', dataUrl),
     openExternal: (url: string): Promise<void> => t.invoke('shell:open-external', url),
+    /** 用系统文件管理器打开宿主目录（仅 Electron，`hasCap('folder.open')`）；返回错误文本，成功为 '' */
+    openPath: async (path: string): Promise<string> =>
+      ((await t.invoke('shell:open-path', path)) as string | null) ?? 'unsupported',
 
     // privacy consent window ONLY — the main process rejects these from any other
     // sender (privacy-consent.ts), so exposing them everywhere grants nothing.

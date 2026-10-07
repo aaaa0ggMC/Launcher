@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, clipboard, shell, app, nativeImage } from 'electron'
 import { homedir } from 'os'
-import { join } from 'path'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { isAbsolute, join } from 'path'
+import { readFile, writeFile, mkdir, stat } from 'fs/promises'
 import { cliExec } from './cli'
 import { runCommand, listCommands, commandLogsArgs, UnknownCommandError } from './commands/registry'
 import { withOrigin, type CallOrigin } from './privacy'
@@ -245,6 +245,19 @@ export function registerIpc(): void {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       void shell.openExternal(url)
     }
+  })
+
+  // 用系统文件管理器打开本机目录（Skill 目录等）。只接受用户自己的渲染进程、只开已存在的绝对目录；
+  // 返回错误文本，成功为 ''。网页 / 安卓没有这条通道（caps 里 folder.open = none）。
+  ipcMain.handle('shell:open-path', async (e, path: string): Promise<string> => {
+    if (originOfSender(e.sender.id)) return 'denied'
+    if (typeof path !== 'string' || !isAbsolute(path)) return 'invalid path'
+    try {
+      if (!(await stat(path)).isDirectory()) return 'not a directory'
+    } catch {
+      return 'not found'
+    }
+    return shell.openPath(path)
   })
 
   // 截图模式：裸截主窗口（不经隐私遮罩）。只接受用户自己的渲染进程——agent 视图一律拒绝，

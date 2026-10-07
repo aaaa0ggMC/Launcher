@@ -729,5 +729,11 @@
   "yaya.search_sources.queries": "搜索了",
   "yaya.settings.model_search_on": "有自带联网搜索（点击关闭）",
   "yaya.settings.model_search_off": "没有自带联网搜索（点击标记为有）",
-  "yaya.settings.model_search_hint": "带地球图标的模型有自带联网搜索（按类型和名字识别），点模型可手动改；对话里「联网搜索」选「模型内置」时才会用"
+  "yaya.settings.model_search_hint": "带地球图标的模型有自带联网搜索（按类型和名字识别），点模型可手动改；对话里「联网搜索」选「模型内置」时才会用",
+  "yaya.settings.plugins.skills_browse_dir": "浏览目录",
+  "yaya.settings.plugins.skills_open_failed": "无法打开目录：{msg}",
+  "yaya.settings.plugins.skills_dir_title": "Skill 目录",
+  "yaya.settings.plugins.skills_dir_hint": "目录在运行 Cockpit 的宿主机上，这台设备无法直接打开；可以复制路径，或在下面浏览。",
+  "yaya.settings.plugins.skills_dir_empty": "空目录",
+  "yaya.settings.plugins.skills_dir_close": "关闭"
 }
