@@ -8,6 +8,7 @@
  * - `inlineTokens`：把消息正文里的某种记号（如 `[[secret_xxxx]]`）渲染成标签 / 替换文字。
  * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
  * - `messageActions`：每条回答下面操作栏里的按钮（如「朗读」）。
+ * - `cardViews`：插件工作流写进对话的数据卡片（`ctx.addCard({ type })`）按 type 渲染。
  * - `inputExtension`：输入框扩展组件；往「+」面板加项用 `context.addAction`（见 plugin-input.ts）。
  *
  * **只做显示层变换**：数据库与发给模型的历史永远是模型 / 工具的原文，所以这里怎么渲染都不影响提示词缓存。
@@ -75,6 +76,17 @@ export interface InlineTokenRule {
   render: (match: RegExpExecArray, ctx: InlineTokenContext) => InlineTokenView | null
 }
 
+/** 数据卡片视图拿到的 props */
+export interface CardViewProps {
+  /** 卡片类型 / 标题 / 结构化数据 / 兜底 Markdown（见 WorkflowCardMeta） */
+  type: string
+  title?: string
+  data?: unknown
+  markdown?: string
+  messageId: string
+  sessionId: string
+}
+
 /** 回答操作栏按钮拿到的上下文 */
 export interface MessageActionContext {
   sessionId: string
@@ -125,6 +137,8 @@ export interface PluginUi {
   usageView?: Lazy
   /** 回答下面操作栏的按钮（复制 / 重新生成之后） */
   messageActions?: MessageAction[]
+  /** 数据卡片类型 → 视图组件（props 见 CardViewProps）；没有就显示卡片的 markdown */
+  cardViews?: Record<string, Lazy>
 }
 
 export function definePluginUi(ui: PluginUi): PluginUi {

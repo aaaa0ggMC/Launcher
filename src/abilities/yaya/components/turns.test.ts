@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { MessageNode } from '../types'
+import type { MessageNode, WorkflowCardMeta, WorkflowStepRecord } from '../types'
 import {
   answerStep,
   buildTurns,
@@ -192,7 +192,13 @@ describe('turnSegments', () => {
     assert.ok(turn.kind === 'assistant')
     const segs = turnSegments(turn)
     assert.deepEqual(
-      segs.map((s) => (s.kind === 'text' ? `text:${s.node.id}` : `proc:${s.items.length}`)),
+      segs.map((s) =>
+        s.kind === 'text'
+          ? `text:${s.node.id}`
+          : s.kind === 'process'
+            ? `proc:${s.items.length}`
+            : 'card'
+      ),
       // [s1 全部 + s2 思考] → s2 的话 → [s2 工具] → s3 的话 → [s3 工具 + s4 思考]
       ['proc:2', 'text:s2', 'proc:1', 'text:s3', 'proc:2']
     )
@@ -289,4 +295,58 @@ it('turnFullMarkdown 按顺序包含思考、说的话、工具调用与回答',
     assert.ok(i > at, `${piece} 顺序不对：\n${md}`)
     at = i
   }
+})
+
+describe('data cards (ctx.addCard)', () => {
+  it('cards stay out of steps, are placed by the workflow record, trailing ones after the answer', () => {
+    const rec = (
+      kind: 'card' | 'llm' | 'compute',
+      messageId?: string,
+      id = `r-${kind}-${messageId}`
+    ): WorkflowStepRecord => ({
+      id,
+      agent: kind === 'compute' ? 'compute' : 'main',
+      kind,
+      label: kind,
+      messageId,
+      startedAt: 0,
+      status: 'ok' as const
+    })
+    const workflow = {
+      runId: 'r',
+      workflowId: 'story',
+      label: 'story',
+      status: 'ok' as const,
+      startedAt: 0,
+      tokens: 0,
+      steps: [rec('compute'), rec('card', 'c1'), rec('llm', 'a1'), rec('card', 'c2')]
+    }
+    const card = (id: string): WorkflowCardMeta => ({
+      workflowId: 'story',
+      type: 'state',
+      title: id
+    })
+    const turns = buildTurns([
+      node({ id: 'u', role: 'user', content: 'go' }),
+      node({ id: 'c1', role: 'assistant', content: '', meta: { workflow, card: card('c1') } }),
+      node({ id: 'a1', role: 'assistant', content: 'Once upon a time' }),
+      node({ id: 'c2', role: 'assistant', content: 'state', meta: { card: card('c2') } })
+    ])
+    const t = turns[1]
+    assert.ok(t.kind === 'assistant')
+    assert.deepEqual(
+      t.steps.map((n) => n.id),
+      ['a1']
+    )
+    assert.equal(answerStep(t)?.id, 'a1')
+    assert.deepEqual(
+      turnSegments(t, 'after').map((x) => (x.kind === 'card' ? `card:${x.node.id}` : x.kind)),
+      ['card:c2']
+    )
+    assert.deepEqual(
+      turnSegments(t).map((s) => (s.kind === 'card' ? `card:${s.node.id}` : s.kind)),
+      ['process', 'card:c1']
+    )
+    assert.ok(hasProcess(t), 'compute step shows the process card')
+  })
 })

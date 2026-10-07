@@ -19,6 +19,8 @@ export interface AssistantTurn {
   steps: MessageNode[]
   /** 找不到对应工具调用的 tool 结果节点 */
   orphanResults: MessageNode[]
+  /** 工作流写进对话的数据卡片节点（`ctx.addCard`；不算 AI 的话，不进 steps） */
+  cards: MessageNode[]
   /** 本轮第一个节点的同级分支（重新生成产生的兄弟回答） */
   siblingIds?: string[]
   firstId: string
@@ -46,7 +48,7 @@ export function processSteps(turn: AssistantTurn): MessageNode[] {
 export function hasProcess(turn: AssistantTurn): boolean {
   if (processSteps(turn).length > 0) return true
   if (answerStep(turn)?.reasoningContent) return true
-  return Boolean(turn.workflow?.steps.some((s) => s.kind !== 'llm'))
+  return Boolean(turn.workflow?.steps.some((s) => s.kind !== 'llm' && s.kind !== 'card'))
 }
 
 export function toolCallCount(turn: AssistantTurn): number {
@@ -67,7 +69,9 @@ export type ProcessItem =
       rec?: WorkflowStepRecord
       part: 'reasoning' | 'tools' | 'all'
     }
-  | { kind: 'subagent' | 'note'; key: string; rec: WorkflowStepRecord }
+  | { kind: 'subagent' | 'note' | 'compute'; key: string; rec: WorkflowStepRecord }
+  /** 数据卡片：只用来给 turnSegments 定位，不进过程卡片 */
+  | { kind: 'card'; key: string; rec: WorkflowStepRecord; node: MessageNode }
 
 /** 时间线：有过程记录就按记录顺序（含子 Agent），旧数据按节点顺序 */
 export function processItems(turn: AssistantTurn): ProcessItem[] {
@@ -87,7 +91,13 @@ export function processItems(turn: AssistantTurn): ProcessItem[] {
   if (!rec) return turn.steps.filter((n) => shown.has(n.id)).map((n) => llm(n))
   const out: ProcessItem[] = []
   const used = new Set<string>()
+  const cards = new Map(turn.cards.map((n) => [n.id, n]))
   for (const s of rec.steps) {
+    if (s.kind === 'card') {
+      const node = s.messageId ? cards.get(s.messageId) : undefined
+      if (node) out.push({ kind: 'card', key: `c:${node.id}`, rec: s, node })
+      continue
+    }
     if (s.kind === 'llm') {
       const node = s.messageId ? byId.get(s.messageId) : undefined
       if (node && shown.has(node.id)) {
@@ -104,13 +114,22 @@ export function processItems(turn: AssistantTurn): ProcessItem[] {
 export type TurnSegment =
   | { kind: 'process'; key: string; items: ProcessItem[] }
   | { kind: 'text'; key: string; node: MessageNode }
+  | { kind: 'card'; key: string; node: MessageNode }
+
+/** 过程卡片里显示的项（数据卡片单独成段，不进过程卡片） */
+export function processOnly(items: ProcessItem[]): Exclude<ProcessItem, { kind: 'card' }>[] {
+  return items.filter((i): i is Exclude<ProcessItem, { kind: 'card' }> => i.kind !== 'card')
+}
 
 /**
  * 一轮回答的显示顺序：过程块（思考 / 工具 / 子 Agent）与 AI 中途说的话交错，
  * 最终回答不在这里（AssistantTurn 单独渲染在最后）。一步之内按模型输出顺序：
  * 思考 → 说的话 → 工具调用。
  */
-export function turnSegments(turn: AssistantTurn): TurnSegment[] {
+export function turnSegments(
+  turn: AssistantTurn,
+  where: 'before' | 'after' = 'before'
+): TurnSegment[] {
   const out: TurnSegment[] = []
   let block: ProcessItem[] = []
   const flush = (): void => {
@@ -118,7 +137,24 @@ export function turnSegments(turn: AssistantTurn): TurnSegment[] {
     out.push({ kind: 'process', key: `p:${block[0].key}`, items: block })
     block = []
   }
-  for (const item of processItems(turn)) {
+  // 按过程记录的顺序分成「回答之前」与「回答之后」（如工作流在写完回答后还有记录 / 计算 / 卡片）
+  const steps = turn.workflow?.steps ?? []
+  const answer = answerStep(turn)
+  const answerAt = answer
+    ? steps.findIndex((s) => s.kind === 'llm' && s.messageId === answer.id)
+    : -1
+  const isAfter = (item: ProcessItem): boolean =>
+    answerAt >= 0 && !!item.rec && steps.indexOf(item.rec) > answerAt
+  const items = processItems(turn).filter((it) => isAfter(it) === (where === 'after'))
+  // 没有过程记录（旧数据）时卡片按节点顺序放在最前面
+  if (!turn.workflow && where === 'before')
+    for (const n of turn.cards) out.push({ kind: 'card', key: `c:${n.id}`, node: n })
+  for (const item of items) {
+    if (item.kind === 'card') {
+      flush()
+      out.push({ kind: 'card', key: item.key, node: item.node })
+      continue
+    }
     if (item.kind !== 'llm') {
       block.push(item)
       continue
@@ -158,6 +194,7 @@ export function buildTurnsReusing(branch: MessageNode[], prev: Turn[]): Turn[] {
     const a = o as AssistantTurn
     return same(a.steps, t.steps) &&
       same(a.orphanResults, t.orphanResults) &&
+      same(a.cards, t.cards) &&
       same(a.siblingIds, t.siblingIds) &&
       a.status === t.status &&
       a.workflow === t.workflow &&
@@ -213,6 +250,7 @@ export function buildTurns(branch: MessageNode[]): Turn[] {
         key: node.id,
         steps: [],
         orphanResults: [],
+        cards: [],
         siblingIds: node.siblingIds,
         firstId: node.id,
         lastId: node.id,
@@ -222,7 +260,9 @@ export function buildTurns(branch: MessageNode[]): Turn[] {
       turns.push(current)
     }
     current.lastId = node.id
-    if (node.role === 'assistant') {
+    if (node.role === 'assistant' && node.meta?.card) {
+      current.cards.push(node)
+    } else if (node.role === 'assistant') {
       for (const c of node.toolCalls ?? []) knownCalls.add(c.id)
       current.steps.push(node)
       current.status = node.status

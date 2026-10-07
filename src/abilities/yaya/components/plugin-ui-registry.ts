@@ -180,6 +180,18 @@ export const inputExtensions = computed(() =>
     }))
 )
 
+/**
+ * 数据卡片的视图。不按启用状态门控：历史对话里的卡片在插件关掉后也要能看懂
+ * （同 inlineTokens）。没有返回 null，显示卡片自带的 markdown。
+ */
+export function cardViewFor(pluginId: string | undefined, type: string): Component | null {
+  if (!pluginId) return null
+  const ui = uis.find((u) => u.pluginId === pluginId)
+  const loader = ui?.cardViews?.[type]
+  if (!loader) return null
+  return lazy(`card:${pluginId}:${type}`, loader)
+}
+
 /** 回答操作栏里的插件按钮（只算已启用插件的，按插件 id 排序） */
 export const messageActions = computed<{ pluginId: string; action: MessageAction }[]>(() =>
   [...uis]

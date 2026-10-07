@@ -18,6 +18,7 @@ import type { MessageAction, MessageActionContext } from './plugin-ui'
 import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
+import DataCard from './DataCard.vue'
 import WorkflowCard from './WorkflowCard.vue'
 
 const props = defineProps<{
@@ -92,12 +93,14 @@ const answerSegments = computed(() =>
  * 说的话与最终回答用同一套 Markdown 分段（插件代码块照样接管）。
  */
 const segments = computed(() =>
-  showProcess.value
+  showProcess.value || props.turn.cards.length
     ? turnSegments(props.turn).map((seg) =>
         seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
       )
     : []
 )
+/** 回答之后的过程块 / 卡片（按过程记录在回答之后的步骤） */
+const segmentsAfter = computed(() => (props.turn.workflow ? turnSegments(props.turn, 'after') : []))
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
     if (segments.value[i].kind === 'process') return segments.value[i].key
@@ -241,6 +244,7 @@ async function copyTurn(): Promise<void> {
             :pending-approval-id="pendingApprovalId"
             :preview-steps="previewSteps"
           />
+          <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
           <div v-else-if="'parts' in seg" class="narration">
             <template v-for="(part, i) in seg.parts" :key="i">
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
@@ -278,6 +282,22 @@ async function copyTurn(): Promise<void> {
             :source="seg.source"
             :streaming="live && !seg.closed"
           />
+        </template>
+
+        <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
+        <template v-for="seg in segmentsAfter" :key="seg.key">
+          <WorkflowCard
+            v-if="seg.kind === 'process'"
+            :turn="turn"
+            :items="seg.items"
+            :first="false"
+            :last="true"
+            :assistant-name="assistantName"
+            :live="live"
+            :pending-approval-id="pendingApprovalId"
+            :preview-steps="previewSteps"
+          />
+          <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
         </template>
 
         <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">

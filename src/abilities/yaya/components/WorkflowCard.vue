@@ -2,7 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import type { AssistantTurn, ProcessItem } from './turns'
-import { processItems, summarizeArgs } from './turns'
+import { processItems, processOnly, summarizeArgs } from './turns'
 import type { ToolCallItem } from '../types'
 import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
@@ -76,7 +76,7 @@ watch(
 onBeforeUnmount(() => swapEnd?.())
 const openDetails = ref<Record<string, boolean>>({})
 
-const items = computed<ProcessItem[]>(() => props.items ?? processItems(props.turn))
+const items = computed(() => processOnly(props.items ?? processItems(props.turn)))
 /** 本块在运行（整轮在运行且是最后一块） */
 const blockLive = computed(() => props.live && props.last)
 

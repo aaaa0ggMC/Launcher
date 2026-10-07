@@ -47,6 +47,22 @@ export interface SubAgentOptions {
   recordOutput?: boolean
 }
 
+/** `ctx.addCard` 的参数，见 `WorkflowCardMeta` */
+export interface WorkflowCardInput {
+  type: string
+  title?: string
+  data?: unknown
+  /** 没有自定义卡片视图时显示的 Markdown */
+  markdown?: string
+  /** 写进对话历史、之后的模型调用能看到的文字；不给 = 模型看不到这张卡 */
+  modelText?: string
+}
+
+export interface ComputeOptions<T> {
+  /** 结果在过程卡片里的展示（缺省：字符串原样，其余 JSON） */
+  detail?: (result: T) => string
+}
+
 export interface WorkflowContext {
   readonly session: Session
   readonly config: YayaConfig
@@ -64,10 +80,28 @@ export interface WorkflowContext {
   subAgent(opts: SubAgentOptions): Promise<{ content: string }>
   /** 往过程记录里加一条说明 */
   note(label: string, detail?: string): void
+  /**
+   * 非 AI 节点：纯计算 / 规则 / 随机数等，在过程卡片里显示为一步（耗时、结果）。
+   * fn 抛错 = 这一步失败并把错误抛给工作流。
+   */
+  compute<T>(label: string, fn: () => T | Promise<T>, opts?: ComputeOptions<T>): Promise<T>
+  /** 往对话里写一张数据卡片（不是 AI 的话），返回节点 id */
+  addCard(card: WorkflowCardInput): string
+  /** 本工作流在当前分支上最近一次保存的状态（重新生成 / 编辑重发时自动回到对应分支的状态） */
+  loadState<T = unknown>(): T | undefined
+  /** 把状态存到本次运行的回答节点上（每次运行最后一次保存为准） */
+  saveState(state: unknown): void
+  /** 插件工作流：所属插件的配置（默认值已填、secret 已解密）；内置工作流为 {} */
+  readonly pluginConfig: Record<string, unknown>
 }
 
 export interface WorkflowDefinition {
+  /** 全局唯一；插件工作流建议用 `<插件 id>.<名字>` */
   id: string
+  /** 插件注入的工作流由注册表填上（插件不用自己写） */
+  pluginId?: string
+  /** mdi 图标 */
+  icon?: string
   /** 翻译键与中文兜底（主进程 `t()` 翻译） */
   labelKey: string
   label: string

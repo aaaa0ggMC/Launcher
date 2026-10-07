@@ -220,16 +220,41 @@ const reasoningItems = computed<{ title: string; value: ReasoningEffort }[]>(() 
 )
 
 const workflows = ref<WorkflowInfo[]>([])
-onMounted(async () => {
+/** 按正在看的助手取工作流（插件注入的只在插件对它启用时出现）；插件开关保存后重取 */
+let workflowsSeq = 0
+async function loadWorkflows(): Promise<void> {
+  const seq = ++workflowsSeq
   try {
-    const res = (await window.cockpit.command('yaya.workflows-list')) as
-      WorkflowInfo[] | { workflows?: WorkflowInfo[] }
-    workflows.value = Array.isArray(res) ? res : (res.workflows ?? [])
+    const res = (await window.cockpit.command(
+      'yaya.workflows-list',
+      selectedId.value ? { assistant: selectedId.value } : {}
+    )) as WorkflowInfo[] | { workflows?: WorkflowInfo[] }
+    if (seq === workflowsSeq) workflows.value = Array.isArray(res) ? res : (res.workflows ?? [])
   } catch {
-    workflows.value = []
+    if (seq === workflowsSeq) workflows.value = []
   }
+}
+watch(selectedId, () => void loadWorkflows())
+onMounted(() => {
+  void loadWorkflows()
+  offConfig = window.cockpit.on('cockpit:yaya-config-changed', () => void loadWorkflows())
 })
-const workflowItems = computed(() => workflows.value.map((w) => ({ title: w.label, value: w.id })))
+let offConfig: (() => void) | null = null
+onBeforeUnmount(() => offConfig?.())
+const workflowItems = computed(() => {
+  const items = workflows.value.map((w) => ({
+    title: w.pluginLabel ? `${w.label} · ${w.pluginLabel}` : w.label,
+    value: w.id
+  }))
+  // 选了的插件工作流现在不可用（插件被关）：照样列出，说明会回落
+  const cur = selected.value?.defaultWorkflow
+  if (cur && !items.some((i) => i.value === cur))
+    items.push({
+      title: te('yaya.wf.unavailable', { id: cur }, '{id}（插件未启用，会回落到全局默认）'),
+      value: cur
+    })
+  return items
+})
 </script>
 
 <template>

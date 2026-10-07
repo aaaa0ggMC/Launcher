@@ -15,6 +15,7 @@
  */
 import type { MessageAttachment, YayaConfig } from '../../types'
 import type { SessionUsage, UsageSection } from '../usage'
+import type { WorkflowDefinition } from '../workflow/types'
 
 export type PluginKind = 'builtin' | 'mcp' | 'skill'
 
@@ -181,6 +182,13 @@ export interface YayaPlugin {
   configSchema?: PluginConfigField[]
   /** 子分组（缺省 = 无分组） */
   groups?: () => PluginGroup[]
+  /**
+   * 插件注入的工作流（缺省 = 无）。插件对某个助手启用时，这些工作流出现在该助手的默认工作流
+   * 选择与输入框的工作流菜单里；插件被关掉后，选了它的会话 / 助手回落到默认工作流。
+   * id 建议 `<插件 id>.<名字>`；契约见 `services/workflow/types.ts`（可用子 Agent、计算节点、
+   * 数据卡片、按分支保存的状态）。
+   */
+  workflows?: () => WorkflowDefinition[]
   /**
    * 用户在输入框 `@` 点名本插件时**额外**的效果（PLAN 6.3）。插件的全部工具由宿主统一注入，
    * 这里只补充附注 / 随消息加载的内容：skill = SKILL.md 正文（Skill 提供方实现）；
