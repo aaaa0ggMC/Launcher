@@ -288,8 +288,9 @@ async function attach(): Promise<void> {
   await importPaths(paths)
 }
 
-async function importPaths(paths: string[]): Promise<void> {
-  if (!paths.length) return
+async function importPaths(paths: string[] | null | undefined): Promise<void> {
+  // 取消选择：各宿主约定返回 []，这里再兜一次底（旧版宿主 / 原生壳可能给 null）
+  if (!Array.isArray(paths) || !paths.length) return
   importing.value = true
   try {
     const session = await props.ensureSession()
