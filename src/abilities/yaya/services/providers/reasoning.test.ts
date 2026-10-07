@@ -56,3 +56,25 @@ test('思考参数：default / none 不发，其余按格式', () => {
   assert.equal(normalizeEffort('bogus'), 'default')
   assert.equal(normalizeEffort('high'), 'high')
 })
+
+test('思考参数：Gemini 兼容接口按地址识别，总是要思考摘要', () => {
+  assert.equal(
+    resolveReasoningStyle({
+      type: 'openai',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai'
+    }),
+    'gemini'
+  )
+  assert.deepEqual(reasoningParams('gemini', 'default', 'openai', 'gemini-2.5-flash'), {
+    extra_body: { google: { thinking_config: { include_thoughts: true } } }
+  })
+  assert.deepEqual(reasoningParams('gemini', 'high', 'openai', 'gemini-2.5-pro'), {
+    extra_body: { google: { thinking_config: { thinking_budget: 24576, include_thoughts: true } } }
+  })
+  assert.deepEqual(reasoningParams('gemini', 'low', 'openai', 'gemini-3-pro-preview'), {
+    extra_body: { google: { thinking_config: { thinking_level: 'low', include_thoughts: true } } }
+  })
+  assert.deepEqual(reasoningParams('gemini', 'off', 'openai', 'gemini-2.5-flash'), {
+    extra_body: { google: { thinking_config: { thinking_budget: 0 } } }
+  })
+})

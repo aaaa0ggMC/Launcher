@@ -15,6 +15,8 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { normalizeEffort } from '../providers/reasoning'
+import { chosenSearchMode, useBuiltinSearch, withoutGenericSearch } from '../search-mode'
+import { BuiltinSearchUnsupportedError, builtinSearchRejected } from '../providers/builtin-search'
 import { getBroadcast } from '../../../../main/process/broadcast'
 import { makeLogger } from '../../../../main/process/logger'
 import { t, te } from '../../../../main/process/i18n'
@@ -26,6 +28,7 @@ import type {
   ToolCallItem,
   TokenUsage,
   WorkflowRecord,
+  YayaConfig,
   WorkflowStepRecord
 } from '../../types'
 import {
@@ -133,6 +136,8 @@ export class WorkflowRunner {
   private session: Session | null = null
   /** 本次运行可用的工具（运行开始时解析一次，保证整轮工具表稳定 → 提示词缓存友好） */
   private tools: ResolvedTool[] = []
+  private forcedRefs: string[] = []
+  private usesTools = false
   /** 工作流自带的工具（assistantStep 的 localTools），按 wire name；runTools 先查这里 */
   private localTools = new Map<string, WorkflowTool>()
   private paused = false
@@ -396,7 +401,9 @@ export class WorkflowRunner {
       })
       // 本会话被 @ 点名强制启用的插件 / 工具（追加在工具表末尾，见 mention.ts）
       const forced = sessionMentions(this.session?.meta).map((m) => m.ref)
-      this.tools = workflow.usesTools ? await resolveTools(this.ctx.config, forced) : []
+      this.forcedRefs = forced
+      this.usesTools = workflow.usesTools
+      this.tools = workflow.usesTools ? await resolveTools(this.pluginsConfig, forced) : []
       await workflow.run(this.buildContext(workflow))
       if (this.aborted) return
       this.closeOpenNode()
@@ -699,7 +706,7 @@ export class WorkflowRunner {
   private systemPrompt(extra?: string, replace?: string, pluginInstructions = true): string {
     const base =
       replace ?? resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
-    const plugins = pluginInstructions ? buildPluginInstructions(this.ctx.config) : ''
+    const plugins = pluginInstructions ? buildPluginInstructions(this.pluginsConfig) : ''
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }
 
@@ -725,6 +732,26 @@ export class WorkflowRunner {
       out.push({ name: t.name, description: t.description, parameters: t.parameters })
     }
     return out
+  }
+
+  /**
+   * 这次用模型自带搜索（会话 / 助手选了 builtin 且当前模型支持）。
+   * 用的时候 GenericSearch 插件本次不提供（工具与说明都去掉），见 search-mode.ts
+   */
+  private get builtinSearch(): boolean {
+    const provider = this.ctx.config.providers.find((p) => p.id === this.ctx.provider.id)
+    return (
+      useBuiltinSearch(
+        chosenSearchMode(this.ctx.config, this.session?.meta),
+        provider,
+        this.model
+      ) && !builtinSearchRejected(this.ctx.provider.id, this.model)
+    )
+  }
+
+  /** 解析插件工具 / 说明用的配置（builtin 搜索时关掉 GenericSearch） */
+  private get pluginsConfig(): YayaConfig {
+    return this.builtinSearch ? withoutGenericSearch(this.ctx.config) : this.ctx.config
   }
 
   /** 思考强度：会话自己的选择 → 设置里的默认 */
@@ -809,48 +836,60 @@ export class WorkflowRunner {
     })
     this.setStatus('streaming')
 
-    const result = await this.generateWithRetry(
-      {
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: this.systemPrompt(opts.extraSystem, opts.system, opts.pluginInstructions)
+    const generate = (stepTools: ProviderTool[]): Promise<ProviderGenerateResult> =>
+      this.generateWithRetry(
+        {
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content: this.systemPrompt(opts.extraSystem, opts.system, opts.pluginInstructions)
+            },
+            ...this.history()
+          ],
+          tools: stepTools,
+          stream: this.ctx.config.streamOutput,
+          reasoning: this.reasoning,
+          builtinSearch: this.builtinSearch,
+          signal: this.abortController.signal,
+          onToken: (tok) => {
+            const offset = this.bufferedContent.length
+            this.bufferedContent += tok
+            getBroadcast()('cockpit:yaya-token', {
+              sessionId: this.ctx.sessionId,
+              messageId,
+              token: tok,
+              offset
+            })
           },
-          ...this.history()
-        ],
-        tools,
-        stream: this.ctx.config.streamOutput,
-        reasoning: this.reasoning,
-        signal: this.abortController.signal,
-        onToken: (tok) => {
-          const offset = this.bufferedContent.length
-          this.bufferedContent += tok
-          getBroadcast()('cockpit:yaya-token', {
-            sessionId: this.ctx.sessionId,
-            messageId,
-            token: tok,
-            offset
-          })
+          onReasoning: (chunk) => {
+            const offset = this.bufferedReasoning.length
+            this.bufferedReasoning += chunk
+            getBroadcast()('cockpit:yaya-reasoning', {
+              sessionId: this.ctx.sessionId,
+              messageId,
+              reasoning: chunk,
+              offset
+            })
+          }
         },
-        onReasoning: (chunk) => {
-          const offset = this.bufferedReasoning.length
-          this.bufferedReasoning += chunk
-          getBroadcast()('cockpit:yaya-reasoning', {
-            sessionId: this.ctx.sessionId,
-            messageId,
-            reasoning: chunk,
-            offset
-          })
+        () => {
+          // 重试从头生成：清掉半截内容，快照广播后页面会重新加载这条消息
+          this.bufferedContent = ''
+          this.bufferedReasoning = ''
+          updateMessage(messageId, { content: '', reasoningContent: undefined })
         }
-      },
-      () => {
-        // 重试从头生成：清掉半截内容，快照广播后页面会重新加载这条消息
-        this.bufferedContent = ''
-        this.bufferedReasoning = ''
-        updateMessage(messageId, { content: '', reasoningContent: undefined })
-      }
-    )
+      )
+    let result: ProviderGenerateResult
+    try {
+      result = await generate(tools)
+    } catch (e) {
+      if (!(e instanceof BuiltinSearchUnsupportedError)) throw e
+      // 模型其实不支持自带搜索：换回 GenericSearch（工具表重新解析），重做这一步
+      log.warn('built-in search rejected, falling back to GenericSearch', { error: e.message })
+      if (this.usesTools) this.tools = await resolveTools(this.pluginsConfig, this.forcedRefs)
+      result = await generate(this.stepTools(opts.tools, opts.localTools))
+    }
     if (this.aborted) throw new Error('aborted')
 
     const content = result.content || this.bufferedContent
@@ -869,7 +908,9 @@ export class WorkflowRunner {
         ...getMessage(messageId)?.meta,
         model: this.model,
         provider: this.ctx.provider.id,
-        native: result.native
+        native: result.native,
+        reasoningSummary: result.reasoningSummary || undefined,
+        search: result.search
       }
     })
     if (result.usage) this.lastUsage = result.usage

@@ -37,6 +37,8 @@ export interface ProviderGenerateOptions {
   temperature?: number
   /** 思考强度（缺省 default = 不发参数） */
   reasoning?: ReasoningEffort
+  /** 打开模型自带的联网搜索（Gemini google_search / Claude web_search / OpenRouter web 等），见 search-mode.ts */
+  builtinSearch?: boolean
   signal?: AbortSignal
   onToken?: (token: string) => void
   onReasoning?: (thought: string) => void
@@ -49,6 +51,16 @@ export interface ProviderGenerateResult {
   toolCalls?: ToolCallItem[]
   usage?: TokenUsage
   native?: NativeState
+  /** reasoningContent 是闭源模型给的思考摘要（Gemini / Claude / OpenAI），不是原始思维链 */
+  reasoningSummary?: boolean
+  /** 模型自带搜索的查询词与来源（打开 builtinSearch 且模型真的搜了才有） */
+  search?: BuiltinSearchInfo
+}
+
+/** 模型自带搜索这一步搜了什么、引用了哪些网页（存到 assistant 节点的 `meta.search`） */
+export interface BuiltinSearchInfo {
+  queries: string[]
+  sources: Array<{ url: string; title?: string }>
 }
 
 export interface AIProvider {
