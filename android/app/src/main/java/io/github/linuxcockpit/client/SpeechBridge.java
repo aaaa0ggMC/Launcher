@@ -8,6 +8,7 @@ import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -374,7 +375,9 @@ final class SpeechBridge {
                 reply.fail("system speech recognition unavailable");
                 return;
             }
-            if (act.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // 已授权也在本进程第一次用时申请一次（见 MainActivity.micAsked）
+            if (!act.micAsked
+                    || act.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 pendingAsr = args;
                 act.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_ASR);
                 // 结果经事件回来（授权后开始 / 拒绝后 error），这里先应答「已受理」
@@ -510,13 +513,26 @@ final class SpeechBridge {
         }
     }
 
-    private static String errorText(int code) {
+    /** 系统默认语音识别服务的包名（设置里的「语音输入」），拿不到为空串 */
+    private String recognizerHint() {
+        try {
+            String v = Settings.Secure.getString(act.getContentResolver(), "voice_recognition_service");
+            if (v == null || v.isEmpty()) return "";
+            int slash = v.indexOf('/');
+            return " (" + (slash > 0 ? v.substring(0, slash) : v) + ")";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String errorText(int code) {
         switch (code) {
             case SpeechRecognizer.ERROR_NO_MATCH:
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
                 return "no-speech";
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
-                return "permission denied";
+                // 本 App 的录音权限在 startAsr 里已经确认过：这里多半是识别服务（小爱 / Google 等）自己没有麦克风权限
+                return "recognizer permission denied" + recognizerHint();
             case SpeechRecognizer.ERROR_NETWORK:
             case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
                 return "network";

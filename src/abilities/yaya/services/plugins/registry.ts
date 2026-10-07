@@ -8,6 +8,7 @@ import { makeLogger } from '../../../../main/process/logger'
 import { t } from '../../../../main/process/i18n'
 import type { MessageAttachment, YayaConfig } from '../../types'
 import { loadYayaConfig, setPluginSecretKeysResolver } from '../config'
+import { assistantConfig } from '../../assistants'
 import { saveAsset } from '../assets'
 import type { SessionUsage, UsageSection } from '../usage'
 import type {
@@ -76,7 +77,7 @@ export function refreshPlugins(config: YayaConfig): YayaPlugin[] {
 
   for (const old of current) {
     const still = next.find((p) => p.id === old.id)
-    if (!still || still !== old || !isPluginEnabled(still, config)) void stopPlugin(old)
+    if (!still || still !== old || !isPluginEnabledAnywhere(still, config)) void stopPlugin(old)
   }
   current = next
   getBroadcast()('cockpit:yaya-plugins-changed', {})
@@ -93,6 +94,17 @@ export function getPlugin(id: string): YayaPlugin | undefined {
 
 export function isPluginEnabled(plugin: YayaPlugin, config: YayaConfig): boolean {
   return config.pluginEnabled?.[plugin.id] ?? plugin.defaultEnabled ?? true
+}
+
+/**
+ * 全局或任何一个助手启用了这个插件。启用开关按助手生效（设置 → 助手 → 插件），
+ * 只在某个助手里启用的插件不能因为「全局没开」就被停掉（MCP 连接等会被反复断开）。
+ */
+export function isPluginEnabledAnywhere(plugin: YayaPlugin, config: YayaConfig): boolean {
+  if (isPluginEnabled(plugin, config)) return true
+  return (config.assistants ?? []).some((a) =>
+    isPluginEnabled(plugin, assistantConfig(config, a.id))
+  )
 }
 
 // 告诉 config.ts 哪些插件配置字段是 secret（落盘前加密、下发前脱敏都要用）。

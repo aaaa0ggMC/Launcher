@@ -80,5 +80,6 @@
   "yaya.speech.err_system_asr": "「系统语音」在界面里直接识别，不经过这条命令",
   "yaya.speech.asr.no_system": "当前环境没有系统语音识别：设置 → YAYA → 插件 → 语音，换一个识别引擎",
   "yaya.speech.asr.network": "连不上语音识别服务（浏览器的在线识别要能访问 Google）",
-  "yaya.speech.asr.busy": "语音识别正忙，稍后再试"
+  "yaya.speech.asr.busy": "语音识别正忙，稍后再试",
+  "yaya.speech.asr.service_denied": "系统语音识别服务{service}没有麦克风权限：到系统设置 → 应用里给它打开麦克风，或换一个识别引擎"
 }

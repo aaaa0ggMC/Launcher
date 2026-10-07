@@ -80,5 +80,6 @@
   "yaya.speech.err_system_asr": "The system voice recognizes speech in the UI directly, not through this command",
   "yaya.speech.asr.no_system": "No system speech recognition here: pick another engine in Settings → YAYA → Plugins → Speech",
   "yaya.speech.asr.network": "Cannot reach the speech recognition service (browser online recognition needs access to Google)",
-  "yaya.speech.asr.busy": "Speech recognition is busy, try again shortly"
+  "yaya.speech.asr.busy": "Speech recognition is busy, try again shortly",
+  "yaya.speech.asr.service_denied": "The system speech recognition service{service} has no microphone permission: allow it in system Settings → Apps, or choose another recognition engine"
 }

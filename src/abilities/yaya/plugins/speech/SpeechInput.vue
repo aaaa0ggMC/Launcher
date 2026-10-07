@@ -21,7 +21,7 @@ const props = defineProps<{ context: PluginInputContext }>()
 const context = toRef(props, 'context')
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
-const { t } = useI18n(lang)
+const { t, te } = useI18n(lang)
 
 type State = 'idle' | 'starting' | 'recording' | 'transcribing' | 'error'
 const state = ref<State>('idle')
@@ -87,6 +87,16 @@ function startTimer(): void {
 
 function systemError(e: unknown): string {
   const code = (e as SpeechError)?.code
+  const message = e instanceof Error ? e.message : ''
+  // 安卓：本 App 有权限，但系统识别服务（小爱 / Google 等）自己没有麦克风权限
+  if (code === 'permission' && message.includes('recognizer')) {
+    const pkg = /\(([^)]+)\)/.exec(message)?.[1] ?? ''
+    return te(
+      'yaya.speech.asr.service_denied',
+      { service: pkg ? ` (${pkg}) ` : '' },
+      '系统语音识别服务{service}没有麦克风权限：到系统设置 → 应用里给它打开麦克风，或换一个识别引擎'
+    )
+  }
   if (code === 'permission') return t('yaya.speech.asr.denied', '没有麦克风权限')
   if (code === 'unsupported')
     return t(
