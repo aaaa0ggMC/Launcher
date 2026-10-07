@@ -316,6 +316,10 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 
 与 `settings` 同构：能力在 `index.ts` 里声明 `shortcuts: [{ key, label }]`（完整 id = `<能力id>.<key>`，label 走 `label.<原文>` 翻译），`App.vue` 汇总进注册表；页面里用 `useShortcut('<id>.<key>', handler)`（`@ui/shortcuts`，页面可见才生效）。外壳自己的用 `registerShortcut({ ..., group: 'shell' })`（如截图模式）。设置 → 快捷键（`ShortcutsSection.vue`）按能力分组管理：改键 / 清除 / 冲突标红 / 整组禁用 / 搜索（名称、能力、id、按键）。**所有快捷键默认都不绑定**（防止互相冲突，没有 defaultKey 这回事），用户自己启用。绑定存 `config.json` 的 `shortcuts`（`{ id: 'Ctrl+Shift+S' }`），整组禁用存 `shortcutGroupsOff`（组 id 数组）。默认仅窗口有焦点时生效；每项可单独开「全局」（`config.json` 的 `shortcutGlobal` id 数组，需至少两个修饰键，主进程 `global-shortcuts.ts` 用 `globalShortcut` 注册，Wayland 下启用 `GlobalShortcutsPortal` 走 xdg portal，注册结果显示在设置页；声明里的 `command` 让没有页面处理函数时也能触发），组合键必须带修饰键（F1–F12 除外），AI 视图里不响应。
 
+### 系统语音（`src/main/ui/speech.ts`，`@ui/speech`）
+
+任何能力 / 插件都能用的「系统自带」朗读与语音识别（渲染端）：`speak(text, { lang?, voice?, rate?, pitch?, onStart?, onBoundary? })` → `{ done, stop }`；`recognize({ lang?, onPartial?, onLevel?, onReady? })` → `{ result, stop, cancel }`；`systemSpeechSupport()` / `await systemSpeechReady()` 看可用性，`systemVoices()` / `pickVoice()` 选语音。后端自动选：**安卓 App 0.8.0+** 走原生桥（系统 TextToSpeech / SpeechRecognizer，`tts.*` / `asr.*`，事件 `cockpit:client-tts` / `cockpit:client-asr`），**浏览器 / Electron** 走 `speechSynthesis` 与 `SpeechRecognition`（Chrome / Edge 在线识别；Electron 里视为不支持）。同一时刻只有一段朗读 / 一路识别，新的打断旧的；不支持时 Promise 以 `SpeechError('unsupported')` 失败。页面不要直接调原生 `tts.*` / `asr.*`。
+
 ### 悬浮窗（Outsider SDK，`src/main/ui/outsider.ts`）
 
 浮在页面之上的小窗（桌宠、迷你播放器、AI 在场提示、网页版授权弹窗）。宿主 `OutsiderLayer.vue` 在 `App.vue` 挂一层，单个窗由 `OutsiderItem.vue` 负责定位 / 拖动 / 位置记忆。
@@ -369,7 +373,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **子分组**：`YayaPlugin.groups()` 声明分组（id / 名称 / 状态 / `defaultEnabled`），`PluginTool.group` 把工具挂上去；分组被用户关掉（`yaya.plugin-group-set` → `config.pluginGroupEnabled`）或 `status().state !== 'ready'` 时整组工具不提供给模型（registry 的 `isGroupEnabled` / `groupAvailableForTool`），设置页显示原因。工具的 `group` 指向不存在的分组 = 视为无分组。
 - 工具执行来源是 `local-agent`，受隐私 SDK 的脱敏 / guard / `agent: 'deny'` 约束。`fetch_url` 访问本机 / 局域网 / 链路本地地址（含重定向后到达的）前要 `guard(SCOPE_EXEC)`（`plugins/system/net-guard.ts`）。直接读写任意文件或运行 Shell 的插件必须自己 `await guard(SCOPE_EXEC)`，审批模式 auto 不能替代隐私授权。工具需响应 `ctx.signal`，无法取消的已执行操作不回滚。
 - 工作流登记 transport `local` 会话，AgentBar 支持暂停 / 继续 / 停止；每步、每次工具执行前（包括审批后）经过暂停闸门。外壳快捷键 `shell.agent-pause-all` 调 `agent.pause-all`，默认不绑定。
-- 渲染端可在 `plugins/<id>/ui.ts` 导出 `definePluginUi`，声明 toolViews / fences。变换只影响显示，数据库和模型历史保留原文；工具图片存会话资产，数据库不存 base64。视图必须遵守 DESIGN.md 与隐私标签规范。
+- 渲染端可在 `plugins/<id>/ui.ts` 导出 `definePluginUi`，声明 toolViews / fences / `messageActions`（回答操作栏按钮，如朗读）/ `inputExtension`（输入框扩展组件；往输入框「+」面板加项用 `context.addAction({ icon, label, placement: 'tile'|'item', active?, run })`，**不要往工具栏塞按钮**——输入框只留最常用的，其余进「+」，桌面是弹出菜单、窄屏 / 触屏是底部弹层）。变换只影响显示，数据库和模型历史保留原文；工具图片存会话资产，数据库不存 base64。视图必须遵守 DESIGN.md 与隐私标签规范。
 - MCP 支持 Streamable HTTP / SSE，请求头值加密存储，页面只有头名与 `headersSet`；编辑留空沿用、移除才清空。连接失败不得在未知执行结果下自动重放工具调用。Skill 扫描配置目录的 SKILL.md，系统提示词只列名称 / 描述，`skill_load` / `skill_read_file` 渐进读取，附属路径不得越界。
 - **思考强度**：会话级 `session.meta.reasoning`（default / off / low / medium / high，缺省取 `reasoningEffort`），按服务商的 `reasoningStyle`（auto 按地址识别：DeepSeek `thinking` / Qwen `enable_thinking` / OpenRouter `reasoning` / llama.cpp `chat_template_kwargs` / 其余 `reasoning_effort`）转成请求参数（`services/providers/reasoning.ts`）；端点 400 拒绝时去掉重试并记住。usage 记录缓存命中 `cached` 与推理 `reasoning` token。**用量统计** `yaya.session-usage`（`services/usage.ts`）：token、每次调用的上下文、按工具汇总与明细（风险 = 工具默认审批：ask 高危 / 动态 视参数）。
 - **工具审批范围**：允许执行（once）/ 本次执行都允许（run，内存，运行结束即失效）/ 本对话都允许（session，存 `session.meta.approvedTools`，`yaya.session-approved-tools` 查看 / 撤销）。只跳过 YAYA 的工具审批，工具内部的隐私 guard 照样弹窗。`yaya.workflow-approve` / `agent.control --action approve` 都带 `--scope`。
@@ -433,6 +437,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **安卓客户端（`android/`）**：纯 Java、无 AndroidX / 第三方依赖的 WebView 壳（APK 约 50KB），**直接打开宿主托管的网页**（`<地址>/?token=`），所以前端更新都来自宿主，安卓程序本身基本不用动——典型用法是连本机 Termux 里的无头宿主（复用 Termux 的全部能力）。`pnpm build:android` 出 debug APK（需 `/opt/android-sdk` 的 build-tools 35 + JDK 17；AGP 8.7.2 / Gradle 8.9 wrapper）。原生侧只做：连接页（`assets/connect.html`，连接前原生探 `/api/info` 区分「宿主没开 / token 不对」）、`<input type=file>`（`onShowFileChooser`）、前台服务保活（播放器 / SSE 在后台不断，`mediaPlayback` 类型）、edge-to-edge 下按系统栏 + 键盘留白（网页量到的就是可用区域）、系统栏跟随网页背景色、返回键先给网页发 Escape 关弹窗、渲染进程崩溃自动重建、非宿主 origin 的链接交给系统浏览器、debug 包开 `chrome://inspect`（真机性能分析）。网页侧 `window.CockpitAndroid` 原生桥（`copyText` / `openExternal` / `openConnect` / `version`），`web-shim.ts` 检测到时把 `clipboard` / `external` 档位标为 `native`；UA 带 `CockpitAndroid/<版本>`。**同一个宿主同时服务浏览器与 App**，区分只在页面侧：App 里 `window.cockpit.client` 有值，浏览器里为 `null`。
   - **原生客户端 SDK（`window.cockpit.client`，App 0.2.0+）**：`call(method, args)` 异步调用（协议：页面 `CockpitAndroid.call(id, method, argsJson)` → 原生 `window.__cockpitNative.reply(id, ok, data)`）；原生事件 `__cockpitNative.event(name, data)` → 本地频道 `cockpit:client-<name>`，页面「就绪」前在原生排队（就绪信号 = 外壳注册 `cockpit:client-shared` 监听时由 shim 发 `ready`）。方法：`info` / `settings.set {keepAlive}` / `openConnect` / `pickFiles {multiple}`（系统选择器 + 原生流式上传到 `/api/upload`，返回宿主路径；进度事件 `upload-progress`）/ `pickDirectory {initial?}`（0.4.0 起：系统目录选择器，SAF 树映射成宿主真实路径，返回 `{path}`；只认 `primary` 卷，别处明确报错）。宿主不和 App 直接通信，文件不经过 JS。**新原生能力**：Java 侧 `MainActivity.dispatch` 加 case，类型写进 `preload/api.ts` 的 `NativeClient` 注释；页面判断 `window.cockpit.client` 存在再用。
   - **系统媒体控制（App 0.5.0+）**：WebView 不会把 `navigator.mediaSession` 交给系统（Chrome 会），所以 App 里放歌时通知栏 / 锁屏 / 灵动岛类胶囊都没有媒体卡片。`src/headless/native-media.ts` 在 App 里给 `navigator.mediaSession` 套一层，页面照常写 metadata / setActionHandler / setPositionState，同时经 `media.update` 推给原生 `MediaBridge.java`（MediaSession + MediaStyle 通知，与保活前台通知共用 id，有媒体时替换它）；系统按钮回来是事件 `media-action`，按页面注册的处理函数执行。页面没写 `playbackState` 时按最近一次 `play()` 的媒体元素推断播放状态；封面在页面里缩成 ≤512px JPEG data URL 再交给原生。**能力不用为 App 单独写代码**，正常用 `navigator.mediaSession` 即可。
+  - **系统语音（App 0.8.0+）**：`tts.voices` / `tts.speak {id,text,lang?,voice?,rate?,pitch?}` / `tts.stop`、`asr.start {lang?,partial?}` / `asr.stop` / `asr.cancel`，进度经事件 `tts` / `asr` 回来；`info.speech = {tts, asr}`。录音权限在 `asr.start` 时按需申请；网页 `getUserMedia` 的麦克风请求（只给宿主页面）也会转成系统录音权限。页面统一用 `@ui/speech`。
   - **系统分享**：App 注册 `SEND` / `SEND_MULTIPLE`，文件原生上传后发 `shared {paths, text, error?}`；外壳切到第一个声明了 `Ability.shareTarget` 的能力并 `onActivate({ share })`（YAYA：文件变附件、文字接到草稿后）。
   - **只在 App 里出现的设置**：`AbilitySettingItem.visible: () => !!window.cockpit.client`（设置 → 外观 → Android 客户端：后台保持运行、切换宿主；值存 App 的 SharedPreferences，不进宿主配置）。换宿主：长按桌面图标 →「连接设置」，或 Termux 里 `termux-open-url "linuxcockpit://connect?url=…&token=…"`（深链接只预填，必须用户自己点连接）。原生桥对宿主页面全开放（宿主是用户自己的），所以 WebView 里只允许宿主 origin 与连接页。
 - **计划与优先级**：`docs/headless-web-plan.md`（当前：移动端适配 + Web / GUI 稳定）。
@@ -527,10 +532,10 @@ registerJobHandler('download-batch', async (control: JobControl, args: Record<st
 5. **翻译** `src/abilities/<id>/translations/{zh,en-US}.json`
 6. **（可选）自定义显示名**：页面 `inject('cockpit:set-title')` 后调用 `setTitle('<能力id>', '名字' | null)`，App bar 标题与侧栏条目都改用它（存 localStorage，下次启动未挂载时也生效；`null` 恢复原名），如 YAYA 跟随设置里的助手名
 7. **设置注入** `index.ts` 里的 `settings` 数组（分类/条目）；页面里要打开自己的设置用 `useSettings().open('<id>')`（`@ui/composables/settings`）：有设置页就跳到本能力的分类（可选定位到设置项），没有设置页则弹浮窗——**不要**写 `activate('settings', …)`，能力不应依赖 settings 能力存在。无页面的后端能力也可以注入设置
-7. **（可选）悬浮窗** `index.ts` 里的 `outsiders` 数组（见上「悬浮窗（Outsider SDK）」），用户可在设置 → 能力里禁止
-7. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
-8. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
-9. **（涉及个人数据时必做）隐私声明**：`privacy.ts` 定义 scope，命令声明 `privacy`、结果 `shield`，界面 `v-privacy` / `v-agent-forbidden`（见上「隐私 SDK」）
+8. **（可选）悬浮窗** `index.ts` 里的 `outsiders` 数组（见上「悬浮窗（Outsider SDK）」），用户可在设置 → 能力里禁止
+9. **（可选）平台过滤**：`platforms: ['linux']` 声明适用平台；多 Ability 时把数组默认导出
+10. **（可选）能力依赖**：`provides: ['background-tasks']` 声明提供的能力 + `dependencies: ['background-tasks']` 声明要求的能力（见上「能力依赖」）；要求的能力无提供者 → 命令不注册、侧栏不显示
+11. **（涉及个人数据时必做）隐私声明**：`privacy.ts` 定义 scope，命令声明 `privacy`、结果 `shield`，界面 `v-privacy` / `v-agent-forbidden`（见上「隐私 SDK」）
 
 **无需改任何 yaml/注册表**——侧栏按 `category`/`name` 字母序自注入（见上）。
 

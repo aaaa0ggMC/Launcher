@@ -4,6 +4,7 @@ defineOptions({ name: 'cockpit-settings' })
 import {
   computed,
   inject,
+  nextTick,
   ref,
   watch,
   onMounted,
@@ -57,13 +58,15 @@ function findScroller(): HTMLElement | null {
 }
 function saveScroll(el: HTMLElement): void {
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
+  const id = activeCategoryId.value
   scrollSaveTimer = setTimeout(() => {
-    mem.scroll = el.scrollTop
+    if (id && id === activeCategoryId.value) mem.scrolls[id] = el.scrollTop
   }, 200)
 }
 function restoreScroll(): void {
   const el = findScroller()
-  if (el && mem.scroll > 0) el.scrollTop = mem.scroll
+  const top = activeCategoryId.value ? (mem.scrolls[activeCategoryId.value] ?? 0) : 0
+  if (el && top > 0) el.scrollTop = top
 }
 
 function isMdiIcon(icon: string): boolean {
@@ -178,11 +181,18 @@ const pickerItems = computed(() =>
 )
 
 function selectCategory(id: string): void {
+  const el = findScroller()
+  const prev = activeCategoryId.value
+  if (el && prev && !searching.value) mem.scrolls[prev] = el.scrollTop
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
   activeCategoryId.value = id
   highlight.value = null
   query.value = ''
-  const el = findScroller()
-  if (el) el.scrollTop = 0
+  // 每个分类回到自己上次的位置（没来过 = 顶部），渲染后再定位
+  void nextTick(() => {
+    const target = findScroller()
+    if (target) target.scrollTop = mem.scrolls[id] ?? 0
+  })
 }
 
 /**
@@ -418,6 +428,7 @@ defineExpose({ toMarkdown, onActivate })
           :key="activeCategory.id"
           :category="activeCategory"
           :highlight="highlight"
+          :compact-header="narrow"
           @item-ref="setItemRef"
         />
       </section>

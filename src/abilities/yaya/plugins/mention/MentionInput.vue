@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * mention 插件的输入框扩展：`@` 点名 + 工具栏 @ 按钮 + 已点标签。
+ * mention 插件的输入框扩展：`@` 点名 + 「+」面板里的「点名」+ 已点标签。
  * 同时也是 composer SDK（`components/plugin-input.ts`）的参考实现。
  *
  * 分工：
@@ -11,7 +11,7 @@
  * - 触碰草稿只有一条路：确认点名时用 `replaceRange` 删掉光标前的 `@query`，
  *   且必须先校验触发时保存的区间还对着当前草稿 / 光标（对不上就宁可不删，不吃用户文字）。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from '../../../../main/ui/i18n'
 import type { PluginInputContext } from '../../components/plugin-input'
 import type { MentionCandidate } from '../../services/plugins/mention'
@@ -49,10 +49,8 @@ const active = ref(0)
 /** 触发时保存的 `@query` 精确区间；替换前重新校验 */
 const range = ref<TriggerRange | null>(null)
 
-/** 工具栏目标：宿主挂载完成后才会出现，出现了才能 Teleport 进去 */
-const toolbar = computed(() => context.value.toolbarTarget.value)
-
 let dispose: (() => void) | null = null
+let disposeAction: (() => void) | null = null
 /**
  * 异步代：查询变化 / 关闭 / 重置 / 卸载 / 切换会话都会 +1，
  * 在途请求回来时发现代变了就直接丢弃（立即作废，不等下一次请求）。
@@ -199,6 +197,15 @@ function handleKey(e: KeyboardEvent): boolean {
 }
 
 onMounted(() => {
+  // 不再往工具栏塞 @ 按钮：收进「+」面板（输入 @ 照样触发）
+  disposeAction = context.value.addAction({
+    id: 'mention',
+    icon: 'mdi-at',
+    label: t('yaya.mention.action', '点名'),
+    description: t('yaya.mention.button', '点名插件 / 工具（本对话启用）'),
+    order: 50,
+    run: openManual
+  })
   dispose = context.value.register({
     triggers: TRIGGERS,
     onTrigger: (match) => {
@@ -255,11 +262,12 @@ onBeforeUnmount(() => {
   invalidate()
   dispose?.()
   dispose = null
+  disposeAction?.()
+  disposeAction = null
 })
 </script>
 
 <template>
-  <!-- 多个根节点：标签行在原位，工具栏按钮 Teleport 进宿主的目标容器 -->
   <div v-if="selected.length" class="mention-row">
     <span v-for="m in selected" :key="m.ref" class="mention-chip" :title="m.description">
       <v-icon
@@ -293,19 +301,6 @@ onBeforeUnmount(() => {
     @search="onSearch"
     @keydown="handleKey"
   />
-
-  <Teleport v-if="toolbar" :to="toolbar">
-    <v-btn
-      icon="mdi-at"
-      variant="text"
-      density="comfortable"
-      class="mention-tool-btn"
-      :title="t('yaya.mention.button', '点名插件 / 工具（本对话启用）')"
-      :aria-label="t('yaya.mention.button', '点名插件 / 工具（本对话启用）')"
-      @pointerdown.prevent
-      @click="openManual"
-    />
-  </Teleport>
 </template>
 
 <style scoped>
@@ -344,8 +339,5 @@ onBeforeUnmount(() => {
 }
 .mention-chip-x:hover {
   background: rgba(var(--v-theme-primary), 0.16);
-}
-.mention-tool-btn {
-  flex-shrink: 0;
 }
 </style>

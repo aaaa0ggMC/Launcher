@@ -9,5 +9,6 @@
  */
 export const settingsSessionMemory: {
   category: string | null
-  scroll: number
-} = { category: null, scroll: 0 }
+  /** 每个分类各自的滚动位置（分类内部的子视图由各自的 useScrollMemory 处理） */
+  scrolls: Record<string, number>
+} = { category: null, scrolls: {} }

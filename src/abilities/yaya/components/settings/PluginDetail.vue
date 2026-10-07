@@ -19,6 +19,8 @@ const props = defineProps<{
   restarting?: boolean
   /** 某个助手的插件页：分组开关改这个助手的 */
   assistantId?: string
+  /** 窄屏层级头部已有「返回」：不再放自己的 */
+  hideBack?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -106,6 +108,7 @@ function onDocsClick(ev: MouseEvent): void {
 <template>
   <div class="plugin-detail d-flex flex-column ga-4">
     <v-btn
+      v-if="!hideBack"
       variant="text"
       prepend-icon="mdi-chevron-left"
       class="align-self-start"

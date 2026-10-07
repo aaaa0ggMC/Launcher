@@ -7,6 +7,8 @@
  * - `settingsView`：替换插件详情页里按 `configSchema` 自动生成的配置表单（设置 → 插件 → 详情）。
  * - `inlineTokens`：把消息正文里的某种记号（如 `[[secret_xxxx]]`）渲染成标签 / 替换文字。
  * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
+ * - `messageActions`：每条回答下面操作栏里的按钮（如「朗读」）。
+ * - `inputExtension`：输入框扩展组件；往「+」面板加项用 `context.addAction`（见 plugin-input.ts）。
  *
  * **只做显示层变换**：数据库与发给模型的历史永远是模型 / 工具的原文，所以这里怎么渲染都不影响提示词缓存。
  * 配置值仍走命令 `yaya.plugin-config-set` 保存（schema 校验、secret 加密都在主进程）。
@@ -73,6 +75,34 @@ export interface InlineTokenRule {
   render: (match: RegExpExecArray, ctx: InlineTokenContext) => InlineTokenView | null
 }
 
+/** 回答操作栏按钮拿到的上下文 */
+export interface MessageActionContext {
+  sessionId: string
+  /** 本轮第一个 assistant 节点 id（同一轮回答的稳定标识） */
+  messageId: string
+  role: 'assistant'
+  /** 本轮回答的正文（Markdown 原文，不含思考 / 工具过程） */
+  text: string
+}
+
+/** 回答下面操作栏里的一个按钮（插件启用时才显示） */
+export interface MessageAction {
+  /** 插件内唯一 */
+  id: string
+  icon: string
+  /** 中文原文；`labelKey` 给了就走翻译 */
+  label: string
+  labelKey?: string
+  /** 进行中（如正在朗读这一条）：换成 activeIcon / activeLabel，点击仍调 run，由插件决定停还是重来 */
+  active?: (ctx: MessageActionContext) => boolean
+  activeIcon?: string
+  activeLabel?: string
+  activeLabelKey?: string
+  /** 返回 false = 这一条不显示（如回答没有正文） */
+  visible?: (ctx: MessageActionContext) => boolean
+  run: (ctx: MessageActionContext) => void | Promise<void>
+}
+
 export interface PluginUi {
   /** 对应后端插件 id；动态插件可用 `kind:<mcp|skill>` 匹配同类全部插件 */
   pluginId: string
@@ -93,6 +123,8 @@ export interface PluginUi {
   inlineTokens?: InlineTokenRule[]
   /** 用量统计里本插件分区的视图，props 见 UsageViewProps（后端 `hooks.usage` 给了分区才显示） */
   usageView?: Lazy
+  /** 回答下面操作栏的按钮（复制 / 重新生成之后） */
+  messageActions?: MessageAction[]
 }
 
 export function definePluginUi(ui: PluginUi): PluginUi {

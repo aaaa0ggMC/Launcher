@@ -26,6 +26,7 @@ import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -73,6 +74,9 @@ public class MainActivity extends Activity {
     private static final int REQ_NOTIFY = 2;
     private static final int REQ_PICK = 3;
     private static final int REQ_DIR = 4;
+    private static final int REQ_MIC = 5;
+    /** 网页的麦克风请求（语音输入）：等系统录音权限的结果 */
+    private PermissionRequest pendingMic;
 
     private FrameLayout root;
     /** 打开着的网页登录页（webLogin RPC）；同一时间最多一个 */
@@ -80,6 +84,8 @@ public class MainActivity extends Activity {
     private WebView web;
     /** 系统媒体控制（通知栏 / 锁屏）；页面经 media.update 驱动 */
     private MediaBridge media;
+    /** 系统 TTS / 语音识别（0.8.0） */
+    private SpeechBridge speech;
     private SharedPreferences prefs;
     private ValueCallback<Uri[]> fileCallback;
     /** 连接页要显示的错误（下次 state() 取走） */
@@ -145,6 +151,7 @@ public class MainActivity extends Activity {
         createSpinner();
         createWebView();
         media = new MediaBridge(this);
+        speech = new SpeechBridge(this);
 
         boolean restored = false;
         if (savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
@@ -557,6 +564,32 @@ public class MainActivity extends Activity {
     }
 
     private class Chrome extends WebChromeClient {
+        /** 网页 getUserMedia 的麦克风请求：只给宿主页面，先要系统的录音权限 */
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            boolean wantsMic = false;
+            for (String r : request.getResources())
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) wantsMic = true;
+            String origin = originOf(request.getOrigin().toString());
+            if (!wantsMic || hostOrigin.isEmpty() || !hostOrigin.equals(origin)) {
+                request.deny();
+                return;
+            }
+            String[] grant = new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE};
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                request.grant(grant);
+                return;
+            }
+            if (pendingMic != null) pendingMic.deny();
+            pendingMic = request;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+        }
+
+        @Override
+        public void onPermissionRequestCanceled(PermissionRequest request) {
+            if (pendingMic == request) pendingMic = null;
+        }
+
         @Override
         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams params) {
             if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -666,6 +699,21 @@ public class MainActivity extends Activity {
 
     private boolean notifyAsked;
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == SpeechBridge.REQ_ASR) {
+            speech.onPermission(results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
+            return;
+        }
+        if (requestCode != REQ_MIC || pendingMic == null) return;
+        PermissionRequest req = pendingMic;
+        pendingMic = null;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+            req.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        else req.deny();
+    }
+
     /** Android 13+ 的通知权限：保活开启时、或第一次有媒体要显示时请求（每次启动最多问一次） */
     void ensureNotifyPermission() {
         if (notifyAsked) return;
@@ -714,6 +762,7 @@ public class MainActivity extends Activity {
         pendingConnect = null;
         showLoading(false);
         media.release();
+        speech.release();
         stopService(new Intent(this, KeepAliveService.class));
         io.shutdownNow();
         web.destroy();
@@ -752,6 +801,11 @@ public class MainActivity extends Activity {
                     o.put("url", prefs.getString("url", DEFAULT_URL));
                     o.put("keepAlive", prefs.getBoolean("keepAlive", true));
                     o.put("pinShortcuts", Shortcuts.supported(this));
+                    // 系统语音（0.8.0）：页面据此决定用原生 TTS / 识别（见 src/main/ui/speech.ts）
+                    JSONObject sp = new JSONObject();
+                    sp.put("tts", true);
+                    sp.put("asr", SpeechBridge.asrAvailable(this));
+                    o.put("speech", sp);
                     reply(id, true, o);
                     return;
                 }
@@ -833,6 +887,27 @@ public class MainActivity extends Activity {
                     reply(id, true, new JSONObject());
                     return;
                 }
+                case "tts.voices":
+                    speech.voices(replier(id));
+                    return;
+                case "tts.speak":
+                    speech.speak(args, replier(id));
+                    return;
+                case "tts.stop":
+                    speech.stopTts();
+                    reply(id, true, new JSONObject());
+                    return;
+                case "asr.start":
+                    speech.startAsr(args, replier(id));
+                    return;
+                case "asr.stop":
+                    speech.stopAsr();
+                    reply(id, true, new JSONObject());
+                    return;
+                case "asr.cancel":
+                    speech.cancelAsr();
+                    reply(id, true, new JSONObject());
+                    return;
                 default:
                     reply(id, false, errorJson("unknown method: " + method));
             }
@@ -994,6 +1069,20 @@ public class MainActivity extends Activity {
         } catch (JSONException ignored) {
         }
         return o;
+    }
+
+    private SpeechBridge.Reply replier(String id) {
+        return new SpeechBridge.Reply() {
+            @Override
+            public void ok(JSONObject data) {
+                reply(id, true, data);
+            }
+
+            @Override
+            public void fail(String error) {
+                reply(id, false, errorJson(error));
+            }
+        };
     }
 
     private void reply(String id, boolean ok, JSONObject data) {

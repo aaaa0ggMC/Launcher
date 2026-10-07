@@ -10,6 +10,15 @@ export default {
   // 安卓 App 的系统分享：文件变成附件、文字放进输入框
   shareTarget: true,
   component: defineAsyncComponent(() => import('./View.vue')),
+  // 语音插件的朗读播放器（悬浮在页面上；被禁用时 YAYA 页面里内嵌显示）
+  outsiders: [
+    {
+      key: 'tts-player',
+      label: 'YAYA 朗读播放器',
+      component: () => import('./plugins/speech/TtsPlayer.vue'),
+      attrs: { anchor: 'bottom-right', offset: { x: 16, y: 96 } }
+    }
+  ],
   settings: [
     {
       key: 'yaya',

@@ -27,6 +27,8 @@ import type {
 import type { WorkflowSnapshot } from './services/loop/types'
 import { buildTurnsReusing, mergeNodes, type Turn } from './components/turns'
 import ChatSessionList from './components/ChatSessionList.vue'
+import TtsPlayer from './plugins/speech/TtsPlayer.vue'
+import { tts } from './plugins/speech/player'
 import UserMessage from './components/UserMessage.vue'
 import AssistantTurn from './components/AssistantTurn.vue'
 import ChatInputBox from './components/ChatInputBox.vue'
@@ -1673,6 +1675,8 @@ watch(isRunning, (now, before) => {
             {{ t('yaya.resume', '继续') }}
           </v-btn>
         </div>
+        <!-- 朗读播放器：悬浮窗被禁用时内嵌在输入框上方 -->
+        <TtsPlayer v-if="tts.inline && tts.status !== 'idle'" inline />
         <ChatInputBox
           ref="inputRef"
           v-model="draft"

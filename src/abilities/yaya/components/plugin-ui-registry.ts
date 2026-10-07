@@ -8,7 +8,7 @@
  * 用户正在插件详情页里操作，那里的启用开关自己也要能点。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
-import type { InlineTokenContext, InlineTokenView, PluginUi } from './plugin-ui'
+import type { InlineTokenContext, InlineTokenView, MessageAction, PluginUi } from './plugin-ui'
 import type { PluginInfo, PluginKind } from '../services/plugins/types'
 
 const modules = import.meta.glob<PluginUi>('../plugins/*/ui.ts', { eager: true, import: 'default' })
@@ -178,6 +178,14 @@ export const inputExtensions = computed(() =>
       pluginId: ui.pluginId,
       component: lazy(`input:${ui.pluginId}`, ui.inputExtension!)
     }))
+)
+
+/** 回答操作栏里的插件按钮（只算已启用插件的，按插件 id 排序） */
+export const messageActions = computed<{ pluginId: string; action: MessageAction }[]>(() =>
+  [...uis]
+    .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+    .filter((ui) => pluginOn.value.get(ui.pluginId) === true && ui.messageActions?.length)
+    .flatMap((ui) => ui.messageActions!.map((action) => ({ pluginId: ui.pluginId, action })))
 )
 
 // ---------------------------------------------------------------------------
