@@ -319,13 +319,22 @@ const processPreviewSteps = computed(() => {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(5, Math.max(0, Math.round(v))) : 1
 })
 
-/** 当前会话的工作流：会话自己的选择 → 草稿选择 → 设置里的默认 → agent */
+/**
+ * 当前会话的工作流：会话自己的选择 → 草稿选择 → 助手的默认 → 全局默认 → agent。
+ * 列表已加载时跳过不可用的（插件工作流的插件被关了），与运行时的回落一致。
+ */
 const currentWorkflowId = computed({
-  get: () =>
-    (activeSession.value?.meta?.workflow as string | undefined) ||
-    draftWorkflow.value ||
-    config.value?.defaultWorkflow ||
-    'agent',
+  get: () => {
+    const chain = [
+      activeSession.value?.meta?.workflow as string | undefined,
+      draftWorkflow.value,
+      config.value?.defaultWorkflow,
+      rawConfig.value?.defaultWorkflow,
+      'agent'
+    ].filter((x): x is string => !!x)
+    if (!workflows.value.length) return chain[0]
+    return chain.find((id) => workflows.value.some((w) => w.id === id)) ?? 'agent'
+  },
   set: (id: string) => {
     const s = activeSession.value
     if (!s) {
@@ -403,13 +412,20 @@ async function loadConfig(): Promise<void> {
   }
 }
 
+/** 工作流列表按当前助手过滤（插件注入的工作流只在插件对这个助手启用时出现） */
+let workflowsSeq = 0
 async function loadWorkflows(): Promise<void> {
+  const seq = ++workflowsSeq
   try {
-    workflows.value = (await window.cockpit.command('yaya.workflows-list')) as WorkflowInfo[]
+    const list = (await window.cockpit.command('yaya.workflows-list', {
+      assistant: currentAssistantId.value
+    })) as WorkflowInfo[]
+    if (seq === workflowsSeq) workflows.value = list
   } catch {
-    workflows.value = []
+    if (seq === workflowsSeq) workflows.value = []
   }
 }
+watch(currentAssistantId, () => void loadWorkflows())
 
 async function loadSessions(): Promise<void> {
   try {
@@ -1270,7 +1286,10 @@ onMounted(async () => {
     }),
     window.cockpit.on('cockpit:yaya-config-changed', (payload: unknown) => {
       rawConfig.value = payload as YayaConfig
+      // 插件开关可能变了：插件注入的工作流跟着出现 / 消失
+      void loadWorkflows()
     }),
+    window.cockpit.on('cockpit:yaya-plugins-changed', () => void loadWorkflows()),
     window.cockpit.on('cockpit:yaya-sessions-changed', () => {
       void loadSessions()
     }),

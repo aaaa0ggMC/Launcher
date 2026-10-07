@@ -87,8 +87,30 @@ export type ReasoningStyle =
 /** 批准的范围：once = 这一次；run = 本次执行里同一工具不再询问；session = 本对话都不再询问 */
 export type ApprovalScope = 'once' | 'run' | 'session'
 
+/**
+ * 工作流写进对话的数据卡片（`ctx.addCard`）：不是聊天内容，而是计算结果 / 状态面板之类。
+ * 界面按 `type` 找插件的卡片视图（`PluginUi.cardViews`），没有就显示 markdown；
+ * 模型只看得到写在节点 content 里的 `modelText`（没给 = 模型看不到这张卡）。
+ */
+export interface WorkflowCardMeta {
+  /** 来源插件（插件工作流才有） */
+  pluginId?: string
+  workflowId: string
+  /** 卡片类型，插件内自定（如 `story-state`） */
+  type: string
+  title?: string
+  /** 结构化数据（给插件的卡片视图） */
+  data?: unknown
+  /** 没有自定义视图时显示的 Markdown */
+  markdown?: string
+}
+
 export interface MessageMeta {
   workflow?: WorkflowRecord
+  /** 这个节点是一张数据卡片（不是 AI 说的话） */
+  card?: WorkflowCardMeta
+  /** 工作流在这个节点上保存的状态（按工作流 id；`ctx.saveState`，跟着对话分支走） */
+  workflowState?: Record<string, unknown>
   /** 生成这条 assistant 回答时实际使用的模型 / 服务商 id（会话中途换模型也能追溯） */
   model?: string
   provider?: string
@@ -101,7 +123,7 @@ export interface WorkflowStepRecord {
   /** 执行者：'main' = 写入对话的主 Agent；其余为子 Agent 名（如 'planner'） */
   agent: string
   /** llm = 写进对话的一步（messageId 指向该 assistant 节点）；subagent = 不进对话的子 Agent 调用；note = 说明 */
-  kind: 'llm' | 'subagent' | 'note'
+  kind: 'llm' | 'subagent' | 'note' | 'compute' | 'card'
   /** 已翻译的显示名 */
   label: string
   /** 子 Agent 输出 / 说明正文（Markdown） */
@@ -321,6 +343,11 @@ export interface WorkflowInfo {
   description: string
   /** 是否会调用工具（纯对话类 workflow 为 false） */
   usesTools: boolean
+  /** 插件注入的工作流：来源插件 id 与显示名 */
+  pluginId?: string
+  pluginLabel?: string
+  /** mdi 图标（插件工作流可给） */
+  icon?: string
 }
 
 // ---- 对话树（yaya.session-tree，见 services/tree.ts）----

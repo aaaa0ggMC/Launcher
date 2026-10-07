@@ -57,7 +57,9 @@ import {
   applyToolResultHooks,
   buildPluginInstructions,
   collectModelHints,
+  getPlugin,
   normalizeToolResult,
+  pluginConfigValues,
   resolveTools,
   runPluginTool,
   toolNeedsApproval,
@@ -86,6 +88,8 @@ import { resolveWorkflow, workflowLabel } from '../workflow/registry'
 import {
   MaxStepsError,
   type AssistantStepOptions,
+  type ComputeOptions,
+  type WorkflowCardInput,
   type AssistantStepResult,
   type SubAgentOptions,
   type WorkflowContext,
@@ -340,8 +344,11 @@ export class WorkflowRunner {
     const session = getSession(this.ctx.sessionId)
     if (!session) throw new Error(`Session ${this.ctx.sessionId} not found`)
     this.session = session
+    // 会话选的工作流不可用（插件被关 / 卸载）→ 助手的默认工作流 → 全局默认 → agent
     const workflow = resolveWorkflow(
-      (session.meta?.workflow as string | undefined) ?? this.ctx.config.defaultWorkflow
+      (session.meta?.workflow as string | undefined) ?? this.ctx.config.defaultWorkflow,
+      this.ctx.config,
+      loadYayaConfig().defaultWorkflow
     )
     this.record = {
       runId: randomUUID(),
@@ -425,8 +432,114 @@ export class WorkflowRunner {
       subAgent: (opts) => this.subAgent(opts),
       note: (label, detail) => {
         this.addStep({ agent: 'main', kind: 'note', label, detail, status: 'ok' })
-      }
+      },
+      compute: (label, fn, opts) => this.compute(label, fn, opts),
+      addCard: (card) => this.addCard(workflow, card),
+      loadState: <T>() => this.loadState(workflow.id) as T | undefined,
+      saveState: (state) => this.saveState(workflow.id, state),
+      pluginConfig: (() => {
+        const plugin = workflow.pluginId ? getPlugin(workflow.pluginId) : undefined
+        return plugin ? pluginConfigValues(plugin, this.ctx.config) : {}
+      })()
     }
+  }
+
+  /** 非 AI 节点：纯计算，记进过程（耗时 + 结果） */
+  private async compute<T>(
+    label: string,
+    fn: () => T | Promise<T>,
+    opts: ComputeOptions<T> = {}
+  ): Promise<T> {
+    await this.gate()
+    if (this.aborted) throw new Error('aborted')
+    const step = this.addStep({ agent: 'compute', kind: 'compute', label, status: 'running' })
+    try {
+      const result = await fn()
+      step.detail = opts.detail
+        ? opts.detail(result)
+        : typeof result === 'string'
+          ? result
+          : result === undefined
+            ? undefined
+            : '```json\n' + JSON.stringify(result, null, 2) + '\n```'
+      this.endStep(step, 'ok')
+      return result
+    } catch (e) {
+      step.detail = e instanceof Error ? e.message : String(e)
+      this.endStep(step, 'error')
+      throw e
+    }
+  }
+
+  /**
+   * 数据卡片：对话树上的一个 assistant 节点，content = 给模型看的文字（没有就是空串，
+   * 组装历史时空节点会被滤掉 → 模型看不到），卡片本体在 meta.card。
+   * 还没用过本次运行的首节点就用它（首节点挂着过程记录），否则接在当前末端后面。
+   */
+  private addCard(workflow: WorkflowDefinition, card: WorkflowCardInput): string {
+    const meta = {
+      pluginId: workflow.pluginId,
+      workflowId: workflow.id,
+      type: String(card.type || 'data'),
+      title: card.title,
+      data: card.data,
+      markdown: card.markdown
+    }
+    const content = card.modelText?.trim() ?? ''
+    let id: string
+    if (!this.anchorUsed) {
+      this.anchorUsed = true
+      id = this.anchorId
+      updateMessage(id, {
+        content,
+        status: 'completed',
+        meta: { ...getMessage(id)?.meta, card: meta }
+      })
+    } else {
+      id = randomUUID()
+      insertMessage({
+        id,
+        sessionId: this.ctx.sessionId,
+        parentId: this.parentId,
+        role: 'assistant',
+        content,
+        status: 'completed',
+        createdAt: Date.now(),
+        meta: { card: meta }
+      })
+    }
+    this.parentId = id
+    this.addStep({
+      agent: 'main',
+      kind: 'card',
+      label: card.title || meta.type,
+      messageId: id,
+      status: 'ok'
+    })
+    this.emitSnapshot()
+    return id
+  }
+
+  /** 当前分支上（从当前末端往上）最近一次保存的这个工作流的状态 */
+  private loadState(workflowId: string): unknown {
+    const branch = getMessageBranch(this.parentId)
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const st = branch[i].meta?.workflowState
+      if (st && Object.prototype.hasOwnProperty.call(st, workflowId)) return st[workflowId]
+    }
+    return undefined
+  }
+
+  /** 状态存在本次运行的首节点上：重新生成 / 编辑重发是新的首节点，分支各有各的状态 */
+  private saveState(workflowId: string, state: unknown): void {
+    const anchor = getMessage(this.anchorId)
+    if (!anchor) return
+    const prev = anchor.meta?.workflowState ?? {}
+    // 深拷贝一次：之后工作流再改这个对象不会悄悄影响已保存的值
+    const value = state === undefined ? undefined : JSON.parse(JSON.stringify(state))
+    updateMessage(this.anchorId, {
+      meta: { ...anchor.meta, workflowState: { ...prev, [workflowId]: value } }
+    })
   }
 
   private history(): ProviderMessage[] {
@@ -929,6 +1042,22 @@ export class WorkflowRunner {
     const id = this.anchorUsed ? this.ctx.assistantMessageId : this.anchorId
     const node = getMessage(id)
     if (!node) return
+    // 当前末端是数据卡片（卡片之后、下一次 assistantStep 之前出错）：卡片保持原样，错误另起一个节点
+    if (node.meta?.card || getMessage(this.parentId)?.meta?.card) {
+      const errId = randomUUID()
+      insertMessage({
+        id: errId,
+        sessionId: this.ctx.sessionId,
+        parentId: this.parentId,
+        role: 'assistant',
+        content: '',
+        status: 'error',
+        error,
+        createdAt: Date.now()
+      })
+      this.parentId = errId
+      return
+    }
     updateMessage(id, {
       content:
         id === this.ctx.assistantMessageId ? this.bufferedContent || node.content : node.content,

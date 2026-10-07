@@ -6,7 +6,14 @@ import type { ApprovalScope, ToolCallItem, YayaProfile } from '../types'
 import { modelMonogram } from '../profile'
 import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
-import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
+import {
+  answerStep,
+  hasProcess,
+  trailingCards,
+  turnFullMarkdown,
+  turnSegments,
+  turnText
+} from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
 import {
   applyInlineTokensHtml,
@@ -18,6 +25,7 @@ import type { MessageAction, MessageActionContext } from './plugin-ui'
 import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
+import DataCard from './DataCard.vue'
 import WorkflowCard from './WorkflowCard.vue'
 
 const props = defineProps<{
@@ -92,7 +100,7 @@ const answerSegments = computed(() =>
  * 说的话与最终回答用同一套 Markdown 分段（插件代码块照样接管）。
  */
 const segments = computed(() =>
-  showProcess.value
+  showProcess.value || props.turn.cards.length
     ? turnSegments(props.turn).map((seg) =>
         seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
       )
@@ -241,6 +249,7 @@ async function copyTurn(): Promise<void> {
             :pending-approval-id="pendingApprovalId"
             :preview-steps="previewSteps"
           />
+          <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
           <div v-else-if="'parts' in seg" class="narration">
             <template v-for="(part, i) in seg.parts" :key="i">
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
@@ -279,6 +288,8 @@ async function copyTurn(): Promise<void> {
             :streaming="live && !seg.closed"
           />
         </template>
+
+        <DataCard v-for="c in trailingCards(turn)" :key="c.id" :node="c" />
 
         <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
           <span /><span /><span />

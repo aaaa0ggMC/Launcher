@@ -666,7 +666,13 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               color="primary"
               @click="workflowId = w.id"
             >
-              <v-list-item-title class="font-weight-medium">{{ w.label }}</v-list-item-title>
+              <template v-if="w.icon" #prepend>
+                <v-icon :icon="w.icon" />
+              </template>
+              <v-list-item-title class="font-weight-medium d-flex align-center ga-2">
+                <span class="text-truncate">{{ w.label }}</span>
+                <span v-if="w.pluginLabel" class="wf-plugin">{{ w.pluginLabel }}</span>
+              </v-list-item-title>
               <v-list-item-subtitle class="wf-desc">{{ w.description }}</v-list-item-subtitle>
             </v-list-item>
           </v-list>
@@ -849,6 +855,15 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   color: inherit;
   font-size: 0.8rem;
   cursor: pointer;
+}
+.wf-plugin {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  background: rgba(var(--v-theme-primary), 0.14);
+  color: rgb(var(--v-theme-primary));
 }
 .wf-pick:hover {
   background: rgba(var(--v-theme-primary), 0.08);

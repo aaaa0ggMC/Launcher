@@ -441,9 +441,17 @@ const commands: CommandSpec[] = [
 
   {
     name: 'yaya.workflows-list',
-    description: '列出可选的工作流（智能体 / 纯对话 / 先规划再执行……）',
-    usage: 'yaya.workflows-list',
-    run: async () => listWorkflowInfo()
+    description:
+      '列出可选的工作流（智能体 / 纯对话 / 先规划再执行… 以及已启用插件注入的工作流）。' +
+      '给 --assistant 按该助手启用的插件过滤；不给按新助手的默认插件开关',
+    usage: 'yaya.workflows-list [--assistant <助手 id>]',
+    run: async (ctx) => {
+      const cfg = loadYayaConfig()
+      const assistant = ctx.named.assistant
+      return listWorkflowInfo(
+        typeof assistant === 'string' && assistant ? assistantConfig(cfg, assistant) : cfg
+      )
+    }
   },
 
   {
