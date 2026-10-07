@@ -56,5 +56,13 @@
   "yaya.rp.export.colon": ": ",
   "yaya.rp.export.copied": "Copied",
   "yaya.rp.export.empty": "No story yet, nothing to export.",
-  "yaya.agent.setup": "Setup"
+  "yaya.agent.setup": "Setup",
+  "yaya.rp.cfg.tools": "Plugin tools available",
+  "yaya.rp.cfg.tools_desc": "Lets the GM look things up before writing; the tools themselves are enabled on the plugins page (e.g. web search)",
+  "yaya.rp.tools.search": "Web search only",
+  "yaya.rp.tools.all": "All enabled tools",
+  "yaya.rp.tools.none": "No plugin tools",
+  "yaya.rp.cfg.tool_rounds": "Tool steps per passage (max)",
+  "yaya.rp.cfg.tool_rounds_desc": "How many rounds the GM may spend researching before it must write",
+  "yaya.rp.step.research": "GM: research"
 }

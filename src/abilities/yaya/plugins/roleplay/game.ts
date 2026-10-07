@@ -311,8 +311,15 @@ const PACE_TEXT: Record<Pace, string> = {
   fast: 'fast: keep things moving, frequent events and turning points'
 }
 
-/** GM 的系统提示词（替换助手的系统提示词）：只依赖生效设定与 additions，同一个故事里稳定 */
-export function gmSystem(setup: RpSetup, additions: string): string {
+/**
+ * GM 的系统提示词（替换助手的系统提示词）：只依赖生效设定、additions 与有没有工具，同一个故事里稳定。
+ * 不写任何内容尺度 / 安全规则：那由模型自己判断。
+ */
+export function gmSystem(
+  setup: RpSetup,
+  additions: string,
+  opts: { tools?: boolean } = {}
+): string {
   return [
     'You are the GameMaster (GM) of a text roleplay. Using prose, you lead the user through the world they imagine.',
     "The user plays the protagonist. Refer to the protagonist ONLY with the literal token [[main]] (the app shows it as the protagonist's name). Never give [[main]] a name or call them anything else.",
@@ -335,6 +342,14 @@ export function gmSystem(setup: RpSetup, additions: string): string {
     '- "r <aspect>": expand on an aspect of the current moment without advancing the plot.',
     '- "prompt" / "help": handled by the app (you may see their short notes in the history).',
     '',
+    opts.tools
+      ? [
+          '## Working on a turn',
+          'Organize each turn yourself. You have tools (such as web search): when the story touches real places, history, culture, works or facts you are unsure about, look them up first, then write.',
+          'Your final message (the one without tool calls) is the passage shown to the user. While you are still calling tools, write nothing else.',
+          ''
+        ].join('\n')
+      : '',
     '## Rules',
     '- Stay consistent with established facts (see the story memory). Show, do not tell.',
     '- Never spoil future developments.',
@@ -354,6 +369,7 @@ export function turnInstructions(action: RpAction, state: RpState): string {
         return [
           "## This turn: the OPENING (the user's last message is their intro)",
           "If the intro is an exported save of a previous session (settings, world, story so far), restore it: keep everything, briefly recap where the story stands, and wait for the user's command instead of starting over.",
+          'If the intro explicitly asks for different settings (point of view, detail level, pace, play mode, style), follow the intro over the settings above.',
           'Otherwise:',
           "1. Flesh out [[main]]'s origin and background (consistent with the protagonist setting).",
           "2. Depict the scene of the user's intro: set the stage. Do NOT push the plot forward yet.",
@@ -399,7 +415,7 @@ export function memoryBrief(state: RpState): string {
 }
 
 export function setupAgentSystem(setup: RpSetup, prev: RpState | null): string {
-  return `You set up a text roleplay. Read the conversation: the user's messages are their intro for the story${prev ? ' and their feedback on the opening' : ''}.
+  return `You record the setup of a text roleplay. Read the conversation: the user's messages are their intro for the story${prev ? ' and their feedback on the opening' : ''}; it ends with the GM's opening passage. Record what the intro and the opening established (the opening is canon: follow it).
 Output ONLY a JSON object:
 {
   "title": "short story title",
