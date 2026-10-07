@@ -703,12 +703,16 @@ export class WorkflowRunner {
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }
 
-  private stepTools(opt: AssistantStepOptions['tools'], local: WorkflowTool[] = []): ProviderTool[] {
-    const list = opt === 'none'
-      ? []
-      : Array.isArray(opt)
-        ? this.tools.filter((t) => opt.includes(t.wireName))
-        : this.tools
+  private stepTools(
+    opt: AssistantStepOptions['tools'],
+    local: WorkflowTool[] = []
+  ): ProviderTool[] {
+    const list =
+      opt === 'none'
+        ? []
+        : Array.isArray(opt)
+          ? this.tools.filter((t) => opt.includes(t.wireName))
+          : this.tools
     const out: ProviderTool[] = list.map((t) => ({
       name: t.wireName,
       description: t.tool.description,
