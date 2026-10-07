@@ -120,18 +120,27 @@ async function startSystem(): Promise<void> {
     return
   }
   const language = String(pluginConfigValues('speech').asr_language ?? '').trim()
+  // 识别服务连上（麦克风真正开始收音）之前一直显示「正在连接」：
+  // 提前显示「正在听」的话，用户开口的头几个字会在建连期间丢掉
+  const ready = (): void => {
+    if (rec !== r || state.value !== 'starting') return
+    state.value = 'recording'
+    startTimer()
+  }
   const r = recognize({
     lang: language && language !== 'auto' ? language : undefined,
+    onReady: () => ready(),
     onPartial: (text) => {
-      if (rec === r) partial.value = text
+      if (rec !== r) return
+      // 个别引擎不报 ready：出字了肯定已经在听
+      ready()
+      partial.value = text
     },
     onLevel: (level) => {
       if (rec === r) levels.value = [...levels.value.slice(1), level]
     }
   })
   rec = r
-  state.value = 'recording'
-  startTimer()
   try {
     const text = await r.result
     if (rec !== r) return
@@ -190,9 +199,14 @@ async function start(): Promise<void> {
     if (e.data.size) parts.push(e.data)
   }
   recorder.onstop = () => void finishRecording(recorder?.mimeType || mime || 'audio/webm')
-  recorder.start(250)
-  state.value = 'recording'
-  startTimer()
+  const r = recorder
+  // 录音机真正开始（onstart）才算在听
+  r.onstart = () => {
+    if (recorder !== r || state.value !== 'starting') return
+    state.value = 'recording'
+    startTimer()
+  }
+  r.start(250)
   startMeter(stream)
 }
 
@@ -352,7 +366,29 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="state !== 'idle'" class="asr-row" :class="`is-${state}`" role="status">
-    <template v-if="state === 'recording' || state === 'starting'">
+    <template v-if="state === 'starting'">
+      <v-progress-circular
+        indeterminate
+        size="16"
+        width="2"
+        color="primary"
+        class="flex-shrink-0"
+      />
+      <span class="asr-hint asr-connecting">{{
+        t('yaya.speech.asr.connecting', '正在连接，稍等再开口…')
+      }}</span>
+      <v-spacer />
+      <v-btn
+        icon="mdi-close"
+        variant="text"
+        size="small"
+        :title="t('yaya.speech.asr.cancel', '取消录音')"
+        :aria-label="t('yaya.speech.asr.cancel', '取消录音')"
+        @pointerdown.prevent
+        @click="cancel"
+      />
+    </template>
+    <template v-else-if="state === 'recording'">
       <span class="asr-dot" aria-hidden="true" />
       <div class="asr-levels" aria-hidden="true">
         <span
@@ -381,7 +417,6 @@ onBeforeUnmount(() => {
         color="primary"
         variant="tonal"
         size="small"
-        :disabled="state !== 'recording'"
         :title="t('yaya.speech.asr.done', '结束并识别')"
         :aria-label="t('yaya.speech.asr.done', '结束并识别')"
         @pointerdown.prevent
