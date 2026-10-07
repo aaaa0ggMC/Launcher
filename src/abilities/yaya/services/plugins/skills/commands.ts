@@ -9,12 +9,14 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
   statSync
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import type { CommandSpec } from '../../../../../main/process/commands/types'
 import { SCOPE_EXEC } from '../../../../../main/process/privacy'
@@ -23,6 +25,7 @@ import { t, te } from '../../../../../main/process/i18n'
 import { makeLogger } from '../../../../../main/process/logger'
 import { loadYayaConfig } from '../../config'
 import { refreshPlugins } from '../registry'
+import { GithubImportError, downloadGithubSkill } from './github'
 import { parseSkillMd } from './skill-md'
 import { SKILL_FILE_NAME, skillDirById, skillSlug, skillsDirOf } from './provider'
 
@@ -85,6 +88,63 @@ function refreshAndBroadcast(): number {
   return plugins.filter((p) => p.kind === 'skill' && p.id !== 'skills').length
 }
 
+/** 把一个含 SKILL.md 的目录拷进 Skill 目录（本地导入与 GitHub 导入共用） */
+function importFromDir(src: string, overwrite: boolean): { ok: true; id: string; name: string } {
+  if (!src || !existsSync(src) || !statSync(src).isDirectory()) {
+    throw new Error(te('yaya.skill.err.no_dir', { path: src }, '目录不存在：{path}'))
+  }
+  const skillFile = join(src, SKILL_FILE_NAME)
+  if (!existsSync(skillFile)) {
+    throw new Error(te('yaya.skill.err.no_skill_md', { path: src }, '目录下没有 SKILL.md：{path}'))
+  }
+  const parsed = parseSkillMd(readFileSync(skillFile, 'utf8'))
+  if (!parsed) {
+    throw new Error(
+      te(
+        'yaya.skill.err.bad_skill_md',
+        { path: skillFile },
+        'SKILL.md 解析失败（frontmatter 至少要有 name）：{path}'
+      )
+    )
+  }
+  if (dirSize(src) > MAX_IMPORT_BYTES) {
+    throw new Error(
+      te('yaya.skill.err.too_large', { path: src, limit: '50MB' }, '目录体积超过 50MB 上限：{path}')
+    )
+  }
+
+  const root = skillsDirOf(loadYayaConfig())
+  mkdirSync(root, { recursive: true })
+  const destName = skillSlug(parsed.name)
+  const dest = join(root, destName)
+  const sourcePath = realpathSync(src)
+  const destinationPath = existsSync(dest) ? realpathSync(dest) : join(realpathSync(root), destName)
+  if (
+    sourcePath === destinationPath ||
+    destinationPath.startsWith(sourcePath + sep) ||
+    sourcePath.startsWith(destinationPath + sep)
+  ) {
+    throw new Error(t('yaya.skill.err.overlap', '导入来源与目标目录不能相同或互相包含'))
+  }
+  if (existsSync(dest)) {
+    if (!overwrite) {
+      throw new Error(
+        te(
+          'yaya.skill.err.exists',
+          { name: parsed.name },
+          'Skill {name} 已存在；加 --overwrite true 覆盖导入'
+        )
+      )
+    }
+    rmSync(dest, { recursive: true, force: true })
+  }
+
+  cpSync(src, dest, { recursive: true, filter: copyFilter(resolve(src)) })
+  refreshAndBroadcast()
+  log.info('skill imported', { name: parsed.name, dir: destName })
+  return { ok: true, id: `skill-${destName}`, name: parsed.name }
+}
+
 export const skillCommands: CommandSpec[] = [
   {
     name: 'yaya.skills-dir',
@@ -106,70 +166,42 @@ export const skillCommands: CommandSpec[] = [
     usage: 'yaya.skills-import --path <dir> [--overwrite true]',
     // 读用户指定的任意路径 → 等同 system.exec；只许用户本人 / 已授权 agent 触发
     privacy: { requires: [SCOPE_EXEC] },
+    run: async (ctx) =>
+      importFromDir(
+        String(ctx.named.path ?? ''),
+        ctx.named.overwrite === true || ctx.named.overwrite === 'true'
+      )
+  },
+
+  {
+    name: 'yaya.skills-import-github',
+    description: t(
+      'yaya.skill.cmd_import_github_desc',
+      '从 GitHub 链接导入 Skill（仓库、tree / blob 子路径或 raw SKILL.md 链接）'
+    ),
+    usage: 'yaya.skills-import-github --url <github url> [--path <repo subdir>] [--overwrite true]',
+    // 下载的 Skill 可能带脚本，会进 agent 的指令：与本地导入同级
+    privacy: { requires: [SCOPE_EXEC] },
     run: async (ctx) => {
-      const src = String(ctx.named.path ?? '')
-      if (!src || !existsSync(src) || !statSync(src).isDirectory()) {
-        throw new Error(te('yaya.skill.err.no_dir', { path: src }, '目录不存在：{path}'))
-      }
-      const skillFile = join(src, SKILL_FILE_NAME)
-      if (!existsSync(skillFile)) {
-        throw new Error(
-          te('yaya.skill.err.no_skill_md', { path: src }, '目录下没有 SKILL.md：{path}')
+      const url = String(ctx.named.url ?? '').trim()
+      const pick = ctx.named.path === undefined ? undefined : String(ctx.named.path)
+      const tmp = mkdtempSync(join(tmpdir(), 'yaya-skill-gh-'))
+      try {
+        const res = await downloadGithubSkill(url, tmp, { pick }).catch((err: unknown) => {
+          if (!(err instanceof GithubImportError)) throw err
+          throw new Error(te(`yaya.skill.err.gh_${err.code}`, err.vars, err.template))
+        })
+        // 链接下有多个 Skill：交回给调用方选一个（再带 --path 调）
+        if (res.candidates) return { ok: false, candidates: res.candidates }
+        const out = importFromDir(
+          res.dir!,
+          ctx.named.overwrite === true || ctx.named.overwrite === 'true'
         )
+        log.info('skill imported from github', { url, name: out.name })
+        return out
+      } finally {
+        rmSync(tmp, { recursive: true, force: true })
       }
-      const parsed = parseSkillMd(readFileSync(skillFile, 'utf8'))
-      if (!parsed) {
-        throw new Error(
-          te(
-            'yaya.skill.err.bad_skill_md',
-            { path: skillFile },
-            'SKILL.md 解析失败（frontmatter 至少要有 name）：{path}'
-          )
-        )
-      }
-      if (dirSize(src) > MAX_IMPORT_BYTES) {
-        throw new Error(
-          te(
-            'yaya.skill.err.too_large',
-            { path: src, limit: '50MB' },
-            '目录体积超过 50MB 上限：{path}'
-          )
-        )
-      }
-
-      const root = skillsDirOf(loadYayaConfig())
-      mkdirSync(root, { recursive: true })
-      const destName = skillSlug(parsed.name)
-      const dest = join(root, destName)
-      const sourcePath = realpathSync(src)
-      const destinationPath = existsSync(dest)
-        ? realpathSync(dest)
-        : join(realpathSync(root), destName)
-      if (
-        sourcePath === destinationPath ||
-        destinationPath.startsWith(sourcePath + sep) ||
-        sourcePath.startsWith(destinationPath + sep)
-      ) {
-        throw new Error(t('yaya.skill.err.overlap', '导入来源与目标目录不能相同或互相包含'))
-      }
-      const overwrite = ctx.named.overwrite === true || ctx.named.overwrite === 'true'
-      if (existsSync(dest)) {
-        if (!overwrite) {
-          throw new Error(
-            te(
-              'yaya.skill.err.exists',
-              { name: parsed.name },
-              'Skill {name} 已存在；加 --overwrite true 覆盖导入'
-            )
-          )
-        }
-        rmSync(dest, { recursive: true, force: true })
-      }
-
-      cpSync(src, dest, { recursive: true, filter: copyFilter(resolve(src)) })
-      refreshAndBroadcast()
-      log.info('skill imported', { name: parsed.name, dir: destName })
-      return { ok: true, id: `skill-${destName}`, name: parsed.name }
     }
   },
 
