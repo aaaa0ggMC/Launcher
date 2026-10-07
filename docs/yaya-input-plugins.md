@@ -118,8 +118,9 @@ function handleKey(e: KeyboardEvent): boolean {
    `onBeforeUnmount` 里 `invalidate + dispose`。
 4. **纯逻辑**抽成 `plugins/<id>/select.ts`（候选过滤、环绕索引、区间校验），配
    `select.test.ts` 用 `node:test` 离线跑（`pnpm test`），不碰 DOM / 命令 / 配置。
-5. **翻译**：界面字符串走 `useI18n` 的 `t(key, 兜底)`，新键报给副总监加进 yaya 的
-   `translations/zh.json` 与 `en-US.json`（键名带 `yaya.<插件id>.` 前缀）。
+5. **翻译**：界面字符串走 `useI18n` 的 `t(key, 兜底)`，键写进插件自己的
+   `plugins/<id>/translations/zh.json` 与 `en-US.json`（键名带 `yaya.<插件id>.` 前缀；
+   前端与主进程都会自动合并，不要加进 yaya 的全局翻译）。
 
 ## 九、最小可运行示例（点名插件的骨架）
 

@@ -1,0 +1,12 @@
+{
+  "yaya.plugin.widget.label": "HTML widgets",
+  "yaya.plugin.widget.desc": "Run ```widget code blocks in an isolated sandbox on click (no network, no access to Cockpit) — display only",
+  "yaya.plugin.widget.mention": "You can output ```widget code blocks (self-contained HTML / CSS / JS) — the UI runs them in a sandbox",
+  "yaya.widget.run": "Run widget",
+  "yaya.widget.show_source": "Stop and show source",
+  "yaya.widget.rerun": "Run again",
+  "yaya.widget.streaming": "Generating — you can run it once the code block is closed",
+  "yaya.widget.too_large": "Widget is over 500KB — showing source only",
+  "yaya.widget.sandbox_hint": "Runs in an isolated sandbox: no network, no access to Cockpit",
+  "yaya.widget.frame_title": "HTML widget"
+}

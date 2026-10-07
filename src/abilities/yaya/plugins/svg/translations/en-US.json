@@ -1,0 +1,7 @@
+{
+  "yaya.plugin.svg.label": "SVG preview",
+  "yaya.plugin.svg.desc": "Display ```svg code blocks as sanitized images (scripts stay inert) — display only",
+  "yaya.plugin.svg.mention": "You can output ```svg code blocks directly — the UI shows them as images",
+  "yaya.diagram.svg_invalid": "Not a valid SVG — cannot render",
+  "yaya.diagram.svg_too_large": "SVG exceeds 200 KB — source only"
+}

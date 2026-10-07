@@ -42,6 +42,14 @@ mergeModuleTables(
   }),
   tables
 )
+// …and so may plugins inside an ability (e.g. YAYA's plugins/<id>/translations/).
+mergeModuleTables(
+  import.meta.glob('../../abilities/*/plugins/*/translations/*.json', {
+    eager: true,
+    import: 'default'
+  }),
+  tables
+)
 mergeModuleTables(
   import.meta.glob('../../background/*/translations/*.json', {
     eager: true,

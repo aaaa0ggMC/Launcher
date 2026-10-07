@@ -1,0 +1,8 @@
+{
+  "yaya.plugin.android.label": "安卓控制",
+  "yaya.plugin.android.desc": "宿主在手机 Termux 里时操作这台手机（Termux:API / Shizuku）",
+  "yaya.plugin.android.group_termux": "Termux:API",
+  "yaya.plugin.android.group_termux_desc": "电量、通知、震动、手电筒、音量、亮度、朗读、剪贴板、定位、拍照",
+  "yaya.plugin.android.group_shizuku": "Shizuku",
+  "yaya.plugin.android.group_shizuku_desc": "adb 级权限：截屏、点按 / 滑动 / 输入、启动应用、Shell（危险，默认关闭）"
+}

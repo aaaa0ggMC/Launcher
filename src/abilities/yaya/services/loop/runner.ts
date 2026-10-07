@@ -36,7 +36,12 @@ import {
   getSession,
   updateSession
 } from '../db'
-import { loadYayaConfig, normalizeAssistantName, resolveSystemPrompt } from '../config'
+import {
+  DEFAULT_YAYA_CONFIG,
+  loadYayaConfig,
+  normalizeAssistantName,
+  resolveSystemPrompt
+} from '../config'
 import { assistantConfig, sessionAssistantId } from '../../assistants'
 import { collectPromptVars, type PromptVar } from '../prompt-vars'
 import { normalizeProfile } from '../../profile'
@@ -427,6 +432,10 @@ export class WorkflowRunner {
         return host.aborted
       },
       history: () => this.history(),
+      assistantPrompt: () =>
+        this.rawSystemPrompt.trim() === DEFAULT_YAYA_CONFIG.systemPrompt.trim()
+          ? ''
+          : resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars),
       assistantStep: (opts) => this.assistantStep(workflow, opts),
       runTools: (step) => this.runTools(step),
       subAgent: (opts) => this.subAgent(opts),
@@ -683,8 +692,9 @@ export class WorkflowRunner {
   /** 系统提示词变量的快照（run() 开始时取） */
   private promptVars: Partial<Record<PromptVar, string>> = {}
 
-  private systemPrompt(extra?: string): string {
-    const base = resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
+  private systemPrompt(extra?: string, replace?: string): string {
+    const base =
+      replace ?? resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
     const plugins = buildPluginInstructions(this.ctx.config)
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }
@@ -787,7 +797,7 @@ export class WorkflowRunner {
       {
         model: this.model,
         messages: [
-          { role: 'system', content: this.systemPrompt(opts.extraSystem) },
+          { role: 'system', content: this.systemPrompt(opts.extraSystem, opts.system) },
           ...this.history()
         ],
         tools,

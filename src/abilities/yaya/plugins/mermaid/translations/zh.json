@@ -1,0 +1,15 @@
+{
+  "yaya.plugin.mermaid.label": "Mermaid 图表",
+  "yaya.plugin.mermaid.desc": "把 ```mermaid 代码块渲染成流程图 / 时序图 / 关系图，只影响显示",
+  "yaya.plugin.mermaid.mention": "用户希望你在需要时用 ```mermaid 代码块画流程图 / 时序图 / 关系图，界面会渲染成图",
+  "yaya.diagram.render_failed": "图表渲染失败",
+  "yaya.diagram.mermaid_load_failed": "图表引擎加载失败",
+  "yaya.plugin.mermaid.cfg_theme": "配色",
+  "yaya.plugin.mermaid.theme_follow": "跟随界面主题",
+  "yaya.plugin.mermaid.theme_default": "Mermaid 默认",
+  "yaya.plugin.mermaid.theme_neutral": "中性（黑白）",
+  "yaya.plugin.mermaid.theme_forest": "森林",
+  "yaya.plugin.mermaid.theme_dark": "暗色",
+  "yaya.plugin.mermaid.cfg_max_height": "图的最大显示高度（像素）",
+  "yaya.plugin.mermaid.cfg_max_height_desc": "超过的部分等比缩小；点图可以放大查看"
+}

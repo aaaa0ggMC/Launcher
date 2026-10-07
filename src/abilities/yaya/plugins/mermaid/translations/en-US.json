@@ -1,0 +1,15 @@
+{
+  "yaya.plugin.mermaid.label": "Mermaid diagrams",
+  "yaya.plugin.mermaid.desc": "Render ```mermaid code blocks into flowcharts / sequence / entity diagrams — display only",
+  "yaya.plugin.mermaid.mention": "The user would like you to draw flowcharts / sequence / relationship diagrams with ```mermaid code blocks when useful — the UI renders them as images",
+  "yaya.diagram.render_failed": "Diagram failed to render",
+  "yaya.diagram.mermaid_load_failed": "Failed to load the diagram engine",
+  "yaya.plugin.mermaid.cfg_theme": "Colors",
+  "yaya.plugin.mermaid.theme_follow": "Follow the app theme",
+  "yaya.plugin.mermaid.theme_default": "Mermaid default",
+  "yaya.plugin.mermaid.theme_neutral": "Neutral (black & white)",
+  "yaya.plugin.mermaid.theme_forest": "Forest",
+  "yaya.plugin.mermaid.theme_dark": "Dark",
+  "yaya.plugin.mermaid.cfg_max_height": "Maximum diagram height (px)",
+  "yaya.plugin.mermaid.cfg_max_height_desc": "Taller diagrams are scaled down; click to zoom"
+}

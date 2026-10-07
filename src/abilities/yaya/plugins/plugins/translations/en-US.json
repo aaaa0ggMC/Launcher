@@ -1,0 +1,18 @@
+{
+  "yaya.plugin.plugins.desc": "Let the assistant inspect and adjust its own plugins, MCP servers and skills, and see the current context usage",
+  "yaya.plugin.plugins.err_bad_url": "Only http / https server URLs are supported",
+  "yaya.plugin.plugins.err_need_name": "Missing MCP server name",
+  "yaya.plugin.plugins.err_need_plugin": "Missing plugin id",
+  "yaya.plugin.plugins.err_need_server": "Missing MCP server id",
+  "yaya.plugin.plugins.err_need_tool": "Missing tool wire name",
+  "yaya.plugin.plugins.err_self": "The plugin management plugin cannot disable itself — use the settings page",
+  "yaya.plugin.plugins.err_self_tool": "The plugin management plugin's own tools cannot be disabled — use the settings page",
+  "yaya.plugin.plugins.err_unknown_plugin": "Plugin not found: {id}",
+  "yaya.plugin.plugins.err_unknown_server": "MCP server not found: {id}",
+  "yaya.plugin.plugins.err_unknown_tool": "Tool not found: {wireName}",
+  "yaya.plugin.plugins.guard_config": "Change which YAYA plugins / tools are enabled",
+  "yaya.plugin.plugins.guard_mcp_add": "Add an MCP server: connect to an arbitrary server and hand its tools to the AI",
+  "yaya.plugin.plugins.guard_mcp_update": "Change an MCP server's URL / headers: equivalent to connecting to an arbitrary server",
+  "yaya.plugin.plugins.label": "Plugin management",
+  "yaya.plugin.plugins.note_next_run": "New tools take effect from the next conversation run"
+}

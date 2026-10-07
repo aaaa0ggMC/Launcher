@@ -1,0 +1,18 @@
+{
+  "yaya.plugin.plugins.desc": "让助手查看与调整自己的插件、MCP 服务器、Skill，并查看当前上下文用量",
+  "yaya.plugin.plugins.err_bad_url": "只支持 http / https 服务器地址",
+  "yaya.plugin.plugins.err_need_name": "缺少 MCP 服务器名称（name）",
+  "yaya.plugin.plugins.err_need_plugin": "缺少插件 id",
+  "yaya.plugin.plugins.err_need_server": "缺少 MCP 服务器 id",
+  "yaya.plugin.plugins.err_need_tool": "缺少工具 wire name",
+  "yaya.plugin.plugins.err_self": "「插件管理」插件不能停用自己，请在设置页操作",
+  "yaya.plugin.plugins.err_self_tool": "「插件管理」插件自己的工具不能停用，请在设置页操作",
+  "yaya.plugin.plugins.err_unknown_plugin": "插件不存在：{id}",
+  "yaya.plugin.plugins.err_unknown_server": "MCP 服务器不存在：{id}",
+  "yaya.plugin.plugins.err_unknown_tool": "工具不存在：{wireName}",
+  "yaya.plugin.plugins.guard_config": "修改 YAYA 插件 / 工具的启用状态",
+  "yaya.plugin.plugins.guard_mcp_add": "添加 MCP 服务器：连接任意服务器并把它的工具交给 AI",
+  "yaya.plugin.plugins.guard_mcp_update": "修改 MCP 服务器地址 / 请求头：等同连接任意服务器",
+  "yaya.plugin.plugins.label": "插件管理",
+  "yaya.plugin.plugins.note_next_run": "新工具从下一次对话运行起生效"
+}
