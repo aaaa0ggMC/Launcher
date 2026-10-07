@@ -48,3 +48,14 @@ export function latestReasoningTitle(text: string | undefined): string {
   }
   return ''
 }
+
+/** 预览用的纯文本：拆开粘连的小标题，去掉小标题两边的星号 */
+export function plainReasoning(text: string): string {
+  return unglue(text)
+    .split('\n')
+    .map((l) => {
+      const m = HEADING.exec(l)
+      return m ? m[1].trim() : l
+    })
+    .join('\n')
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { latestReasoningTitle, reasoningSections } from './reasoning-brief'
+import { latestReasoningTitle, plainReasoning, reasoningSections } from './reasoning-brief'
 
 test('思考摘要按「**小标题**」分段；原始思维链是一整段', () => {
   assert.deepEqual(
@@ -35,4 +35,8 @@ test('上一段句号后直接接下一段小标题也能拆开', () => {
   assert.deepEqual(reasoningSections('This is **key**\nnext'), [
     { title: '', body: 'This is **key**\nnext' }
   ])
+})
+
+test('预览纯文本：小标题去星号、粘连的拆开', () => {
+  assert.equal(plainReasoning('**A**\nx.**B**\ny'), 'A\nx.\nB\ny')
 })

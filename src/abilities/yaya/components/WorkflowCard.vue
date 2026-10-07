@@ -8,7 +8,7 @@ import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
 import EmergeText from './EmergeText.vue'
 import ReasoningText from './ReasoningText.vue'
-import { latestReasoningTitle } from './reasoning-brief'
+import { latestReasoningTitle, plainReasoning } from './reasoning-brief'
 
 /**
  * 过程块：一段连续的思考 / 工具调用 / 子 Agent 步骤（AI 说的话在块外，见 turns.ts `turnSegments`）。
@@ -140,7 +140,11 @@ const summary = computed(() => {
   if (items.value.some((it) => it.kind !== 'llm')) return t('yaya.wf.process', '过程')
   // 闭源模型（Gemini / Claude / OpenAI）只给思考摘要，不叫「思考过程」
   const thought = props.turn.steps.filter((n) => n.reasoningContent)
-  if (thought.length && thought.every((n) => n.meta?.reasoningSummary))
+  // （运行中 meta 还没写回：带「**小标题**」分段的也当摘要）
+  if (
+    thought.length &&
+    thought.every((n) => n.meta?.reasoningSummary || latestReasoningTitle(n.reasoningContent))
+  )
     return t('yaya.wf.thinking_summary', '思考摘要')
   return t('yaya.wf.thinking', '思考过程')
 })
@@ -233,10 +237,9 @@ const previewRows = computed<PreviewRow[]>(() => {
 /** 取文本最后几行（思考的预览，纯文本不渲染 Markdown） */
 function tailLines(text: string, lines = 3): string {
   // 只看末尾一段：思考可能有几万字，流式时每次刷新都整段 split 没必要
-  const kept = text
-    .slice(-800)
+  const kept = plainReasoning(text.slice(-800))
     .split('\n')
-    .map((l) => l.trim().replace(/^\*\*([^*]+)\*\*$/, '$1'))
+    .map((l) => l.trim())
     .filter(Boolean)
     .slice(-lines)
   return kept.join('\n')
