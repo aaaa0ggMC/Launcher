@@ -9,6 +9,7 @@
  * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
  * - `messageActions`：每条回答下面操作栏里的按钮（如「朗读」）。
  * - `cardViews`：插件工作流写进对话的数据卡片（`ctx.addCard({ type })`）按 type 渲染。
+ * - `toolCards`：某个工具的调用渲染成回答里的独立卡片（不收进过程卡片），运行中可交互（如 ask 的提问）。
  * - `inputExtension`：输入框扩展组件；往「+」面板加项用 `context.addAction`（见 plugin-input.ts）。
  *
  * **只做显示层变换**：数据库与发给模型的历史永远是模型 / 工具的原文，所以这里怎么渲染都不影响提示词缓存。
@@ -33,6 +34,15 @@ export interface FenceViewProps {
   source: string
   /** 流式输出中（代码块可能还没写完） */
   streaming: boolean
+}
+
+/**
+ * 工具卡片（`toolCards`）拿到的 props：固定显示在回答正文里（过程卡片里仍保留这次调用的记录行）。
+ * `live` = 本轮正在运行，卡片可据此决定能否交互（如提问卡片的提交按钮）。
+ */
+export interface ToolCardProps extends ToolViewProps {
+  sessionId: string
+  live: boolean
 }
 
 /** 插件详情页的自定义配置界面（替代按 schema 自动生成的表单） */
@@ -139,6 +149,11 @@ export interface PluginUi {
   messageActions?: MessageAction[]
   /** 数据卡片类型 → 视图组件（props 见 CardViewProps）；没有就显示卡片的 markdown */
   cardViews?: Record<string, Lazy>
+  /**
+   * 裸工具名 → 独立卡片视图（props 见 ToolCardProps）。这个工具的每次调用都在回答里显示成一张卡片，
+   * 位置在发起调用的那一步之后；不按启用状态门控（历史对话里的卡片在插件关掉后也要能看懂）。
+   */
+  toolCards?: Record<string, Lazy>
 }
 
 export function definePluginUi(ui: PluginUi): PluginUi {

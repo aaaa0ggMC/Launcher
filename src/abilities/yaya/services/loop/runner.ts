@@ -1057,6 +1057,7 @@ export class WorkflowRunner {
             withOrigin(this.origin, () =>
               runPluginTool(def, applyToolArgsHooks(this.ctx.sessionId, call.name, args, cfg), {
                 sessionId: this.ctx.sessionId,
+                callId: call.id,
                 signal: this.abortController.signal,
                 context: () => this.toolContext()
               })

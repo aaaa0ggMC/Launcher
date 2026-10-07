@@ -161,6 +161,20 @@ export function toolViewFor(wireName: string): ResolvedToolView | null {
   }
 }
 
+/** 某个工具调用的独立卡片视图（PluginUi.toolCards；没有返回 null）。不按启用状态门控 */
+export function toolCardFor(wireName: string): ResolvedToolView | null {
+  const ref = wireMap.value.get(wireName)
+  if (!ref) return null
+  const ui = uiFor(ref.pluginId, ref.kind)
+  const loader = ui?.toolCards?.[ref.toolName]
+  if (!loader) return null
+  return {
+    component: lazy(`toolcard:${ui!.pluginId}:${ref.toolName}`, loader),
+    pluginId: ref.pluginId,
+    toolName: ref.toolName
+  }
+}
+
 /** 已注册了渲染器的代码块语言（小写；只算已启用插件的） */
 export const fenceLangs = computed(() => {
   const set = new Set<string>()

@@ -1,0 +1,18 @@
+{
+  "yaya.plugin.ask.label": "Ask the user",
+  "yaya.plugin.ask.desc": "When the AI needs a decision, it shows a question card you can click through, then carries on",
+  "yaya.ask.title": "A few questions for you",
+  "yaya.ask.waiting": "Submitted, continuing…",
+  "yaya.ask.answered": "Your answers",
+  "yaya.ask.dismissed": "Not answered",
+  "yaya.ask.failed": "Question cancelled",
+  "yaya.ask.expired": "Question expired",
+  "yaya.ask.expired_hint": "This run has ended; just reply with a message instead.",
+  "yaya.ask.multi": "Pick any",
+  "yaya.ask.other": "Something else / a note (optional)",
+  "yaya.ask.free": "Type your answer",
+  "yaya.ask.skipped": "Skipped",
+  "yaya.ask.progress": "{n}/{total} answered",
+  "yaya.ask.dismiss": "Skip all",
+  "yaya.ask.submit": "Submit"
+}

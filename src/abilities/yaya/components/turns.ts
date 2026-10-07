@@ -115,6 +115,8 @@ export type TurnSegment =
   | { kind: 'process'; key: string; items: ProcessItem[] }
   | { kind: 'text'; key: string; node: MessageNode }
   | { kind: 'card'; key: string; node: MessageNode }
+  /** 渲染成独立卡片的工具调用（插件 `toolCards`，如 ask 的提问）：过程卡片里仍有它的记录行 */
+  | { kind: 'toolcard'; key: string; node: MessageNode; call: ToolCallItem }
 
 /** 过程卡片里显示的项（数据卡片单独成段，不进过程卡片） */
 export function processOnly(items: ProcessItem[]): Exclude<ProcessItem, { kind: 'card' }>[] {
@@ -128,7 +130,9 @@ export function processOnly(items: ProcessItem[]): Exclude<ProcessItem, { kind: 
  */
 export function turnSegments(
   turn: AssistantTurn,
-  where: 'before' | 'after' = 'before'
+  where: 'before' | 'after' = 'before',
+  /** 这个工具的调用要不要单独成卡片（插件 `toolCards`） */
+  isCardTool?: (name: string) => boolean
 ): TurnSegment[] {
   const out: TurnSegment[] = []
   let block: ProcessItem[] = []
@@ -164,12 +168,18 @@ export function turnSegments(
     const tools = !item.answer && !!n.toolCalls?.length
     if (!text) {
       if (n.reasoningContent || tools) block.push({ ...item, part: 'all' })
-      continue
+    } else {
+      if (n.reasoningContent) block.push({ ...item, key: `${item.key}:r`, part: 'reasoning' })
+      flush()
+      out.push({ kind: 'text', key: `t:${n.id}`, node: n })
+      if (tools) block.push({ ...item, key: `${item.key}:t`, part: 'tools' })
     }
-    if (n.reasoningContent) block.push({ ...item, key: `${item.key}:r`, part: 'reasoning' })
-    flush()
-    out.push({ kind: 'text', key: `t:${n.id}`, node: n })
-    if (tools) block.push({ ...item, key: `${item.key}:t`, part: 'tools' })
+    const cardCalls = tools && isCardTool ? n.toolCalls!.filter((c) => isCardTool(c.name)) : []
+    if (cardCalls.length) {
+      flush()
+      for (const call of cardCalls)
+        out.push({ kind: 'toolcard', key: `k:${n.id}:${call.id}`, node: n, call })
+    }
   }
   flush()
   return out

@@ -165,6 +165,36 @@ describe('answer / process split', () => {
 })
 
 describe('turnSegments', () => {
+  it('splits plugin tool-card calls (e.g. ask_user) out of the process block, after their step', () => {
+    const turns = buildTurns([
+      node({ id: 'u', role: 'user', content: 'go' }),
+      node({
+        id: 's1',
+        role: 'assistant',
+        content: 'one question first',
+        toolCalls: [
+          { id: 'c1', name: 'run_bash', args: { command: 'ls' }, status: 'success' },
+          { id: 'c2', name: 'ask_user', args: { questions: [] }, status: 'executing' }
+        ]
+      })
+    ])
+    const turn = turns[1]
+    assert.ok(turn.kind === 'assistant')
+    const segs = turnSegments(turn, 'before', (n) => n === 'ask_user')
+    assert.deepEqual(
+      segs.map((s) => s.kind),
+      ['text', 'process', 'toolcard']
+    )
+    const card = segs[2]
+    assert.ok(card.kind === 'toolcard')
+    assert.equal(card.call.id, 'c2')
+    // 没有判定函数时与旧行为一致
+    assert.deepEqual(
+      turnSegments(turn).map((s) => s.kind),
+      ['text', 'process']
+    )
+  })
+
   it('interleaves narration with process blocks; only reasoning and tools are folded', () => {
     const call = (id: string): MessageNode['toolCalls'] => [
       { id, name: 'cockpit_command_script', args: { code: 'x' }, status: 'success' }
