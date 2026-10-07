@@ -136,6 +136,9 @@ const pendingCall = computed<ToolCallItem | null>(() => {
   if (!props.pendingApprovalId) return null
   for (const s of props.turn.steps)
     for (const c of s.toolCalls ?? []) if (c.id === props.pendingApprovalId) return c
+  // 带工具的子 Agent（如副代理）的调用记在过程记录的步骤上
+  for (const s of props.turn.workflow?.steps ?? [])
+    for (const c of s.calls ?? []) if (c.id === props.pendingApprovalId) return c
   return null
 })
 

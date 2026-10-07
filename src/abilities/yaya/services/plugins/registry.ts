@@ -430,6 +430,18 @@ export function buildPluginInstructions(config: YayaConfig): string {
 /**
  * 本次调用是否需要人工确认。优先级：用户对该工具的显式设置 > 全局「自动允许」> 提供方默认。
  */
+/** 不看参数时的审批方式（给子 Agent 挑「免确认的工具」用）：dynamic = 插件按参数判断 */
+export function toolApprovalMode(
+  resolved: ResolvedTool,
+  config: Pick<YayaConfig, 'toolApproval' | 'autoApproveTools'>
+): 'ask' | 'auto' | 'dynamic' {
+  const override = config.toolApproval?.[resolved.wireName]
+  if (override === 'ask' || override === 'auto') return override
+  if (config.autoApproveTools) return 'auto'
+  const a = resolved.tool.approval ?? 'auto'
+  return typeof a === 'function' ? 'dynamic' : a
+}
+
 export function toolNeedsApproval(
   resolved: ResolvedTool,
   args: Record<string, unknown>,

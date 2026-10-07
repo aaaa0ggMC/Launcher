@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { before, it } from 'node:test'
 import type { AIProvider, ProviderGenerateResult } from '../providers/types'
-import type { YayaConfig } from '../../types'
+import type { WorkflowRecord, YayaConfig } from '../../types'
 
 process.env.HOME = mkdtempSync('/tmp/yaya-controls-test-')
 process.env.XDG_CONFIG_HOME = `${process.env.HOME}/.config`
@@ -257,9 +257,9 @@ it('a plugin tool can run a sub-agent with tools; its calls share approval and l
   const branch = db.getMessageBranch(db.getSession(id)!.activeLeafId!)
   const toolNode = branch.find((n) => n.role === 'tool' && n.name === 'dispatch')
   assert.equal(toolNode?.content, 'report: found probe-result (1 calls)')
-  const rec = branch.find((n) => n.meta?.workflow)?.meta?.workflow
-  const step = rec.steps.find((s: { agent: string }) => s.agent === 'deputy')
+  const rec = branch.find((n) => n.meta?.workflow)?.meta?.workflow as WorkflowRecord
+  const step = rec.steps.find((s) => s.agent === 'deputy')!
   assert.equal(step.status, 'ok')
-  assert.equal(step.calls[0].status, 'success')
+  assert.equal(step.calls?.[0].status, 'success')
   assert.equal(step.detail, 'found probe-result')
 })

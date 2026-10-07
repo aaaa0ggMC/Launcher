@@ -59,6 +59,8 @@ export interface WorkflowTool {
 export interface AvailableTool {
   name: string
   pluginId: string
+  /** 按当前设置是否要用户确认：dynamic = 看参数（插件按参数判断） */
+  approval?: 'ask' | 'auto' | 'dynamic'
 }
 
 export interface AssistantStepResult {

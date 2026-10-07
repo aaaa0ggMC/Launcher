@@ -70,6 +70,7 @@ import {
   pluginConfigValues,
   resolveTools,
   runPluginTool,
+  toolApprovalMode,
   toolNeedsApproval,
   type ResolvedTool
 } from '../plugins/registry'
@@ -98,6 +99,7 @@ import {
   type AgentRunOptions,
   type AgentRunResult,
   type AssistantStepOptions,
+  type AvailableTool,
   type ComputeOptions,
   type WorkflowCardInput,
   type AssistantStepResult,
@@ -442,7 +444,7 @@ export class WorkflowRunner {
     this.toolWorkflow = {
       workflowId: workflow.id,
       history: () => this.history(),
-      availableTools: () => this.tools.map((t) => ({ name: t.wireName, pluginId: t.plugin.id })),
+      availableTools: () => this.availableTools(),
       subAgent: (opts) => this.subAgent(opts),
       runAgent: (opts) => this.runAgent(opts),
       note: (label, detail) => {
@@ -458,7 +460,7 @@ export class WorkflowRunner {
         return host.aborted
       },
       history: () => this.history(),
-      availableTools: () => this.tools.map((t) => ({ name: t.wireName, pluginId: t.plugin.id })),
+      availableTools: () => this.availableTools(),
       assistantPrompt: () =>
         this.rawSystemPrompt.trim() === DEFAULT_YAYA_CONFIG.systemPrompt.trim()
           ? ''
@@ -479,6 +481,14 @@ export class WorkflowRunner {
         return plugin ? pluginConfigValues(plugin, this.ctx.config) : {}
       })()
     }
+  }
+
+  private availableTools(): AvailableTool[] {
+    return this.tools.map((t) => ({
+      name: t.wireName,
+      pluginId: t.plugin.id,
+      approval: toolApprovalMode(t, this.ctx.config)
+    }))
   }
 
   /** 非 AI 节点：纯计算，记进过程（耗时 + 结果） */

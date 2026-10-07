@@ -4,6 +4,7 @@
   "label.YAYA": "YAYA",
   "label.助手名称、服务商与模型、工具权限": "助手名称、服务商与模型、工具权限",
   "label.智能体配置": "智能体配置",
+  "yaya.wf.sub_calls": "{n} 次工具调用",
   "yaya.agent.planner": "规划",
   "yaya.branch_next": "下一个分支",
   "yaya.branch_prev": "上一个分支",
