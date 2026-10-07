@@ -18,9 +18,11 @@
 import { t, te } from '../../../../main/process/i18n'
 import type { PluginConfigField, YayaPlugin } from '../../services/plugins/types'
 import {
+  jsonSubAgent,
   pickExternalTools,
   selfOrganizedLoop,
-  toolScope
+  toolScope,
+  transcriptMessages
 } from '../../services/workflow/self-organized'
 import type {
   WorkflowContext,
@@ -190,7 +192,7 @@ ${sheet}
 What the author says is happening now:
 ${situation || '(continue from the story so far)'}
 
-The conversation so far is the story. Say what you WANT and DO right now, from your own point of view and interests (you may lie or hide things to protect your secret).
+The record is the story so far. Say what you WANT and DO right now, from your own point of view and interests (you may lie or hide things to protect your secret).
 ${LANG_RULE}
 Output, briefly:
 INTENT: one sentence
@@ -283,7 +285,7 @@ export function authorExtra(
     .join('\n')
 }
 
-const CHRONICLER_SYSTEM = `You are the chronicler of an interactive story engine. The conversation ends with the newest story passage.
+const CHRONICLER_SYSTEM = `You are the chronicler of an interactive story engine. You do not write story text. The record you are given ends with the newest story passage.
 Compare it with the story bible below and output ONLY a JSON object with what CHANGED in this passage:
 {
   "summary": "one sentence: what happened in this passage",
@@ -410,12 +412,18 @@ async function runStory(ctx: WorkflowContext): Promise<void> {
       run: async (args) => {
         if (built) return 'The story bible is already built; continue with it.'
         const brief = typeof args.brief === 'string' ? args.brief.trim() : ''
-        const out = await ctx.subAgent({
-          agent: 'architect',
-          label: t('yaya.story.step.architect', '构建世界与角色'),
-          system: brief ? `${ARCHITECT_SYSTEM}\n\nThe author's brief:\n${brief}` : ARCHITECT_SYSTEM
-        })
-        const next = bibleFromArchitect(extractJson(out.content))
+        const json = await jsonSubAgent(
+          ctx,
+          {
+            agent: 'architect',
+            label: t('yaya.story.step.architect', '构建世界与角色'),
+            system: brief
+              ? `${ARCHITECT_SYSTEM}\n\nThe author's brief:\n${brief}`
+              : ARCHITECT_SYSTEM
+          },
+          extractJson
+        )
+        const next = bibleFromArchitect(json)
         if (!next.characters.length && !next.title)
           throw new Error('the architect returned no usable bible, try again with a clearer brief')
         bible = next
@@ -451,7 +459,11 @@ async function runStory(ctx: WorkflowContext): Promise<void> {
         const out = await ctx.subAgent({
           agent: 'character',
           label: te('yaya.story.step.character', { name }, '角色：{name}'),
-          system: characterSystem(name, bible, situation)
+          system: characterSystem(name, bible, situation),
+          messages: transcriptMessages(
+            ctx,
+            `Now answer as ${name}, in the INTENT / ACTIONS / LINES format from your instructions. Do not narrate the story.`
+          )
         })
         return out.content.trim() || '(no answer)'
       }
@@ -467,32 +479,39 @@ async function runStory(ctx: WorkflowContext): Promise<void> {
     localTools: local,
     external,
     maxRounds: num(cfg.tool_rounds, 6, 1, 20) + 1,
-    label: t('yaya.story.step.author', '作者：构思与查资料'),
-    finalLabel: t('yaya.story.step.narrate', '旁白：写下这一段')
+    label: t('yaya.story.step.narrate', '旁白：写下这一段')
   })
   if (ctx.aborted || !final) return
 
   // ⑤ 程序辅助：第一轮没搭世界 → 按对话（含刚写的正文）补建
   if (fresh && !built) {
-    const out = await ctx.subAgent({
-      agent: 'architect',
-      label: t('yaya.story.step.architect', '构建世界与角色'),
-      system: `${ARCHITECT_SYSTEM}\nThe conversation already contains the opening passage: stay consistent with it.`
-    })
+    const json = await jsonSubAgent(
+      ctx,
+      {
+        agent: 'architect',
+        label: t('yaya.story.step.architect', '构建世界与角色'),
+        system: `${ARCHITECT_SYSTEM}\nThe record already contains the opening passage: stay consistent with it.`
+      },
+      extractJson
+    )
     if (ctx.aborted) return
-    bible = bibleFromArchitect(extractJson(out.content))
+    bible = bibleFromArchitect(json)
   }
 
   // 记录员 + 合并
-  const chronicle = await ctx.subAgent({
-    agent: 'chronicler',
-    label: t('yaya.story.step.chronicle', '记录员：更新档案'),
-    system: `${CHRONICLER_SYSTEM}\n\n### Story bible\n${bibleBrief(bible, { secrets: true })}`
-  })
+  const chronicle = await jsonSubAgent(
+    ctx,
+    {
+      agent: 'chronicler',
+      label: t('yaya.story.step.chronicle', '记录员：更新档案'),
+      system: `${CHRONICLER_SYSTEM}\n\n### Story bible\n${bibleBrief(bible, { secrets: true })}`
+    },
+    extractJson
+  )
   const next = await ctx.compute(
     t('yaya.story.step.merge', '合并档案'),
     () => {
-      const merged = mergeChronicle(bible, extractJson(chronicle.content))
+      const merged = mergeChronicle(bible, chronicle)
       merged.turn = note.turn
       merged.chapter = note.chapter
       merged.tension = note.tension

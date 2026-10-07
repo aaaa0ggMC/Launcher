@@ -75,8 +75,11 @@ function fake(): AIProvider & { calls: ProviderGenerateOptions[] } {
             characters: [{ name: '阿婆', note: '房东' }]
           })
         }
+      // 记录员第一次跑偏接着讲故事，被退回后才给 JSON
       if (sys.startsWith('You keep the memory'))
-        return { content: '{"summary":"[[main]] 搬进弄堂"}' }
+        return opts.messages.length <= 2
+          ? { content: '[[main]] 走进弄堂深处，天色渐暗……' }
+          : { content: '{"summary":"[[main]] 搬进弄堂"}' }
       if (sys.includes('GameMaster')) {
         const last = opts.messages[opts.messages.length - 1]
         if (opts.tools?.length && last.role === 'user')
@@ -153,7 +156,13 @@ it('角色扮演：GM 先搜索再写开场，设定 Agent 在开场之后记录
     const sys = c.messages[0].content ?? ''
     return sys.includes('GameMaster') ? 'gm' : sys.startsWith('You record') ? 'setup' : 'chronicler'
   })
-  assert.deepEqual(order, ['gm', 'gm', 'setup', 'chronicler'])
+  assert.deepEqual(order, ['gm', 'gm', 'setup', 'chronicler', 'chronicler'])
+  // 子 Agent 的对话一律以用户消息收尾（末尾是 assistant 时 DeepSeek 等会把它当前缀续写）
+  for (const c of p.calls.slice(2)) {
+    assert.equal(c.messages[1].role, 'user')
+    assert.ok(c.messages[1].content.includes('<record>'))
+    assert.equal(c.messages.at(-1)!.role, 'user')
+  }
   const gm = p.calls.filter((c) => c.messages[0].content?.includes('GameMaster'))
   for (const c of gm) assert.ok(!c.messages[0].content?.includes('SEARCH-RULES'))
   assert.ok(gm[0].messages[0].content?.includes('look them up first'))
@@ -163,7 +172,7 @@ it('角色扮演：GM 先搜索再写开场，设定 Agent 在开场之后记录
   )
   // 设定 Agent 看得到开场正文
   const setup = p.calls[2]
-  assert.ok(setup.messages.some((m) => m.role === 'assistant' && m.content?.includes('推开石库门')))
+  assert.ok(setup.messages.at(-1)!.content.includes('推开石库门'))
 
   const a1 = db.getMessage(t1.anchor)!
   const kinds = a1.meta?.workflow?.steps.map((s) => `${s.kind}:${s.agent}`)
@@ -173,6 +182,7 @@ it('角色扮演：GM 先搜索再写开场，设定 Agent 在开场之后记录
     'llm:main',
     'subagent:setup',
     'card:main',
+    'subagent:chronicler',
     'subagent:chronicler',
     'compute:compute'
   ])

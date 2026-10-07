@@ -415,7 +415,7 @@ export function memoryBrief(state: RpState): string {
 }
 
 export function setupAgentSystem(setup: RpSetup, prev: RpState | null): string {
-  return `You record the setup of a text roleplay. Read the conversation: the user's messages are their intro for the story${prev ? ' and their feedback on the opening' : ''}; it ends with the GM's opening passage. Record what the intro and the opening established (the opening is canon: follow it).
+  return `You record the setup of a text roleplay. You do not write story text. Read the record: the user's messages are their intro for the story${prev ? ' and their feedback on the opening' : ''}; it ends with the GM's opening passage. Record what the intro and the opening established (the opening is canon: follow it).
 Output ONLY a JSON object:
 {
   "title": "short story title",
@@ -434,7 +434,7 @@ Rules:
 }
 
 export function chroniclerSystem(state: RpState): string {
-  return `You keep the memory of a text roleplay. The conversation ends with the newest story passage.
+  return `You keep the memory of a text roleplay. You do not write story text. The record you are given ends with the newest story passage.
 Compare it with the memory below and output ONLY a JSON object with what this passage added:
 {
   "summary": "one sentence: what happened in this passage (use [[main]] for the protagonist)",

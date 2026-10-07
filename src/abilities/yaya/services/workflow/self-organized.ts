@@ -8,6 +8,7 @@
  * - 不追加插件的 instructions（隐私、凭据、审批这类工具守则与讲故事无关），工具 description 已够用。
  */
 import { t } from '../../../../main/process/i18n'
+import type { ProviderMessage } from '../providers/types'
 import type { AssistantStepResult, WorkflowContext, WorkflowTool } from './types'
 
 /** 插件工具的开放范围：search = 只给网页搜索；all = 全部已启用工具；none = 不给 */
@@ -80,4 +81,75 @@ export async function selfOrganizedLoop(
   }
   // 循环的最后一次必定 return；走到这里只可能是 rounds 计算出错
   throw new Error(t('yaya.wf.self.no_final', '工作流没有写出最终回答'))
+}
+
+/**
+ * 子 Agent（建筑师 / 设定 / 记录员 / 角色）用的对话：整段历史压成**一条用户消息**，任务说明放在最后。
+ *
+ * 不能直接把原始历史交给子 Agent：历史的最后一条常常是 assistant（刚写完的正文，或作者正在发起的
+ * 工具调用），DeepSeek 等模型会把末尾的 assistant 当成要续写的前缀，于是记录员接着讲故事、
+ * 设定 Agent 吐不出 JSON。压成一条 user 消息后，模型面对的永远是「读这段记录，完成这个任务」。
+ */
+export function transcriptMessages(
+  ctx: WorkflowContext,
+  task: string,
+  opts: { toolResultChars?: number } = {}
+): ProviderMessage[] {
+  const limit = opts.toolResultChars ?? 1500
+  const parts: string[] = []
+  for (const m of ctx.history()) {
+    const text = (m.content ?? '').trim()
+    if (m.role === 'user' && text) parts.push(`[USER]\n${text}`)
+    else if (m.role === 'assistant' && text) parts.push(`[STORY / ASSISTANT]\n${text}`)
+    else if (m.role === 'tool' && text)
+      parts.push(
+        `[RESEARCH: ${m.name ?? 'tool'}]\n${text.length > limit ? `${text.slice(0, limit)}…` : text}`
+      )
+  }
+  return [
+    {
+      role: 'user',
+      content: [
+        'Below is the record of the conversation so far, between <record> tags. It is material for your task, not something to continue.',
+        '<record>',
+        parts.join('\n\n') || '(empty)',
+        '</record>',
+        '',
+        task
+      ].join('\n')
+    }
+  ]
+}
+
+/** 要求只输出 JSON 的子 Agent 的收尾任务说明 */
+export const JSON_TASK =
+  'Now do the task described in your instructions. Do NOT continue or rewrite the story. Output ONLY the JSON object.'
+
+/**
+ * 要 JSON 的子 Agent：材料走 transcriptMessages；解析不出 JSON 时把它的输出退回去重试一次
+ * （程序辅助：别让一次跑偏就留下空白设定卡 / 丢一轮记忆）。两次都失败返回 null。
+ */
+export async function jsonSubAgent<T>(
+  ctx: WorkflowContext,
+  opts: { agent: string; label: string; system: string },
+  parse: (text: string) => T | null
+): Promise<T | null> {
+  const messages = transcriptMessages(ctx, JSON_TASK)
+  const first = await ctx.subAgent({ ...opts, messages })
+  const ok = parse(first.content)
+  if (ok || ctx.aborted) return ok
+  const retry = await ctx.subAgent({
+    ...opts,
+    label: `${opts.label} · ${t('yaya.wf.self.retry_json', '重试')}`,
+    messages: [
+      ...messages,
+      { role: 'assistant', content: first.content },
+      {
+        role: 'user',
+        content:
+          'That was not the required JSON. Do not write story text. Reply with ONLY the JSON object described in your instructions.'
+      }
+    ]
+  })
+  return parse(retry.content)
 }
