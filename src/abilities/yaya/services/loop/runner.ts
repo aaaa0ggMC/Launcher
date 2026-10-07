@@ -81,7 +81,7 @@ import type {
   ProviderTool
 } from '../providers/types'
 import { MAX_RETRIES, errorBrief, isRetryable, retryDelay, sleep } from './retry'
-import type { ToolSessionContext } from '../plugins/types'
+import type { ToolSessionContext, ToolWorkflowHandle } from '../plugins/types'
 import { sessionMentions } from '../plugins/mention'
 import { withOrigin, type CallOrigin } from '../../../../main/process/privacy'
 import { currentBrowserClient, withBrowserClient } from '../../../../main/process/browser-ui'
@@ -95,6 +95,8 @@ import {
 import { resolveWorkflow, workflowLabel } from '../workflow/registry'
 import {
   MaxStepsError,
+  type AgentRunOptions,
+  type AgentRunResult,
   type AssistantStepOptions,
   type ComputeOptions,
   type WorkflowCardInput,
@@ -113,6 +115,10 @@ interface ApprovalDecision {
   reason?: string
   scope?: ApprovalScope
 }
+
+/** runAgent 最后一轮（不再给工具）追加到子 Agent 系统提示词后面的话 */
+export const AGENT_FINAL_NUDGE =
+  'Your tool budget is used up: no more tool calls. Write your final report now from what you have found so far, and say what is still unverified.'
 
 /** 用户主动停止时写进 message.error 的标记，界面据此显示「已停止」而不是错误横幅 */
 export const ABORTED_MARK = 'aborted'
@@ -433,6 +439,16 @@ export class WorkflowRunner {
   private buildContext(workflow: WorkflowDefinition): WorkflowContext {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const host = this
+    this.toolWorkflow = {
+      workflowId: workflow.id,
+      history: () => this.history(),
+      availableTools: () => this.tools.map((t) => ({ name: t.wireName, pluginId: t.plugin.id })),
+      subAgent: (opts) => this.subAgent(opts),
+      runAgent: (opts) => this.runAgent(opts),
+      note: (label, detail) => {
+        this.addStep({ agent: 'main', kind: 'note', label, detail, status: 'ok' })
+      }
+    }
     return {
       session: this.session!,
       config: this.ctx.config,
@@ -450,6 +466,7 @@ export class WorkflowRunner {
       assistantStep: (opts) => this.assistantStep(workflow, opts),
       runTools: (step) => this.runTools(step),
       subAgent: (opts) => this.subAgent(opts),
+      runAgent: (opts) => this.runAgent(opts),
       note: (label, detail) => {
         this.addStep({ agent: 'main', kind: 'note', label, detail, status: 'ok' })
       },
@@ -952,141 +969,167 @@ export class WorkflowRunner {
   private async runTools(step: AssistantStepResult): Promise<void> {
     const toolCalls = step.toolCalls
     const assistantMsgId = step.messageId
-    const persist = (): void => {
-      updateMessage(assistantMsgId, { toolCalls })
+    const persist = (status?: 'waiting_approval' | 'tool_executing'): void => {
+      updateMessage(assistantMsgId, { toolCalls, ...(status ? { status } : {}) })
       this.emitSnapshot()
     }
-    const fail = (call: ToolCallItem, error: string): void => {
-      call.status = 'failed'
-      call.error = error
-      this.recordToolMessage(call, JSON.stringify({ error }))
-      persist()
-    }
-    /** 已被打断：只在调用上标记，不再往对话树写节点（历史组装时会补「已中断」结果） */
-    const markAborted = (call: ToolCallItem): void => {
-      call.status = 'failed'
-      call.error = t('yaya.err.aborted_before_tool', '用户停止，未执行')
-      updateMessage(assistantMsgId, { toolCalls })
-    }
-
     for (const call of toolCalls) {
-      await this.gate()
-      if (this.aborted) {
-        markAborted(call)
-        continue
-      }
-
-      const local = this.localTools.get(call.name)
-      if (local) {
-        call.status = 'executing'
-        this.ctx.status = 'tool_executing'
-        persist()
-        await this.runLocalTool(local, call)
-        persist()
-        continue
-      }
-
-      const def = this.tools.find((t) => t.wireName === call.name)
-      if (!def) {
-        fail(call, te('yaya.err.tool_not_found', { name: call.name }, '工具 {name} 不存在'))
-        continue
-      }
-
-      let args: Record<string, unknown>
-      try {
-        args = typeof call.args === 'string' ? JSON.parse(call.args || '{}') : call.args
-      } catch {
-        fail(call, t('yaya.err.bad_args', '工具参数不是合法的 JSON'))
-        continue
-      }
-
-      if (toolNeedsApproval(def, args, this.ctx.config) && !this.preApproved(call.name)) {
-        call.status = 'awaiting_approval'
-        this.ctx.pendingApprovalTool = call
-        updateMessage(assistantMsgId, { toolCalls, status: 'waiting_approval' })
-        this.setStatus('waiting_approval')
-
-        // 用户不在对话页时，悬浮窗据此强制展开并给出批准 / 拒绝
-        setSessionAttention(this.agentSessionId, { kind: 'approval', tool: call.name }, { args })
-        const decision = await new Promise<ApprovalDecision>((resolve) => {
-          this.approvalResolver = resolve
-        })
-        setSessionAttention(this.agentSessionId, null)
-        this.ctx.pendingApprovalTool = undefined
-        if (decision.approved) this.rememberApproval(call.name, decision.scope)
-        updateMessage(assistantMsgId, { status: 'tool_executing' })
-        if (!decision.approved) {
-          if (this.aborted) markAborted(call)
-          else if (decision.reason) {
-            call.rejectReason = decision.reason
-            fail(
-              call,
-              te(
-                'yaya.err.rejected_reason',
-                { reason: decision.reason },
-                '用户拒绝了执行该工具，理由：{reason}'
-              )
-            )
-          } else fail(call, t('yaya.err.rejected', '用户拒绝了执行该工具'))
-          continue
-        }
-      }
-
-      // 审批等待期间也可能暂停 / 停止，批准不代表可以越过暂停闸门。
-      await this.gate()
-      if (this.aborted) {
-        markAborted(call)
-        continue
-      }
-      call.status = 'executing'
-      this.ctx.status = 'tool_executing'
-      persist()
-
-      const start = Date.now()
-      // 插件数据流钩子（SecretPlugin 等）：参数在执行前变换，结果在入库前变换
-      const cfg = assistantConfig(loadYayaConfig(), sessionAssistantId(this.session))
-      const scrub = <T>(value: T): T =>
-        applyToolResultHooks(this.ctx.sessionId, call.name, value, cfg)
-      touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', undefined, call.name)
-      try {
-        // 以 local-agent 身份执行：命令注册表里的隐私声明、脱敏、授权窗口全部生效；
-        // 同时恢复发起本次运行的浏览器上下文（无头下 ui.* 只操作那个标签页）
-        const raw = await withBrowserClient(
-          this.browserClient,
-          () =>
-            withOrigin(this.origin, () =>
-              runPluginTool(def, applyToolArgsHooks(this.ctx.sessionId, call.name, args, cfg), {
-                sessionId: this.ctx.sessionId,
-                signal: this.abortController.signal,
-                context: () => this.toolContext()
-              })
-            ),
-          this.abortController.signal
-        )
-        const normalized = await normalizeToolResult(raw, this.ctx.sessionId)
-        const out = {
-          ...normalized,
-          text: scrub(normalized.text),
-          display: scrub(normalized.display)
-        }
-        call.status = out.isError ? 'failed' : 'success'
-        call.result = out.display
-        if (out.isError) call.error = out.text.slice(0, 2000)
-        if (out.images.length) call.images = out.images.map((i) => i.assetPath)
-        this.recordToolMessage(call, out.text, out.images)
-      } catch (e: unknown) {
-        call.status = 'failed'
-        call.error = scrub(e instanceof Error ? e.message : String(e))
-        this.recordToolMessage(call, JSON.stringify({ error: call.error }))
-      }
-      call.ms = Date.now() - start
+      const out = await this.invokeTool(call, this.tools, this.localTools, persist, call.name)
+      // null = 已被打断：只在调用上标记，不再往对话树写节点（历史组装时会补「已中断」结果）
+      if (out) this.recordToolMessage(call, out.text, out.images)
       persist()
     }
     if (!this.aborted) updateMessage(assistantMsgId, { status: 'completed', toolCalls })
   }
 
+  /** 并行的子 Agent 同时要审批时排队：一次只挂起一个（审批界面 / 命令只认一个挂起的调用） */
+  private approvalQueue: Promise<void> = Promise.resolve()
+
+  private async requestApproval(
+    call: ToolCallItem,
+    args: Record<string, unknown>,
+    persist: (status?: 'waiting_approval' | 'tool_executing') => void
+  ): Promise<ApprovalDecision> {
+    const prev = this.approvalQueue
+    let release: () => void = () => {}
+    this.approvalQueue = new Promise<void>((r) => (release = r))
+    await prev
+    try {
+      if (this.aborted) return { approved: false }
+      // 排队期间别的子 Agent 已经点了「本次 / 本对话都允许」
+      if (this.preApproved(call.name)) return { approved: true }
+      call.status = 'awaiting_approval'
+      this.ctx.pendingApprovalTool = call
+      persist('waiting_approval')
+      this.setStatus('waiting_approval')
+      // 用户不在对话页时，悬浮窗据此强制展开并给出批准 / 拒绝
+      setSessionAttention(this.agentSessionId, { kind: 'approval', tool: call.name }, { args })
+      const decision = await new Promise<ApprovalDecision>((resolve) => {
+        this.approvalResolver = resolve
+      })
+      setSessionAttention(this.agentSessionId, null)
+      this.ctx.pendingApprovalTool = undefined
+      if (decision.approved) this.rememberApproval(call.name, decision.scope)
+      persist('tool_executing')
+      return decision
+    } finally {
+      release()
+    }
+  }
+
+  /**
+   * 一次工具调用的完整流程：查找 → 解析参数 → 审批 → 执行（插件钩子、隐私来源、浏览器上下文）。
+   * 结果写在 call 上（status / result / error / ms / images），返回交给模型的内容；
+   * 返回 null = 已被用户停止，调用只做了标记，不需要结果。主 Agent 与 runAgent 的子 Agent 共用。
+   */
+  private async invokeTool(
+    call: ToolCallItem,
+    tools: ResolvedTool[],
+    local: Map<string, WorkflowTool>,
+    persist: (status?: 'waiting_approval' | 'tool_executing') => void,
+    label: string
+  ): Promise<{ text: string; images?: MessageAttachment[] } | null> {
+    const fail = (error: string): { text: string } => {
+      call.status = 'failed'
+      call.error = error
+      return { text: JSON.stringify({ error }) }
+    }
+    const markAborted = (): null => {
+      call.status = 'failed'
+      call.error = t('yaya.err.aborted_before_tool', '用户停止，未执行')
+      return null
+    }
+
+    await this.gate()
+    if (this.aborted) return markAborted()
+
+    const localTool = local.get(call.name)
+    if (localTool) {
+      call.status = 'executing'
+      this.ctx.status = 'tool_executing'
+      persist()
+      return this.runLocalTool(localTool, call)
+    }
+
+    const def = tools.find((t) => t.wireName === call.name)
+    if (!def) return fail(te('yaya.err.tool_not_found', { name: call.name }, '工具 {name} 不存在'))
+
+    let args: Record<string, unknown>
+    try {
+      args = typeof call.args === 'string' ? JSON.parse(call.args || '{}') : call.args
+    } catch {
+      return fail(t('yaya.err.bad_args', '工具参数不是合法的 JSON'))
+    }
+
+    if (toolNeedsApproval(def, args, this.ctx.config) && !this.preApproved(call.name)) {
+      const decision = await this.requestApproval(call, args, persist)
+      if (!decision.approved) {
+        if (this.aborted) return markAborted()
+        if (decision.reason) {
+          call.rejectReason = decision.reason
+          return fail(
+            te(
+              'yaya.err.rejected_reason',
+              { reason: decision.reason },
+              '用户拒绝了执行该工具，理由：{reason}'
+            )
+          )
+        }
+        return fail(t('yaya.err.rejected', '用户拒绝了执行该工具'))
+      }
+    }
+
+    // 审批等待期间也可能暂停 / 停止，批准不代表可以越过暂停闸门。
+    await this.gate()
+    if (this.aborted) return markAborted()
+    call.status = 'executing'
+    this.ctx.status = 'tool_executing'
+    persist()
+
+    const start = Date.now()
+    // 插件数据流钩子（SecretPlugin 等）：参数在执行前变换，结果在入库前变换
+    const cfg = assistantConfig(loadYayaConfig(), sessionAssistantId(this.session))
+    const scrub = <T>(value: T): T =>
+      applyToolResultHooks(this.ctx.sessionId, call.name, value, cfg)
+    touchSession(this.agentSessionId, 'local', this.origin.client ?? 'YAYA', undefined, label)
+    let out: { text: string; images?: MessageAttachment[] }
+    try {
+      // 以 local-agent 身份执行：命令注册表里的隐私声明、脱敏、授权窗口全部生效；
+      // 同时恢复发起本次运行的浏览器上下文（无头下 ui.* 只操作这个页面）
+      const raw = await withBrowserClient(
+        this.browserClient,
+        () =>
+          withOrigin(this.origin, () =>
+            runPluginTool(def, applyToolArgsHooks(this.ctx.sessionId, call.name, args, cfg), {
+              sessionId: this.ctx.sessionId,
+              signal: this.abortController.signal,
+              context: () => this.toolContext(),
+              workflow: this.toolWorkflow
+            })
+          ),
+        this.abortController.signal
+      )
+      const normalized = await normalizeToolResult(raw, this.ctx.sessionId)
+      const text = scrub(normalized.text)
+      call.status = normalized.isError ? 'failed' : 'success'
+      call.result = scrub(normalized.display)
+      if (normalized.isError) call.error = text.slice(0, 2000)
+      if (normalized.images.length) call.images = normalized.images.map((i) => i.assetPath)
+      out = { text, images: normalized.images }
+    } catch (e: unknown) {
+      call.status = 'failed'
+      call.error = scrub(e instanceof Error ? e.message : String(e))
+      out = { text: JSON.stringify({ error: call.error }) }
+    }
+    call.ms = Date.now() - start
+    return out
+  }
+
   /** 工作流自带的工具：不审批，直接执行；抛错 = 失败，错误交给模型 */
-  private async runLocalTool(tool: WorkflowTool, call: ToolCallItem): Promise<void> {
+  private async runLocalTool(
+    tool: WorkflowTool,
+    call: ToolCallItem
+  ): Promise<{ text: string; images?: MessageAttachment[] }> {
     let args: Record<string, unknown> = {}
     try {
       const raw = typeof call.args === 'string' ? JSON.parse(call.args || '{}') : call.args
@@ -1094,24 +1137,146 @@ export class WorkflowRunner {
     } catch {
       call.status = 'failed'
       call.error = t('yaya.err.bad_args', '工具参数不是合法的 JSON')
-      this.recordToolMessage(call, JSON.stringify({ error: call.error }))
-      return
+      return { text: JSON.stringify({ error: call.error }) }
     }
     const start = Date.now()
+    let out: { text: string; images?: MessageAttachment[] }
     try {
-      const out = await normalizeToolResult(await tool.run(args), this.ctx.sessionId)
-      call.status = out.isError ? 'failed' : 'success'
-      call.result = out.display
-      if (out.isError) call.error = out.text.slice(0, 2000)
-      this.recordToolMessage(call, out.text, out.images)
+      const res = await normalizeToolResult(await tool.run(args), this.ctx.sessionId)
+      call.status = res.isError ? 'failed' : 'success'
+      call.result = res.display
+      if (res.isError) call.error = res.text.slice(0, 2000)
+      out = { text: res.text, images: res.images }
     } catch (e: unknown) {
       if (this.aborted) throw e
       call.status = 'failed'
       call.error = e instanceof Error ? e.message : String(e)
-      this.recordToolMessage(call, JSON.stringify({ error: call.error }))
+      out = { text: JSON.stringify({ error: call.error }) }
     }
     call.ms = Date.now() - start
+    return out
   }
+
+  /**
+   * 带工具的子 Agent：自己的一段对话（只在内存里）、自己的工具循环，过程卡片里一步。
+   * 最后一轮不给工具、提示它写报告；工具调用实时记在步骤的 calls 上（界面可展开查看、审批）。
+   */
+  private async runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
+    await this.gate()
+    if (this.aborted) throw new Error('aborted')
+    const rounds = Math.max(1, Math.min(opts.maxRounds ?? 8, this.ctx.maxSteps))
+    const allowed =
+      opts.tools === 'none'
+        ? []
+        : Array.isArray(opts.tools)
+          ? this.tools.filter((x) => opts.tools!.includes(x.wireName))
+          : this.tools
+    const local = new Map((opts.localTools ?? []).map((x) => [x.name, x]))
+    const providerTools: ProviderTool[] = [
+      ...allowed.map((x) => ({
+        name: x.wireName,
+        description: x.tool.description,
+        parameters: x.tool.parameters
+      })),
+      ...[...local.values()]
+        .filter((x) => !allowed.some((a) => a.wireName === x.name))
+        .map((x) => ({ name: x.name, description: x.description, parameters: x.parameters }))
+    ]
+    const messages: ProviderMessage[] = opts.messages
+      ? [...opts.messages]
+      : [{ role: 'user', content: opts.task ?? '' }]
+    const step = this.addStep({
+      agent: opts.agent,
+      kind: 'subagent',
+      label: opts.label,
+      model: this.model,
+      status: 'running',
+      calls: []
+    })
+    const calls = step.calls!
+    const persist = (): void => {
+      this.persistRecord()
+      this.emitSnapshot()
+    }
+    // 由插件工具派出时主流程是 tool_executing：子 Agent 结束后恢复
+    const before = this.ctx.status
+    this.setStatus('streaming')
+    let tokens = 0
+    let content = ''
+    let used = 0
+    let exhausted = false
+    try {
+      for (let i = 0; i < rounds; i++) {
+        await this.gate()
+        if (this.aborted) throw new Error('aborted')
+        const last = i === rounds - 1
+        const offer = providerTools.length > 0 && !last
+        // 前面几轮都在调工具、到最后一轮还没写报告：收掉工具，提示它把报告写出来
+        exhausted = last && i > 0 && providerTools.length > 0
+        used++
+        const result = await this.generateWithRetry({
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content: exhausted ? `${opts.system}\n\n${AGENT_FINAL_NUDGE}` : opts.system
+            },
+            ...messages
+          ],
+          tools: offer ? providerTools : undefined,
+          stream: false,
+          reasoning: this.reasoning,
+          signal: this.abortController.signal
+        })
+        if (this.aborted) throw new Error('aborted')
+        tokens += result.usage?.total ?? 0
+        content = result.content ?? ''
+        const toolCalls = offer ? (result.toolCalls ?? []) : []
+        if (!toolCalls.length) break
+        messages.push({
+          role: 'assistant',
+          content,
+          toolCalls,
+          ...(result.native ? { native: result.native } : {})
+        })
+        for (const call of toolCalls) {
+          calls.push(call)
+          persist()
+          const out = await this.invokeTool(
+            call,
+            allowed,
+            local,
+            persist,
+            `${opts.agent}:${call.name}`
+          )
+          if (!out) throw new Error('aborted')
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content: out.text,
+            ...(out.images?.length ? { attachments: out.images } : {})
+          })
+          persist()
+        }
+        if (content.trim()) step.detail = content
+      }
+      step.detail = content
+      this.endStep(step, 'ok', tokens)
+      this.setStatus(before)
+      return { content, calls, rounds: used, tokens, exhausted }
+    } catch (e) {
+      step.detail = this.aborted
+        ? content || undefined
+        : `${content ? `${content}\n\n` : ''}${e instanceof Error ? e.message : String(e)}`
+      this.endStep(step, 'error', tokens)
+      this.emitSnapshot()
+      throw e
+    }
+  }
+
+  /** 给插件工具的工作流句柄（ToolRunContext.workflow），见 plugins/types.ts */
+  private toolWorkflow: ToolWorkflowHandle | undefined
 
   /** 工具结果节点：content = 交给模型的文本；attachments = 工具产出的图片（作为图片交给模型） */
   private recordToolMessage(call: ToolCallItem, text: string, images?: MessageAttachment[]): void {
