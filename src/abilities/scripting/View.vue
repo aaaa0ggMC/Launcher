@@ -1080,7 +1080,9 @@ onUnmounted(() => {
               prepend-icon="mdi-code-json"
               append-icon="mdi-chevron-down"
             >
-              {{ translate(uiLang, 'scripting.toolbar.templates') }}
+              <span class="ide-btn-label">{{
+                translate(uiLang, 'scripting.toolbar.templates')
+              }}</span>
             </v-btn>
           </template>
           <v-list density="compact" rounded="lg" class="script-menu-list">
@@ -1146,7 +1148,9 @@ onUnmounted(() => {
               prepend-icon="mdi-lightning-bolt-outline"
               append-icon="mdi-chevron-down"
             >
-              {{ translate(uiLang, 'scripting.toolbar.snippets') }}
+              <span class="ide-btn-label">{{
+                translate(uiLang, 'scripting.toolbar.snippets')
+              }}</span>
             </v-btn>
           </template>
           <v-list density="compact" rounded="lg" class="script-menu-list">
@@ -1262,7 +1266,7 @@ onUnmounted(() => {
           @click="runScript"
         >
           {{ translate(uiLang, 'scripting.toolbar.run') }}
-          <span class="text-caption ml-1 opacity-75 font-weight-regular">(Ctrl+↵)</span>
+          <span class="text-caption ml-1 opacity-75 font-weight-regular ide-run-kbd">(Ctrl+↵)</span>
         </v-btn>
       </div>
     </div>
@@ -2099,6 +2103,16 @@ onUnmounted(() => {
   .ide-top-bar > :last-child {
     order: 3;
     flex: 0 0 auto !important;
+  }
+
+  /* 手机：模板 / 代码片段只留图标，运行按钮省掉快捷键提示（触屏没有 Ctrl+Enter），
+     让整排工具在 360–430px 宽度内基本放得下；仍放不下时右缘渐隐提示可横向滑动 */
+  .ide-btn-label,
+  .ide-run-kbd {
+    display: none;
+  }
+  .ide-tool-group {
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
   }
 
   /* buttons keep their intrinsic width while the group scrolls */

@@ -31,6 +31,11 @@ const loading = ref(false)
 const error = ref('')
 const gridEl = ref<HTMLElement | null>(null)
 const locked = ref(false)
+/** 窄屏（手机 / 窄窗口）：卡片改为单列自然高度堆叠，不挂 gridstack（拖拽排版只在宽屏有意义）。 */
+const NARROW_MAX = 640
+const rootEl = ref<HTMLElement | null>(null)
+const narrow = ref(false)
+let rootObserver: ResizeObserver | null = null
 
 let grid: GridStack | null = null
 let timer: ReturnType<typeof setInterval> | null = null
@@ -120,7 +125,7 @@ async function applyDefaultLayout(): Promise<void> {
 
 async function initGrid(): Promise<void> {
   const el = gridEl.value
-  if (!el || grid) return
+  if (!el || grid || narrow.value) return
   const g = GridStack.init(
     {
       column: 12,
@@ -176,7 +181,32 @@ function applyLock(): void {
 
 function onResize(): void {
   // Reflow all widgets against the current container width.
-  grid?.column(12)
+  if (!narrow.value) grid?.column(12)
+}
+
+/** 宽 ↔ 窄切换：窄屏拆掉 gridstack（保留 DOM），宽屏重新挂上并读回保存的排版。 */
+async function setNarrow(next: boolean): Promise<void> {
+  if (next === narrow.value) return
+  if (next && grid) {
+    grid.destroy(false)
+    grid = null
+  }
+  narrow.value = next
+  if (!next && firstLoaded.value) {
+    await nextTick()
+    await initGrid()
+  }
+}
+
+function observeWidth(): void {
+  const el = rootEl.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  rootObserver = new ResizeObserver(() => {
+    const w = el.clientWidth
+    if (w > 0) void setNarrow(w <= NARROW_MAX)
+  })
+  rootObserver.observe(el)
+  if (el.clientWidth > 0) narrow.value = el.clientWidth <= NARROW_MAX
 }
 
 let unsubReset: (() => void) | null = null
@@ -185,6 +215,7 @@ onMounted(async () => {
   window.addEventListener('resize', onResize)
   // Settings → 重置排版: restore the default grid layout live.
   unsubReset = window.cockpit.on('cockpit:dashboard-reset', () => void applyDefaultLayout())
+  observeWidth()
   await refresh()
   // grid init must wait until the container has a real width
   await nextTick()
@@ -197,7 +228,7 @@ onMounted(async () => {
 // Re-shown from keep-alive cache: the container was display:none while hidden,
 // so reflow the grid now that it has a real width again.
 onActivated(async () => {
-  if (!firstLoaded.value || !grid) return
+  if (!firstLoaded.value || !grid || narrow.value) return
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   grid.column(12)
@@ -205,6 +236,7 @@ onActivated(async () => {
 
 onBeforeUnmount(() => {
   unsubReset?.()
+  rootObserver?.disconnect()
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
 })
@@ -319,8 +351,8 @@ defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <div>
-    <div class="d-flex align-center justify-space-between mb-3">
+  <div ref="rootEl">
+    <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
       <div>
         <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'dashboard.heading') }}</div>
         <div v-if="stats" class="text-caption on-surface-variant mt-1">
@@ -362,7 +394,12 @@ defineExpose({ toMarkdown })
       skeleton-type="list-item-two-line,article"
     />
 
-    <div v-if="firstLoaded" ref="gridEl" class="grid-stack">
+    <div
+      v-if="firstLoaded"
+      ref="gridEl"
+      :key="narrow ? 'stack' : 'grid'"
+      :class="narrow ? 'dash-stack' : 'grid-stack'"
+    >
       <div
         v-for="c in cards"
         :id="c.id"
@@ -427,6 +464,7 @@ defineExpose({ toMarkdown })
               <template v-else-if="c.id === 'cpu'">
                 <div class="d-flex align-center ga-3 mb-2">
                   <v-progress-circular
+                    class="flex-shrink-0"
                     :model-value="stats?.cpu.usage ?? 0"
                     color="primary"
                     size="56"
@@ -434,7 +472,7 @@ defineExpose({ toMarkdown })
                   >
                     {{ stats?.cpu.usage }}%
                   </v-progress-circular>
-                  <div class="flex-grow-1 min-width-0">
+                  <div class="flex-grow-1 min-w-0">
                     <div class="text-body-2 font-weight-medium text-truncate">
                       {{ stats?.cpu.model }}
                     </div>
@@ -604,7 +642,7 @@ defineExpose({ toMarkdown })
               <!-- NVIDIA PM -->
               <template v-else-if="c.id === 'pm'">
                 <div class="d-flex align-center justify-space-between">
-                  <div class="flex-grow-1 min-width-0 pr-2">
+                  <div class="flex-grow-1 min-w-0 pr-2">
                     <div class="text-body-2 text-truncate">
                       NVreg_PreserveVideoMemoryAllocations
                     </div>
@@ -683,7 +721,7 @@ defineExpose({ toMarkdown })
                   :key="ct.id"
                   class="d-flex justify-space-between align-center mb-1"
                 >
-                  <div class="d-flex align-center ga-2 min-width-0">
+                  <div class="d-flex align-center ga-2 min-w-0">
                     <v-icon
                       size="16"
                       :color="ct.state === 'running' ? 'success' : 'on-surface-variant'"
@@ -736,6 +774,21 @@ defineExpose({ toMarkdown })
 </template>
 
 <style scoped>
+/* 窄屏单列：卡片按内容自然高度依次排列（gridstack 未挂载，清掉它的绝对定位残留） */
+.dash-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dash-stack > .grid-stack-item,
+.dash-stack .grid-stack-item-content {
+  position: static !important;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+}
+
 .stat-card-text {
   padding: 0 16px 16px;
 }

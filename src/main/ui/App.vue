@@ -1706,7 +1706,7 @@ onBeforeUnmount(() => {
     </v-app-bar>
 
     <v-main scrollable class="content-bg">
-      <v-container fluid :class="narrow ? 'px-2 py-4' : 'pa-4'">
+      <v-container fluid :class="narrow ? 'px-3 py-4' : 'pa-4'">
         <!-- min-height 写在 class 里而不是内联 style：settings / campusinfo 激活时会临时把内联
              min-height 改成 0、离开时清空内联值——写成内联的话清空就把它永久抹掉了，之后
              所有页面（日志等按 flex 铺满的页面）都塌成内容高度。 -->
