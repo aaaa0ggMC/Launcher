@@ -304,7 +304,7 @@ function join(dir: string, name: string): string {
 function onRequest(ev: Event): void {
   const detail = (ev as CustomEvent<PickRequest>).detail
   // 已有对话框在显示：旧请求视为取消
-  req.value?.resolve(null)
+  if (req.value) settle(req.value, null)
   req.value = detail
   showAll.value = false
   picked.value = []
@@ -328,12 +328,24 @@ function onRequest(ev: Event): void {
 onMounted(() => window.addEventListener('cockpit:host-pick', onRequest))
 onBeforeUnmount(() => window.removeEventListener('cockpit:host-pick', onRequest))
 
-function finish(path: string | string[] | { clipboard: true } | null): void {
+type PickResult = string | string[] | { clipboard: true } | null
+
+/**
+ * 按请求的模式给出结果：多选（`pickFiles`）的约定是「取消返回 []」，单个路径也包成数组——
+ * 调用方直接 `.length`，给 null 会抛 `Cannot read properties of null`。
+ */
+function settle(r: PickRequest, value: PickResult): void {
+  if (r.mode === 'open-multi')
+    r.resolve(Array.isArray(value) ? value : typeof value === 'string' ? [value] : [])
+  else r.resolve(value)
+}
+
+function finish(path: PickResult): void {
   cancelUpload()
   const r = req.value
   req.value = null
   open.value = false
-  r?.resolve(path)
+  if (r) settle(r, path)
 }
 
 const canConfirm = computed(() => {
