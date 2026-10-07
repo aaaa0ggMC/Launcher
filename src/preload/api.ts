@@ -23,11 +23,15 @@ export type HostCap = 'native' | 'web' | 'none'
  *   `shortcut.pin { ability, target?, label?, icon? }` 或 `{ package, label?, icon? }`（0.6.0，固定桌面
  *   快捷方式，icon 为 data URL；`info.pinShortcuts` 表示启动器是否支持）/
  *   `webLogin { url, doneHosts, cookieUrls, title? }`（0.6.0，盖一层网页登录页，登完 → `{ cookies:
- *   [{url, cookie}], cancelled }`，balance 用来把网页登录的会话导入无头宿主）…），失败 reject；
+ *   [{url, cookie}], cancelled }`，balance 用来把网页登录的会话导入无头宿主）/
+ *   系统语音（0.8.0，`info.speech = { tts, asr }`）：`tts.voices` / `tts.speak { id, text, lang?, voice?,
+ *   rate?, pitch? }` / `tts.stop` / `asr.start { lang?, partial? }` / `asr.stop` / `asr.cancel`
+ *   ——页面不要直接调，用渲染端 SDK `@ui/speech`（它也覆盖浏览器 / Electron）…），失败 reject；
  * - 原生推来的事件经 `window.cockpit.on('cockpit:client-<事件名>', cb)` 收：
  *   `upload-progress`（{index,total,pct,name,call}）、`shared`（别的应用分享进来：{paths,text,error?}）、
  *   `media-action`（系统媒体按钮：{action, position?}）、`open`（桌面快捷方式 / 深链接跳页：
- *   {ability, target?}，外壳 App.vue 处理）。
+ *   {ability, target?}，外壳 App.vue 处理）、`tts`（{id, type: start|range|done|stopped|error}）、
+ *   `asr`（{type: ready|partial|final|level|error|end, text?, level?, error?}）。
  * - 媒体控制不用页面直接调：web-shim 把 `navigator.mediaSession` 自动转给原生（headless/native-media.ts）。
  */
 export interface NativeClient {

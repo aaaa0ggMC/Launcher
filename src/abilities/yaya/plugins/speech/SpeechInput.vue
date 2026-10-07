@@ -1,7 +1,11 @@
 <script setup lang="ts">
 /**
  * speech 插件的输入框扩展：往「+」面板注册「语音输入」，录音时在输入框里显示录音条。
- * 录音（MediaRecorder）→ base64 → `yaya.speech-transcribe` → 识别结果插到光标处。
+ * - 系统语音：框架 SDK `@ui/speech` 的 recognize（安卓 App = 系统语音识别，Chrome = 在线识别），
+ *   边说边显示中间结果；
+ * - 接口（OpenAI 兼容 / MiMo / Gemini）：录音（MediaRecorder）→（MiMo / Gemini 先转 16k WAV）→
+ *   base64 → `yaya.speech-transcribe`。
+ * 识别结果插到光标处。
  * 录音只在本机内存里，不落盘；识别失败录音就丢掉（不重试，避免重复消耗额度）。
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
@@ -9,6 +13,9 @@ import type { Ref } from 'vue'
 import { useI18n } from '@ui/i18n'
 import type { PluginInputContext } from '../../components/plugin-input'
 import { pluginConfigValues } from '../../components/plugin-ui-registry'
+import { recognize, systemSpeechReady, type Recognition, type SpeechError } from '@ui/speech'
+import { asrWantsWav, engineOf } from './engines'
+import { toWav16k } from './wav'
 
 const props = defineProps<{ context: PluginInputContext }>()
 const context = toRef(props, 'context')
@@ -33,6 +40,10 @@ let timer: ReturnType<typeof setInterval> | null = null
 let startedAt = 0
 /** 取消 = 停止录音但不识别 */
 let discard = false
+/** 系统识别进行中 */
+let rec: Recognition | null = null
+/** 系统识别的中间结果（录音条上实时显示） */
+const partial = ref('')
 let disposeAction: (() => void) | null = null
 let disposeHooks: (() => void) | null = null
 
@@ -40,6 +51,13 @@ const maxSec = computed(() => {
   const v = Number(pluginConfigValues('speech').asr_max_sec)
   return Number.isFinite(v) && v >= 10 ? Math.min(600, v) : 120
 })
+
+/** 中间结果只显示最后一截（新说的话在末尾） */
+const partialTail = computed(() =>
+  partial.value.length > 48 ? `…${partial.value.slice(-48)}` : partial.value
+)
+
+const engine = computed(() => engineOf(pluginConfigValues('speech').asr_engine))
 
 const timeText = computed(() => {
   const s = Math.floor(elapsed.value)
@@ -58,9 +76,70 @@ function fail(message: string): void {
   error.value = message
 }
 
+function startTimer(): void {
+  startedAt = performance.now()
+  elapsed.value = 0
+  timer = setInterval(() => {
+    elapsed.value = (performance.now() - startedAt) / 1000
+    if (elapsed.value >= maxSec.value) stopRecording()
+  }, 200)
+}
+
+function systemError(e: unknown): string {
+  const code = (e as SpeechError)?.code
+  if (code === 'permission') return t('yaya.speech.asr.denied', '没有麦克风权限')
+  if (code === 'unsupported')
+    return t(
+      'yaya.speech.asr.no_system',
+      '当前环境没有系统语音识别：设置 → YAYA → 插件 → 语音，换一个识别引擎'
+    )
+  if (code === 'network')
+    return t('yaya.speech.asr.network', '连不上语音识别服务（浏览器的在线识别要能访问 Google）')
+  if (code === 'busy') return t('yaya.speech.asr.busy', '语音识别正忙，稍后再试')
+  return e instanceof Error ? e.message : String(e)
+}
+
+/** 系统语音识别：边说边出字，说完（或点 ✓）拿最终结果 */
+async function startSystem(): Promise<void> {
+  state.value = 'starting'
+  partial.value = ''
+  discard = false
+  const support = await systemSpeechReady()
+  if (!support.asr) {
+    fail(systemError({ code: 'unsupported' }))
+    return
+  }
+  const language = String(pluginConfigValues('speech').asr_language ?? '').trim()
+  const r = recognize({
+    lang: language && language !== 'auto' ? language : undefined,
+    onPartial: (text) => {
+      if (rec === r) partial.value = text
+    },
+    onLevel: (level) => {
+      if (rec === r) levels.value = [...levels.value.slice(1), level]
+    }
+  })
+  rec = r
+  state.value = 'recording'
+  startTimer()
+  try {
+    const text = await r.result
+    if (rec !== r) return
+    rec = null
+    cleanup()
+    if (!discard) insert(text)
+    state.value = 'idle'
+  } catch (e) {
+    if (rec !== r) return
+    rec = null
+    fail(systemError(e))
+  }
+}
+
 async function start(): Promise<void> {
   if (state.value === 'recording' || state.value === 'starting') return
   error.value = ''
+  if (engine.value === 'system') return startSystem()
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     fail(
       window.isSecureContext
@@ -102,13 +181,8 @@ async function start(): Promise<void> {
   }
   recorder.onstop = () => void finishRecording(recorder?.mimeType || mime || 'audio/webm')
   recorder.start(250)
-  startedAt = performance.now()
-  elapsed.value = 0
   state.value = 'recording'
-  timer = setInterval(() => {
-    elapsed.value = (performance.now() - startedAt) / 1000
-    if (elapsed.value >= maxSec.value) stopRecording()
-  }, 200)
+  startTimer()
   startMeter(stream)
 }
 
@@ -134,12 +208,25 @@ function startMeter(s: MediaStream): void {
 }
 
 function stopRecording(): void {
+  if (rec) {
+    // 系统识别：停止收音，等最终结果
+    state.value = 'transcribing'
+    if (timer) clearInterval(timer)
+    timer = null
+    rec.stop()
+    return
+  }
   if (recorder && recorder.state !== 'inactive') recorder.stop()
 }
 
 function cancel(): void {
   discard = true
-  if (recorder && recorder.state !== 'inactive') recorder.stop()
+  if (rec) {
+    const r = rec
+    rec = null
+    r.cancel()
+    cleanup()
+  } else if (recorder && recorder.state !== 'inactive') recorder.stop()
   else cleanup()
   state.value = 'idle'
 }
@@ -154,6 +241,7 @@ function cleanup(): void {
   for (const track of stream?.getTracks() ?? []) track.stop()
   stream = null
   levels.value = Array(16).fill(0)
+  partial.value = ''
 }
 
 async function finishRecording(mime: string): Promise<void> {
@@ -171,10 +259,17 @@ async function finishRecording(mime: string): Promise<void> {
   }
   state.value = 'transcribing'
   try {
-    const b64 = await blobToBase64(blob)
+    let audio = blob
+    let type = mime.split(';')[0]
+    // MiMo / Gemini 不认 webm / ogg：转成 16k 单声道 WAV
+    if (asrWantsWav(engine.value) && type !== 'audio/wav') {
+      audio = await toWav16k(blob)
+      type = 'audio/wav'
+    }
+    const b64 = await blobToBase64(audio)
     const res = (await window.cockpit.command('yaya.speech-transcribe', {
       audio: b64,
-      mime: mime.split(';')[0]
+      mime: type
     })) as { text?: string }
     if (state.value !== 'transcribing') return
     insert((res.text ?? '').trim())
@@ -236,6 +331,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   discard = true
+  rec?.cancel()
+  rec = null
   if (recorder && recorder.state !== 'inactive') recorder.stop()
   cleanup()
   disposeAction?.()
@@ -255,7 +352,8 @@ onBeforeUnmount(() => {
         />
       </div>
       <span class="asr-time">{{ timeText }}</span>
-      <span class="asr-hint asr-listening text-medium-emphasis">{{
+      <span v-if="partial" class="asr-partial" :title="partial">{{ partialTail }}</span>
+      <span v-else class="asr-hint asr-listening text-medium-emphasis">{{
         t('yaya.speech.asr.listening', '正在听…')
       }}</span>
       <v-spacer />
@@ -358,6 +456,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+.asr-partial {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .asr-error {
   font-size: 0.8125rem;

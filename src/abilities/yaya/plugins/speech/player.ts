@@ -1,7 +1,8 @@
 /**
  * 朗读播放器（渲染端，模块级单例：切换页面 / 能力不中断）。
  *
- * - 系统语音：浏览器 `speechSynthesis` 逐段朗读（不经过主进程）；
+ * - 系统语音：框架 SDK `@ui/speech` 逐段朗读（安卓 App = 系统 TTS，电脑 = speechSynthesis），
+ *   不经过主进程；系统 TTS 不一定能暂停，暂停 = 停在当前段，继续 = 从这一段开头重念；
  * - 接口：`yaya.speech-speak` 在主进程后台任务里逐段合成，`cockpit:bt` 推送每段的音频地址，
  *   这里按顺序用 `<audio>` 播放；下一段还没合成好就等着（显示「合成中」）。
  *
@@ -10,6 +11,8 @@
  */
 import { reactive } from 'vue'
 import { closeOutsider, openOutsider } from '@ui/outsider'
+import { speak as systemSpeak, systemSpeechSupport, type Utterance } from '@ui/speech'
+import { engineOf, type SpeechEngine } from './engines'
 import { pluginConfigValues } from '../../components/plugin-ui-registry'
 import { speechText, splitSpeech } from './text'
 
@@ -28,7 +31,10 @@ export const tts = reactive({
   key: '',
   /** 朗读内容的开头（播放器标题） */
   title: '',
-  engine: 'browser' as 'browser' | 'api',
+  /** system = 系统语音（渲染端）；api = 主进程接口合成 */
+  engine: 'system' as 'system' | 'api',
+  /** 具体引擎（播放器副标题） */
+  provider: 'system' as SpeechEngine,
   index: 0,
   /** 总段数（接口引擎在合成结束前可能还不确定，以 done 为准） */
   total: 0,
@@ -48,9 +54,11 @@ let chunks: ChunkInfo[] = []
 let taskId = ''
 let synthDone = false
 let audio: HTMLAudioElement | null = null
-let utterance: SpeechSynthesisUtterance | null = null
+let utterance: Utterance | null = null
 /** 每次 speak / stop +1：旧的回调发现代变了就不再动状态 */
 let gen = 0
+/** 系统朗读的代：暂停 / 跳段 / 调速会 stop 当前段，旧段的 done 回来时据此忽略 */
+let sysGen = 0
 let btSubscribed = false
 
 function cfg(): Record<string, unknown> {
@@ -78,13 +86,16 @@ function resetPlayback(): void {
     audio.removeAttribute('src')
     audio.load()
   }
+  stopSystem()
+}
+
+/** 停掉系统朗读（先 gen 作废它的回调，不会被当成「念完了」去播下一段） */
+function stopSystem(): void {
   if (utterance) {
-    utterance.onend = null
-    utterance.onerror = null
-    utterance.onboundary = null
+    sysGen++
+    utterance.stop()
     utterance = null
   }
-  if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
 }
 
 function stopTask(): void {
@@ -116,13 +127,15 @@ export async function speak(key: string, markdown: string): Promise<void> {
   stop()
   const my = ++gen
   const text = speechText(markdown)
-  const engine = cfg().tts_engine === 'api' ? 'api' : 'browser'
+  const provider = engineOf(cfg().tts_engine)
+  const engine = provider === 'system' ? 'system' : 'api'
   const rate = Number(cfg().tts_speed) || 1
   Object.assign(tts, {
     status: 'loading',
     key,
     title: text.replace(/\s+/g, ' ').slice(0, 80),
     engine,
+    provider,
     rate: Math.min(2.5, Math.max(0.5, rate)),
     error: '',
     errorKey: ''
@@ -131,8 +144,8 @@ export async function speak(key: string, markdown: string): Promise<void> {
   setMediaSession(true)
   if (!text) return fail(my, '没有可以朗读的文字', 'yaya.speech.err_no_text')
 
-  if (engine === 'browser') {
-    if (typeof speechSynthesis === 'undefined')
+  if (engine === 'system') {
+    if (!systemSpeechSupport().tts)
       return fail(
         my,
         '当前环境没有系统语音：设置 → YAYA → 插件 → 语音，改用接口引擎',
@@ -141,7 +154,7 @@ export async function speak(key: string, markdown: string): Promise<void> {
     chunks = splitSpeech(text, 220, 120).map((t) => ({ text: t }))
     tts.total = chunks.length
     tts.ready = chunks.length
-    playBrowser(my, 0)
+    playSystem(my, 0)
     return
   }
 
@@ -180,52 +193,36 @@ function fail(my: number, message: string, key = ''): void {
 
 // ---- 系统语音 ----
 
-function pickVoice(text: string): SpeechSynthesisVoice | null {
-  const voices = speechSynthesis.getVoices()
-  if (!voices.length) return null
-  const want = String(cfg().tts_browser_voice ?? '')
-    .trim()
-    .toLowerCase()
-  if (want) {
-    const hit = voices.find((v) => v.name.toLowerCase().includes(want))
-    if (hit) return hit
-  }
-  const zh = /[㐀-鿿]/.test(text)
-  const lang = zh ? 'zh' : 'en'
-  return (
-    voices.find((v) => v.lang.toLowerCase().startsWith(lang) && v.localService) ??
-    voices.find((v) => v.lang.toLowerCase().startsWith(lang)) ??
-    null
-  )
-}
-
-function playBrowser(my: number, index: number): void {
+function playSystem(my: number, index: number): void {
   if (my !== gen) return
   if (index >= chunks.length) return finish(my)
   tts.index = index
   tts.progress = 0
   const text = chunks[index].text
-  const u = new SpeechSynthesisUtterance(text)
-  const voice = pickVoice(text)
-  if (voice) {
-    u.voice = voice
-    u.lang = voice.lang
-  }
-  u.rate = tts.rate
-  u.onstart = () => {
-    if (my === gen && tts.status !== 'paused') tts.status = 'playing'
-  }
-  u.onboundary = (e) => {
-    if (my === gen) tts.progress = Math.min(1, e.charIndex / Math.max(1, text.length))
-  }
-  u.onend = () => playBrowser(my, index + 1)
-  u.onerror = (e) => {
-    // cancel()（停止 / 跳段 / 调速）也会触发 error：只有不是自己取消的才算失败
-    if (e.error === 'canceled' || e.error === 'interrupted') return
-    fail(my, `${e.error}`)
-  }
+  const mine = ++sysGen
+  const u = systemSpeak(text, {
+    voice: String(cfg().tts_browser_voice ?? '') || undefined,
+    rate: tts.rate,
+    onStart: () => {
+      if (my === gen && mine === sysGen && tts.status !== 'paused') tts.status = 'playing'
+    },
+    onBoundary: (i) => {
+      if (my === gen && mine === sysGen) tts.progress = Math.min(1, i / Math.max(1, text.length))
+    }
+  })
   utterance = u
-  speechSynthesis.speak(u)
+  // 没有 onStart 的引擎也要显示成「播放中」
+  if (tts.status === 'loading') tts.status = 'playing'
+  u.done.then(
+    () => {
+      if (my !== gen || mine !== sysGen) return
+      if (utterance === u) utterance = null
+      playSystem(my, index + 1)
+    },
+    (e: unknown) => {
+      if (my === gen && mine === sysGen) fail(my, errText(e))
+    }
+  )
 }
 
 // ---- 接口 ----
@@ -325,14 +322,15 @@ function finish(my: number): void {
 
 export function toggle(): void {
   if (tts.status === 'playing') {
-    if (tts.engine === 'browser') speechSynthesis.pause()
+    // 系统 TTS（尤其安卓）不一定能暂停：停在当前段，继续时从这一段开头重念
+    if (tts.engine === 'system') stopSystem()
     else audio?.pause()
     tts.status = 'paused'
   } else if (tts.status === 'paused') {
-    if (tts.engine === 'browser') {
-      speechSynthesis.resume()
-      // 某些平台 resume 无效：没在说话就从当前段重来
-      if (!speechSynthesis.speaking) restartChunk()
+    if (tts.engine === 'system') {
+      tts.status = 'playing'
+      playSystem(gen, tts.index)
+      return
     } else if (audio?.src) void audio.play()
     else playApi(gen, tts.index)
     tts.status = 'playing'
@@ -341,13 +339,9 @@ export function toggle(): void {
 
 function restartChunk(): void {
   const my = gen
-  if (tts.engine === 'browser') {
-    if (utterance) {
-      utterance.onend = null
-      utterance.onerror = null
-    }
-    speechSynthesis.cancel()
-    playBrowser(my, tts.index)
+  if (tts.engine === 'system') {
+    stopSystem()
+    playSystem(my, tts.index)
   } else playApi(my, tts.index)
 }
 

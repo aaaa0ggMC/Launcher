@@ -84,6 +84,8 @@ public class MainActivity extends Activity {
     private WebView web;
     /** 系统媒体控制（通知栏 / 锁屏）；页面经 media.update 驱动 */
     private MediaBridge media;
+    /** 系统 TTS / 语音识别（0.8.0） */
+    private SpeechBridge speech;
     private SharedPreferences prefs;
     private ValueCallback<Uri[]> fileCallback;
     /** 连接页要显示的错误（下次 state() 取走） */
@@ -149,6 +151,7 @@ public class MainActivity extends Activity {
         createSpinner();
         createWebView();
         media = new MediaBridge(this);
+        speech = new SpeechBridge(this);
 
         boolean restored = false;
         if (savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
@@ -699,6 +702,10 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == SpeechBridge.REQ_ASR) {
+            speech.onPermission(results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
+            return;
+        }
         if (requestCode != REQ_MIC || pendingMic == null) return;
         PermissionRequest req = pendingMic;
         pendingMic = null;
@@ -755,6 +762,7 @@ public class MainActivity extends Activity {
         pendingConnect = null;
         showLoading(false);
         media.release();
+        speech.release();
         stopService(new Intent(this, KeepAliveService.class));
         io.shutdownNow();
         web.destroy();
@@ -793,6 +801,11 @@ public class MainActivity extends Activity {
                     o.put("url", prefs.getString("url", DEFAULT_URL));
                     o.put("keepAlive", prefs.getBoolean("keepAlive", true));
                     o.put("pinShortcuts", Shortcuts.supported(this));
+                    // 系统语音（0.8.0）：页面据此决定用原生 TTS / 识别（见 src/main/ui/speech.ts）
+                    JSONObject sp = new JSONObject();
+                    sp.put("tts", true);
+                    sp.put("asr", SpeechBridge.asrAvailable(this));
+                    o.put("speech", sp);
                     reply(id, true, o);
                     return;
                 }
@@ -874,6 +887,27 @@ public class MainActivity extends Activity {
                     reply(id, true, new JSONObject());
                     return;
                 }
+                case "tts.voices":
+                    speech.voices(replier(id));
+                    return;
+                case "tts.speak":
+                    speech.speak(args, replier(id));
+                    return;
+                case "tts.stop":
+                    speech.stopTts();
+                    reply(id, true, new JSONObject());
+                    return;
+                case "asr.start":
+                    speech.startAsr(args, replier(id));
+                    return;
+                case "asr.stop":
+                    speech.stopAsr();
+                    reply(id, true, new JSONObject());
+                    return;
+                case "asr.cancel":
+                    speech.cancelAsr();
+                    reply(id, true, new JSONObject());
+                    return;
                 default:
                     reply(id, false, errorJson("unknown method: " + method));
             }
@@ -1035,6 +1069,20 @@ public class MainActivity extends Activity {
         } catch (JSONException ignored) {
         }
         return o;
+    }
+
+    private SpeechBridge.Reply replier(String id) {
+        return new SpeechBridge.Reply() {
+            @Override
+            public void ok(JSONObject data) {
+                reply(id, true, data);
+            }
+
+            @Override
+            public void fail(String error) {
+                reply(id, false, errorJson(error));
+            }
+        };
     }
 
     private void reply(String id, boolean ok, JSONObject data) {

@@ -51,6 +51,16 @@ const partText = computed(() =>
       )
     : ''
 )
+const ENGINE_LABELS: Record<string, [string, string]> = {
+  system: ['yaya.speech.engine.system', '系统语音'],
+  openai: ['yaya.speech.engine.openai', 'OpenAI 兼容接口'],
+  mimo: ['yaya.speech.engine.mimo', '小米 MiMo'],
+  gemini: ['yaya.speech.engine.gemini', 'Google Gemini']
+}
+const engineLabel = computed(() => {
+  const [key, fallback] = ENGINE_LABELS[tts.provider] ?? ENGINE_LABELS.system
+  return t(key, fallback)
+})
 const errorText = computed(() => (tts.errorKey ? t(tts.errorKey, tts.error) : tts.error))
 const playLabel = computed(() =>
   tts.status === 'playing'
@@ -111,11 +121,7 @@ const playLabel = computed(() =>
           <span v-if="partText">{{ partText }}</span>
           <span v-if="partText && stateText"> · </span>
           <span v-if="stateText">{{ stateText }}</span>
-          <span v-if="!partText && !stateText">{{
-            tts.engine === 'api'
-              ? t('yaya.speech.engine.api', 'OpenAI 兼容接口')
-              : t('yaya.speech.engine.browser', '系统语音（浏览器）')
-          }}</span>
+          <span v-if="!partText && !stateText">{{ engineLabel }}</span>
         </div>
       </div>
 

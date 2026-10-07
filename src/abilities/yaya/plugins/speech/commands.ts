@@ -14,15 +14,7 @@ import { t, te } from '../../../../main/process/i18n'
 import { getYayaConfigPath, loadYayaConfig } from '../../services/config'
 import { getPlugin, pluginConfigValues } from '../../services/plugins/registry'
 import { SPEECH_PLUGIN_ID } from './index'
-import {
-  AUDIO_EXT,
-  asrMissing,
-  asrSettings,
-  synthesize,
-  transcribe,
-  ttsMissing,
-  ttsSettings
-} from './service'
+import { asrMissing, asrSettings, synthesize, transcribe, ttsMissing, ttsSettings } from './service'
 import { splitSpeech } from './text'
 
 const log = makeLogger('yaya-speech')
@@ -71,7 +63,7 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.speech-speak',
     description:
-      '用语音插件的接口引擎（OpenAI 兼容 /audio/speech）朗读一段文字：在后台任务里逐段合成，返回任务 id；' +
+      '用语音插件的接口引擎（OpenAI 兼容 / MiMo / Gemini）朗读一段文字：在后台任务里逐段合成，返回任务 id；' +
       '每段合成好推送 { type: "chunk", index, total, url }，结束推送 { type: "done" }，失败推送 { type: "error" }。' +
       '「系统语音」引擎在界面里直接朗读，不经过这条命令',
     usage: 'yaya.speech-speak --text <文字>',
@@ -85,6 +77,10 @@ const commands: CommandSpec[] = [
       if (!text) throw new Error(t('yaya.speech.err_no_text', '没有可以朗读的文字'))
       const values = speechValues()
       const s = ttsSettings(values)
+      if (s.engine === 'system')
+        throw new Error(
+          t('yaya.speech.err_system_tts', '「系统语音」在界面里直接朗读，不经过这条命令')
+        )
       const missing = ttsMissing(s)
       if (missing.length)
         throw new Error(
@@ -116,8 +112,8 @@ const commands: CommandSpec[] = [
             }
             control.pushLine(`[${i + 1}/${chunks.length}] ${chunks[i].slice(0, 40)}`)
             const audio = await synthesize(s, chunks[i], ac.signal)
-            const path = join(dir, `${control.id}-${i}.${AUDIO_EXT[s.format] ?? 'mp3'}`)
-            writeFileSync(path, audio)
+            const path = join(dir, `${control.id}-${i}.${audio.ext}`)
+            writeFileSync(path, audio.data)
             control.push({
               data: {
                 type: 'chunk',
@@ -150,7 +146,7 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.speech-transcribe',
     description:
-      '语音输入：把一段录音（base64）交给语音插件配置的转写接口（OpenAI 兼容 /audio/transcriptions），返回 { text }',
+      '语音输入：把一段录音（base64）交给语音插件配置的转写接口（OpenAI 兼容 / MiMo / Gemini），返回 { text }',
     usage: 'yaya.speech-transcribe --audio <base64> --mime audio/webm',
     ui: ['YAYA → 输入框「+」→ 语音输入'],
     related: ['yaya.speech-speak'],
@@ -163,6 +159,10 @@ const commands: CommandSpec[] = [
       if (audio.length > MAX_AUDIO_BYTES)
         throw new Error(t('yaya.speech.err_audio_too_big', '录音太长了（超过 24MB）'))
       const s = asrSettings(speechValues())
+      if (s.engine === 'system')
+        throw new Error(
+          t('yaya.speech.err_system_asr', '「系统语音」在界面里直接识别，不经过这条命令')
+        )
       const missing = asrMissing(s)
       if (missing.length)
         throw new Error(

@@ -18,6 +18,14 @@ import { asrMissing, asrSettings, ttsMissing, ttsSettings } from './service'
 
 export const SPEECH_PLUGIN_ID = 'speech'
 
+/** 引擎选项（TTS / ASR 共用）；旧配置里的 browser / api 由 engineOf 兼容 */
+const ENGINE_OPTIONS = [
+  { value: 'system', label: '系统语音', labelKey: 'yaya.speech.engine.system' },
+  { value: 'openai', label: 'OpenAI 兼容接口', labelKey: 'yaya.speech.engine.openai' },
+  { value: 'mimo', label: '小米 MiMo', labelKey: 'yaya.speech.engine.mimo' },
+  { value: 'gemini', label: 'Google Gemini', labelKey: 'yaya.speech.engine.gemini' }
+]
+
 const CONFIG: PluginConfigField[] = [
   // ---- 朗读（TTS） ----
   {
@@ -26,13 +34,11 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '朗读引擎',
     labelKey: 'yaya.speech.cfg.tts_engine',
-    description: '系统语音不用配置，音质取决于系统 / 浏览器；接口需要下面的地址与密钥',
+    description:
+      '系统语音不用配置（安卓 App 用系统 TTS，电脑用浏览器 / 系统语音）；其余引擎要填下面的密钥，地址 / 模型 / 音色留空用服务商默认',
     descriptionKey: 'yaya.speech.cfg.tts_engine_desc',
-    default: 'browser',
-    options: [
-      { value: 'browser', label: '系统语音（浏览器）', labelKey: 'yaya.speech.engine.browser' },
-      { value: 'api', label: 'OpenAI 兼容接口', labelKey: 'yaya.speech.engine.api' }
-    ]
+    default: 'system',
+    options: ENGINE_OPTIONS
   },
   {
     key: 'tts_speed',
@@ -63,10 +69,11 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '接口地址',
     labelKey: 'yaya.speech.cfg.base_url',
-    description: 'OpenAI 兼容地址（到 /v1 为止），会请求 {地址}/audio/speech',
-    descriptionKey: 'yaya.speech.cfg.tts_base_url_desc',
-    default: 'https://api.openai.com/v1',
-    placeholder: 'https://api.openai.com/v1'
+    description:
+      '留空 = 服务商默认：OpenAI api.openai.com/v1 · MiMo api.xiaomimimo.com/v1 · Gemini generativelanguage.googleapis.com/v1beta',
+    descriptionKey: 'yaya.speech.cfg.base_url_desc',
+    default: '',
+    placeholder: 'https://…'
   },
   {
     key: 'tts_api_key',
@@ -82,8 +89,10 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '模型',
     labelKey: 'yaya.speech.cfg.model',
-    default: 'gpt-4o-mini-tts',
-    placeholder: 'gpt-4o-mini-tts / tts-1 / FunAudioLLM/CosyVoice2-0.5B'
+    description: '留空 = 默认：gpt-4o-mini-tts / mimo-v2.5-tts / gemini-2.5-flash-preview-tts',
+    descriptionKey: 'yaya.speech.cfg.tts_model_desc',
+    default: '',
+    placeholder: 'tts-1 / FunAudioLLM/CosyVoice2-0.5B / …'
   },
   {
     key: 'tts_voice',
@@ -91,8 +100,10 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '音色',
     labelKey: 'yaya.speech.cfg.voice',
-    default: 'alloy',
-    placeholder: 'alloy / nova / …'
+    description: '留空 = 默认：alloy / mimo_default / Kore',
+    descriptionKey: 'yaya.speech.cfg.voice_desc',
+    default: '',
+    placeholder: 'nova / Puck / …'
   },
   {
     key: 'tts_format',
@@ -100,6 +111,8 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '音频格式',
     labelKey: 'yaya.speech.cfg.format',
+    description: '只对 OpenAI 兼容接口有效；MiMo / Gemini 返回 PCM，存成 WAV',
+    descriptionKey: 'yaya.speech.cfg.format_desc',
     default: 'mp3',
     options: ['mp3', 'opus', 'aac', 'flac', 'wav'].map((v) => ({ value: v, label: v }))
   },
@@ -109,7 +122,8 @@ const CONFIG: PluginConfigField[] = [
     group: 'tts',
     label: '语气说明',
     labelKey: 'yaya.speech.cfg.instructions',
-    description: '只有部分模型支持（如 gpt-4o-mini-tts）：用自然语言描述语气、情绪、语速',
+    description:
+      'OpenAI（gpt-4o-mini-tts）与 Gemini：用自然语言描述语气、情绪、语速；MiMo：写风格词，如「开心 磁性」',
     descriptionKey: 'yaya.speech.cfg.instructions_desc',
     default: ''
   },
@@ -128,15 +142,28 @@ const CONFIG: PluginConfigField[] = [
   },
   // ---- 语音输入（ASR） ----
   {
+    key: 'asr_engine',
+    type: 'select',
+    group: 'asr',
+    label: '识别引擎',
+    labelKey: 'yaya.speech.cfg.asr_engine',
+    description:
+      '系统语音：安卓 App 用系统语音识别，Chrome / Edge 用浏览器在线识别（电脑版 Electron 不支持）；其余引擎要填下面的密钥',
+    descriptionKey: 'yaya.speech.cfg.asr_engine_desc',
+    default: 'system',
+    options: ENGINE_OPTIONS
+  },
+  {
     key: 'asr_base_url',
     type: 'string',
     group: 'asr',
     label: '接口地址',
     labelKey: 'yaya.speech.cfg.base_url',
-    description: 'OpenAI 兼容地址（到 /v1 为止），会请求 {地址}/audio/transcriptions',
-    descriptionKey: 'yaya.speech.cfg.asr_base_url_desc',
-    default: 'https://api.openai.com/v1',
-    placeholder: 'https://api.openai.com/v1'
+    description:
+      '留空 = 服务商默认：OpenAI api.openai.com/v1 · MiMo api.xiaomimimo.com/v1 · Gemini generativelanguage.googleapis.com/v1beta',
+    descriptionKey: 'yaya.speech.cfg.base_url_desc',
+    default: '',
+    placeholder: 'https://…'
   },
   {
     key: 'asr_api_key',
@@ -152,8 +179,10 @@ const CONFIG: PluginConfigField[] = [
     group: 'asr',
     label: '模型',
     labelKey: 'yaya.speech.cfg.model',
-    default: 'whisper-1',
-    placeholder: 'whisper-1 / gpt-4o-mini-transcribe / whisper-large-v3'
+    description: '留空 = 默认：whisper-1 / mimo-v2.5-asr / gemini-2.5-flash',
+    descriptionKey: 'yaya.speech.cfg.asr_model_desc',
+    default: '',
+    placeholder: 'gpt-4o-mini-transcribe / whisper-large-v3 / …'
   },
   {
     key: 'asr_language',
@@ -161,7 +190,8 @@ const CONFIG: PluginConfigField[] = [
     group: 'asr',
     label: '语言',
     labelKey: 'yaya.speech.cfg.language',
-    description: 'ISO-639-1 代码（zh / en / ja …），留空 = 自动识别',
+    description:
+      '留空 = 自动 / 跟随浏览器。接口引擎填 ISO-639-1 代码（zh / en / ja …）；系统语音可填 zh-CN 这类区域代码',
     descriptionKey: 'yaya.speech.cfg.language_desc',
     default: ''
   },
@@ -224,15 +254,26 @@ const plugin: YayaPlugin = {
   defaultEnabled: false,
   mentionable: false,
   docs: [
+    '### 引擎',
+    '| 引擎 | 朗读 | 语音输入 |',
+    '|---|---|---|',
+    '| 系统语音 | 安卓 App：系统 TTS；电脑：浏览器 / 系统语音 | 安卓 App：系统语音识别；Chrome / Edge：在线识别（Electron 不支持） |',
+    '| OpenAI 兼容 | `/audio/speech`（OpenAI、SiliconFlow、Groq、Kokoro…） | `/audio/transcriptions`（Whisper 系） |',
+    '| 小米 MiMo | `mimo-v2.5-tts`（风格写在语气说明里，如「开心 磁性」） | `mimo-v2.5-asr` |',
+    '| Google Gemini | `gemini-2.5-flash-preview-tts`，音色如 Kore / Puck | 用 Gemini 模型转写（默认 `gemini-2.5-flash`） |',
+    '',
+    '地址 / 模型 / 音色留空 = 该服务商的默认值。',
+    '',
     '### 语音输入（ASR）',
     '输入框「+」→「语音输入」开始录音，再点一次（或录音条上的 ✓）结束，识别结果插到光标处。',
-    '需要一个 OpenAI 兼容的转写接口（`/audio/transcriptions`，Whisper 系）。',
     '网页版需要安全上下文（https 或 localhost）才能使用麦克风。',
     '',
     '### 朗读（TTS）',
     '回答下面的 🔊 按钮朗读这一条；播放器悬浮在页面上，可以暂停、调速、跳段、停止。',
-    '- **系统语音**：浏览器 / 系统自带，不用配置；',
-    '- **OpenAI 兼容接口**：`/audio/speech`，在后台任务里逐段合成（切换页面不中断，后台任务面板里可停止）。'
+    '接口引擎在后台任务里逐段合成（切换页面不中断，后台任务面板里可停止）。',
+    '',
+    '### 给其他能力用',
+    '系统语音是框架层 SDK `@ui/speech`（`speak` / `recognize`），任何能力或插件都能直接调用。'
   ].join('\n'),
   tools: () => [],
   configSchema: CONFIG,
@@ -245,7 +286,6 @@ const plugin: YayaPlugin = {
       descriptionKey: 'yaya.speech.group.tts_desc',
       status: () => {
         const v = values()
-        if (v.tts_engine !== 'api') return { state: 'ready' }
         return missingStatus(ttsMissing(ttsSettings(v)))
       }
     },
