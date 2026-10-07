@@ -17,6 +17,7 @@
 import { t, te } from '../../../../main/process/i18n'
 import type { PluginConfigField, YayaPlugin } from '../../services/plugins/types'
 import {
+  jsonSubAgent,
   pickExternalTools,
   selfOrganizedLoop,
   toolScope
@@ -307,8 +308,7 @@ async function runRoleplay(ctx: WorkflowContext): Promise<void> {
     localTools: [],
     external,
     maxRounds: num(cfg.tool_rounds, 4, 1, 20) + 1,
-    label: t('yaya.rp.step.research', 'GM：查资料'),
-    finalLabel: gmLabel
+    label: gmLabel
   })
   if (ctx.aborted || !final) return
 
@@ -316,13 +316,17 @@ async function runRoleplay(ctx: WorkflowContext): Promise<void> {
 
   // ③ 设定 Agent：开场 / 开场返工，记下 intro 与开场定下来的东西
   if (opening) {
-    const out = await ctx.subAgent({
-      agent: 'setup',
-      label: t('yaya.rp.step.setup', '设定：主角、题材与世界'),
-      system: setupAgentSystem(setupNow, prev)
-    })
+    const json = await jsonSubAgent(
+      ctx,
+      {
+        agent: 'setup',
+        label: t('yaya.rp.step.setup', '设定：主角、题材与世界'),
+        system: setupAgentSystem(setupNow, prev)
+      },
+      extractJson
+    )
     if (ctx.aborted) return
-    next = stateFromSetup(extractJson(out.content), prev, cfg)
+    next = stateFromSetup(json, prev, cfg)
     const setup = effectiveSetup(cfg, next)
     // 开局设定卡（模型看不到：设定之后会在 GM 的系统提示词里）
     const data: RpSetupCardData = {
@@ -349,14 +353,18 @@ async function runRoleplay(ctx: WorkflowContext): Promise<void> {
 
   // ④ 记录员：扩写不改变剧情，不记
   if (cfg.memory !== false && action.kind !== 'expand') {
-    const chronicle = await ctx.subAgent({
-      agent: 'chronicler',
-      label: t('yaya.rp.step.chronicle', '记录员：更新故事记忆'),
-      system: chroniclerSystem(next)
-    })
+    const chronicle = await jsonSubAgent(
+      ctx,
+      {
+        agent: 'chronicler',
+        label: t('yaya.rp.step.chronicle', '记录员：更新故事记忆'),
+        system: chroniclerSystem(next)
+      },
+      extractJson
+    )
     const merged = await ctx.compute(
       t('yaya.rp.step.merge', '合并故事记忆'),
-      () => mergeChronicle(next, extractJson(chronicle.content)),
+      () => mergeChronicle(next, chronicle),
       {
         detail: (s) =>
           te(

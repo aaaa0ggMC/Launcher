@@ -205,7 +205,7 @@ it('故事模式：作者自组织（先搜索、搭世界、问角色再写）�
   const archIdx = p.calls.findIndex((c) => c.messages[0].content.includes('world architect'))
   assert.ok(p.calls[archIdx].messages[0].content.includes('雾港，渔民传说'))
   assert.ok(
-    p.calls[archIdx].messages.some((m) => m.role === 'tool' && m.name === 'web_search'),
+    p.calls[archIdx].messages.at(-1)!.content.includes('[RESEARCH: web_search]'),
     '建筑师看得到搜索结果'
   )
   // 作者的提示词：不带插件守则；工具 = 网页搜索 + 故事工具
@@ -318,6 +318,6 @@ it('故事模式：工具步数用完时收掉工具逼出正文；第一轮没�
   )
   assert.deepEqual(order, ['author', 'architect', 'chronicler'])
   const arch = calls2[1]
-  assert.ok(arch.messages.some((m) => m.role === 'assistant' && m.content === '雾气漫上码头。'))
+  assert.ok(arch.messages.at(-1)!.content.includes('雾气漫上码头。'))
   assert.equal(cmd.bibleOnBranch(t2.leaf)!.title, '雾港')
 })
