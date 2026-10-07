@@ -7,6 +7,7 @@
 import { useI18n } from '@ui/i18n'
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
+import { useScrollMemory } from '@ui/composables/scroll-memory'
 import type { ReasoningEffort, WorkflowInfo, YayaAssistant, YayaConfig } from '../../types'
 import { assistantFromDefaults } from '../../assistants'
 import { modelMonogram } from '../../profile'
@@ -49,6 +50,9 @@ watch(selected, (a) => {
   }
 })
 const scoped = computed(() => (selected.value ? scopedConfig(props.config, selected.value) : null))
+
+const rootEl = ref<HTMLElement | null>(null)
+useScrollMemory(rootEl, () => `${selectedId.value ?? ''}|${page.value ?? ''}`, 'yaya-assistants')
 
 function open(a: YayaAssistant): void {
   selectedId.value = a.id
@@ -219,7 +223,7 @@ const workflowItems = computed(() => workflows.value.map((w) => ({ title: w.labe
 </script>
 
 <template>
-  <div class="assistants-section d-flex flex-column ga-4">
+  <div ref="rootEl" class="assistants-section d-flex flex-column ga-4">
     <!-- 列表 -->
     <template v-if="!selected">
       <div class="text-caption text-medium-emphasis">

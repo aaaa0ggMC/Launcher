@@ -2,6 +2,7 @@
 import { useI18n } from '@ui/i18n'
 import { computed, inject, onBeforeUnmount, onMounted, onActivated, ref } from 'vue'
 import type { Ref } from 'vue'
+import { useScrollMemory } from '@ui/composables/scroll-memory'
 import type { PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import McpServersPanel from './McpServersPanel.vue'
@@ -131,13 +132,21 @@ function editServer(pluginId: string): void {
   mcpEdit.value = serverId
 }
 
+// 列表 / 详情 / 分页各自记住滚动位置：从 MCP 详情返回时回到点进去的位置
+const rootEl = ref<HTMLElement | null>(null)
+useScrollMemory(
+  rootEl,
+  () => `${tab.value}|${selectedId.value ?? ''}`,
+  `yaya-plugins:${props.assistantId ?? ''}`
+)
+
 function closeDetail(): void {
   selectedId.value = null
 }
 </script>
 
 <template>
-  <div class="plugins-section d-flex flex-column ga-4">
+  <div ref="rootEl" class="plugins-section d-flex flex-column ga-4">
     <v-alert
       v-if="actionError"
       color="error"

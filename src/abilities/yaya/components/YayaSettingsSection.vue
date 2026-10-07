@@ -12,6 +12,7 @@ import {
   watch
 } from 'vue'
 import type { Ref } from 'vue'
+import { useScrollMemory } from '@ui/composables/scroll-memory'
 import type { ProviderConfig, YayaConfig } from '../types'
 import AssistantSection from './settings/AssistantSection.vue'
 import AssistantsSection from './settings/AssistantsSection.vue'
@@ -418,6 +419,16 @@ onBeforeUnmount(() => {
 })
 
 const layerKey = computed(() => (wide.value ? 'wide' : `layer-${layer.value}`))
+
+// 分区 / 层级 / 服务商各自记住滚动位置（共用设置页的滚动容器，否则返回时错位）
+useScrollMemory(
+  rootEl,
+  () =>
+    wide.value
+      ? `${activeSection.value}|${selectedProviderId.value ?? ''}`
+      : `${layer.value}|${layer.value > 0 ? activeSection.value : ''}|${layer.value === 2 ? (selectedProviderId.value ?? '') : ''}`,
+  'yaya-settings'
+)
 const layerTransition = computed(() => (slideDir.value > 0 ? 'layer-push' : 'layer-pop'))
 
 function notice(text: string, color = 'primary'): void {
