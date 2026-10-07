@@ -398,7 +398,8 @@ const NOP_RESULT: Record<string, unknown> = {
   'shortcut:sync-global': {},
   'screenshot:capture': null,
   'screenshot:save': null,
-  'agent-view:control': false
+  'agent-view:control': false,
+  'shell:open-path': 'unsupported'
 }
 
 const cockpit = createCockpit({
@@ -482,10 +483,15 @@ const cockpit = createCockpit({
           return ''
         }
       }
-      case 'shell:open-external':
-        if (android) android.openExternal(String(args[0] ?? ''))
-        else window.open(String(args[0] ?? ''), '_blank', 'noopener')
+      case 'shell:open-external': {
+        // 与 Electron 一致只放行网页链接：file:// 等交给安卓系统会抛 FileUriExposedException 让 App 闪退，
+        // 浏览器里也打不开（且那是宿主机上的路径，不在这台设备上）
+        const target = String(args[0] ?? '')
+        if (!/^https?:\/\//i.test(target)) return
+        if (android) android.openExternal(target)
+        else window.open(target, '_blank', 'noopener')
         return
+      }
       case 'window:work-area':
         return { x: 0, y: 0, width: innerWidth, height: innerHeight }
       default:
@@ -515,7 +521,9 @@ const cockpit = createCockpit({
     'privacy.consent': 'web',
     // 浏览器有等价实现；安卓客户端走原生
     clipboard: android ? 'native' : 'web',
-    external: android ? 'native' : 'web'
+    external: android ? 'native' : 'web',
+    // 宿主目录在宿主机上（Termux / 远端），这台设备的文件管理器打不开：界面改用应用内浏览
+    'folder.open': 'none'
   },
   hostUrl: (u) => u.replace(/^(cockpit-(?:icon|audio|tile)|yaya-asset):\/\//, '/_p/$1/'),
   platform: info.platform,

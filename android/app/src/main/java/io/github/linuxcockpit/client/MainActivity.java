@@ -1190,9 +1190,14 @@ public class MainActivity extends Activity {
     }
 
     void openExternal(String url) {
+        // file:// 交给别的应用会抛 FileUriExposedException（Android 7+）直接闪退；只放行网页 / 邮件等外部链接
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+        if (scheme.isEmpty() || scheme.equals("file") || scheme.equals("content") || scheme.equals("javascript")) return;
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-        } catch (ActivityNotFoundException ignored) {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (RuntimeException ignored) {
+            // ActivityNotFoundException / SecurityException 等：没法打开就算了，不能让 App 崩
         }
     }
 

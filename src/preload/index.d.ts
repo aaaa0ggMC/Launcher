@@ -143,6 +143,8 @@ export interface CockpitApi {
   /** 读取系统剪贴板文本（Electron 主进程 / 安卓原生 / 浏览器 navigator）；读不到返回空串。 */
   readText: () => Promise<string>
   openExternal: (url: string) => Promise<void>
+  /** 用系统文件管理器打开宿主目录（仅 Electron，`hasCap('folder.open')`）；返回错误文本，成功为 '' */
+  openPath: (path: string) => Promise<string>
   /** Privacy consent window only (other senders get an empty result). */
   privacyPending: () => Promise<unknown[]>
   privacyDecide: (id: string, decision: 'deny' | 'once' | 'agent' | 'session') => Promise<boolean>
