@@ -27,6 +27,8 @@ const list = computed(() =>
   inset: 0;
   z-index: 2450;
   pointer-events: none;
+  /* 贴边收起的悬浮窗大半在屏幕外：别让它撑出滚动条 */
+  overflow: hidden;
 }
 </style>
 

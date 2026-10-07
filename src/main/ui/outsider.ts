@@ -30,6 +30,74 @@ export interface OutsiderAttrs {
   persist?: boolean
   /** 模态：居中 + 遮罩，挡住下面的页面（仅外壳使用，如授权弹窗） */
   modal?: boolean
+  /** 拖到屏幕边缘时贴边收起、只露一条（缺省 true；不可拖动时无效） */
+  dockable?: boolean
+}
+
+/** 贴边收起的那条边 */
+export type OutsiderDock = 'left' | 'right' | 'top' | 'bottom'
+
+/** 贴边后露在屏幕里的宽度（CSS px） */
+export const DOCK_PEEK = 22
+
+interface Box {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/**
+ * 拖动松手时要不要贴边：悬浮窗被拖出了屏幕边，或指针贴着屏幕边（`edge` 以内）。
+ * 几条边都满足时取「越界最多」的那条；不贴边返回 null。
+ */
+export function dockSideFor(
+  box: Box,
+  pointer: { x: number; y: number },
+  view: { width: number; height: number },
+  edge = 12
+): OutsiderDock | null {
+  const over: [OutsiderDock, number][] = [
+    ['left', Math.max(-box.left, edge - pointer.x)],
+    ['right', Math.max(box.left + box.width - view.width, pointer.x - (view.width - edge))],
+    ['top', Math.max(-box.top, edge - pointer.y)],
+    ['bottom', Math.max(box.top + box.height - view.height, pointer.y - (view.height - edge))]
+  ]
+  let best: OutsiderDock | null = null
+  let most = 0
+  for (const [side, v] of over) {
+    if (v > most) {
+      best = side
+      most = v
+    }
+  }
+  return best
+}
+
+/**
+ * 同一条边上已经贴着别的悬浮窗时，沿边挪开，免得露出来的几条叠在一起：
+ * 在 [min, max - size] 里找离 `start` 最近、不和任何 `others`（沿边的区间）重叠的位置。
+ * 实在放不下就按原位（夹到范围内）。
+ */
+export function dockSlot(
+  start: number,
+  size: number,
+  others: { start: number; size: number }[],
+  min: number,
+  max: number,
+  gap = 6
+): number {
+  const fit = (v: number): number => Math.min(Math.max(v, min), Math.max(min, max - size))
+  const free = (v: number): boolean =>
+    others.every((o) => v + size + gap <= o.start || v >= o.start + o.size + gap)
+  const candidates = [start]
+  for (const o of others) candidates.push(o.start - size - gap, o.start + o.size + gap)
+  let best: number | null = null
+  for (const c of candidates.map(fit)) {
+    if (!free(c)) continue
+    if (best === null || Math.abs(c - start) < Math.abs(best - start)) best = c
+  }
+  return best ?? fit(start)
 }
 
 /** 能力 `index.ts` 里的声明 */

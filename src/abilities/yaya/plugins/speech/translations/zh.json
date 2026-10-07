@@ -47,6 +47,7 @@
   "yaya.speech.asr.cancel": "取消录音",
   "yaya.speech.asr.done": "结束并识别",
   "yaya.speech.asr.listening": "正在听…",
+  "yaya.speech.asr.connecting": "正在连接，稍等再开口…",
   "yaya.speech.asr.transcribing": "正在识别…",
   "yaya.speech.asr.denied": "没有麦克风权限",
   "yaya.speech.asr.no_mic": "没有找到麦克风",
