@@ -163,6 +163,7 @@ const hint = computed(() => {
       class="widget-box"
       :src="frameUrl"
       sandbox="allow-scripts"
+      allow="autoplay"
       referrerpolicy="no-referrer"
       :title="t('yaya.widget.frame_title', 'HTML 小部件')"
       :style="{ height: `${height}px` }"
