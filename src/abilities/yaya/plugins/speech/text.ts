@@ -39,11 +39,17 @@ export function speechText(md: string): string {
   // 强调符号 / 删除线 / 脚注标记
   s = s.replace(/(\*\*|__|\*|_|~~)(?=\S)([^\n]*?\S)\1/g, '$2')
   s = s.replace(/\[\^[^\]]+\]/g, '')
-  return s
-    .split('\n')
-    .map((l) => l.replace(/[ \t]+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n')
+  return (
+    s
+      .split('\n')
+      .map((l) => l.replace(/[ \t]+/g, ' ').trim())
+      .filter(Boolean)
+      // 标题 / 列表项这类没有句末标点的行补一个，念的时候才有停顿（逐行拼段时不会连成一句）
+      .map((l) =>
+        /[。！？!?；;…：:，,.、)）」』"”]$/.test(l) ? l : l + (CJK_END.test(l) ? '。' : '.')
+      )
+      .join('\n')
+  )
 }
 
 /** 句末标点（含中文）与紧跟的右引号 / 右括号 */
