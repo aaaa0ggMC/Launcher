@@ -3,6 +3,7 @@ import { useI18n } from '@ui/i18n'
 import { computed, inject, onBeforeUnmount, onMounted, onActivated, ref } from 'vue'
 import type { Ref } from 'vue'
 import { useScrollMemory } from '@ui/composables/scroll-memory'
+import { YAYA_SETTINGS_NAV_KEY, type YayaSettingsNav } from './shared'
 import type { PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import McpServersPanel from './McpServersPanel.vue'
@@ -143,6 +144,15 @@ useScrollMemory(
 function closeDetail(): void {
   selectedId.value = null
 }
+
+// 窄屏：头部的「返回」先关详情，详情里就不再放自己的返回按钮
+const nav = inject<YayaSettingsNav | null>(YAYA_SETTINGS_NAV_KEY, null)
+const offBack = nav?.onBack(() => {
+  if (!selectedId.value) return false
+  closeDetail()
+  return true
+})
+onBeforeUnmount(() => offBack?.())
 </script>
 
 <template>
@@ -166,6 +176,7 @@ function closeDetail(): void {
       :config="config"
       :assistant-id="assistantId"
       :restarting="restartingId === selectedPlugin.id"
+      :hide-back="!!nav?.narrow.value"
       @back="closeDetail"
       @restart="restart"
       @edit-server="editServer"

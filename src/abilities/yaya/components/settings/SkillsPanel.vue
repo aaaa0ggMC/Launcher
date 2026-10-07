@@ -188,14 +188,14 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
 <template>
   <div class="skills-panel d-flex flex-column ga-4">
     <!-- Skill 枢纽：提供 skill_load / skill_read_file -->
-    <div v-if="hub" class="hub-row d-flex flex-wrap align-center ga-3 pa-3 rounded-lg border">
+    <div v-if="hub" class="hub-row d-flex align-center ga-3 pa-3 rounded-lg border">
       <v-icon
         :icon="hub.icon || pluginFallbackIcon(hub)"
         color="primary"
         size="24"
         class="flex-shrink-0"
       />
-      <div class="min-w-0 flex-grow-1">
+      <div class="row-main">
         <div class="text-body-2 font-weight-medium">{{ hub.label }}</div>
         <div class="text-caption text-medium-emphasis hub-desc">{{ hub.description }}</div>
       </div>
@@ -307,9 +307,9 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
           size="24"
           class="flex-shrink-0"
         />
-        <div class="min-w-0 flex-grow-1">
+        <div class="row-main">
           <div class="d-flex align-center flex-wrap ga-2">
-            <span class="font-weight-bold text-subtitle-2">{{ skill.label }}</span>
+            <span class="font-weight-bold text-subtitle-2 skill-name">{{ skill.label }}</span>
             <v-chip variant="tonal" class="chip-pad flex-shrink-0">
               {{
                 te(
@@ -322,7 +322,7 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
           </div>
           <div class="text-caption text-medium-emphasis skill-desc">{{ skill.description }}</div>
         </div>
-        <v-icon icon="mdi-chevron-right" class="flex-shrink-0" />
+        <v-icon icon="mdi-chevron-right" class="row-chevron flex-shrink-0" />
         <!-- 开关单独一层：点击 / 按键都不触发行进详情 -->
         <div class="row-switch flex-shrink-0" @click.stop @keydown.stop>
           <v-switch
@@ -334,7 +334,12 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
           />
         </div>
         <!-- 删除：行内二次确认 -->
-        <div class="row-actions flex-shrink-0 d-flex align-center ga-1" @click.stop @keydown.stop>
+        <div
+          class="row-actions flex-shrink-0 d-flex align-center ga-1"
+          :class="{ 'is-confirm': confirmRemoveId === skill.id }"
+          @click.stop
+          @keydown.stop
+        >
           <template v-if="confirmRemoveId === skill.id">
             <v-btn variant="text" color="error" @click="removeSkill(skill)">
               {{ t('yaya.settings.plugins.skills_delete_confirm', '确认移除？') }}
@@ -418,10 +423,36 @@ function toggleSkill(plugin: PluginInfo, on: boolean): void {
   max-width: 480px;
 }
 
-/* 容器放不下时换行，不出横向滚动条 */
+/* 文字区按 0 起算宽度：长名称 / 描述不会把图标、开关挤到下一行 */
+.row-main {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.skill-name {
+  overflow-wrap: anywhere;
+}
+
+/* 移除确认：独占一行放在下面（行本身允许换行，只有它会换） */
+.skill-row {
+  flex-wrap: wrap;
+}
+
+.row-actions.is-confirm {
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
+
+/* 窄屏：整行可点，省掉箭头；内边距收一点 */
 @media (max-width: 560px) {
-  .skill-row {
-    flex-wrap: wrap;
+  .skill-row,
+  .hub-row {
+    gap: 10px !important;
+    padding: 10px 8px 10px 12px !important;
+  }
+
+  .row-chevron {
+    display: none;
   }
 }
 

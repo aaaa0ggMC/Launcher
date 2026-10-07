@@ -22,7 +22,12 @@ import PolicySection from './settings/PolicySection.vue'
 import ProviderDetail from './settings/ProviderDetail.vue'
 import ProvidersSection from './settings/ProvidersSection.vue'
 import SaveStatusText from './settings/SaveStatusText.vue'
-import { YAYA_SAVE_API_KEY, type YayaSettingsSaveApi } from './settings/shared'
+import {
+  YAYA_SAVE_API_KEY,
+  YAYA_SETTINGS_NAV_KEY,
+  type YayaSettingsNav,
+  type YayaSettingsSaveApi
+} from './settings/shared'
 import type { ProviderDraft } from './settings/shared'
 import { mergeConfigSnapshot } from './settings/config-sync'
 
@@ -358,8 +363,22 @@ function backToSections(): void {
   layer.value = 0
 }
 
+/** 子视图的返回拦截器（插件详情 / 助手详情先退自己的一层） */
+const backHandlers: (() => boolean)[] = []
+provide<YayaSettingsNav>(YAYA_SETTINGS_NAV_KEY, {
+  onBack: (handler) => {
+    backHandlers.push(handler)
+    return () => {
+      const i = backHandlers.indexOf(handler)
+      if (i >= 0) backHandlers.splice(i, 1)
+    }
+  },
+  narrow: computed(() => !wide.value)
+})
+
 /** 窄屏层级头部的返回 */
 function backLayer(): void {
+  for (let i = backHandlers.length - 1; i >= 0; i--) if (backHandlers[i]()) return
   if (layer.value === 2) {
     slideDir.value = -1
     layer.value = 1
@@ -789,8 +808,9 @@ onBeforeUnmount(() => {
 
 /* 窄屏（手机，≤720px）：容器内边距收窄 */
 @media (max-width: 720px) {
+  /* 手机上外层（设置页内容区 + 栅格）已经有边距，这里不再叠一层 */
   .yaya-settings {
-    padding: 12px !important;
+    padding: 4px 0 12px !important;
   }
 
   .settings-body {

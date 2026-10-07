@@ -428,6 +428,7 @@ defineExpose({ toMarkdown, onActivate })
           :key="activeCategory.id"
           :category="activeCategory"
           :highlight="highlight"
+          :compact-header="narrow"
           @item-ref="setItemRef"
         />
       </section>

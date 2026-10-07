@@ -122,7 +122,7 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
           size="24"
           class="flex-shrink-0"
         />
-        <div class="min-w-0 flex-grow-1">
+        <div class="row-main">
           <div class="d-flex align-center flex-wrap ga-2">
             <span class="font-weight-bold text-subtitle-2">{{ row.plugin.label }}</span>
             <v-chip variant="tonal" class="chip-pad flex-shrink-0">
@@ -159,7 +159,7 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
           class="status-dot status-dot--error flex-shrink-0"
           :title="row.plugin.status.message || t('yaya.settings.plugins.status_error', '错误')"
         />
-        <v-icon icon="mdi-chevron-right" class="flex-shrink-0" />
+        <v-icon icon="mdi-chevron-right" class="row-chevron flex-shrink-0" />
         <!-- 开关单独一层：点击 / 按键都不触发行进详情 -->
         <div class="row-switch flex-shrink-0" @click.stop @keydown.stop>
           <v-switch
@@ -232,14 +232,28 @@ function toggleEnabled(plugin: PluginInfo, on: boolean): void {
   background: rgb(var(--v-theme-error));
 }
 
-/* 容器放不下时让开关也能换行，不出横向滚动条 */
+/* 文字区按 0 起算宽度：长描述只会让自己省略 / 换行，不会把图标、开关挤到下一行 */
+.row-main {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 窄屏：一行 = 图标 | 名称 + 两行描述 | 开关；整行可点，省掉箭头 */
 @media (max-width: 560px) {
   .plugin-row {
-    flex-wrap: wrap;
+    gap: 10px !important;
+    padding: 10px 8px 10px 12px !important;
+  }
+
+  .row-chevron {
+    display: none;
   }
 
   .row-desc {
     white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow-wrap: anywhere;
   }
 }

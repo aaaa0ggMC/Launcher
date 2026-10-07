@@ -5,9 +5,10 @@
  * 读写插件开关等字段时落到这个助手上，服务商 / MCP 服务器列表等仍是全局的。
  */
 import { useI18n } from '@ui/i18n'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useScrollMemory } from '@ui/composables/scroll-memory'
+import { YAYA_SETTINGS_NAV_KEY, type YayaSettingsNav } from './shared'
 import type { ReasoningEffort, WorkflowInfo, YayaAssistant, YayaConfig } from '../../types'
 import { assistantFromDefaults } from '../../assistants'
 import { modelMonogram } from '../../profile'
@@ -63,6 +64,15 @@ function back(): void {
   if (page.value) page.value = null
   else selectedId.value = null
 }
+
+// 窄屏：头部的「返回」先退出助手的子页 / 详情
+const nav = inject<YayaSettingsNav | null>(YAYA_SETTINGS_NAV_KEY, null)
+const offBack = nav?.onBack(() => {
+  if (!selectedId.value) return false
+  back()
+  return true
+})
+onBeforeUnmount(() => offBack?.())
 
 // ---- 列表操作 ----
 
@@ -322,8 +332,14 @@ const workflowItems = computed(() => workflows.value.map((w) => ({ title: w.labe
 
     <!-- 详情 -->
     <template v-else-if="scoped">
-      <div class="d-flex align-center ga-2">
-        <v-btn variant="text" class="text-none" prepend-icon="mdi-chevron-left" @click="back">
+      <div v-if="!nav?.narrow.value || page" class="d-flex align-center ga-2">
+        <v-btn
+          v-if="!nav?.narrow.value"
+          variant="text"
+          class="text-none"
+          prepend-icon="mdi-chevron-left"
+          @click="back"
+        >
           {{ page ? selected.assistantName : t('yaya.assistants.back_list', '助手列表') }}
         </v-btn>
         <span v-if="page" class="text-subtitle-1 font-weight-bold text-truncate">{{
