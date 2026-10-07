@@ -9,7 +9,13 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useScrollMemory } from '@ui/composables/scroll-memory'
 import { YAYA_SETTINGS_NAV_KEY, type YayaSettingsNav } from './shared'
-import type { ReasoningEffort, WorkflowInfo, YayaAssistant, YayaConfig } from '../../types'
+import type {
+  ReasoningEffort,
+  SearchMode,
+  WorkflowInfo,
+  YayaAssistant,
+  YayaConfig
+} from '../../types'
 import { assistantFromDefaults } from '../../assistants'
 import { modelMonogram } from '../../profile'
 import AvatarBadge from '../AvatarBadge.vue'
@@ -218,6 +224,25 @@ const reasoningItems = computed<{ title: string; value: ReasoningEffort }[]>(() 
     title: t(`yaya.reasoning.${v}`, v)
   }))
 )
+
+const searchItems = computed<{ title: string; value: SearchMode; subtitle: string }[]>(() => [
+  {
+    value: 'generic',
+    title: t('yaya.search_mode.generic', '插件搜索'),
+    subtitle: t(
+      'yaya.search_mode.generic_hint',
+      'GenericSearch：用网页搜索插件里配置的引擎，作为工具调用'
+    )
+  },
+  {
+    value: 'builtin',
+    title: t('yaya.search_mode.builtin', '模型内置搜索'),
+    subtitle: t(
+      'yaya.search_mode.builtin_hint',
+      '服务商替模型搜索（如 Gemini Google 搜索），回答下方附来源'
+    )
+  }
+])
 
 const workflows = ref<WorkflowInfo[]>([])
 /** 按正在看的助手取工作流（插件注入的只在插件对它启用时出现）；插件开关保存后重取 */
@@ -451,6 +476,24 @@ const workflowItems = computed(() => {
           hide-details
           @update:model-value="(v: ReasoningEffort) => (selected!.reasoningEffort = v)"
         />
+        <v-select
+          :model-value="selected.searchMode ?? 'generic'"
+          :items="searchItems"
+          :label="t('yaya.search_mode.title', '联网搜索')"
+          :hint="
+            t(
+              'yaya.search_mode.assistant_hint',
+              '选「模型内置」时，模型不支持自带搜索就照旧用插件搜索；聊天里也能单独切换'
+            )
+          "
+          persistent-hint
+          variant="outlined"
+          @update:model-value="(v: SearchMode) => (selected!.searchMode = v)"
+        >
+          <template #item="{ props: itemProps, item }">
+            <v-list-item v-bind="itemProps" :subtitle="item.raw.subtitle" />
+          </template>
+        </v-select>
         <v-select
           v-if="workflowItems.length"
           :model-value="selected.defaultWorkflow ?? 'agent'"

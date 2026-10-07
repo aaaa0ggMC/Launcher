@@ -11,7 +11,7 @@ import {
 } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { fields as searchFields, filterByQuery } from '../../../main/ui/composables/search'
-import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
+import type { MessageAttachment, ReasoningEffort, SearchMode, WorkflowInfo } from '../types'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
 import { ensurePluginMap, inputExtensions } from './plugin-ui-registry'
@@ -32,6 +32,8 @@ const props = defineProps<{
   workflows: WorkflowInfo[]
   /** 正在编辑一条已发送的消息（内容已载入输入框，发送 = 从它的父节点开新分支） */
   editing?: boolean
+  /** 当前模型有自带联网搜索（有才显示搜索切换） */
+  builtinSearchAvailable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -64,6 +66,24 @@ const reasoningLabel = (v: ReasoningEffort): string =>
 const reasoningIcon = computed(
   () => REASONING_OPTIONS.find((o) => o.value === reasoning.value)?.icon ?? 'mdi-brain'
 )
+
+/** 联网搜索用哪个：GenericSearch 插件 / 模型自带（见 services/search-mode.ts） */
+const searchMode = defineModel<SearchMode>('searchMode', { default: 'generic' })
+const SEARCH_OPTIONS: { value: SearchMode; icon: string }[] = [
+  { value: 'generic', icon: 'mdi-magnify' },
+  { value: 'builtin', icon: 'mdi-web' }
+]
+const searchLabel = (v: SearchMode): string =>
+  v === 'builtin'
+    ? t('yaya.search_mode.builtin', '模型内置搜索')
+    : t('yaya.search_mode.generic', '插件搜索')
+const searchHint = (v: SearchMode): string =>
+  v === 'builtin'
+    ? t(
+        'yaya.search_mode.builtin_hint',
+        '服务商替模型搜索（如 Gemini Google 搜索），回答下方附来源'
+      )
+    : t('yaya.search_mode.generic_hint', 'GenericSearch：用网页搜索插件里配置的引擎，作为工具调用')
 
 /** 展开态（大编辑区，盖住消息区下半部分）由父组件定位 */
 const expanded = defineModel<boolean>('expanded', { default: false })
@@ -758,6 +778,39 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               <v-list-item-subtitle v-if="o.value === 'default'" class="wf-desc">
                 {{ t('yaya.reasoning.default_hint', '不发送思考参数，按模型自己的默认') }}
               </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-menu v-if="builtinSearchAvailable" location="top start">
+          <template #activator="{ props: menuProps }">
+            <button
+              v-bind="menuProps"
+              type="button"
+              class="wf-pick"
+              :title="t('yaya.search_mode.title', '联网搜索')"
+              :aria-label="`${t('yaya.search_mode.title', '联网搜索')}: ${searchLabel(searchMode)}`"
+            >
+              <v-icon
+                :icon="searchMode === 'builtin' ? 'mdi-web' : 'mdi-magnify'"
+                size="16"
+                :color="searchMode === 'builtin' ? 'primary' : undefined"
+              />
+              <span class="wf-pick-label">{{ searchLabel(searchMode) }}</span>
+              <v-icon icon="mdi-chevron-up" size="16" />
+            </button>
+          </template>
+          <v-list density="comfortable" max-width="320" class="wf-menu yaya-pop">
+            <v-list-subheader>{{ t('yaya.search_mode.title', '联网搜索') }}</v-list-subheader>
+            <v-list-item
+              v-for="o in SEARCH_OPTIONS"
+              :key="o.value"
+              :active="o.value === searchMode"
+              :prepend-icon="o.icon"
+              color="primary"
+              @click="searchMode = o.value"
+            >
+              <v-list-item-title>{{ searchLabel(o.value) }}</v-list-item-title>
+              <v-list-item-subtitle class="wf-desc">{{ searchHint(o.value) }}</v-list-item-subtitle>
             </v-list-item>
           </v-list>
         </v-menu>

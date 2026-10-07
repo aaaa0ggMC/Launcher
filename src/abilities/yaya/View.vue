@@ -20,6 +20,7 @@ import type {
   ApprovalScope,
   MessageAttachment,
   ReasoningEffort,
+  SearchMode,
   YayaAssistant,
   YayaConfig,
   WorkflowInfo
@@ -42,6 +43,8 @@ import type { ContextState } from './services/context'
 import ContextMarker from './components/ContextMarker.vue'
 import AvatarBadge from './components/AvatarBadge.vue'
 import { modelMonogram } from './profile'
+import { normalizeSearchMode } from './services/search-mode'
+import { supportsBuiltinSearch } from './services/providers/builtin-search'
 import { ensurePluginMap, setPluginAssistant } from './components/plugin-ui-registry'
 import {
   assistantConfig,
@@ -78,6 +81,7 @@ const workflows = ref<WorkflowInfo[]>([])
 /** 新对话草稿里选的工作流（会话创建时带上） */
 const draftWorkflow = ref<string | null>(null)
 const draftReasoning = ref<ReasoningEffort | null>(null)
+const draftSearch = ref<SearchMode | null>(null)
 const composerExpanded = ref(false)
 const menuRequest = ref<MessageMenuRequest | null>(null)
 /** 正在编辑的已发送消息：内容载入底部输入框，发送时从它的父节点开新分支 */
@@ -369,6 +373,32 @@ const currentReasoning = computed<ReasoningEffort>({
     })
   }
 })
+
+/** 联网搜索：会话自己的选择 → 草稿选择 → 助手 / 设置里的默认 → generic（GenericSearch 插件） */
+const currentSearchMode = computed<SearchMode>({
+  get: () =>
+    normalizeSearchMode(
+      activeSession.value?.meta?.search ?? draftSearch.value ?? config.value?.searchMode
+    ),
+  set: (v: SearchMode) => {
+    const s = activeSession.value
+    if (!s) {
+      draftSearch.value = v
+      return
+    }
+    s.meta = { ...(s.meta ?? {}), search: v }
+    window.cockpit.command('yaya.session-update', { id: s.id, search: v }).catch((e) => {
+      showNotice(errText(e), true)
+    })
+  }
+})
+/** 当前模型有没有自带搜索（没有就不显示切换，照旧用 GenericSearch） */
+const builtinSearchAvailable = computed(() =>
+  supportsBuiltinSearch(
+    config.value?.providers.find((p) => p.id === currentProviderId.value),
+    currentModel.value
+  )
+)
 
 // ---- 滚动：贴底时跟随，用户上翻后不打扰 ----
 // 按「方向」判断用户意图，而不是按离底部的距离：流式输出时每帧都在把视图拉回底部，
@@ -704,7 +734,8 @@ async function ensureSession(): Promise<string> {
     model: config.value?.activeModel,
     provider: config.value?.activeProviderId,
     workflow: draftWorkflow.value || undefined,
-    reasoning: draftReasoning.value || undefined
+    reasoning: draftReasoning.value || undefined,
+    search: draftSearch.value || undefined
   })) as Session
   sessions.value.unshift(s)
   activeSessionId.value = s.id
@@ -1703,6 +1734,8 @@ watch(isRunning, (now, before) => {
           v-model="draft"
           v-model:workflow-id="currentWorkflowId"
           v-model:reasoning="currentReasoning"
+          v-model:search-mode="currentSearchMode"
+          :builtin-search-available="builtinSearchAvailable"
           v-model:expanded="composerExpanded"
           :workflows="workflows"
           :is-running="isRunning"

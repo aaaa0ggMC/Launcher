@@ -20,6 +20,8 @@ import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import DataCard from './DataCard.vue'
 import WorkflowCard from './WorkflowCard.vue'
+import SearchSources from './SearchSources.vue'
+import type { BuiltinSearchInfo } from '../services/providers/types'
 
 const props = defineProps<{
   turn: AssistantTurn
@@ -48,6 +50,22 @@ const { t, te } = useI18n(lang)
 
 const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
+
+/** 本轮各步模型自带搜索的查询词与来源（合并去重） */
+const turnSearch = computed<BuiltinSearchInfo | null>(() => {
+  const queries: string[] = []
+  const sources: BuiltinSearchInfo['sources'] = []
+  let used = false
+  for (const n of props.turn.steps) {
+    const s = n.meta?.search as BuiltinSearchInfo | undefined
+    if (!s || typeof s !== 'object') continue
+    used = true
+    for (const q of s.queries ?? []) if (!queries.includes(q)) queries.push(q)
+    for (const src of s.sources ?? [])
+      if (!sources.some((x) => x.url === src.url)) sources.push(src)
+  }
+  return used ? { queries, sources } : null
+})
 const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
 
@@ -299,6 +317,8 @@ async function copyTurn(): Promise<void> {
           />
           <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
         </template>
+
+        <SearchSources v-if="turnSearch" :search="turnSearch" />
 
         <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
           <span /><span /><span />

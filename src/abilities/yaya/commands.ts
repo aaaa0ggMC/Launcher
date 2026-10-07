@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ApprovalScope } from './types'
 import { normalizeEffort } from './services/providers/reasoning'
+import { normalizeSearchMode } from './services/search-mode'
 import type { CommandSpec } from '../../main/process/commands/types'
 import { registerStartupHook } from '../../main/process/startup'
 import { registerYayaAssetProtocol } from './services/asset-protocol'
@@ -231,7 +232,7 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-create',
     description: '创建一个新的 YAYA 聊天会话',
     usage:
-      'yaya.session-create [--title <title>] [--assistant <助手 id>] [--model <model>] [--provider <providerId>] [--workflow <id>] [--reasoning <effort>]',
+      'yaya.session-create [--title <title>] [--assistant <助手 id>] [--model <model>] [--provider <providerId>] [--workflow <id>] [--reasoning <effort>] [--search generic|builtin]',
     run: async (ctx) => {
       // 不指定助手 = 当前活动助手（会话记住它，之后换活动助手不影响这个会话）
       const assistant = findAssistant(
@@ -243,6 +244,7 @@ const commands: CommandSpec[] = [
       const providerId = ctx.named.provider as string | undefined
       const workflow = ctx.named.workflow as string | undefined
       const reasoning = ctx.named.reasoning
+      const search = ctx.named.search
       const session = createSession({
         id: randomUUID(),
         title,
@@ -251,7 +253,8 @@ const commands: CommandSpec[] = [
         meta: {
           ...(assistant ? { assistantId: assistant.id } : {}),
           ...(workflow ? { workflow } : {}),
-          ...(reasoning !== undefined ? { reasoning: normalizeEffort(reasoning) } : {})
+          ...(reasoning !== undefined ? { reasoning: normalizeEffort(reasoning) } : {}),
+          ...(search !== undefined ? { search: normalizeSearchMode(search) } : {})
         }
       })
       return session
@@ -373,19 +376,25 @@ const commands: CommandSpec[] = [
     name: 'yaya.session-update',
     description: '更新指定会话的属性（标题、模型、Provider 等）',
     usage:
-      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <workflowId>] [--reasoning default|off|low|medium|high]',
+      'yaya.session-update --id <sessionId> [--title <title>] [--model <model>] [--provider <providerId>] [--workflow <workflowId>] [--reasoning default|off|low|medium|high] [--search generic|builtin]',
     run: async (ctx) => {
       const id = String(ctx.named.id)
       const updates: Partial<Session> = {}
       if (ctx.named.title !== undefined) updates.title = String(ctx.named.title)
       if (ctx.named.model !== undefined) updates.model = String(ctx.named.model)
       if (ctx.named.provider !== undefined) updates.providerId = String(ctx.named.provider)
-      if (ctx.named.workflow !== undefined || ctx.named.reasoning !== undefined) {
+      if (
+        ctx.named.workflow !== undefined ||
+        ctx.named.reasoning !== undefined ||
+        ctx.named.search !== undefined
+      ) {
         const current = getSession(id)
         updates.meta = { ...(current?.meta ?? {}) }
         if (ctx.named.workflow !== undefined) updates.meta.workflow = String(ctx.named.workflow)
         if (ctx.named.reasoning !== undefined)
           updates.meta.reasoning = normalizeEffort(ctx.named.reasoning)
+        if (ctx.named.search !== undefined)
+          updates.meta.search = normalizeSearchMode(ctx.named.search)
       }
       updateSession(id, updates)
       return { ok: true, id, ...updates }
