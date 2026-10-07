@@ -75,7 +75,7 @@ async function submit(): Promise<void> {
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="560"
+    width="560"
     scrollable
     @update:model-value="emit('update:modelValue', $event === true)"
   >
