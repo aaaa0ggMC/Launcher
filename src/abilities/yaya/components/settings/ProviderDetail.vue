@@ -5,6 +5,7 @@ import type { Ref } from 'vue'
 import type { ProviderConfig } from '../../types'
 import { YAYA_SAVE_API_KEY, type YayaSettingsSaveApi } from './shared'
 import { providerTypeItems } from './shared'
+import { guessBuiltinSearch, supportsBuiltinSearch } from '../../services/providers/builtin-search'
 
 defineOptions({ name: 'cockpit-yaya-settings-provider-detail' })
 
@@ -57,6 +58,7 @@ const reasoningStyles = computed(() => [
   { value: 'deepseek', title: 'DeepSeek（thinking）' },
   { value: 'qwen', title: 'Qwen / DashScope（enable_thinking）' },
   { value: 'openrouter', title: 'OpenRouter（reasoning）' },
+  { value: 'gemini', title: 'Gemini（extra_body.google.thinking_config）' },
   { value: 'llamacpp', title: 'llama.cpp（chat_template_kwargs）' },
   { value: 'none', title: t('yaya.settings.reasoning_style_none', '不支持（从不发送）') }
 ])
@@ -88,6 +90,23 @@ function commitKeyDraft(): void {
   if (!value) return
   props.provider.apiKey = value
   saveApi?.saveNow()
+}
+
+// 模型自带联网搜索：点模型切换；和按名字猜的一样就不存覆盖
+function hasSearch(model: string): boolean {
+  return supportsBuiltinSearch(props.provider, model)
+}
+function toggleSearch(model: string): void {
+  const next = !hasSearch(model)
+  const map = { ...(props.provider.builtinSearch ?? {}) }
+  if (next === guessBuiltinSearch(props.provider, model)) delete map[model]
+  else map[model] = next
+  props.provider.builtinSearch = Object.keys(map).length ? map : undefined
+}
+function searchTitle(model: string): string {
+  return hasSearch(model)
+    ? t('yaya.settings.model_search_on', '有自带联网搜索（点击关闭）')
+    : t('yaya.settings.model_search_off', '没有自带联网搜索（点击标记为有）')
 }
 
 // 模型列表搜索
@@ -243,6 +262,14 @@ const filteredModels = computed(() => {
         @update:model-value="modelQuery = $event ?? ''"
       />
 
+      <div v-if="provider.models.length > 0" class="text-caption text-medium-emphasis mb-2">
+        {{
+          t(
+            'yaya.settings.model_search_hint',
+            '带地球图标的模型有自带联网搜索（按类型和名字识别），点模型可手动改；对话里「联网搜索」选「模型内置」时才会用'
+          )
+        }}
+      </div>
       <div v-if="provider.models.length === 0" class="text-body-2 text-medium-emphasis py-2">
         {{ t('yaya.settings.models_empty', '尚未获取模型列表，可点上方「拉取模型」') }}
       </div>
@@ -254,8 +281,12 @@ const filteredModels = computed(() => {
           v-for="m in filteredModels.slice(0, 40)"
           :key="m"
           size="small"
-          variant="outlined"
+          :variant="hasSearch(m) ? 'tonal' : 'outlined'"
+          :color="hasSearch(m) ? 'primary' : undefined"
+          :prepend-icon="hasSearch(m) ? 'mdi-web' : undefined"
+          :title="searchTitle(m)"
           class="chip-pad model-chip"
+          @click="toggleSearch(m)"
         >
           {{ m }}
         </v-chip>

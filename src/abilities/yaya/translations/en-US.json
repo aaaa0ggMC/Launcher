@@ -715,5 +715,19 @@
   "label.YAYA 朗读播放器": "YAYA read-aloud player",
   "yaya.agent.compute": "Compute",
   "yaya.agent.chronicler": "Chronicler",
-  "yaya.wf.unavailable": "{id} (plugin not enabled; falls back to the global default)"
+  "yaya.wf.unavailable": "{id} (plugin not enabled; falls back to the global default)",
+  "yaya.wf.thinking_summary": "Thought summary",
+  "yaya.thinking_live_title": "Thinking: {title}",
+  "yaya.search_mode.title": "Web search",
+  "yaya.search_mode.generic": "Plugin search",
+  "yaya.search_mode.builtin": "Model's built-in search",
+  "yaya.search_mode.generic_hint": "GenericSearch: the engines configured in the Web search plugin, called as a tool",
+  "yaya.search_mode.builtin_hint": "The provider searches for the model (e.g. Gemini Google Search); sources are listed under the answer",
+  "yaya.search_mode.assistant_hint": "With built-in search, models without it keep using plugin search; you can also switch per chat",
+  "yaya.search_sources.count": "Built-in search · {n} sources",
+  "yaya.search_sources.none": "Built-in search",
+  "yaya.search_sources.queries": "Searched",
+  "yaya.settings.model_search_on": "Has built-in web search (click to turn off)",
+  "yaya.settings.model_search_off": "No built-in web search (click to mark as supported)",
+  "yaya.settings.model_search_hint": "Models with a globe icon have built-in web search (detected from type and name); click a model to change it. Used only when a chat picks \"Model's built-in search\""
 }

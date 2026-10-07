@@ -7,6 +7,8 @@ import type { ToolCallItem } from '../types'
 import { renderMarkdown } from './markdown'
 import ToolCallRow from './ToolCallRow.vue'
 import EmergeText from './EmergeText.vue'
+import ReasoningText from './ReasoningText.vue'
+import { latestReasoningTitle, plainReasoning } from './reasoning-brief'
 
 /**
  * 过程块：一段连续的思考 / 工具调用 / 子 Agent 步骤（AI 说的话在块外，见 turns.ts `turnSegments`）。
@@ -136,6 +138,14 @@ const summary = computed(() => {
   if (toolCount.value)
     return te('yaya.wf.tool_count', { n: String(toolCount.value) }, '{n} 次工具调用')
   if (items.value.some((it) => it.kind !== 'llm')) return t('yaya.wf.process', '过程')
+  // 闭源模型（Gemini / Claude / OpenAI）只给思考摘要，不叫「思考过程」
+  const thought = props.turn.steps.filter((n) => n.reasoningContent)
+  // （运行中 meta 还没写回：带「**小标题**」分段的也当摘要）
+  if (
+    thought.length &&
+    thought.every((n) => n.meta?.reasoningSummary || latestReasoningTitle(n.reasoningContent))
+  )
+    return t('yaya.wf.thinking_summary', '思考摘要')
   return t('yaya.wf.thinking', '思考过程')
 })
 
@@ -152,7 +162,13 @@ const activity = computed(() => {
   const running = props.turn.workflow?.steps.find((s) => s.status === 'running')
   if (running && running.kind !== 'llm') return `${running.label}…`
   const last = props.turn.steps[props.turn.steps.length - 1]
-  if (last?.reasoningContent && !last.content) return t('yaya.thinking_live', '思考中…')
+  if (last?.reasoningContent && !last.content) {
+    // 思考摘要的小标题 = 模型正在想什么
+    const title = latestReasoningTitle(last.reasoningContent)
+    return title
+      ? te('yaya.thinking_live_title', { title }, '思考中：{title}')
+      : t('yaya.thinking_live', '思考中…')
+  }
   return t('yaya.wf.working', '处理中…')
 })
 
@@ -221,8 +237,7 @@ const previewRows = computed<PreviewRow[]>(() => {
 /** 取文本最后几行（思考的预览，纯文本不渲染 Markdown） */
 function tailLines(text: string, lines = 3): string {
   // 只看末尾一段：思考可能有几万字，流式时每次刷新都整段 split 没必要
-  const kept = text
-    .slice(-800)
+  const kept = plainReasoning(text.slice(-800))
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
@@ -346,7 +361,7 @@ function toolColor(call: ToolCallItem): string | undefined {
                 }}</span>
               </div>
               <div v-if="item.part !== 'tools' && item.node.reasoningContent" class="wf-reasoning">
-                <EmergeText :text="item.node.reasoningContent" :live="blockLive" />
+                <ReasoningText :text="item.node.reasoningContent" :live="blockLive" />
               </div>
               <div
                 v-if="item.part !== 'reasoning' && !item.answer && item.node.toolCalls?.length"

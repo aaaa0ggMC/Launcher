@@ -7,7 +7,9 @@
  * - 思考：2.x 用 `thinkingBudget`，3.x 用 `thinkingLevel`；`includeThoughts` 拿思考摘要；
  *   模型返回的 parts（含 `thoughtSignature`）存进 `native`，同一模型继续时原样放回，
  *   否则 Gemini 3 的多步工具调用会 400；
- * - 端点不认识思考配置 / JSON Schema 字段时去掉重试并记住。
+ * - 端点不认识思考配置 / JSON Schema 字段时去掉重试并记住；
+ * - 自带搜索：`tools` 里加 `{google_search: {}}`，查询词与来源在 `groundingMetadata`；
+ *   端点不让它和函数调用同时用（Gemini 2.x）时抛 BuiltinSearchUnsupportedError，运行器换回 GenericSearch。
  */
 import { randomUUID } from 'node:crypto'
 import type { MessageAttachment, ProviderConfig, ToolCallItem, TokenUsage } from '../../types'
@@ -21,6 +23,11 @@ import type {
 } from './types'
 import { loadAttachment } from './attachments'
 import { cleanBase, ensureOk, ProviderHttpError, readSse, tryParseJson } from './http'
+import {
+  BuiltinSearchUnsupportedError,
+  rejectBuiltinSearch,
+  SearchCollector
+} from './builtin-search'
 import { makeLogger } from '../../../../main/process/logger'
 
 const log = makeLogger('yaya-provider-gemini')
@@ -187,9 +194,11 @@ export class GeminiProvider implements AIProvider {
     }
   }
 
-  private buildTools(tools: ProviderTool[] | undefined): unknown[] | undefined {
-    if (!tools?.length) return undefined
+  private buildTools(tools: ProviderTool[] | undefined, search?: boolean): unknown[] | undefined {
+    const out: unknown[] = search ? [{ google_search: {} }] : []
+    if (!tools?.length) return out.length ? out : undefined
     return [
+      ...out,
       {
         functionDeclarations: tools.map((t) => ({
           name: t.name,
@@ -215,7 +224,7 @@ export class GeminiProvider implements AIProvider {
     for (let attempt = 0; attempt < 3 && !res; attempt++) {
       const body: Record<string, unknown> = { contents }
       if (system) body.systemInstruction = { parts: [{ text: system }] }
-      const tools = this.buildTools(options.tools)
+      const tools = this.buildTools(options.tools, options.builtinSearch)
       if (tools) body.tools = tools
       if (!this.noThinking)
         body.generationConfig = { thinkingConfig: geminiThinking(model, options.reasoning) }
@@ -232,6 +241,11 @@ export class GeminiProvider implements AIProvider {
         if (!(e instanceof ProviderHttpError) || e.status !== 400 || options.signal?.aborted)
           throw e
         const msg = `${e.message} ${e.body}`
+        if (options.builtinSearch && /google_search|search|function calling/i.test(msg)) {
+          log.warn(`Provider ${this.id} rejected google_search for ${model}`)
+          rejectBuiltinSearch(this.id, model)
+          throw new BuiltinSearchUnsupportedError(this.id, model, msg)
+        }
         if (!this.noThinking && /thinking/i.test(msg)) {
           log.warn(`Provider ${this.id} rejected thinkingConfig; retrying without it`)
           this.noThinking = true
@@ -259,7 +273,8 @@ export class GeminiProvider implements AIProvider {
     } else {
       acc.add((await res.json()) as Record<string, unknown>)
     }
-    return acc.finish(model)
+    const result = acc.finish(model)
+    return options.builtinSearch ? { ...result, search: acc.searchInfo() } : result
   }
 }
 
@@ -272,6 +287,7 @@ export class GeminiAccumulator {
   private usage: Record<string, unknown> | undefined
   private finishReason = ''
   private blockReason = ''
+  private search = new SearchCollector()
 
   constructor(private options: Pick<ProviderGenerateOptions, 'onToken' | 'onReasoning'>) {}
 
@@ -286,6 +302,16 @@ export class GeminiAccumulator {
     const cand = (chunk.candidates as Array<Record<string, unknown>> | undefined)?.[0]
     if (!cand) return
     if (typeof cand.finishReason === 'string') this.finishReason = cand.finishReason
+    const grounding = cand.groundingMetadata as
+      | {
+          webSearchQueries?: unknown[]
+          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>
+        }
+      | undefined
+    if (grounding) {
+      for (const q of grounding.webSearchQueries ?? []) this.search.query(q)
+      for (const c of grounding.groundingChunks ?? []) this.search.source(c.web?.uri, c.web?.title)
+    }
     const parts = ((cand.content as { parts?: Part[] } | undefined)?.parts ?? []) as Part[]
     for (const p of parts) {
       if (typeof p.text === 'string') {
@@ -331,6 +357,10 @@ export class GeminiAccumulator {
     }
   }
 
+  searchInfo(): ProviderGenerateResult['search'] {
+    return this.search.result()
+  }
+
   finish(model: string): ProviderGenerateResult {
     if (this.blockReason && !this.content && !this.calls.length)
       throw new Error(`Gemini blocked the prompt (${this.blockReason})`)
@@ -346,6 +376,8 @@ export class GeminiAccumulator {
     return {
       content: this.content,
       reasoningContent: this.reasoning || undefined,
+      // includeThoughts 给的是思考摘要（分段，带加粗小标题），不是原始思维链
+      ...(this.reasoning ? { reasoningSummary: true } : {}),
       toolCalls: this.calls.length ? this.calls : undefined,
       usage: toGeminiUsage(this.usage),
       ...(native ? { native } : {})

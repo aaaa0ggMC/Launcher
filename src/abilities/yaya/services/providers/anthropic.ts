@@ -7,7 +7,9 @@
  * - 思考：`thinking: {type: 'adaptive', display: 'summarized'}` + `output_config.effort`；
  *   返回的 thinking 块（含签名）存进 `native`，同一模型继续对话 / 工具循环时原样放回 assistant 消息开头；
  * - 提示词缓存：顶层 `cache_control` 自动缓存（工具表与系统提示词本来就逐字节稳定）；
- * - 端点 / 网关不认识的可选字段（thinking / output_config / cache_control）收到 400 后去掉重试并记住。
+ * - 端点 / 网关不认识的可选字段（thinking / output_config / cache_control）收到 400 后去掉重试并记住；
+ * - 自带搜索：服务端工具 `web_search_20250305`（Anthropic 那边执行，不进工具循环），
+ *   查询词在 `server_tool_use`、来源在 `web_search_tool_result` 块。
  */
 import type { ProviderConfig, ToolCallItem, TokenUsage, MessageAttachment } from '../../types'
 import type {
@@ -20,6 +22,11 @@ import type {
 } from './types'
 import { loadAttachment } from './attachments'
 import { cleanBase, ensureOk, ProviderHttpError, readSse, tryParseJson } from './http'
+import {
+  BuiltinSearchUnsupportedError,
+  rejectBuiltinSearch,
+  SearchCollector
+} from './builtin-search'
 import { makeLogger } from '../../../../main/process/logger'
 
 const log = makeLogger('yaya-provider-anthropic')
@@ -152,13 +159,31 @@ export class AnthropicProvider implements AIProvider {
       ...anthropicReasoning(options.reasoning)
     }
     if (system) body.system = system
-    if (options.tools?.length) body.tools = options.tools.map(toAnthropicTool)
+    const tools: Record<string, unknown>[] = (options.tools ?? []).map(toAnthropicTool)
+    if (options.builtinSearch) tools.push(WEB_SEARCH_TOOL)
+    if (tools.length) body.tools = tools
     if (options.stream) body.stream = true
 
-    const res = await this.send(body, options.signal)
-    return options.stream
+    let res: Response
+    try {
+      res = await this.send(body, options.signal)
+    } catch (e) {
+      const msg = e instanceof ProviderHttpError ? `${e.message} ${e.body}` : ''
+      if (
+        options.builtinSearch &&
+        e instanceof ProviderHttpError &&
+        e.status === 400 &&
+        /web_search/.test(msg)
+      ) {
+        rejectBuiltinSearch(this.id, options.model)
+        throw new BuiltinSearchUnsupportedError(this.id, options.model, msg)
+      }
+      throw e
+    }
+    const result = await (options.stream
       ? this.readStream(res, options)
-      : this.readJson(res, options.model, options.onToolCall)
+      : this.readJson(res, options.model, options.onToolCall))
+    return options.builtinSearch ? result : { ...result, search: undefined }
   }
 
   /** 发请求；可选字段 / 过大的 max_tokens 被拒时去掉重试 */
@@ -245,7 +270,7 @@ export class AnthropicProvider implements AIProvider {
         if (block.type === 'text') block.text = ''
         if (block.type === 'thinking') block.thinking = block.thinking ?? ''
         blocks[idx] = block
-        if (block.type === 'tool_use') partialJson[idx] = ''
+        if (block.type === 'tool_use' || block.type === 'server_tool_use') partialJson[idx] = ''
       } else if (type === 'content_block_delta') {
         const idx = msg.index as number
         const block = blocks[idx]
@@ -265,7 +290,8 @@ export class AnthropicProvider implements AIProvider {
       } else if (type === 'content_block_stop') {
         const idx = msg.index as number
         const block = blocks[idx]
-        if (block?.type === 'tool_use') block.input = tryParseJson(partialJson[idx] ?? '')
+        if ((block?.type === 'tool_use' || block?.type === 'server_tool_use') && partialJson[idx])
+          block.input = tryParseJson(partialJson[idx])
       } else if (type === 'message_delta') {
         const d = msg.delta as { stop_reason?: string; stop_details?: typeof stopDetails }
         if (d?.stop_reason) stopReason = d.stop_reason
@@ -295,8 +321,15 @@ export function finishAnthropic(
   let reasoning = ''
   const toolCalls: ToolCallItem[] = []
   const thinkingBlocks: Block[] = []
+  const search = new SearchCollector()
   for (const b of blocks) {
-    if (b.type === 'text') content += String(b.text ?? '')
+    if (b.type === 'server_tool_use' && b.name === 'web_search') {
+      search.query((b.input as { query?: unknown } | undefined)?.query)
+    } else if (b.type === 'web_search_tool_result') {
+      if (Array.isArray(b.content))
+        for (const r of b.content as Array<{ url?: string; title?: string }>)
+          search.source(r.url, r.title)
+    } else if (b.type === 'text') content += String(b.text ?? '')
     else if (b.type === 'thinking') {
       reasoning += String(b.thinking ?? '')
       thinkingBlocks.push({ type: 'thinking', thinking: b.thinking ?? '', signature: b.signature })
@@ -331,9 +364,15 @@ export function finishAnthropic(
     reasoningContent: reasoning || undefined,
     toolCalls: toolCalls.length ? toolCalls : undefined,
     usage: toAnthropicUsage(usage),
-    ...(native ? { native } : {})
+    ...(native ? { native } : {}),
+    // display: summarized 给的是思考摘要
+    ...(reasoning ? { reasoningSummary: true } : {}),
+    ...(search.result() ? { search: search.result() } : {})
   }
 }
+
+/** Anthropic 服务端执行的网页搜索（与 GenericSearch 的 web_search 二选一，不会同时出现） */
+const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 5 }
 
 function toAnthropicTool(t: ProviderTool): Record<string, unknown> {
   return {

@@ -4,6 +4,7 @@ import {
   AnthropicProvider,
   anthropicReasoning,
   anthropicUrl,
+  finishAnthropic,
   formatAnthropicMessages,
   toAnthropicUsage
 } from './anthropic'
@@ -228,4 +229,42 @@ it('refusal 且没有任何输出：报错说明原因', async () => {
     }),
     /refusal, cyber: nope/
   )
+})
+
+it('自带搜索：server_tool_use 的查询词与 web_search_tool_result 的来源进 search，不算工具调用', () => {
+  const r = finishAnthropic(
+    [
+      { type: 'thinking', thinking: 'brief', signature: 's' },
+      {
+        type: 'server_tool_use',
+        id: 'srv_1',
+        name: 'web_search',
+        input: { query: 'wuhan weather' }
+      },
+      {
+        type: 'web_search_tool_result',
+        tool_use_id: 'srv_1',
+        content: [
+          {
+            type: 'web_search_result',
+            url: 'https://a.example/x',
+            title: 'A',
+            encrypted_content: 'e'
+          }
+        ]
+      },
+      { type: 'text', text: 'Rain today.' }
+    ],
+    undefined,
+    'end_turn',
+    null,
+    { model: 'claude-sonnet-4-5' }
+  )
+  assert.equal(r.content, 'Rain today.')
+  assert.equal(r.toolCalls, undefined)
+  assert.equal(r.reasoningSummary, true)
+  assert.deepEqual(r.search, {
+    queries: ['wuhan weather'],
+    sources: [{ url: 'https://a.example/x', title: 'A' }]
+  })
 })

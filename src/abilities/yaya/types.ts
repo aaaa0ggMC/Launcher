@@ -82,7 +82,14 @@ export interface TokenUsage {
 export type ReasoningEffort = 'default' | 'off' | 'low' | 'medium' | 'high'
 /** 思考参数的格式（各家不统一）；auto = 按服务商地址猜 */
 export type ReasoningStyle =
-  'auto' | 'openai' | 'deepseek' | 'qwen' | 'openrouter' | 'llamacpp' | 'none'
+  'auto' | 'openai' | 'deepseek' | 'qwen' | 'openrouter' | 'gemini' | 'llamacpp' | 'none'
+
+/**
+ * 联网搜索用哪个：generic = GenericSearch 插件（`web_search` 工具，走你配置的搜索引擎）；
+ * builtin = 模型自带的搜索（Gemini google_search / Claude web_search …），
+ * 当前模型不支持时自动退回 generic。见 services/search-mode.ts
+ */
+export type SearchMode = 'generic' | 'builtin'
 
 /** 批准的范围：once = 这一次；run = 本次执行里同一工具不再询问；session = 本对话都不再询问 */
 export type ApprovalScope = 'once' | 'run' | 'session'
@@ -176,6 +183,8 @@ export interface ProviderConfig {
   enabled: boolean
   /** 思考强度参数的格式（缺省 auto） */
   reasoningStyle?: ReasoningStyle
+  /** 逐模型强制「有 / 没有」自带搜索（模型名 → 是否支持）；没写的按类型和名字猜 */
+  builtinSearch?: Record<string, boolean>
 }
 
 export type McpTransport = 'streamable-http' | 'sse'
@@ -234,6 +243,7 @@ export interface YayaAssistant {
   activeModel?: string
   defaultWorkflow?: string
   reasoningEffort?: ReasoningEffort
+  searchMode?: SearchMode
   autoApproveTools: boolean
   maxLoopSteps: number
   pluginEnabled?: Record<string, boolean>
@@ -282,6 +292,8 @@ export interface YayaConfig {
   toolApproval?: Record<string, ToolApprovalMode>
   /** 新会话默认的思考强度（会话可单独覆盖，存 session.meta.reasoning） */
   reasoningEffort?: ReasoningEffort
+  /** 联网搜索默认用哪个（会话可单独覆盖，存 session.meta.search；缺省 generic） */
+  searchMode?: SearchMode
   /**
    * 过程卡片收起时仍显示最近几步的预览（默认 1，0–5，0 = 完全折叠）。
    */

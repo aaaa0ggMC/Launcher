@@ -22,6 +22,7 @@ export const ASSISTANT_KEYS = [
   'activeModel',
   'defaultWorkflow',
   'reasoningEffort',
+  'searchMode',
   'autoApproveTools',
   'maxLoopSteps',
   'pluginEnabled',
@@ -80,6 +81,7 @@ export function assistantFromDefaults(
     activeModel: opts.keepModel ? cfg.activeModel : '',
     defaultWorkflow: cfg.defaultWorkflow,
     reasoningEffort: cfg.reasoningEffort,
+    searchMode: cfg.searchMode,
     autoApproveTools: cfg.autoApproveTools === true,
     maxLoopSteps: cfg.maxLoopSteps,
     pluginEnabled: clone(cfg.pluginEnabled),
@@ -107,6 +109,12 @@ function normalizeAssistant(raw: unknown, cfg: YayaConfig): YayaAssistant | null
     activeModel: typeof r.activeModel === 'string' ? r.activeModel : '',
     defaultWorkflow: typeof r.defaultWorkflow === 'string' ? r.defaultWorkflow : undefined,
     reasoningEffort: r.reasoningEffort,
+    searchMode:
+      r.searchMode === 'builtin'
+        ? 'builtin'
+        : r.searchMode === 'generic'
+          ? 'generic'
+          : cfg.searchMode,
     autoApproveTools: r.autoApproveTools === true,
     maxLoopSteps: Number.isFinite(steps)
       ? Math.min(100, Math.max(1, Math.round(steps)))

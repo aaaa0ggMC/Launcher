@@ -715,5 +715,19 @@
   "label.YAYA 朗读播放器": "YAYA 朗读播放器",
   "yaya.agent.compute": "计算",
   "yaya.agent.chronicler": "记录员",
-  "yaya.wf.unavailable": "{id}（插件未启用，会回落到全局默认）"
+  "yaya.wf.unavailable": "{id}（插件未启用，会回落到全局默认）",
+  "yaya.wf.thinking_summary": "思考摘要",
+  "yaya.thinking_live_title": "思考中：{title}",
+  "yaya.search_mode.title": "联网搜索",
+  "yaya.search_mode.generic": "插件搜索",
+  "yaya.search_mode.builtin": "模型内置搜索",
+  "yaya.search_mode.generic_hint": "GenericSearch：用网页搜索插件里配置的引擎，作为工具调用",
+  "yaya.search_mode.builtin_hint": "服务商替模型搜索（如 Gemini Google 搜索），回答下方附来源",
+  "yaya.search_mode.assistant_hint": "选「模型内置」时，模型不支持自带搜索就照旧用插件搜索；聊天里也能单独切换",
+  "yaya.search_sources.count": "模型内置搜索 · {n} 个来源",
+  "yaya.search_sources.none": "模型内置搜索",
+  "yaya.search_sources.queries": "搜索了",
+  "yaya.settings.model_search_on": "有自带联网搜索（点击关闭）",
+  "yaya.settings.model_search_off": "没有自带联网搜索（点击标记为有）",
+  "yaya.settings.model_search_hint": "带地球图标的模型有自带联网搜索（按类型和名字识别），点模型可手动改；对话里「联网搜索」选「模型内置」时才会用"
 }
