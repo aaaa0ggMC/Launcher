@@ -289,8 +289,16 @@ export function summarizeArgs(call: ToolCallItem, max = 80): string {
   let text: string
   if (typeof args === 'string') text = args
   else {
-    const key = ['command', 'path', 'url', 'query'].find((k) => typeof args[k] === 'string')
-    text = key ? String(args[key]) : JSON.stringify(args)
+    const key = ['command', 'path', 'url', 'query', 'question'].find(
+      (k) => typeof args[k] === 'string'
+    )
+    // 提问类工具（ask_user）：摘要显示问题本身
+    const questions = Array.isArray(args.questions)
+      ? (args.questions as { question?: unknown }[])
+          .map((q) => (typeof q?.question === 'string' ? q.question : ''))
+          .filter(Boolean)
+      : []
+    text = key ? String(args[key]) : questions.length ? questions.join(' / ') : JSON.stringify(args)
   }
   text = text.replace(/\s+/g, ' ').trim()
   return text.length > max ? `${text.slice(0, max)}…` : text

@@ -267,7 +267,7 @@ const headText = computed(() => {
       </v-btn>
     </div>
     <div v-if="error" class="ask-error text-error">{{ error }}</div>
-    <div v-if="state === 'expired' && !embedded" class="ask-foot">
+    <div v-if="(state === 'expired' || state === 'failed') && !embedded" class="ask-foot">
       {{ t('yaya.ask.expired_hint', '这次运行已经结束，可以直接发消息回答。') }}
     </div>
   </div>
