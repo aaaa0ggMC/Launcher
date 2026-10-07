@@ -77,6 +77,13 @@ public class MainActivity extends Activity {
     private static final int REQ_MIC = 5;
     /** 网页的麦克风请求（语音输入）：等系统录音权限的结果 */
     private PermissionRequest pendingMic;
+    /**
+     * 本进程是否已经走过一次 requestPermissions(RECORD_AUDIO)。MIUI / HyperOS 等 ROM 在系统权限之外
+     * 还有一层自己的管控：在设置里手动打开后 checkSelfPermission 已经是 GRANTED，但不经过一次
+     * 运行时申请，录音照样被拦（表现为「没有麦克风权限」）。所以每个进程第一次用麦克风前都申请一次——
+     * 原生 Android 上已授权时这个调用立刻返回，不弹窗。
+     */
+    boolean micAsked;
 
     private FrameLayout root;
     /** 打开着的网页登录页（webLogin RPC）；同一时间最多一个 */
@@ -576,7 +583,7 @@ public class MainActivity extends Activity {
                 return;
             }
             String[] grant = new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE};
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (micAsked && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 request.grant(grant);
                 return;
             }
@@ -702,6 +709,7 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == SpeechBridge.REQ_ASR || requestCode == REQ_MIC) micAsked = true;
         if (requestCode == SpeechBridge.REQ_ASR) {
             speech.onPermission(results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
             return;

@@ -4,7 +4,8 @@
  * 也给插件详情页查自定义配置界面（settingsView）。
  *
  * 插件启用状态：`fenceLangs` / `fenceViewFor` / `toolViewFor` 只算**已启用**插件的
- * （插件在设置里被禁用 → 代码块 / 工具结果按默认方式渲染）。`settingsViewFor` 不设门控：
+ * （插件在设置里被禁用 → 代码块 / 工具结果按默认方式渲染）；启用状态按当前会话的助手算
+ * （`setPluginAssistant`）。`settingsViewFor` 不设门控：
  * 用户正在插件详情页里操作，那里的启用开关自己也要能点。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
@@ -29,12 +30,28 @@ const pluginValues = ref(new Map<string, Record<string, unknown>>())
 let loading: Promise<void> | null = null
 let subscribed = false
 let refreshSequence = 0
+/**
+ * 当前会话所属的助手：插件的启用开关按助手生效（设置 → 助手 → 插件），
+ * 渲染端的门控（朗读按钮、输入框扩展、代码块渲染器…）也要按它算，而不是全局配置。
+ * 由 YAYA 页面在切换会话 / 助手时设置；没设置过 = 全局配置。
+ */
+let assistantId = ''
+
+export function setPluginAssistant(id: string | null | undefined): void {
+  const next = id ?? ''
+  if (next === assistantId) return
+  assistantId = next
+  void refreshPluginMap()
+}
 
 export function refreshPluginMap(): Promise<void> {
   const sequence = ++refreshSequence
   loading = (async () => {
     try {
-      const list = (await window.cockpit.command('yaya.plugins-list')) as PluginInfo[]
+      const list = (await window.cockpit.command(
+        'yaya.plugins-list',
+        assistantId ? { assistant: assistantId } : {}
+      )) as PluginInfo[]
       const map = new Map<string, ToolRef>()
       const on = new Map<string, boolean>()
       const values = new Map<string, Record<string, unknown>>()

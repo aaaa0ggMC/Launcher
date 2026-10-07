@@ -42,7 +42,7 @@ import type { ContextState } from './services/context'
 import ContextMarker from './components/ContextMarker.vue'
 import AvatarBadge from './components/AvatarBadge.vue'
 import { modelMonogram } from './profile'
-import { ensurePluginMap } from './components/plugin-ui-registry'
+import { ensurePluginMap, setPluginAssistant } from './components/plugin-ui-registry'
 import {
   assistantConfig,
   DEFAULT_ASSISTANT_ID,
@@ -223,6 +223,8 @@ const multiAssistant = computed(() => (rawConfig.value?.assistants?.length ?? 0)
 const filterAssistantId = computed(() =>
   rawConfig.value ? (findAssistant(rawConfig.value, currentAssistantId.value)?.id ?? null) : null
 )
+// 插件开关按助手生效：朗读按钮、输入框扩展等界面门控跟着当前会话的助手走
+watch(filterAssistantId, (id) => setPluginAssistant(id), { immediate: true })
 const visibleSessions = computed(() => {
   const cfg = rawConfig.value
   if (!cfg || !multiAssistant.value || showAllAssistants.value) return sessions.value
