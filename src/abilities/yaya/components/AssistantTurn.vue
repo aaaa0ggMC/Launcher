@@ -8,7 +8,13 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
-import { applyInlineTokensHtml, fenceLangs, fenceViewFor } from './plugin-ui-registry'
+import {
+  applyInlineTokensHtml,
+  fenceLangs,
+  fenceViewFor,
+  messageActions
+} from './plugin-ui-registry'
+import type { MessageAction, MessageActionContext } from './plugin-ui'
 import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
@@ -43,6 +49,30 @@ const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
 const showProcess = computed(() => hasProcess(props.turn))
 const labels = computed(() => ({ copy: t('yaya.copy', '复制') }))
+
+// ---- 插件注入的回答操作（如「朗读」） ----
+const actionCtx = computed<MessageActionContext>(() => ({
+  sessionId: props.turn.steps[0]?.sessionId ?? '',
+  messageId: props.turn.firstId,
+  role: 'assistant',
+  text: answer.value?.content ?? ''
+}))
+const pluginActions = computed(() =>
+  messageActions.value.filter(({ action }) => action.visible?.(actionCtx.value) ?? true)
+)
+function actionActive(a: MessageAction): boolean {
+  return a.active?.(actionCtx.value) ?? false
+}
+function actionLabel(a: MessageAction): string {
+  if (actionActive(a) && a.activeLabel)
+    return a.activeLabelKey ? t(a.activeLabelKey, a.activeLabel) : a.activeLabel
+  return a.labelKey ? t(a.labelKey, a.label) : a.label
+}
+function runAction(a: MessageAction): void {
+  void Promise.resolve()
+    .then(() => a.run(actionCtx.value))
+    .catch((e: unknown) => console.warn('[yaya] message action failed', a.id, e))
+}
 
 /** Markdown 分段 + 插件的正文记号（如 [[secret_xxxx]]）：只改显示 */
 function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
@@ -308,6 +338,23 @@ async function copyTurn(): Promise<void> {
           @click="emit('regenerate', turn.firstId)"
         >
           <v-icon icon="mdi-refresh" size="20" />
+        </v-btn>
+        <v-btn
+          v-for="{ pluginId, action } in pluginActions"
+          :key="`${pluginId}:${action.id}`"
+          icon
+          variant="text"
+          density="comfortable"
+          :color="actionActive(action) ? 'primary' : undefined"
+          :title="actionLabel(action)"
+          :aria-label="actionLabel(action)"
+          :aria-pressed="action.active ? actionActive(action) : undefined"
+          @click="runAction(action)"
+        >
+          <v-icon
+            :icon="actionActive(action) && action.activeIcon ? action.activeIcon : action.icon"
+            size="20"
+          />
         </v-btn>
         <v-btn
           icon

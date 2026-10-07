@@ -26,6 +26,7 @@ import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -73,6 +74,9 @@ public class MainActivity extends Activity {
     private static final int REQ_NOTIFY = 2;
     private static final int REQ_PICK = 3;
     private static final int REQ_DIR = 4;
+    private static final int REQ_MIC = 5;
+    /** 网页的麦克风请求（语音输入）：等系统录音权限的结果 */
+    private PermissionRequest pendingMic;
 
     private FrameLayout root;
     /** 打开着的网页登录页（webLogin RPC）；同一时间最多一个 */
@@ -557,6 +561,32 @@ public class MainActivity extends Activity {
     }
 
     private class Chrome extends WebChromeClient {
+        /** 网页 getUserMedia 的麦克风请求：只给宿主页面，先要系统的录音权限 */
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            boolean wantsMic = false;
+            for (String r : request.getResources())
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) wantsMic = true;
+            String origin = originOf(request.getOrigin().toString());
+            if (!wantsMic || hostOrigin.isEmpty() || !hostOrigin.equals(origin)) {
+                request.deny();
+                return;
+            }
+            String[] grant = new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE};
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                request.grant(grant);
+                return;
+            }
+            if (pendingMic != null) pendingMic.deny();
+            pendingMic = request;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+        }
+
+        @Override
+        public void onPermissionRequestCanceled(PermissionRequest request) {
+            if (pendingMic == request) pendingMic = null;
+        }
+
         @Override
         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams params) {
             if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -665,6 +695,17 @@ public class MainActivity extends Activity {
     }
 
     private boolean notifyAsked;
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_MIC || pendingMic == null) return;
+        PermissionRequest req = pendingMic;
+        pendingMic = null;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+            req.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        else req.deny();
+    }
 
     /** Android 13+ 的通知权限：保活开启时、或第一次有媒体要显示时请求（每次启动最多问一次） */
     void ensureNotifyPermission() {

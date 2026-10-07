@@ -14,7 +14,13 @@ import type { MessageAttachment, ReasoningEffort, WorkflowInfo } from '../types'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
 import { ensurePluginMap, inputExtensions } from './plugin-ui-registry'
-import { matchInputTrigger, type PluginInputContext, type PluginInputHooks } from './plugin-input'
+import {
+  matchInputTrigger,
+  type InputMenuAction,
+  type PluginInputContext,
+  type PluginInputHooks
+} from './plugin-input'
+import InputPlusPanel from './InputPlusPanel.vue'
 
 const props = defineProps<{
   isRunning: boolean
@@ -87,6 +93,45 @@ const inputHooks = shallowReactive(new Map<symbol, PluginInputHooks>())
 const toolbarTarget = ref<HTMLElement | null>(null)
 ensurePluginMap()
 
+// ---- 「+」面板：宿主自带「文件」，其余由插件 addAction 注入（Rikkahub 式，输入框不被按钮挤爆） ----
+const extraActions = shallowReactive(new Map<symbol, InputMenuAction>())
+const plusOpen = ref(false)
+/** 窄屏 / 触屏用底部弹层，桌面用输入框上方的弹出菜单 */
+const narrowMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null
+const narrow = ref(narrowMq?.matches ?? false)
+const onNarrowChange = (e: MediaQueryListEvent): void => {
+  narrow.value = e.matches
+}
+narrowMq?.addEventListener('change', onNarrowChange)
+onBeforeUnmount(() => narrowMq?.removeEventListener('change', onNarrowChange))
+const sheetMode = computed(() => coarse || narrow.value)
+
+const plusActions = computed<InputMenuAction[]>(() => {
+  const builtin: InputMenuAction = {
+    id: 'host.attach',
+    icon: 'mdi-paperclip',
+    label: t('yaya.input.attach_short', '文件'),
+    description: t('yaya.input.attach', '添加附件'),
+    order: 0,
+    disabled: () => importing.value,
+    run: attach
+  }
+  return [builtin, ...extraActions.values()]
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => (x.a.order ?? 100) - (y.a.order ?? 100) || x.i - y.i)
+    .map((x) => x.a)
+})
+
+function runPlusAction(action: InputMenuAction): void {
+  if (action.disabled?.()) return
+  if (!action.keepOpen) plusOpen.value = false
+  void Promise.resolve()
+    .then(() => action.run())
+    .catch((e: unknown) => {
+      attachError.value = e instanceof Error ? e.message : String(e)
+    })
+}
+
 function nativeTextarea(): HTMLTextAreaElement | null {
   const el = (textarea.value as unknown as { $el?: HTMLElement } | null)?.$el
   return el?.querySelector('textarea') ?? null
@@ -96,6 +141,13 @@ const inputContext: PluginInputContext = {
   draft,
   sessionId: toRef(props, 'sessionId'),
   toolbarTarget,
+  addAction: (action) => {
+    const key = Symbol('input-action')
+    extraActions.set(key, action)
+    return () => {
+      extraActions.delete(key)
+    }
+  },
   focus: () => textarea.value?.focus(),
   selection: () => {
     const el = nativeTextarea()
@@ -544,16 +596,53 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
       </div>
 
       <div class="input-tools">
+        <!-- 「+」：附件与插件注入的动作（语音输入、点名…）都在这里 -->
+        <v-menu
+          v-if="!sheetMode"
+          v-model="plusOpen"
+          location="top start"
+          :close-on-content-click="false"
+          offset="8"
+        >
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              v-bind="menuProps"
+              icon
+              variant="text"
+              density="comfortable"
+              class="plus-btn"
+              :class="{ 'is-open': plusOpen }"
+              :title="t('yaya.input.more', '更多：文件、语音输入、插件…')"
+              :aria-label="t('yaya.input.more', '更多：文件、语音输入、插件…')"
+              @pointerdown="keepFocus"
+            >
+              <v-icon icon="mdi-plus" />
+            </v-btn>
+          </template>
+          <v-card class="yaya-pop" rounded="xl">
+            <InputPlusPanel :actions="plusActions" @run="runPlusAction" />
+          </v-card>
+        </v-menu>
         <v-btn
-          icon="mdi-paperclip"
+          v-else
+          icon
           variant="text"
           density="comfortable"
-          :disabled="importing"
-          :title="t('yaya.input.attach', '添加附件')"
-          :aria-label="t('yaya.input.attach', '添加附件')"
+          class="plus-btn"
+          :class="{ 'is-open': plusOpen }"
+          :title="t('yaya.input.more', '更多：文件、语音输入、插件…')"
+          :aria-label="t('yaya.input.more', '更多：文件、语音输入、插件…')"
           @pointerdown="keepFocus"
-          @click="attach"
-        />
+          @click="plusOpen = !plusOpen"
+        >
+          <v-icon icon="mdi-plus" />
+        </v-btn>
+        <v-bottom-sheet v-if="sheetMode" v-model="plusOpen">
+          <v-card class="plus-sheet yaya-pop">
+            <div class="plus-sheet-handle" aria-hidden="true" />
+            <InputPlusPanel sheet :actions="plusActions" @run="runPlusAction" />
+          </v-card>
+        </v-bottom-sheet>
         <div ref="toolbarTarget" class="plugin-input-tools" />
         <v-menu v-if="workflows.length > 1" location="top start">
           <template #activator="{ props: menuProps }">
@@ -813,6 +902,23 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
 }
 .send-btn {
   border-radius: 999px;
+}
+.plus-btn :deep(.v-icon) {
+  transition: transform 0.2s;
+}
+.plus-btn.is-open :deep(.v-icon) {
+  transform: rotate(45deg);
+}
+.plus-sheet {
+  border-radius: 24px 24px 0 0 !important;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.plus-sheet-handle {
+  width: 36px;
+  height: 4px;
+  margin: 10px auto 0;
+  border-radius: 2px;
+  background: rgba(var(--v-theme-on-surface), 0.25);
 }
 .plugin-input-tools {
   display: flex;
