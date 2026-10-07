@@ -10,6 +10,12 @@ const props = defineProps<{
   activeSessionId: string | null
   /** 正在生成的会话 id，条目上显示脉冲点 */
   runningSessionIds: string[]
+  /** 有多个助手时 = 当前助手名（显示「只看当前助手 / 全部助手」开关）；只有一个助手为 null */
+  assistantFilter?: string | null
+  /** 是否列出全部助手的会话 */
+  showAllAssistants?: boolean
+  /** 列出全部助手时，会话 id → 所属助手名 */
+  assistantNames?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +26,7 @@ const emit = defineEmits<{
   (e: 'deleteSession', id: string): void
   (e: 'renameSession', id: string, title: string): void
   (e: 'import'): void
+  (e: 'toggleAllAssistants'): void
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -152,6 +159,16 @@ const sessionGroups = computed<SessionGroup[]>(() => {
   return buckets.filter((b) => b.items.length > 0)
 })
 
+const assistantToggleLabel = computed(() =>
+  props.showAllAssistants
+    ? t('yaya.sessions.showing_all', '正在显示全部助手的会话，点击只看当前助手')
+    : te(
+        'yaya.sessions.showing_one',
+        { name: props.assistantFilter ?? '' },
+        '只显示「{name}」的会话，点击显示全部助手'
+      )
+)
+
 function startOfDay(ts: number): number {
   const d = new Date(ts)
   d.setHours(0, 0, 0, 0)
@@ -236,6 +253,17 @@ function doDelete(): void {
         "
         @click="emit('import')"
       />
+      <v-btn
+        v-if="assistantFilter"
+        :icon="showAllAssistants ? 'mdi-account-multiple' : 'mdi-account-filter-outline'"
+        :variant="showAllAssistants ? 'tonal' : 'text'"
+        :color="showAllAssistants ? 'primary' : undefined"
+        density="comfortable"
+        :title="assistantToggleLabel"
+        :aria-label="assistantToggleLabel"
+        :aria-pressed="!!showAllAssistants"
+        @click="emit('toggleAllAssistants')"
+      />
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="emit('createSession')">
         {{ t('yaya.sessions.new', '新建') }}
       </v-btn>
@@ -311,6 +339,9 @@ function doDelete(): void {
                   :aria-label="t('yaya.sessions.running', '生成中')"
                 />
                 <span>{{ formatRelative(s.updatedAt) }}</span>
+                <span v-if="assistantNames?.[s.id]" class="session-assistant text-truncate">
+                  · {{ assistantNames[s.id] }}
+                </span>
                 <span v-if="isRunning(s.id)">{{ t('yaya.sessions.running', '生成中') }}</span>
                 <span v-if="(contentHits.get(s.id)?.matches ?? 0) > 1">
                   ·
@@ -369,7 +400,16 @@ function doDelete(): void {
         class="session-empty text-caption text-medium-emphasis text-center"
       >
         <v-icon icon="mdi-chat-plus-outline" size="28" class="mb-2" />
-        <div>{{ t('yaya.sessions.empty', '暂无会话，点右上角「新建」开始对话') }}</div>
+        <div v-if="assistantFilter && !showAllAssistants">
+          {{
+            te(
+              'yaya.sessions.empty_assistant',
+              { name: assistantFilter },
+              '「{name}」还没有会话，点右上角「新建」开始对话'
+            )
+          }}
+        </div>
+        <div v-else>{{ t('yaya.sessions.empty', '暂无会话，点右上角「新建」开始对话') }}</div>
       </div>
       <div
         v-else-if="sessionGroups.length === 0"
@@ -445,6 +485,10 @@ function doDelete(): void {
 }
 
 /* 生成中会话的脉冲指示点 */
+.session-assistant {
+  min-width: 0;
+}
+
 .session-running-dot {
   width: 7px;
   height: 7px;

@@ -176,3 +176,15 @@ export function sessionAssistantId(
   const id = session?.meta?.assistantId
   return typeof id === 'string' && id ? id : DEFAULT_ASSISTANT_ID
 }
+
+/**
+ * 会话实际归属的助手 id（会话记的助手被删了 = 退回第一个助手，与 `assistantConfig` 的取值一致）。
+ * 会话列表按它过滤，避免助手被删后它的旧会话在哪个助手下都看不到。
+ */
+export function sessionOwnerId(
+  cfg: YayaConfig,
+  session: { meta?: Record<string, unknown> } | null | undefined
+): string {
+  const id = sessionAssistantId(session)
+  return findAssistant(cfg, id)?.id ?? id
+}

@@ -45,7 +45,8 @@ import {
   assistantConfig,
   DEFAULT_ASSISTANT_ID,
   findAssistant,
-  sessionAssistantId
+  sessionAssistantId,
+  sessionOwnerId
 } from './assistants'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 
@@ -196,6 +197,45 @@ const config = computed<YayaConfig | null>(() =>
   rawConfig.value ? assistantConfig(rawConfig.value, currentAssistantId.value) : null
 )
 const assistantName = computed(() => config.value?.assistantName?.trim() || 'YAYA')
+
+// ---- 会话列表按助手过滤：默认只列当前助手的会话，开关打开后列出全部助手的 ----
+const ALL_ASSISTANTS_KEY = 'yaya-sessions-all-assistants'
+function readAllAssistants(): boolean {
+  try {
+    return localStorage.getItem(ALL_ASSISTANTS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const showAllAssistants = ref(readAllAssistants())
+function toggleAllAssistants(): void {
+  showAllAssistants.value = !showAllAssistants.value
+  try {
+    localStorage.setItem(ALL_ASSISTANTS_KEY, showAllAssistants.value ? '1' : '0')
+  } catch {
+    /* 存不了就只在本次生效 */
+  }
+}
+const multiAssistant = computed(() => (rawConfig.value?.assistants?.length ?? 0) > 1)
+/** 过滤用的助手 id（被删的助手已退回第一个，与会话归属同一口径） */
+const filterAssistantId = computed(() =>
+  rawConfig.value ? (findAssistant(rawConfig.value, currentAssistantId.value)?.id ?? null) : null
+)
+const visibleSessions = computed(() => {
+  const cfg = rawConfig.value
+  if (!cfg || !multiAssistant.value || showAllAssistants.value) return sessions.value
+  return sessions.value.filter((s) => sessionOwnerId(cfg, s) === filterAssistantId.value)
+})
+/** 列出全部助手时，每个会话条目标上所属助手名 */
+const sessionAssistantNames = computed<Record<string, string>>(() => {
+  const cfg = rawConfig.value
+  if (!cfg || !multiAssistant.value || !showAllAssistants.value) return {}
+  const out: Record<string, string> = {}
+  for (const s of sessions.value) {
+    out[s.id] = findAssistant(cfg, sessionOwnerId(cfg, s))?.assistantName?.trim() || 'YAYA'
+  }
+  return out
+})
 
 // 外壳 App bar 标题 / 侧栏条目跟随助手名（默认名就恢复能力原名）
 const setShellTitle = inject<(id: string, title: string | null) => void>(
@@ -1256,7 +1296,7 @@ onMounted(async () => {
   // 默认打开最近的会话；没有会话就停在新对话
   activationReady = true
   if (pendingActivationSession) await selectSession(pendingActivationSession)
-  else if (sessions.value.length > 0) await selectSession(sessions.value[0].id)
+  else if (visibleSessions.value.length > 0) await selectSession(visibleSessions.value[0].id)
 })
 
 // keep-alive：从别的页面切回来时同步一次（离开期间可能错过了推送）
@@ -1309,7 +1349,10 @@ watch(isRunning, (now, before) => {
       @click.capture="onDrawerClick"
     >
       <ChatSessionList
-        :sessions="sessions"
+        :sessions="visibleSessions"
+        :assistant-names="sessionAssistantNames"
+        :assistant-filter="multiAssistant ? assistantName : null"
+        :show-all-assistants="showAllAssistants"
         :active-session-id="activeSessionId"
         :running-session-ids="runningIds"
         @select-session="selectSession"
@@ -1318,6 +1361,7 @@ watch(isRunning, (now, before) => {
         @delete-session="handleDelete"
         @rename-session="handleRename"
         @import="handleImport"
+        @toggle-all-assistants="toggleAllAssistants"
       />
     </aside>
 

@@ -912,5 +912,8 @@
   "yaya.assistants.delete_title": "删除助手",
   "yaya.assistants.delete_body": "删除「{name}」？用它的旧对话会改用第一个助手的设置，对话记录不会删除。",
   "yaya.assistants.switch": "切换助手",
-  "yaya.assistants.manage": "管理助手"
+  "yaya.assistants.manage": "管理助手",
+  "yaya.sessions.showing_all": "正在显示全部助手的会话，点击只看当前助手",
+  "yaya.sessions.showing_one": "只显示「{name}」的会话，点击显示全部助手",
+  "yaya.sessions.empty_assistant": "「{name}」还没有会话，点右上角「新建」开始对话"
 }
