@@ -11,7 +11,6 @@ import {
   summarizeArgs,
   turnFullMarkdown,
   turnSegments,
-  trailingCards,
   turnText
 } from './turns'
 import type { AssistantTurn } from './turns'
@@ -341,8 +340,8 @@ describe('data cards (ctx.addCard)', () => {
     )
     assert.equal(answerStep(t)?.id, 'a1')
     assert.deepEqual(
-      trailingCards(t).map((n) => n.id),
-      ['c2']
+      turnSegments(t, 'after').map((x) => (x.kind === 'card' ? `card:${x.node.id}` : x.kind)),
+      ['card:c2']
     )
     assert.deepEqual(
       turnSegments(t).map((s) => (s.kind === 'card' ? `card:${s.node.id}` : s.kind)),

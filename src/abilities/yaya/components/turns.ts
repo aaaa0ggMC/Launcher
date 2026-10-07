@@ -122,27 +122,14 @@ export function processOnly(items: ProcessItem[]): Exclude<ProcessItem, { kind: 
 }
 
 /**
- * 写在最终回答之后的数据卡片（按过程记录的顺序判断）：显示在回答下面。
- * 其余卡片按顺序插在过程块 / 中途的话之间。
- */
-export function trailingCards(turn: AssistantTurn): MessageNode[] {
-  const rec = turn.workflow
-  const answer = answerStep(turn)
-  if (!rec || !answer || !turn.cards.length) return []
-  const at = rec.steps.findIndex((s) => s.kind === 'llm' && s.messageId === answer.id)
-  if (at < 0) return []
-  const after = new Set(
-    rec.steps.slice(at + 1).flatMap((s) => (s.kind === 'card' && s.messageId ? [s.messageId] : []))
-  )
-  return turn.cards.filter((n) => after.has(n.id))
-}
-
-/**
  * 一轮回答的显示顺序：过程块（思考 / 工具 / 子 Agent）与 AI 中途说的话交错，
  * 最终回答不在这里（AssistantTurn 单独渲染在最后）。一步之内按模型输出顺序：
  * 思考 → 说的话 → 工具调用。
  */
-export function turnSegments(turn: AssistantTurn): TurnSegment[] {
+export function turnSegments(
+  turn: AssistantTurn,
+  where: 'before' | 'after' = 'before'
+): TurnSegment[] {
   const out: TurnSegment[] = []
   let block: ProcessItem[] = []
   const flush = (): void => {
@@ -150,14 +137,20 @@ export function turnSegments(turn: AssistantTurn): TurnSegment[] {
     out.push({ kind: 'process', key: `p:${block[0].key}`, items: block })
     block = []
   }
-  const trailing = new Set(trailingCards(turn).map((n) => n.id))
-  const items = processItems(turn)
+  // 按过程记录的顺序分成「回答之前」与「回答之后」（如工作流在写完回答后还有记录 / 计算 / 卡片）
+  const steps = turn.workflow?.steps ?? []
+  const answer = answerStep(turn)
+  const answerAt = answer
+    ? steps.findIndex((s) => s.kind === 'llm' && s.messageId === answer.id)
+    : -1
+  const isAfter = (item: ProcessItem): boolean =>
+    answerAt >= 0 && !!item.rec && steps.indexOf(item.rec) > answerAt
+  const items = processItems(turn).filter((it) => isAfter(it) === (where === 'after'))
   // 没有过程记录（旧数据）时卡片按节点顺序放在最前面
-  if (!turn.workflow)
+  if (!turn.workflow && where === 'before')
     for (const n of turn.cards) out.push({ kind: 'card', key: `c:${n.id}`, node: n })
   for (const item of items) {
     if (item.kind === 'card') {
-      if (trailing.has(item.node.id)) continue
       flush()
       out.push({ kind: 'card', key: item.key, node: item.node })
       continue

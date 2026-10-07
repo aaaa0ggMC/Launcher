@@ -6,14 +6,7 @@ import type { ApprovalScope, ToolCallItem, YayaProfile } from '../types'
 import { modelMonogram } from '../profile'
 import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
-import {
-  answerStep,
-  hasProcess,
-  trailingCards,
-  turnFullMarkdown,
-  turnSegments,
-  turnText
-} from './turns'
+import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
 import {
   applyInlineTokensHtml,
@@ -106,6 +99,8 @@ const segments = computed(() =>
       )
     : []
 )
+/** 回答之后的过程块 / 卡片（按过程记录在回答之后的步骤） */
+const segmentsAfter = computed(() => (props.turn.workflow ? turnSegments(props.turn, 'after') : []))
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
     if (segments.value[i].kind === 'process') return segments.value[i].key
@@ -289,7 +284,21 @@ async function copyTurn(): Promise<void> {
           />
         </template>
 
-        <DataCard v-for="c in trailingCards(turn)" :key="c.id" :node="c" />
+        <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
+        <template v-for="seg in segmentsAfter" :key="seg.key">
+          <WorkflowCard
+            v-if="seg.kind === 'process'"
+            :turn="turn"
+            :items="seg.items"
+            :first="false"
+            :last="true"
+            :assistant-name="assistantName"
+            :live="live"
+            :pending-approval-id="pendingApprovalId"
+            :preview-steps="previewSteps"
+          />
+          <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
+        </template>
 
         <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
           <span /><span /><span />
