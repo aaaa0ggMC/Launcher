@@ -98,7 +98,8 @@ import {
   type AssistantStepResult,
   type SubAgentOptions,
   type WorkflowContext,
-  type WorkflowDefinition
+  type WorkflowDefinition,
+  type WorkflowTool
 } from '../workflow/types'
 import type { LoopContext, WorkflowRetry, WorkflowSnapshot, WorkflowStatus } from './types'
 
@@ -132,6 +133,8 @@ export class WorkflowRunner {
   private session: Session | null = null
   /** 本次运行可用的工具（运行开始时解析一次，保证整轮工具表稳定 → 提示词缓存友好） */
   private tools: ResolvedTool[] = []
+  /** 工作流自带的工具（assistantStep 的 localTools），按 wire name；runTools 先查这里 */
+  private localTools = new Map<string, WorkflowTool>()
   private paused = false
   private resumeWaiters: (() => void)[] = []
   /**
@@ -432,6 +435,7 @@ export class WorkflowRunner {
         return host.aborted
       },
       history: () => this.history(),
+      availableTools: () => this.tools.map((t) => ({ name: t.wireName, pluginId: t.plugin.id })),
       assistantPrompt: () =>
         this.rawSystemPrompt.trim() === DEFAULT_YAYA_CONFIG.systemPrompt.trim()
           ? ''
@@ -692,23 +696,35 @@ export class WorkflowRunner {
   /** 系统提示词变量的快照（run() 开始时取） */
   private promptVars: Partial<Record<PromptVar, string>> = {}
 
-  private systemPrompt(extra?: string, replace?: string): string {
+  private systemPrompt(extra?: string, replace?: string, pluginInstructions = true): string {
     const base =
       replace ?? resolveSystemPrompt(this.rawSystemPrompt, this.ctx.config, this.promptVars)
-    const plugins = buildPluginInstructions(this.ctx.config)
+    const plugins = pluginInstructions ? buildPluginInstructions(this.ctx.config) : ''
     return [base, plugins, extra].filter(Boolean).join('\n\n')
   }
 
-  private stepTools(opt: AssistantStepOptions['tools']): ProviderTool[] {
-    if (opt === 'none') return []
-    const list = Array.isArray(opt)
-      ? this.tools.filter((t) => opt.includes(t.wireName))
-      : this.tools
-    return list.map((t) => ({
+  private stepTools(
+    opt: AssistantStepOptions['tools'],
+    local: WorkflowTool[] = []
+  ): ProviderTool[] {
+    const list =
+      opt === 'none'
+        ? []
+        : Array.isArray(opt)
+          ? this.tools.filter((t) => opt.includes(t.wireName))
+          : this.tools
+    const out: ProviderTool[] = list.map((t) => ({
       name: t.wireName,
       description: t.tool.description,
       parameters: t.tool.parameters
     }))
+    for (const t of local) {
+      if (out.some((x) => x.name === t.name))
+        throw new Error(`workflow tool ${t.name} clashes with a plugin tool`)
+      this.localTools.set(t.name, t)
+      out.push({ name: t.name, description: t.description, parameters: t.parameters })
+    }
+    return out
   }
 
   /** 思考强度：会话自己的选择 → 设置里的默认 */
@@ -751,7 +767,7 @@ export class WorkflowRunner {
     await this.manageContext()
     if (this.aborted) throw new Error('aborted')
     this.stepCount++
-    const tools = this.stepTools(opts.tools)
+    const tools = this.stepTools(opts.tools, opts.localTools)
 
     let messageId: string
     if (!this.anchorUsed) {
@@ -797,7 +813,10 @@ export class WorkflowRunner {
       {
         model: this.model,
         messages: [
-          { role: 'system', content: this.systemPrompt(opts.extraSystem, opts.system) },
+          {
+            role: 'system',
+            content: this.systemPrompt(opts.extraSystem, opts.system, opts.pluginInstructions)
+          },
           ...this.history()
         ],
         tools,
@@ -916,6 +935,16 @@ export class WorkflowRunner {
         continue
       }
 
+      const local = this.localTools.get(call.name)
+      if (local) {
+        call.status = 'executing'
+        this.ctx.status = 'tool_executing'
+        persist()
+        await this.runLocalTool(local, call)
+        persist()
+        continue
+      }
+
       const def = this.tools.find((t) => t.wireName === call.name)
       if (!def) {
         fail(call, te('yaya.err.tool_not_found', { name: call.name }, '工具 {name} 不存在'))
@@ -1013,6 +1042,34 @@ export class WorkflowRunner {
       persist()
     }
     if (!this.aborted) updateMessage(assistantMsgId, { status: 'completed', toolCalls })
+  }
+
+  /** 工作流自带的工具：不审批，直接执行；抛错 = 失败，错误交给模型 */
+  private async runLocalTool(tool: WorkflowTool, call: ToolCallItem): Promise<void> {
+    let args: Record<string, unknown> = {}
+    try {
+      const raw = typeof call.args === 'string' ? JSON.parse(call.args || '{}') : call.args
+      if (raw && typeof raw === 'object') args = raw as Record<string, unknown>
+    } catch {
+      call.status = 'failed'
+      call.error = t('yaya.err.bad_args', '工具参数不是合法的 JSON')
+      this.recordToolMessage(call, JSON.stringify({ error: call.error }))
+      return
+    }
+    const start = Date.now()
+    try {
+      const out = await normalizeToolResult(await tool.run(args), this.ctx.sessionId)
+      call.status = out.isError ? 'failed' : 'success'
+      call.result = out.display
+      if (out.isError) call.error = out.text.slice(0, 2000)
+      this.recordToolMessage(call, out.text, out.images)
+    } catch (e: unknown) {
+      if (this.aborted) throw e
+      call.status = 'failed'
+      call.error = e instanceof Error ? e.message : String(e)
+      this.recordToolMessage(call, JSON.stringify({ error: call.error }))
+    }
+    call.ms = Date.now() - start
   }
 
   /** 工具结果节点：content = 交给模型的文本；attachments = 工具产出的图片（作为图片交给模型） */

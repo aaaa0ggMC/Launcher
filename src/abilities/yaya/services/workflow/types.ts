@@ -31,6 +31,34 @@ export interface AssistantStepOptions {
   extraSystem?: string
   /** 过程记录里这一步的显示名（缺省「生成回答」/「思考与调用工具」） */
   label?: string
+  /**
+   * 工作流自带的工具（只在本步提供，追加在插件工具之后）：如故事模式的「问角色」「记录档案」。
+   * 不走审批、不进设置页；`ctx.runTools` 执行到它们时直接调 `run`。
+   */
+  localTools?: WorkflowTool[]
+  /**
+   * 是否在系统提示词里追加已启用插件的 instructions（缺省 true）。
+   * 故事 / 角色扮演这类自带完整提示词的工作流传 false：插件的工具使用守则（隐私、凭据、审批……）
+   * 与讲故事无关，工具本身的 description 已经够模型用。
+   */
+  pluginInstructions?: boolean
+}
+
+/** 工作流自带的工具，见 `AssistantStepOptions.localTools` */
+export interface WorkflowTool {
+  /** wire name：[a-zA-Z0-9_-]，不能与插件工具重名 */
+  name: string
+  description: string
+  /** JSON Schema（type: 'object'） */
+  parameters: Record<string, unknown>
+  /** 返回值同插件工具（字符串 / 对象 / content 结果）；抛错 = 调用失败，错误交给模型 */
+  run(args: Record<string, unknown>): unknown | Promise<unknown>
+}
+
+/** 本次运行可用的插件工具（`ctx.availableTools()`） */
+export interface AvailableTool {
+  name: string
+  pluginId: string
 }
 
 export interface AssistantStepResult {
@@ -79,6 +107,8 @@ export interface WorkflowContext {
   history(): ProviderMessage[]
   /** 助手 / 会话的系统提示词（变量已替换）；还是出厂默认提示词时为空串 */
   assistantPrompt(): string
+  /** 本次运行解析出的插件工具（工作流 usesTools 为 false 时为空）；挑一部分传给 assistantStep 的 tools */
+  availableTools(): AvailableTool[]
   /** 走一步主 Agent：流式写入一个 assistant 节点 */
   assistantStep(opts?: AssistantStepOptions): Promise<AssistantStepResult>
   /** 执行上一步产生的工具调用（含审批），结果节点接到对话树上 */

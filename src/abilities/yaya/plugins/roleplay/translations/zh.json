@@ -56,5 +56,13 @@
   "yaya.rp.export.colon": "：",
   "yaya.rp.export.copied": "已复制",
   "yaya.rp.export.empty": "还没有开始故事，没有可导出的内容。",
-  "yaya.agent.setup": "设定"
+  "yaya.agent.setup": "设定",
+  "yaya.rp.cfg.tools": "可用的插件工具",
+  "yaya.rp.cfg.tools_desc": "GM 可以先查资料再写；工具本身在插件页启用（如网页搜索）",
+  "yaya.rp.tools.search": "只用网页搜索",
+  "yaya.rp.tools.all": "全部已启用的工具",
+  "yaya.rp.tools.none": "不用插件工具",
+  "yaya.rp.cfg.tool_rounds": "每段最多工具步数",
+  "yaya.rp.cfg.tool_rounds_desc": "GM 查资料的轮数上限；用完后直接写正文",
+  "yaya.rp.step.research": "GM：查资料"
 }

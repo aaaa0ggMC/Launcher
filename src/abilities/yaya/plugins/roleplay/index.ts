@@ -1,25 +1,32 @@
 /**
  * 内置 roleplay 插件：GameMaster 角色扮演工作流（`roleplay.gm`）。
  *
- * 与 StoryTeller（多层 Agent 写故事）不同，这里是「一个 GM 带着用户玩」：
+ * 与 StoryTeller（作者 + 子 Agent 写故事）不同，这里是「一个 GM 带着用户玩」，同样是自组织 + 程序辅助：
  *
  *   ① 读档案 + 解析命令（计算）——`c [消息]` 继续 / `r <内容>` 扩写 / `prompt` 导出 / `help`，
  *      不区分大小写；没有命令头的文字按阶段解释（开场前 = intro，开场后 = 对开场的意见，之后 = 继续）
- *   ② 设定 Agent（子 Agent，只在开场 / 开场返工）——从 intro 里定主角、题材、世界、人物、用户明说的设定
- *   ③ 开局设定卡（数据卡片）
- *   ④ GM（主 Agent）——GM 提示词替换助手的系统提示词；助手原来的系统提示词作为「用户补充说明」注入
- *   ⑤ 记录员（子 Agent，可关）+ 合并（计算）——剧情摘要、新的世界设定、人物
+ *   ② GM（主 Agent，工具循环）——自己决定要不要先查资料（网页搜索等插件工具，按配置开放）再写；
+ *      GM 提示词替换助手的系统提示词，助手原来的系统提示词作为「用户补充说明」注入；不追加插件的工具守则
+ *   ③ 设定 Agent（子 Agent，只在开场 / 开场返工，GM 写完之后）——从 intro 与开场里记下主角、题材、
+ *      世界、人物、用户明说的设定 → 开局设定卡（数据卡片）
+ *   ④ 记录员（子 Agent，可关）+ 合并（计算）——剧情摘要、新的世界设定、人物
  *
  * `prompt` 与 `help` 完全由代码生成（卡片），不调模型。主角在正文里一律写成 `[[main]]`，
  * 界面按配置里的主角名显示（ui.ts 的 inlineTokens）。档案跟着对话分支走（ctx.saveState）。
  */
 import { t, te } from '../../../../main/process/i18n'
 import type { PluginConfigField, YayaPlugin } from '../../services/plugins/types'
+import {
+  pickExternalTools,
+  selfOrganizedLoop,
+  toolScope
+} from '../../services/workflow/self-organized'
 import type { WorkflowContext, WorkflowDefinition } from '../../services/workflow/types'
 import {
   chroniclerSystem,
   decide,
   effectiveSetup,
+  emptyState,
   exportText,
   extractJson,
   gmSystem,
@@ -126,6 +133,32 @@ const CONFIG: PluginConfigField[] = [
     ]
   },
   {
+    key: 'tools',
+    type: 'select',
+    label: '可用的插件工具',
+    labelKey: 'yaya.rp.cfg.tools',
+    description: 'GM 可以先查资料再写；工具本身在插件页启用（如网页搜索）',
+    descriptionKey: 'yaya.rp.cfg.tools_desc',
+    default: 'search',
+    options: [
+      { value: 'search', label: '只用网页搜索', labelKey: 'yaya.rp.tools.search' },
+      { value: 'all', label: '全部已启用的工具', labelKey: 'yaya.rp.tools.all' },
+      { value: 'none', label: '不用插件工具', labelKey: 'yaya.rp.tools.none' }
+    ]
+  },
+  {
+    key: 'tool_rounds',
+    type: 'number',
+    label: '每段最多工具步数',
+    labelKey: 'yaya.rp.cfg.tool_rounds',
+    description: 'GM 查资料的轮数上限；用完后直接写正文',
+    descriptionKey: 'yaya.rp.cfg.tool_rounds_desc',
+    default: 4,
+    min: 1,
+    max: 20,
+    step: 1
+  },
+  {
     key: 'memory',
     type: 'boolean',
     label: '故事记忆',
@@ -146,6 +179,11 @@ export interface RpSetupCardData {
 }
 export interface RpExportCardData {
   text: string
+}
+
+function num(v: unknown, dflt: number, min: number, max: number): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : dflt
 }
 
 function lastUserText(ctx: WorkflowContext): string {
@@ -250,28 +288,52 @@ async function runRoleplay(ctx: WorkflowContext): Promise<void> {
     return
   }
 
-  let state = prev
+  const opening = action.kind === 'opening' || action.kind === 'revise'
+  // 开场前没有档案：GM 只按配置的默认设定与 intro 写，设定 Agent 在它写完后再记录
+  const state = prev ?? emptyState()
 
-  // ② 设定 Agent：开场 / 开场返工
-  if (action.kind === 'opening' || action.kind === 'revise') {
+  // ② GM：自组织（要不要先查资料由它决定）
+  const external = pickExternalTools(ctx, toolScope(cfg.tools))
+  const setupNow = effectiveSetup(cfg, prev)
+  const gmLabel =
+    action.kind === 'expand'
+      ? t('yaya.rp.step.expand', 'GM：扩写')
+      : action.kind === 'continue'
+        ? t('yaya.rp.step.continue', 'GM：推进故事')
+        : t('yaya.rp.step.opening', 'GM：开场')
+  const { final } = await selfOrganizedLoop(ctx, {
+    system: gmSystem(setupNow, ctx.assistantPrompt(), { tools: external.length > 0 }),
+    extraSystem: turnInstructions(action, state),
+    localTools: [],
+    external,
+    maxRounds: num(cfg.tool_rounds, 4, 1, 20) + 1,
+    label: t('yaya.rp.step.research', 'GM：查资料'),
+    finalLabel: gmLabel
+  })
+  if (ctx.aborted || !final) return
+
+  let next: RpState = JSON.parse(JSON.stringify(state))
+
+  // ③ 设定 Agent：开场 / 开场返工，记下 intro 与开场定下来的东西
+  if (opening) {
     const out = await ctx.subAgent({
       agent: 'setup',
       label: t('yaya.rp.step.setup', '设定：主角、题材与世界'),
-      system: setupAgentSystem(effectiveSetup(cfg, prev), prev)
+      system: setupAgentSystem(setupNow, prev)
     })
     if (ctx.aborted) return
-    state = stateFromSetup(extractJson(out.content), prev, cfg)
-    const setup = effectiveSetup(cfg, state)
-    // ③ 开局设定卡（模型看不到：设定已经在 GM 的系统提示词里）
+    next = stateFromSetup(extractJson(out.content), prev, cfg)
+    const setup = effectiveSetup(cfg, next)
+    // 开局设定卡（模型看不到：设定之后会在 GM 的系统提示词里）
     const data: RpSetupCardData = {
-      title: state.title,
+      title: next.title,
       setup,
-      world: state.world.length,
-      characters: state.characters
+      world: next.world.length,
+      characters: next.characters
     }
     ctx.addCard({
       type: 'roleplay-setup',
-      title: state.title || t('yaya.rp.card.setup', '开局设定'),
+      title: next.title || t('yaya.rp.card.setup', '开局设定'),
       data,
       markdown: [
         `**${t('yaya.rp.cfg.protagonist', '主角设定')}**: ${setup.protagonist || '—'}`,
@@ -280,31 +342,12 @@ async function runRoleplay(ctx: WorkflowContext): Promise<void> {
     })
   }
 
-  // decide()：没有档案时只会是开场，这里只是让类型收窄
-  if (!state) return
-
-  // ④ GM 写正文
-  const setup = effectiveSetup(cfg, state)
-  await ctx.assistantStep({
-    tools: 'none',
-    label:
-      action.kind === 'expand'
-        ? t('yaya.rp.step.expand', 'GM：扩写')
-        : action.kind === 'continue'
-          ? t('yaya.rp.step.continue', 'GM：推进故事')
-          : t('yaya.rp.step.opening', 'GM：开场'),
-    system: gmSystem(setup, ctx.assistantPrompt()),
-    extraSystem: turnInstructions(action, state)
-  })
-  if (ctx.aborted) return
-
-  let next: RpState = JSON.parse(JSON.stringify(state))
   if (action.kind === 'continue') {
     next.phase = 'playing'
     next.turn += 1
   }
 
-  // ⑤ 记录员：扩写不改变剧情，不记
+  // ④ 记录员：扩写不改变剧情，不记
   if (cfg.memory !== false && action.kind !== 'expand') {
     const chronicle = await ctx.subAgent({
       agent: 'chronicler',
@@ -340,7 +383,7 @@ export const roleplayWorkflow: WorkflowDefinition = {
   description:
     'GameMaster 带你玩文字角色扮演：先发 intro 开场，之后 c 继续 / r 扩写 / prompt 导出存档',
   icon: 'mdi-drama-masks',
-  usesTools: false,
+  usesTools: true,
   run: runRoleplay
 }
 
@@ -358,6 +401,8 @@ const plugin: YayaPlugin = {
   docs: [
     '启用后，在输入框的工作流菜单（或助手的默认工作流）里选「角色扮演」，然后发出你的故事 intro。',
     'GM 先完善主角的出身、描绘 intro 的场景，问你是否满意：直接回复意见会重写开场，回复 `c` 开始。',
+    'GM 每一段都自己决定要不要先查资料（网页搜索等，见配置「可用的插件工具」）再写。',
+    '提示词里不追加插件的工具守则（隐私、凭据、审批说明），内容尺度交给模型自己判断。',
     '',
     '| 命令（不区分大小写） | 作用 |',
     '|---|---|',
