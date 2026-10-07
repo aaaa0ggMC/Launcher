@@ -912,5 +912,8 @@
   "yaya.assistants.delete_title": "Delete assistant",
   "yaya.assistants.delete_body": "Delete “{name}”? Its old chats will use the first assistant's settings. Chat history is kept.",
   "yaya.assistants.switch": "Switch assistant",
-  "yaya.assistants.manage": "Manage assistants"
+  "yaya.assistants.manage": "Manage assistants",
+  "yaya.sessions.showing_all": "Showing chats from all assistants — click to show only the current one",
+  "yaya.sessions.showing_one": "Showing only {name}'s chats — click to show all assistants",
+  "yaya.sessions.empty_assistant": "{name} has no chats yet — click “New” to start one"
 }

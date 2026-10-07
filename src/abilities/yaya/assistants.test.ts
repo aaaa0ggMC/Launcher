@@ -10,7 +10,8 @@ import {
   DEFAULT_ASSISTANT_ID,
   findAssistant,
   normalizeAssistants,
-  sessionAssistantId
+  sessionAssistantId,
+  sessionOwnerId
 } from './assistants'
 
 function base(): YayaConfig {
@@ -96,4 +97,13 @@ it('会话的助手：旧会话 = default；被删的助手退回第一个', () 
   const cfg = base()
   normalizeAssistants(cfg)
   assert.equal(findAssistant(cfg, 'deleted')?.id, DEFAULT_ASSISTANT_ID)
+})
+
+it('会话归属：记了的助手被删 / 没记 = 第一个助手', () => {
+  const cfg = base()
+  normalizeAssistants(cfg)
+  cfg.assistants!.push(assistantFromDefaults(cfg, 'b', { name: 'Coder', now: 1 }))
+  assert.equal(sessionOwnerId(cfg, { meta: { assistantId: 'b' } }), 'b')
+  assert.equal(sessionOwnerId(cfg, { meta: { assistantId: 'gone' } }), DEFAULT_ASSISTANT_ID)
+  assert.equal(sessionOwnerId(cfg, {}), DEFAULT_ASSISTANT_ID)
 })
