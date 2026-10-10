@@ -49,3 +49,6 @@ src/abilities/launcher-mobile-clipboard/
 
 # 能力开关（个人文件，见 AGENTS.md「toggle.json」）
 src/abilities/toggle.json
+
+# opencode 工具运行产物（验收截图 / 任务状态等，不入库）
+.opencode/
