@@ -60,15 +60,43 @@ it('新助手复制默认值，但模型留空 = 跟随默认模型；改一个�
   const eb = assistantConfig(cfg, 'b')
   assert.equal(eb.assistantName, 'Coder')
   assert.equal(eb.activeModel, 'm1', '没选模型时用全局默认')
-  assert.deepEqual(eb.pluginEnabled, { system: true })
   assert.equal(eb.profile?.userName, 'me', '你的名字是全局的')
   assert.equal(eb.profile?.assistantNameVisible, false)
   const ea = assistantConfig(cfg, DEFAULT_ASSISTANT_ID)
-  assert.deepEqual(ea.pluginEnabled, { system: false })
   assert.equal(ea.systemPrompt, 'You are {name}.')
   b.activeModel = 'm2'
   b.activeProviderId = 'p2'
   assert.equal(assistantConfig(cfg, 'b').activeProviderId, 'p2')
+})
+
+it('插件开关：默认跟随根配置；关掉同步才用助手自己那份', () => {
+  const cfg = base()
+  cfg.pluginEnabled = { system: false }
+  cfg.pluginGroupEnabled = { 'system/core': true }
+  normalizeAssistants(cfg)
+  const a = cfg.assistants![0]
+  // 默认（pluginsFollowRoot 缺省 / true）：生效配置用根配置的
+  assert.equal(a.pluginsFollowRoot, true)
+  assert.deepEqual(assistantConfig(cfg, a.id).pluginEnabled, { system: false })
+  assert.deepEqual(assistantConfig(cfg, a.id).pluginGroupEnabled, { 'system/core': true })
+  // 助手自己存了一份，躺着不动
+  a.pluginEnabled = { system: true }
+  a.pluginGroupEnabled = { 'system/core': false }
+  assert.deepEqual(
+    assistantConfig(cfg, a.id).pluginEnabled,
+    { system: false },
+    '跟随时助手那份不生效'
+  )
+  // 关掉同步：助手自己那份生效
+  a.pluginsFollowRoot = false
+  assert.deepEqual(assistantConfig(cfg, a.id).pluginEnabled, { system: true })
+  assert.deepEqual(assistantConfig(cfg, a.id).pluginGroupEnabled, { 'system/core': false })
+  // 别的字段照旧叠加（不被同步开关影响）
+  a.systemPrompt = 'solo'
+  assert.equal(assistantConfig(cfg, a.id).systemPrompt, 'solo')
+  // 开回来：又跟随根配置
+  a.pluginsFollowRoot = true
+  assert.deepEqual(assistantConfig(cfg, a.id).pluginEnabled, { system: false })
 })
 
 it('校验：坏条目 / 重复 id 去掉，活动助手不存在时回落第一个', () => {

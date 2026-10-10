@@ -7,7 +7,7 @@
 import { ASSISTANT_KEYS } from '../../assistants'
 import type { YayaAssistant, YayaConfig } from '../../types'
 
-const SCOPED = new Set<string>([...ASSISTANT_KEYS, 'profile'])
+const SCOPED = new Set<string>([...ASSISTANT_KEYS, 'profile', 'pluginsFollowRoot'])
 
 export function scopedConfig(config: YayaConfig, assistant: YayaAssistant): YayaConfig {
   const a = assistant as unknown as Record<string, unknown>

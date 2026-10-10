@@ -510,6 +510,7 @@ const workflowItems = computed(() => {
         v-else-if="page === 'plugins'"
         :key="`plugins-${selected.id}`"
         :config="scoped"
+        :root-config="config"
         :assistant-id="selected.id"
         :only="['plugins', 'skills']"
       />

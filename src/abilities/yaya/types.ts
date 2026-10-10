@@ -250,6 +250,12 @@ export interface YayaAssistant {
   maxLoopSteps: number
   pluginEnabled?: Record<string, boolean>
   pluginGroupEnabled?: Record<string, boolean>
+  /**
+   * 插件开关跟随根配置（默认开）。开会话 / 工具表 / 设置里，这个助手的插件启用与分组
+   * 都用根配置（YAYA → 插件）的那份，助手自己存的 pluginEnabled / pluginGroupEnabled
+   * 暂时躺平；关掉才独立，设置里可「手动同步」把根配置拷过来再改。
+   */
+  pluginsFollowRoot?: boolean
   disabledTools?: string[]
   toolApproval?: Record<string, ToolApprovalMode>
   context?: import('./services/context').ContextConfig

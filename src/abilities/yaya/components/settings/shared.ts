@@ -1,9 +1,20 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import type { ProviderType } from '../../types'
 
 export interface ProviderTypeItem {
   title: string
   value: ProviderType
+}
+
+/**
+ * 「前往根配置」跳转请求（助手插件页 → YAYA 设置的某个分区）。
+ * 模块级 ref：设置页已经开着也能切过去（watch 到变化即跳），没开时随挂载消费。
+ * nonce 保证重复请求同一分区也能再次触发。
+ */
+export const yayaSectionRequest = ref<{ id: string; nonce: number } | null>(null)
+
+export function requestYayaSection(id: string): void {
+  yayaSectionRequest.value = { id, nonce: Date.now() }
 }
 
 /** 添加服务商弹窗里的草稿（不含 id，由外壳落库） */

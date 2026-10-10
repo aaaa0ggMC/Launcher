@@ -34,6 +34,15 @@ export const ASSISTANT_KEYS = [
 
 export type AssistantKey = (typeof ASSISTANT_KEYS)[number]
 
+/**
+ * 插件开关字段：可被「自动同步根配置」整个让位给根配置（见 assistantConfig）。
+ * 它们仍在 ASSISTANT_KEYS 里（助手能独立存），只是生效时可能被跳过。
+ */
+export const PLUGIN_SCOPE_KEYS = [
+  'pluginEnabled',
+  'pluginGroupEnabled'
+] as const satisfies readonly (keyof YayaAssistant | keyof YayaConfig)[]
+
 export const ASSISTANT_PROFILE_KEYS = [
   'assistantAvatar',
   'assistantAvatarMode',
@@ -86,6 +95,7 @@ export function assistantFromDefaults(
     maxLoopSteps: cfg.maxLoopSteps,
     pluginEnabled: clone(cfg.pluginEnabled),
     pluginGroupEnabled: clone(cfg.pluginGroupEnabled),
+    pluginsFollowRoot: true,
     disabledTools: clone(cfg.disabledTools),
     toolApproval: clone(cfg.toolApproval),
     context: clone(cfg.context),
@@ -121,6 +131,7 @@ function normalizeAssistant(raw: unknown, cfg: YayaConfig): YayaAssistant | null
       : cfg.maxLoopSteps,
     pluginEnabled: record<boolean>(r.pluginEnabled),
     pluginGroupEnabled: record<boolean>(r.pluginGroupEnabled),
+    pluginsFollowRoot: r.pluginsFollowRoot !== false,
     disabledTools: Array.isArray(r.disabledTools)
       ? r.disabledTools.filter((x): x is string => typeof x === 'string')
       : undefined,
@@ -156,6 +167,8 @@ export function findAssistant(cfg: YayaConfig, id?: string | null): YayaAssistan
 /**
  * 助手叠加到全局配置上的「生效配置」。没有助手（还没迁移的配置）时原样返回。
  * 助手没选模型 = 跟随全局默认模型。
+ * `pluginsFollowRoot !== false`（默认开）时，插件开关整份用根配置的——助手那份躺平，
+ * 在设置里关掉同步才生效（可先「手动同步」把根配置拷过来再改）。
  */
 export function assistantConfig(cfg: YayaConfig, id?: string | null): YayaConfig {
   const a = findAssistant(cfg, id)
@@ -164,6 +177,8 @@ export function assistantConfig(cfg: YayaConfig, id?: string | null): YayaConfig
   const target = out as unknown as Record<string, unknown>
   for (const key of ASSISTANT_KEYS) {
     if (key === 'activeProviderId' || key === 'activeModel') continue
+    if (a.pluginsFollowRoot !== false && (PLUGIN_SCOPE_KEYS as readonly string[]).includes(key))
+      continue
     target[key] = a[key]
   }
   if (a.activeModel) {

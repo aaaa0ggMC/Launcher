@@ -1,9 +1,17 @@
 <script setup lang="ts">
+/* eslint-disable vue/no-mutating-props -- 与其他设置分区一样直接改外壳持有的配置对象 */
 import { useI18n } from '@ui/i18n'
 import { computed, inject, onBeforeUnmount, onMounted, onActivated, ref } from 'vue'
 import type { Ref } from 'vue'
 import { useScrollMemory } from '@ui/composables/scroll-memory'
-import { YAYA_SETTINGS_NAV_KEY, type YayaSettingsNav } from './shared'
+import { useSettings } from '@ui/composables/settings'
+import {
+  YAYA_SAVE_API_KEY,
+  YAYA_SETTINGS_NAV_KEY,
+  requestYayaSection,
+  type YayaSettingsNav,
+  type YayaSettingsSaveApi
+} from './shared'
 import type { PluginInfo } from '../../services/plugins/types'
 import type { YayaConfig } from '../../types'
 import McpServersPanel from './McpServersPanel.vue'
@@ -20,6 +28,8 @@ const props = defineProps<{
   assistantId?: string
   /** 只显示这几个分页（助手页把 MCP 单独放一页） */
   only?: PluginsTab[]
+  /** 全局配置（助手页的「手动同步 / 自动同步根配置」要读根配置的那份插件开关） */
+  rootConfig?: YayaConfig
 }>()
 
 const lang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -147,6 +157,39 @@ function closeDetail(): void {
 
 // 窄屏：头部的「返回」先关详情，详情里就不再放自己的返回按钮
 const nav = inject<YayaSettingsNav | null>(YAYA_SETTINGS_NAV_KEY, null)
+const saveApi = inject<YayaSettingsSaveApi | null>(YAYA_SAVE_API_KEY, null)
+const settings = useSettings()
+
+// ---- 助手插件页：「自动同步根配置」（默认开） ----
+// 开：这个助手的插件开关 / 分组整份跟随根配置（YAYA → 插件），此处不显示具体开关，
+//     只给「前往根配置」；关：用助手自己那份，可「手动同步」把根配置拷过来再改。
+// scopedConfig 代理把 pluginsFollowRoot 路由到助手对象上，YayaConfig 类型里没有它
+type ScopedFlagView = { pluginsFollowRoot?: boolean }
+const followRoot = computed(
+  () => (props.config as unknown as ScopedFlagView).pluginsFollowRoot !== false
+)
+
+function setFollowRoot(v: boolean | null): void {
+  ;(props.config as unknown as ScopedFlagView).pluginsFollowRoot = v !== false
+  saveApi?.saveNow()
+  void loadPlugins()
+}
+
+/** 把根配置的插件开关 / 分组拷进这个助手（手动同步） */
+function syncFromRoot(): void {
+  const root = props.rootConfig
+  if (!root) return
+  props.config.pluginEnabled = { ...(root.pluginEnabled ?? {}) }
+  props.config.pluginGroupEnabled = { ...(root.pluginGroupEnabled ?? {}) }
+  saveApi?.saveNow()
+  void loadPlugins()
+}
+
+/** 跳到 YAYA 设置的插件分区（根配置）；设置页已经开着也照切 */
+function gotoRootPlugins(): void {
+  requestYayaSection('plugins')
+  settings.open({ ability: 'yaya' })
+}
 const offBack = nav?.onBack(() => {
   if (!selectedId.value) return false
   closeDetail()
@@ -191,6 +234,55 @@ onBeforeUnmount(() => offBack?.())
           )
         }}
       </div>
+
+      <!-- 助手插件页：自动同步根配置（默认开）——开着就不显示具体开关，给跳转 -->
+      <v-card v-if="assistantId && tab === 'plugins'" variant="tonal" class="sync-card pa-3" border>
+        <div class="d-flex align-center ga-3">
+          <v-icon icon="mdi-sync-circle" class="flex-shrink-0" />
+          <div class="min-w-0 flex-grow-1">
+            <div class="text-body-2 font-weight-medium">
+              {{ t('yaya.assistants.plugins_sync', '自动同步根配置') }}
+            </div>
+            <div class="text-caption text-medium-emphasis">
+              {{
+                followRoot
+                  ? t(
+                      'yaya.assistants.plugins_sync_hint_on',
+                      '这个助手的插件开关与分组跟随根配置（YAYA → 插件），此处不显示具体开关'
+                    )
+                  : t(
+                      'yaya.assistants.plugins_sync_hint_off',
+                      '已独立：下面的开关只影响这个助手，可先从根配置同步一次再改'
+                    )
+              }}
+            </div>
+          </div>
+          <v-switch
+            :model-value="followRoot"
+            color="primary"
+            density="compact"
+            hide-details
+            class="flex-shrink-0"
+            :aria-label="t('yaya.assistants.plugins_sync', '自动同步根配置')"
+            @update:model-value="setFollowRoot"
+          />
+        </div>
+        <div class="d-flex ga-2 flex-wrap mt-3">
+          <v-btn
+            v-if="followRoot"
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-open-in-new"
+            @click="gotoRootPlugins"
+          >
+            {{ t('yaya.assistants.plugins_sync_goto', '前往根配置') }}
+          </v-btn>
+          <v-btn v-else size="small" variant="tonal" prepend-icon="mdi-sync" @click="syncFromRoot">
+            {{ t('yaya.assistants.plugins_sync_now', '手动同步') }}
+          </v-btn>
+        </div>
+      </v-card>
+
       <v-alert v-if="loadError" color="error" variant="tonal" density="compact" class="mb-1">
         {{ t('yaya.settings.plugins.load_failed', '插件列表加载失败') }}
       </v-alert>
@@ -208,7 +300,7 @@ onBeforeUnmount(() => offBack?.())
       </v-tabs>
 
       <PluginList
-        v-if="tab === 'plugins'"
+        v-if="tab === 'plugins' && !(assistantId && followRoot)"
         :plugins="plugins"
         :config="config"
         :loading="loading"
@@ -238,6 +330,10 @@ onBeforeUnmount(() => offBack?.())
 
 <style scoped>
 .plugins-section {
+  width: 100%;
+  min-width: 0;
+}
+.sync-card {
   width: 100%;
   min-width: 0;
 }

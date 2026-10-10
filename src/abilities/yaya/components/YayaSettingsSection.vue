@@ -25,6 +25,7 @@ import SaveStatusText from './settings/SaveStatusText.vue'
 import {
   YAYA_SAVE_API_KEY,
   YAYA_SETTINGS_NAV_KEY,
+  yayaSectionRequest,
   type YayaSettingsNav,
   type YayaSettingsSaveApi
 } from './settings/shared'
@@ -357,6 +358,18 @@ function openSection(id: SectionId): void {
   slideDir.value = 1
   layer.value = 1
 }
+
+/** 「前往根配置」：别处（助手插件页）请求切到某个分区——已经开着也照切 */
+watch(
+  yayaSectionRequest,
+  (req) => {
+    if (!req || !sections.some((s) => s.id === req.id)) return
+    openSection(req.id as SectionId)
+    selectedProviderId.value = null
+    yayaSectionRequest.value = null
+  },
+  { immediate: true }
+)
 
 function backToSections(): void {
   slideDir.value = -1
