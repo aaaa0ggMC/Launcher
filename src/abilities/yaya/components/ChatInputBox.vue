@@ -127,46 +127,103 @@ narrowMq?.addEventListener('change', onNarrowChange)
 onBeforeUnmount(() => narrowMq?.removeEventListener('change', onNarrowChange))
 const sheetMode = computed(() => coarse || narrow.value)
 
-// ---- 底部弹层：触屏下滑收起（把手 / 空白处按住下滑，超过阈值即关闭） ----
+// ---- 底部弹层：全局下滑收起 ----
+// 面板上任意位置（含按钮 / 列表项）和面板外的遮罩上，按住往下划都能收起：
+// 面板内阈值 72px、遮罩上 40px（外面没有内容要保留，随手一划就收）。
+// 监听挂在 document 上（捕获阶段）——弹层 teleport 到 body，scoped 样式和
+// 组件内 @pointer 都盖不到遮罩；拖拽判定成立后吞掉随后补发的 click，
+// 不然在按钮上起手会把按钮也点一下。
+const sheetCardEl = ref<HTMLElement | null>(null)
 const sheetDragY = ref(0)
 const sheetDragging = ref(false)
 let sheetStartY = 0
 let sheetPointerId: number | null = null
+let sheetDecided = false
+let sheetInside = false
+let sheetJustDragged = false
 
-function onSheetPointerDown(e: PointerEvent): void {
+/** v-card 是组件：模板 ref 拿到的是组件实例，根 DOM 在 $el 上 */
+function sheetCardNode(): HTMLElement | null {
+  const v = sheetCardEl.value as unknown as { $el?: HTMLElement } | null
+  return v?.$el ?? null
+}
+
+function onSheetDocDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse') return
-  // 按钮 / 列表项 / 输入区上不启动拖拽：别影响点按和列表滚动
-  const el = e.target as HTMLElement | null
-  if (el?.closest('button, .v-list-item, .v-input, input, textarea')) return
+  sheetJustDragged = false
+  sheetInside = !!sheetCardNode()?.contains(e.target as Node)
   sheetStartY = e.clientY
   sheetPointerId = e.pointerId
+  sheetDecided = false
 }
 
-function onSheetPointerMove(e: PointerEvent): void {
+function onSheetDocMove(e: PointerEvent): void {
   if (sheetPointerId !== e.pointerId) return
   const dy = e.clientY - sheetStartY
-  if (!sheetDragging.value) {
-    if (dy < 6) return // 只认向下拖（向上留给可能的列表滚动）
+  if (!sheetDecided) {
+    if (dy < 8) return // 向下且超过 8px 才算拖拽（避免把手抖当滑动）
+    sheetDecided = true
     sheetDragging.value = true
-    try {
-      // 捕获指针：拖到手势结束都收到 move（合成事件 / 已失效指针会抛，忽略即可）
-      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    } catch {
-      /* noop */
-    }
   }
-  sheetDragY.value = dy
+  sheetDragY.value = Math.max(0, dy)
 }
 
-function onSheetPointerUp(e: PointerEvent): void {
+function onSheetDocUp(e: PointerEvent): void {
   if (sheetPointerId !== e.pointerId) return
   const dy = sheetDragY.value
+  const dragged = sheetDecided
   sheetPointerId = null
+  sheetDecided = false
   sheetDragging.value = false
   sheetDragY.value = 0
-  // 拖过 96px 当作「收起」；没超过则回弹（transform 清除，CSS transition 兜底）
-  if (dy > 96) plusOpen.value = false
+  const threshold = sheetInside ? 72 : 40
+  if (dragged && dy > threshold) {
+    sheetJustDragged = true
+    plusOpen.value = false
+  }
 }
+
+/** 拖拽收起后吞掉抬手时浏览器补发的 click（点不到面板里的按钮） */
+function onSheetDocClick(e: MouseEvent): void {
+  if (!sheetJustDragged) return
+  sheetJustDragged = false
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function bindSheetGestures(): void {
+  document.addEventListener('pointerdown', onSheetDocDown, true)
+  document.addEventListener('pointermove', onSheetDocMove, true)
+  document.addEventListener('pointerup', onSheetDocUp, true)
+  document.addEventListener('pointercancel', onSheetDocUp, true)
+  document.addEventListener('click', onSheetDocClick, true)
+}
+
+function unbindSheetGestures(): void {
+  document.removeEventListener('pointerdown', onSheetDocDown, true)
+  document.removeEventListener('pointermove', onSheetDocMove, true)
+  document.removeEventListener('pointerup', onSheetDocUp, true)
+  document.removeEventListener('pointercancel', onSheetDocUp, true)
+  document.removeEventListener('click', onSheetDocClick, true)
+}
+
+let sheetUnbindTimer: ReturnType<typeof setTimeout> | null = null
+watch(plusOpen, (open) => {
+  if (sheetUnbindTimer) {
+    clearTimeout(sheetUnbindTimer)
+    sheetUnbindTimer = null
+  }
+  if (open) {
+    void nextTick(bindSheetGestures)
+    return
+  }
+  // 关闭后短暂保留监听：抬手与 click 之间还有一个事件任务，立刻解绑会漏拦
+  sheetUnbindTimer = setTimeout(unbindSheetGestures, 400)
+})
+onBeforeUnmount(() => {
+  if (sheetUnbindTimer) clearTimeout(sheetUnbindTimer)
+  unbindSheetGestures()
+})
 
 const plusActions = computed<InputMenuAction[]>(() => {
   const builtin: InputMenuAction = {
@@ -729,13 +786,10 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
         </v-btn>
         <v-bottom-sheet v-if="sheetMode" v-model="plusOpen">
           <v-card
+            ref="sheetCardEl"
             class="plus-sheet yaya-pop"
             :class="{ 'is-dragging': sheetDragging }"
             :style="sheetDragY ? { transform: `translateY(${sheetDragY}px)` } : undefined"
-            @pointerdown="onSheetPointerDown"
-            @pointermove="onSheetPointerMove"
-            @pointerup="onSheetPointerUp"
-            @pointercancel="onSheetPointerUp"
           >
             <div class="plus-sheet-handle" aria-hidden="true" />
             <InputPlusPanel sheet :actions="plusActions" @run="runPlusAction" />
@@ -1105,6 +1159,9 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   padding-bottom: env(safe-area-inset-bottom);
   /* 下滑收起：拖拽跟手（无过渡），松手回弹 / 关闭有过渡 */
   transition: transform 0.2s ease;
+  /* 整块面板都是拖拽热区：禁掉默认触控行为，下滑手势才跟手
+     （面板内容设计上放得下，不需要内部滚动） */
+  touch-action: none;
 }
 .plus-sheet.is-dragging {
   transition: none;
@@ -1115,16 +1172,6 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   margin: 10px auto 0;
   border-radius: 2px;
   background: rgba(var(--v-theme-on-surface), 0.25);
-  /* 把手是拖拽热区：禁掉默认触控行为，下滑手势才跟手 */
-  touch-action: none;
-}
-/* 把手只是视觉中心：整个把手行都是拖拽热区（按住这一带下滑可收起） */
-.plus-sheet-handle::before {
-  content: '';
-  display: block;
-  width: 120px;
-  height: 28px;
-  margin: -12px auto -12px;
 }
 .plugin-input-tools {
   display: flex;

@@ -114,10 +114,13 @@ function toggleSidebar(): void {
 }
 
 // ---- 窄屏弹出侧栏：单指向左划收回（与外壳侧栏同一套手势判定，竖向滚动不受影响） ----
+// 手势挂在抽屉和遮罩两处：遮罩盖住的主区（屏幕右侧）也要能左划收回，
+// 不然只有抽屉本体那一长条能划，别处划不动。
 const drawerSwipe = new DrawerSwipe()
 const drawerDragX = ref(0)
 const drawerDragging = ref(false)
 const drawerWidth = ref(1)
+const asideEl = ref<HTMLElement | null>(null)
 let drawerBlockClick = false
 
 function resetDrawerSwipe(): void {
@@ -130,7 +133,9 @@ function onDrawerPointerDown(e: PointerEvent): void {
   if (wide.value || !drawerOpen.value || e.button !== 0) return
   if ((e.target as Element).closest('input, textarea, [contenteditable="true"]')) return
   drawerBlockClick = false
-  const el = e.currentTarget as HTMLElement
+  // 测量一律以抽屉为准（遮罩也走这套处理，宽度语义不能跟着变）
+  const el = asideEl.value
+  if (!el) return
   const width = el.getBoundingClientRect().width
   drawerWidth.value = el.offsetWidth || 1
   drawerSwipe.down(e.pointerId, e.clientX, e.clientY, width, e.timeStamp)
@@ -141,7 +146,8 @@ function onDrawerPointerDown(e: PointerEvent): void {
 function onDrawerPointerMove(e: PointerEvent): void {
   const state = drawerSwipe.move(e.pointerId, e.clientX, e.clientY)
   if (!state) return
-  const el = e.currentTarget as HTMLElement
+  const el = asideEl.value
+  if (!el) return
   const width = el.getBoundingClientRect().width
   // 页面可能被缩放：屏幕位移换回元素自身坐标
   const scale = width > 0 ? el.offsetWidth / width : 1
@@ -150,7 +156,8 @@ function onDrawerPointerMove(e: PointerEvent): void {
   if (state.dragging) {
     drawerBlockClick = true
     e.preventDefault()
-    if (!el.hasPointerCapture(e.pointerId)) el.setPointerCapture(e.pointerId)
+    const target = e.currentTarget as HTMLElement
+    if (!target.hasPointerCapture(e.pointerId)) target.setPointerCapture(e.pointerId)
   }
 }
 
@@ -187,6 +194,63 @@ const scrimStyle = computed(() =>
 )
 
 watch([drawerOpen, wide], resetDrawerSwipe)
+
+// ---- 窄屏：快速右划打开会话侧栏 ----
+// 全区判定（抽屉开着才是左划收回，关着才认右划开），两个避让：
+//   1. 最左 OPEN_EDGE_MARGIN px 留给外壳侧栏的边缘手势，不抢；
+//   2. 正在划文字选择时让位——选择会被滑动延长，检查按下时与触发时各一次。
+const OPEN_EDGE_MARGIN = 24
+const OPEN_TRIGGER_PX = 44
+let openSwipeId: number | null = null
+let openSwipeX = 0
+let openSwipeY = 0
+let openSwipeFired = false
+let openBlockClick = false
+
+function selectingText(): boolean {
+  const sel = window.getSelection?.()
+  return !!sel && !sel.isCollapsed && sel.toString().length > 0
+}
+
+function onShellPointerDown(e: PointerEvent): void {
+  if (e.pointerType === 'mouse' || wide.value || drawerOpen.value || e.button !== 0) return
+  if (e.clientX < OPEN_EDGE_MARGIN) return
+  if ((e.target as Element).closest('input, textarea, [contenteditable="true"]')) return
+  if (selectingText()) return
+  openSwipeId = e.pointerId
+  openSwipeX = e.clientX
+  openSwipeY = e.clientY
+  openSwipeFired = false
+}
+
+function onShellPointerMove(e: PointerEvent): void {
+  if (openSwipeId !== e.pointerId || openSwipeFired) return
+  const dx = e.clientX - openSwipeX
+  const dy = Math.abs(e.clientY - openSwipeY)
+  // 横向主导才算划屏（竖向留给消息列表滚动）
+  if (dx < OPEN_TRIGGER_PX || dx < dy * 1.5) return
+  // 触发前再查一次：滑到一半开始/正在进行文字选择就放弃
+  if (selectingText()) {
+    openSwipeId = null
+    return
+  }
+  openSwipeFired = true
+  openBlockClick = true
+  drawerOpen.value = true
+}
+
+function onShellPointerEnd(e: PointerEvent): void {
+  if (openSwipeId !== e.pointerId) return
+  openSwipeId = null
+}
+
+/** 手势开栏后吞掉随后补发的 click，免得点开手指下的建议 / 消息 */
+function onShellClick(e: MouseEvent): void {
+  if (!openBlockClick || e.detail === 0) return
+  openBlockClick = false
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
 
 // ---- 派生状态 ----
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
@@ -1383,10 +1447,31 @@ watch(isRunning, (now, before) => {
 </script>
 
 <template>
-  <div ref="shellEl" class="yaya-shell" :class="{ 'is-narrow': !wide }">
+  <div
+    ref="shellEl"
+    class="yaya-shell"
+    :class="{ 'is-narrow': !wide }"
+    @pointerdown="onShellPointerDown"
+    @pointermove="onShellPointerMove"
+    @pointerup="onShellPointerEnd"
+    @pointercancel="onShellPointerEnd"
+    @click.capture="onShellClick"
+  >
     <!-- 会话侧栏：宽屏常驻，窄屏弹出 -->
-    <div v-if="!wide && drawerOpen" class="scrim" :style="scrimStyle" @click="drawerOpen = false" />
+    <!-- 遮罩也挂左划手势：盖住的主区（屏幕右侧）往下划一样收回侧栏 -->
+    <div
+      v-if="!wide && drawerOpen"
+      class="scrim"
+      :style="scrimStyle"
+      @click="drawerOpen = false"
+      @pointerdown="onDrawerPointerDown"
+      @pointermove="onDrawerPointerMove"
+      @pointerup="onDrawerPointerEnd"
+      @pointercancel="onDrawerPointerEnd"
+      @lostpointercapture="onDrawerPointerEnd"
+    />
     <aside
+      ref="asideEl"
       class="sidebar"
       :class="{
         'is-open': sidebarVisible,
@@ -1886,6 +1971,8 @@ watch(isRunning, (now, before) => {
   inset: 0;
   z-index: 19;
   background: rgba(0, 0, 0, 0.35);
+  /* 横划（左划收回）交给 JS 手势，别让浏览器把横划当页面导航 */
+  touch-action: pan-y;
 }
 
 /* ---- 主列 ---- */
