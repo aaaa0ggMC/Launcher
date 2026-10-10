@@ -127,6 +127,47 @@ narrowMq?.addEventListener('change', onNarrowChange)
 onBeforeUnmount(() => narrowMq?.removeEventListener('change', onNarrowChange))
 const sheetMode = computed(() => coarse || narrow.value)
 
+// ---- 底部弹层：触屏下滑收起（把手 / 空白处按住下滑，超过阈值即关闭） ----
+const sheetDragY = ref(0)
+const sheetDragging = ref(false)
+let sheetStartY = 0
+let sheetPointerId: number | null = null
+
+function onSheetPointerDown(e: PointerEvent): void {
+  if (e.pointerType === 'mouse') return
+  // 按钮 / 列表项 / 输入区上不启动拖拽：别影响点按和列表滚动
+  const el = e.target as HTMLElement | null
+  if (el?.closest('button, .v-list-item, .v-input, input, textarea')) return
+  sheetStartY = e.clientY
+  sheetPointerId = e.pointerId
+}
+
+function onSheetPointerMove(e: PointerEvent): void {
+  if (sheetPointerId !== e.pointerId) return
+  const dy = e.clientY - sheetStartY
+  if (!sheetDragging.value) {
+    if (dy < 6) return // 只认向下拖（向上留给可能的列表滚动）
+    sheetDragging.value = true
+    try {
+      // 捕获指针：拖到手势结束都收到 move（合成事件 / 已失效指针会抛，忽略即可）
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* noop */
+    }
+  }
+  sheetDragY.value = dy
+}
+
+function onSheetPointerUp(e: PointerEvent): void {
+  if (sheetPointerId !== e.pointerId) return
+  const dy = sheetDragY.value
+  sheetPointerId = null
+  sheetDragging.value = false
+  sheetDragY.value = 0
+  // 拖过 96px 当作「收起」；没超过则回弹（transform 清除，CSS transition 兜底）
+  if (dy > 96) plusOpen.value = false
+}
+
 const plusActions = computed<InputMenuAction[]>(() => {
   const builtin: InputMenuAction = {
     id: 'host.attach',
@@ -687,7 +728,15 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
           <v-icon icon="mdi-plus" />
         </v-btn>
         <v-bottom-sheet v-if="sheetMode" v-model="plusOpen">
-          <v-card class="plus-sheet yaya-pop">
+          <v-card
+            class="plus-sheet yaya-pop"
+            :class="{ 'is-dragging': sheetDragging }"
+            :style="sheetDragY ? { transform: `translateY(${sheetDragY}px)` } : undefined"
+            @pointerdown="onSheetPointerDown"
+            @pointermove="onSheetPointerMove"
+            @pointerup="onSheetPointerUp"
+            @pointercancel="onSheetPointerUp"
+          >
             <div class="plus-sheet-handle" aria-hidden="true" />
             <InputPlusPanel sheet :actions="plusActions" @run="runPlusAction" />
           </v-card>
@@ -1054,6 +1103,11 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
 .plus-sheet {
   border-radius: 24px 24px 0 0 !important;
   padding-bottom: env(safe-area-inset-bottom);
+  /* 下滑收起：拖拽跟手（无过渡），松手回弹 / 关闭有过渡 */
+  transition: transform 0.2s ease;
+}
+.plus-sheet.is-dragging {
+  transition: none;
 }
 .plus-sheet-handle {
   width: 36px;
@@ -1061,6 +1115,16 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   margin: 10px auto 0;
   border-radius: 2px;
   background: rgba(var(--v-theme-on-surface), 0.25);
+  /* 把手是拖拽热区：禁掉默认触控行为，下滑手势才跟手 */
+  touch-action: none;
+}
+/* 把手只是视觉中心：整个把手行都是拖拽热区（按住这一带下滑可收起） */
+.plus-sheet-handle::before {
+  content: '';
+  display: block;
+  width: 120px;
+  height: 28px;
+  margin: -12px auto -12px;
 }
 .plugin-input-tools {
   display: flex;

@@ -834,10 +834,14 @@ watch(narrow, () => {
   min-height: 24px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   padding-inline: 8px;
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.06);
   white-space: nowrap;
+  /* 定宽：百分比 1–3 位数（20%–250%）宽度不同，窄屏工具栏按 flex-basis 换行时，
+     整个按钮行会随缩放位数在两条线之间跳。钉住宽度让换行边界稳定。 */
+  min-width: 80px;
 }
 /* 画布：自己滚（平移），不让整页跟着滚 */
 .graph-stage {
