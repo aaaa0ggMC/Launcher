@@ -90,6 +90,21 @@ watch(activeCategoryId, (id) => {
 const trimmed = computed(() => query.value.trim().toLowerCase())
 const searching = computed(() => trimmed.value.length > 0)
 
+/**
+ * 窄屏头部：搜索是低频操作（平时都是切分类 + 视觉浏览），默认只留「分类下拉 + 搜索图标」一行，
+ * 点图标才展开搜索框——比原来「搜索框整行 + 下拉整行」少占约 56px。
+ */
+const searchOpen = ref(false)
+const searchInputEl = ref<ComponentPublicInstance | null>(null)
+function openSearch(): void {
+  searchOpen.value = true
+  void nextTick(() => searchInputEl.value?.$el?.querySelector('input')?.focus())
+}
+function closeSearch(): void {
+  searchOpen.value = false
+  query.value = ''
+}
+
 const activeCategory = computed<SettingsCategory | null>(() => {
   if (!sections.value.length) return null
   return sections.value.find((c) => c.id === activeCategoryId.value) ?? sections.value[0]
@@ -374,29 +389,54 @@ defineExpose({ toMarkdown, onActivate })
         </v-list>
       </aside>
 
-      <div v-else class="settings-narrow-bar d-flex flex-wrap ga-2 pb-3 flex-shrink-0">
-        <v-text-field
-          v-model="query"
-          prepend-inner-icon="mdi-magnify"
-          :placeholder="translate(uiLang, 'settings.searchPlaceholder')"
-          variant="solo-filled"
-          flat
-          hide-details
-          clearable
-          rounded="lg"
-          @click:clear="query = ''"
-        />
-        <v-select
-          v-if="!searching"
-          :model-value="activeCategory?.id"
-          :items="pickerItems"
-          :aria-label="t('settings.jumpTo', '设置分类')"
-          variant="solo-filled"
-          flat
-          rounded="lg"
-          hide-details
-          @update:model-value="(id: string) => selectCategory(id)"
-        />
+      <div v-else class="settings-narrow-bar d-flex align-center ga-2 pb-3 flex-shrink-0">
+        <!-- 平时：分类下拉（主操作）+ 搜索图标；点图标才换成搜索框（带回退） -->
+        <template v-if="!searchOpen">
+          <v-select
+            :model-value="activeCategory?.id"
+            :items="pickerItems"
+            :aria-label="t('settings.jumpTo', '设置分类')"
+            variant="solo-filled"
+            flat
+            rounded="lg"
+            hide-details
+            class="settings-narrow-picker"
+            @update:model-value="(id: string) => selectCategory(id)"
+          />
+          <v-btn
+            icon
+            variant="text"
+            :title="t('settings.searchAction', '搜索设置')"
+            :aria-label="t('settings.searchAction', '搜索设置')"
+            @click="openSearch"
+          >
+            <v-icon icon="mdi-magnify" />
+          </v-btn>
+        </template>
+        <template v-else>
+          <v-btn
+            icon
+            variant="text"
+            :title="t('settings.searchBack', '返回分类')"
+            :aria-label="t('settings.searchBack', '返回分类')"
+            @click="closeSearch"
+          >
+            <v-icon icon="mdi-arrow-left" />
+          </v-btn>
+          <v-text-field
+            ref="searchInputEl"
+            v-model="query"
+            prepend-inner-icon="mdi-magnify"
+            :placeholder="translate(uiLang, 'settings.searchPlaceholder')"
+            variant="solo-filled"
+            flat
+            hide-details
+            clearable
+            rounded="lg"
+            class="settings-narrow-search"
+            @click:clear="query = ''"
+          />
+        </template>
       </div>
 
       <!-- 内容：自己滚动 -->
@@ -467,7 +507,12 @@ defineExpose({ toMarkdown, onActivate })
   margin-bottom: 2px !important;
 }
 .settings-narrow-bar > * {
-  flex: 1 1 180px;
+  min-width: 0;
+}
+/* 分类下拉与搜索框吃满剩余宽度；图标按钮保持方形不拉伸 */
+.settings-narrow-picker,
+.settings-narrow-search {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .settings-content {

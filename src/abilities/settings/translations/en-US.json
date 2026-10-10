@@ -7,6 +7,8 @@
   "settings.searchEmptyText": "Try different keywords — search matches category names and setting content.",
   "settings.caption": "Settings injected by each ability · search matches categories and individual settings",
   "settings.searchPlaceholder": "Search settings…",
+  "settings.searchAction": "Search settings",
+  "settings.searchBack": "Back to categories",
   "settings.resultCount": "{n} settings",
   "theme.title": "Theme",
   "theme.dark": "Dark (Material 3)",

@@ -43,23 +43,20 @@ export function providerTypeItems(
 ): ProviderTypeItem[] {
   return [
     {
-      title: t(
-        'yaya.settings.type_openai',
-        'OpenAI 兼容协议（OpenAI / DeepSeek / SiliconFlow 等）'
-      ),
+      title: t('yaya.settings.type_openai', 'OpenAI 兼容协议'),
       value: 'openai'
     },
     {
-      title: t('yaya.settings.type_anthropic', 'Anthropic 原生（Claude Messages API）'),
+      title: t('yaya.settings.type_anthropic', 'Anthropic 原生'),
       value: 'anthropic'
     },
     {
-      title: t('yaya.settings.type_gemini', 'Google Gemini 原生（Generative Language API）'),
+      title: t('yaya.settings.type_gemini', 'Gemini 原生'),
       value: 'gemini'
     },
-    { title: t('yaya.settings.type_ollama', 'Ollama（本地部署）'), value: 'ollama' },
+    { title: t('yaya.settings.type_ollama', 'Ollama（本地）'), value: 'ollama' },
     {
-      title: t('yaya.settings.type_codex_proxy', 'Codex Proxy（本地代理）'),
+      title: t('yaya.settings.type_codex_proxy', 'Codex Proxy（本地）'),
       value: 'codex-proxy'
     }
   ]

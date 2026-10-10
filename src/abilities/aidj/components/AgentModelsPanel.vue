@@ -247,4 +247,18 @@ function onPick(row: Row, v: unknown): void {
 .models-compact .model-hint {
   white-space: normal;
 }
+/* 窄屏：说明文字允许换行——单行省略在手机上把提示切得只剩几个字，
+   标签换到第二行和说明左对齐（缩进 = 图标 + 间距） */
+@media (max-width: 720px) {
+  .model-row .d-flex {
+    flex-wrap: wrap;
+  }
+  .model-hint {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex-basis: 100%;
+    padding-left: 24px;
+  }
+}
 </style>
