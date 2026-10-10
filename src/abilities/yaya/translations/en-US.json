@@ -4,6 +4,7 @@
   "label.YAYA": "YAYA",
   "label.助手名称、服务商与模型、工具权限": "Assistant name, providers & models, tool permissions",
   "label.智能体配置": "Agent settings",
+  "yaya.wf.sub_calls": "{n} tool calls",
   "yaya.agent.planner": "Planner",
   "yaya.branch_next": "Next branch",
   "yaya.branch_prev": "Previous branch",

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { before, it } from 'node:test'
 import type { AIProvider, ProviderGenerateResult } from '../providers/types'
-import type { YayaConfig } from '../../types'
+import type { WorkflowRecord, YayaConfig } from '../../types'
 
 process.env.HOME = mkdtempSync('/tmp/yaya-controls-test-')
 process.env.XDG_CONFIG_HOME = `${process.env.HOME}/.config`
@@ -74,6 +74,7 @@ function runner(
       systemPrompt: '',
       assistantName: 'Test',
       disabledTools: [],
+      providers: [],
       ...config
     } as YayaConfig,
     tools: [],
@@ -177,4 +178,88 @@ it('approval cannot execute a tool until a pause is released; unadvertised tools
   r.resume()
   await done
   assert.equal(calls, 1)
+})
+
+it('a plugin tool can run a sub-agent with tools; its calls share approval and land in the process record', async () => {
+  plugins.__resetPluginsForTest()
+  let probed = 0
+  plugins.registerPlugin({
+    id: 'test',
+    kind: 'builtin',
+    label: '',
+    description: '',
+    namespace: false,
+    tools: () => [
+      {
+        name: 'probe',
+        description: '',
+        parameters: {},
+        approval: 'ask',
+        run: async () => {
+          probed++
+          return 'probe-result'
+        }
+      },
+      {
+        name: 'dispatch',
+        description: '',
+        parameters: {},
+        run: async (_args, ctx) => {
+          assert.ok(ctx.workflow, 'tools run by the workflow host get a workflow handle')
+          const res = await ctx.workflow.runAgent({
+            agent: 'deputy',
+            label: 'deputy',
+            system: 'sub',
+            task: 'look',
+            tools: ['probe']
+          })
+          return `report: ${res.content} (${res.calls.length} calls)`
+        }
+      }
+    ]
+  })
+  plugins.refreshPlugins({} as YayaConfig)
+  const id = randomUUID()
+  db.createSession({ id, title: 'test' })
+  const seen: string[][] = []
+  let main = 0
+  const r = runner(id, {
+    id: 'fake',
+    listModels: async () => [],
+    generate: async (opts) => {
+      const sys = opts.messages[0].content
+      if (sys === 'sub') {
+        seen.push((opts.tools ?? []).map((x) => x.name))
+        const last = opts.messages[opts.messages.length - 1]
+        return last.role === 'tool'
+          ? { content: `found ${last.content}` }
+          : {
+              content: '',
+              toolCalls: [{ id: 's1', name: 'probe', args: {}, status: 'pending' }]
+            }
+      }
+      return ++main === 1
+        ? {
+            content: '',
+            toolCalls: [{ id: 'm1', name: 'dispatch', args: {}, status: 'pending' }]
+          }
+        : answer
+    }
+  })
+  const done = r.run()
+  await until(() => r.status === 'waiting_approval')
+  assert.equal(r.getSnapshot().pendingApprovalTool?.name, 'probe')
+  r.resolveApproval(true)
+  await done
+  assert.equal(probed, 1)
+  // 子 Agent 只拿到白名单里的工具
+  assert.deepEqual(seen[0], ['probe'])
+  const branch = db.getMessageBranch(db.getSession(id)!.activeLeafId!)
+  const toolNode = branch.find((n) => n.role === 'tool' && n.name === 'dispatch')
+  assert.equal(toolNode?.content, 'report: found probe-result (1 calls)')
+  const rec = branch.find((n) => n.meta?.workflow)?.meta?.workflow as WorkflowRecord
+  const step = rec.steps.find((s) => s.agent === 'deputy')!
+  assert.equal(step.status, 'ok')
+  assert.equal(step.calls?.[0].status, 'success')
+  assert.equal(step.detail, 'found probe-result')
 })

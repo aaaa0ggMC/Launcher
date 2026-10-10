@@ -142,6 +142,8 @@ export interface WorkflowStepRecord {
   startedAt: number
   ms?: number
   tokens?: number
+  /** 带工具的子 Agent（runAgent）调用过的工具，过程卡片里展开这一步时显示 */
+  calls?: ToolCallItem[]
 }
 
 export interface WorkflowRecord {

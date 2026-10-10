@@ -159,6 +159,13 @@ const activity = computed(() => {
         return te('yaya.wf.running_tool', { name: c.name }, '正在执行 {name}')
     }
   }
+  // 带工具的子 Agent（runAgent）的调用
+  for (const s of props.turn.workflow?.steps ?? []) {
+    for (const c of s.calls ?? []) {
+      if (c.id === props.pendingApprovalId)
+        return te('yaya.wf.awaiting', { name: c.name }, '等待你确认 {name}')
+    }
+  }
   const running = props.turn.workflow?.steps.find((s) => s.status === 'running')
   if (running && running.kind !== 'llm') return `${running.label}…`
   const last = props.turn.steps[props.turn.steps.length - 1]
@@ -380,12 +387,15 @@ function toolColor(call: ToolCallItem): string | undefined {
               <button
                 type="button"
                 class="wf-row wf-row-btn"
-                :disabled="!item.rec.detail"
+                :disabled="!item.rec.detail && !item.rec.calls?.length"
                 :aria-expanded="!!openDetails[item.key]"
                 @click="openDetails[item.key] = !openDetails[item.key]"
               >
                 <span class="wf-agent is-sub">{{ agentName(item.rec.agent) }}</span>
                 <span class="wf-label">{{ item.rec.label }}</span>
+                <span v-if="item.rec.calls?.length" class="wf-meta wf-sub-calls">{{
+                  te('yaya.wf.sub_calls', { n: String(item.rec.calls.length) }, '{n} 次工具调用')
+                }}</span>
                 <v-progress-circular
                   v-if="item.rec.status === 'running'"
                   indeterminate
@@ -401,7 +411,7 @@ function toolColor(call: ToolCallItem): string | undefined {
                   fmtMs(item.rec.ms)
                 }}</span>
                 <v-icon
-                  v-if="item.rec.detail"
+                  v-if="item.rec.detail || item.rec.calls?.length"
                   icon="mdi-chevron-down"
                   size="16"
                   class="wf-chevron"
@@ -409,12 +419,22 @@ function toolColor(call: ToolCallItem): string | undefined {
                 />
               </button>
               <v-expand-transition>
-                <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
                 <div
-                  v-if="openDetails[item.key] && item.rec.detail"
-                  class="wf-text"
-                  v-html="md(item.rec.detail)"
-                />
+                  v-if="openDetails[item.key] && (item.rec.detail || item.rec.calls?.length)"
+                  class="wf-sub"
+                >
+                  <!-- 带工具的子 Agent（runAgent）：它调用过的工具 -->
+                  <div v-if="item.rec.calls?.length" class="wf-tools">
+                    <ToolCallRow
+                      v-for="call in item.rec.calls"
+                      :key="call.id"
+                      :call="call"
+                      :awaiting-approval="false"
+                    />
+                  </div>
+                  <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+                  <div v-if="item.rec.detail" class="wf-text" v-html="md(item.rec.detail)" />
+                </div>
               </v-expand-transition>
             </template>
           </li>
@@ -682,6 +702,17 @@ function toolColor(call: ToolCallItem): string | undefined {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.wf-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+@media (max-width: 480px) {
+  .wf-sub-calls {
+    display: none;
+  }
 }
 .wf-empty {
   color: rgba(var(--v-theme-on-surface), 0.6);

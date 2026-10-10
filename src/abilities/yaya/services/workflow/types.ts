@@ -59,6 +59,8 @@ export interface WorkflowTool {
 export interface AvailableTool {
   name: string
   pluginId: string
+  /** 按当前设置是否要用户确认：dynamic = 看参数（插件按参数判断） */
+  approval?: 'ask' | 'auto' | 'dynamic'
 }
 
 export interface AssistantStepResult {
@@ -78,6 +80,43 @@ export interface SubAgentOptions {
   messages?: ProviderMessage[]
   /** 子 Agent 输出是否作为 detail 记进过程（缺省 true） */
   recordOutput?: boolean
+}
+
+/**
+ * 带工具的子 Agent（`ctx.runAgent`）：自己的一段对话、自己的工具循环，**不写进对话树**，
+ * 只在过程卡片里显示成一步（展开可看它调用的每个工具与最终报告）。
+ * 工具执行与主 Agent 同一套：审批（同样的设置与「本对话不再询问」）、隐私来源、插件数据流钩子、暂停 / 停止。
+ */
+export interface AgentRunOptions {
+  /** 子 Agent 名（过程卡片里的徽标），如 'deputy' */
+  agent: string
+  /** 已翻译的步骤显示名 */
+  label: string
+  /** 子 Agent 的系统提示词 */
+  system: string
+  /** 子 Agent 的任务；没给 messages 时作为唯一一条用户消息 */
+  task?: string
+  /** 完整的初始对话（不含系统提示词）；给了就不用 task */
+  messages?: ProviderMessage[]
+  /** 可用的插件工具：'enabled' = 本次运行可用的全部；'none'；或 wire name 白名单（缺省 'enabled'） */
+  tools?: 'enabled' | 'none' | string[]
+  /** 子 Agent 专用的工具（不审批，同 AssistantStepOptions.localTools） */
+  localTools?: WorkflowTool[]
+  /** 最多几轮模型调用（含最后不给工具、逼它写报告的一轮）；缺省 8，上限 ctx.maxSteps */
+  maxRounds?: number
+}
+
+export interface AgentRunResult {
+  /** 最终报告（最后一轮的正文） */
+  content: string
+  /** 子 Agent 调用过的工具（含结果、耗时、失败原因） */
+  calls: ToolCallItem[]
+  /** 实际走了几轮模型调用 */
+  rounds: number
+  /** 本次子 Agent 合计 tokens（拿不到 usage 时为 0） */
+  tokens: number
+  /** 轮数用完时被收掉工具强制收尾 */
+  exhausted: boolean
 }
 
 /** `ctx.addCard` 的参数，见 `WorkflowCardMeta` */
@@ -115,6 +154,8 @@ export interface WorkflowContext {
   runTools(step: AssistantStepResult): Promise<void>
   /** 不写进对话的子 Agent 调用（非流式），记进过程 */
   subAgent(opts: SubAgentOptions): Promise<{ content: string }>
+  /** 不写进对话、可以调用工具的子 Agent（自己的工具循环），见 AgentRunOptions */
+  runAgent(opts: AgentRunOptions): Promise<AgentRunResult>
   /** 往过程记录里加一条说明 */
   note(label: string, detail?: string): void
   /**

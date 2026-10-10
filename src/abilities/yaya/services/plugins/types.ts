@@ -14,8 +14,15 @@
  * 不要在 instructions 里放时间、随机数；动态内容走工具结果。
  */
 import type { MessageAttachment, YayaConfig } from '../../types'
+import type { ProviderMessage } from '../providers/types'
 import type { SessionUsage, UsageSection } from '../usage'
-import type { WorkflowDefinition } from '../workflow/types'
+import type {
+  AgentRunOptions,
+  AgentRunResult,
+  AvailableTool,
+  SubAgentOptions,
+  WorkflowDefinition
+} from '../workflow/types'
 
 export type PluginKind = 'builtin' | 'mcp' | 'skill'
 
@@ -122,6 +129,30 @@ export interface ToolRunContext {
   config?: Record<string, unknown>
   /** 本次运行的上下文信息（宿主按需计算；旧调用方 / 测试里可能没有） */
   context?: () => ToolSessionContext
+  /**
+   * 正在运行的工作流（工具由工作流宿主执行时才有）：插件工具借它操纵这次运行——
+   * 派出子 Agent（可带工具）、往过程卡片里记步骤。见 ToolWorkflowHandle。
+   */
+  workflow?: ToolWorkflowHandle
+}
+
+/**
+ * 插件工具拿到的「当前工作流」句柄（WorkflowContext 的一个安全子集）。
+ * 子 Agent 的步骤记在本次运行的过程卡片里，和工作流自己的子 Agent 一样能暂停 / 停止 / 审批。
+ */
+export interface ToolWorkflowHandle {
+  /** 工作流 id（如 'agent'） */
+  readonly workflowId: string
+  /** 当前分支的对话历史（不含系统提示词） */
+  history(): ProviderMessage[]
+  /** 本次运行可用的插件工具（wire name + 插件 id） */
+  availableTools(): AvailableTool[]
+  /** 不带工具的子 Agent（一次模型调用） */
+  subAgent(opts: SubAgentOptions): Promise<{ content: string }>
+  /** 带工具的子 Agent（自己的工具循环），见 AgentRunOptions */
+  runAgent(opts: AgentRunOptions): Promise<AgentRunResult>
+  /** 往过程卡片里加一条说明 */
+  note(label: string, detail?: string): void
 }
 
 /** 提供方默认审批：ask = 每次确认；auto = 直接执行；函数 = 按参数判断 */
