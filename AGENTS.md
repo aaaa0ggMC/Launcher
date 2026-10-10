@@ -79,6 +79,7 @@ git submodule update --remote src/main/ui/assets/game-icon-pack
 - `dashboard` → `gridstack`
 - `rungame` → `three`（+ devDeps `@types/three`）
 - `yaya` → `openai` / `katex`（数学公式，渲染端按需加载）
+- `discoverer` → 无第三方依赖（只用 node 内置 `dgram` / `crypto`）
 - 其余 ability 只用框架提供的东西（vue/vuetify 等），`package.json` 留空
 
 **规则与机制**：
@@ -162,8 +163,11 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
     "confirmBeforeLaunch": true
   },
   "sidebar": {
-    "default": "cli" // 初始页面（缺失/无效时回落第一个能力）
-  }
+    "default": "cli", // 初始页面（缺失/无效时回落第一个能力）
+    "sort": "alpha", // alpha 字母序（默认）| frequency 使用频次 | recent 最近使用
+    "mode": "auto" // 侧栏形态：auto（≤720px 窄屏弹出式、宽屏常驻）| always 常驻 | overlay 始终弹出式
+  },
+  "boot": {} // 开机自启服务开关表（设置 → 开机服务）：{ '<服务 id>': true }，缺省全关，见 §9「开机服务」
 }
 ```
 
@@ -343,6 +347,18 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - 没有 `help/` 的能力点按钮只弹「暂无使用帮助」提示，不影响其他功能。
 - **渲染**：markdown-it（`html:false` → 原始 HTML 一律转义）+ markdown-it-anchor + 按需加载的 highlight.js；配色全部取 `--v-theme-*`，跟随 10 套主题。
 - 浮窗导航项必须 `:title` + `:aria-label` 暴露无障碍名，否则 inspector / AI 拿不到 ref（图标按钮同理，见上文「UI 写法要求」）。
+
+### 开机服务（Boot services SDK）
+
+Ability 可以向 Launcher 申请「开机自启服务」：启动 Launcher 时自动运行自己注册的后台作业（框架级，`src/main/process/boot-services.ts`，与 `startup.ts` / `background-tasks.ts` 同级）。
+
+- **申请**：ability 的 `commands.ts`（主进程唯一加载点）里调 `registerBootService({ id, label, job, mustComplete? })`；`job` 必须是本能力 `registerJobHandler` 注册过的作业名。重复 id 抛错。
+- **开关**：默认**全部关闭**；用户在 设置 → 开机服务（settings 能力注入的分类，组件 `items/BootServicesSection.vue`）逐项打开，状态存全局 `config.json` 的 `boot`（`{ '<服务 id>': true }`），命令 `boot.list` / `boot.set`（`boot.set` 要 `SCOPE_CONTROL`）。改动**下一次启动生效**。
+- **启动**：模块加载时自注册 startup hook（`registerAbilityCommands()` 之后、首个窗口创建前跑；Electron 与无头宿主同序），按 `boot` 表 `startJobByName(job, { name: label })`，同进程不重复启动。
+- **`mustComplete`（默认 false）决定退出时的行为**：
+  - `true` → 任务没跑完关程序会弹确认框（和现在行为一样，计入 `runningTaskCount()`）；
+  - `false` → 关程序直接终结、不弹窗（`BtTaskInfo.mustComplete` / `startJobByName(name, args, { mustComplete })`，仅 boot 路径会传，`background.job` 不暴露该参数）——适合「内容不重要」的常驻任务（局域网广播、缓存预热）。
+- 参考实现：`discoverer`（局域网设备发现，`mustComplete: false`）。
 
 ### 主题 / 配色方案
 

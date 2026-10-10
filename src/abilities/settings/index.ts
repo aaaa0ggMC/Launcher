@@ -164,6 +164,24 @@ export default {
       ]
     },
     {
+      key: 'boot',
+      label: '开机服务',
+      icon: 'mdi-power-cycle',
+      description: '能力登记的开机自启服务：开启后每次启动 Launcher 自动运行对应的后台任务',
+      keywords: ['开机', '自启', '启动', '服务', '后台', 'boot', 'autostart', 'service'],
+      items: [
+        {
+          key: 'boot-services',
+          label: '开机服务',
+          icon: 'mdi-power-cycle',
+          description: '各能力登记的开机自启任务开关',
+          keywords: ['开机', '自启', '启动', '服务', 'boot', 'autostart'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/BootServicesSection.vue'))
+        }
+      ]
+    },
+    {
       key: 'shortcuts',
       label: '快捷键',
       icon: 'mdi-keyboard-outline',

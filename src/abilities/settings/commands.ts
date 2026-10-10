@@ -23,6 +23,8 @@ import { reloadPrivacyPolicy } from '../../main/process/privacy-consent'
 import { reloadAgentServices } from '../../main/process/agent'
 import { reloadWebHost } from '../../main/process/web-host'
 import { rewrapMasterToScrypt, vaultStatus } from '../../main/process/encrypt'
+import { SCOPE_CONTROL } from '../../main/process/privacy'
+import { listBootServiceStates, setBootServiceEnabled } from '../../main/process/boot-services'
 
 const log = makeLogger('settings')
 
@@ -60,7 +62,9 @@ const DEFAULT_GLOBAL_CONFIG = {
         : ['konsole', '--hold', '-e'],
     confirmBeforeLaunch: true
   },
-  sidebar: { default: 'cli', sort: 'alpha' }
+  sidebar: { default: 'cli', sort: 'alpha' },
+  // 开机自启服务开关表（设置 → 开机服务）：{ '<服务 id>': true }，缺省全关
+  boot: {}
 } as const
 
 registerStartupHook(async () => {
@@ -164,6 +168,25 @@ export default [
         }
       }
       return await applyConfigPatch(patch ?? {})
+    }
+  },
+  {
+    name: 'boot.list',
+    description: '列出能力登记的开机自启服务及其开关状态（设置 → 开机服务）',
+    usage: 'boot.list',
+    run: async () => ({ ok: true, services: await listBootServiceStates() })
+  },
+  {
+    name: 'boot.set',
+    description: '启用/禁用某个开机自启服务 (--id --enabled true|false)，下次启动生效',
+    usage: 'boot.set --id discoverer --enabled true',
+    privacy: { requires: [SCOPE_CONTROL] },
+    run: async (ctx) => {
+      const id = String(ctx.named.id ?? '')
+      if (!id) return { ok: false, error: '需要 --id' }
+      const enabled = String(ctx.named.enabled ?? '') !== 'false' && ctx.named.enabled !== false
+      await setBootServiceEnabled(id, enabled)
+      return { ok: true, services: await listBootServiceStates() }
     }
   },
   {

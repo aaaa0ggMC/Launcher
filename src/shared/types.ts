@@ -141,6 +141,14 @@ export interface BtTaskInfo {
    * playback-control task so a backend-mode switch can stop exactly those).
    */
   tags?: string[]
+  /**
+   * Whether quitting must wait for this task (quit-confirmation counts it).
+   * Default true. `false` is for tasks started by a boot service that declared
+   * itself expendable (`registerBootService({ mustComplete: false })`): closing
+   * the app then terminates them directly instead of asking the user — their
+   * content is considered not worth guarding.
+   */
+  mustComplete?: boolean
 }
 
 /** Live output event from a background task. */
