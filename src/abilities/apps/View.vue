@@ -708,10 +708,9 @@ defineExpose({ toMarkdown, onActivate })
         />
       </v-col>
       <v-col cols="12" sm="8">
-        <div class="d-flex flex-wrap align-center gap-1">
+        <div class="d-flex flex-wrap align-center ga-2">
           <v-chip
-            size="small"
-            variant="outlined"
+            variant="tonal"
             :color="activeTag === '' ? 'primary' : ''"
             @click="activeTag = ''"
           >
@@ -720,21 +719,21 @@ defineExpose({ toMarkdown, onActivate })
           <v-chip
             v-for="t in allTags"
             :key="t"
-            size="small"
             variant="tonal"
             :color="activeTag === t ? 'primary' : ''"
             @click="activeTag = activeTag === t ? '' : t"
           >
             {{ t }}
           </v-chip>
+          <v-spacer />
+          <v-checkbox
+            v-model="showMissing"
+            :label="translate(uiLang, 'apps.showMissing')"
+            density="compact"
+            hide-details
+            class="flex-grow-0"
+          />
         </div>
-        <v-checkbox
-          v-model="showMissing"
-          :label="translate(uiLang, 'apps.showMissing')"
-          density="compact"
-          hide-details
-          class="mt-1"
-        />
       </v-col>
     </v-row>
 

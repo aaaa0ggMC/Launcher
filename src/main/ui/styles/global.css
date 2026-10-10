@@ -253,6 +253,15 @@ pre,
   letter-spacing: 0.02em;
 }
 
+/* 全局默认 density=compact 会把默认尺寸的文字按钮压到 28px，文字贴顶贴底（DESIGN §3）。
+   文字按钮恢复到 36px，与 compact 输入框（40px）同排时也不显得矮一截；图标按钮、
+   size=small/x-small、按钮组里的分段按钮不受影响。 */
+.v-btn--density-compact.v-btn--size-default:not(.v-btn--icon):not(.v-tab):not(
+    .v-btn-group > .v-btn
+  ) {
+  height: var(--v-btn-height);
+}
+
 /* Small text buttons (non-icon) need breathing room so the label never hugs
    the tonal border/background. Kept compact but padded. */
 .v-btn--size-small:not(.v-btn--icon):not(.v-btn--plain) {
@@ -292,7 +301,8 @@ html.motion-off *::after {
 /* Utility: allow a flex/grid item to shrink below its content (needed so long
    nowrap text truncates instead of widening the cell). Vuetify ships no
    min-w-0 class, so define it here — used by chat rows and song grids. */
-.min-w-0 {
+.min-w-0,
+.min-width-0 {
   min-width: 0 !important;
 }
 
@@ -587,4 +597,66 @@ body.win-rounded-body .v-overlay__scrim {
     width: 48px;
     height: 48px;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * 空状态（DESIGN §7）：统一 v-empty-state 的观感——主色调圆底小图标 + 半粗标题 + 弱化说明，
+ * 取代 Vuetify 默认的 96px 灰色大图标 + 20px 标题（在手机上又大又空洞，各页面也不统一）。
+ * 自绘空状态的页面请改用 <v-empty-state icon title text>，不用再各写一套样式。
+ * 图片型 media（image 属性）不受影响。
+ * ------------------------------------------------------------------------- */
+.v-empty-state {
+  padding: 48px 24px;
+}
+
+.v-empty-state__media:has(> .v-icon) {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+
+.v-empty-state__media > .v-icon {
+  font-size: 34px !important;
+  width: 34px !important;
+  height: 34px !important;
+  color: rgb(var(--v-theme-primary)) !important;
+}
+
+.v-empty-state__headline {
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.v-empty-state__title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.v-empty-state__text {
+  max-width: 440px;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: rgba(var(--v-theme-on-surface-variant), 0.85);
+}
+
+.v-empty-state__content {
+  padding: 0;
+}
+
+.v-empty-state__actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 16px 0 0;
+}
+
+/* 复选框 / 单选 / 开关的标签与正文同字号（Vuetify 默认 1rem，比周围 0.875rem 的正文大一号，
+ * 和搜索框、chip 排在一行时显得突兀） */
+.v-selection-control .v-label {
+  font-size: 0.875rem;
 }

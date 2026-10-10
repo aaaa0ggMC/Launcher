@@ -145,6 +145,14 @@ defineExpose({ toMarkdown })
       {{ error }}
     </v-alert>
 
+    <v-empty-state
+      v-if="info && sortedMirrors.length === 0 && !error"
+      icon="mdi-earth-off"
+      :title="translate(uiLang, 'mirror.empty')"
+      :text="translate(uiLang, 'mirror.emptyText')"
+      class="mt-6"
+    />
+
     <v-row dense class="mt-2">
       <v-col v-for="m in sortedMirrors" :key="m.name" cols="12" sm="6" md="4">
         <v-card

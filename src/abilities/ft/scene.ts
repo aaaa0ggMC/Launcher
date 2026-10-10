@@ -253,7 +253,9 @@ export class FtScene {
   }
 
   private defaultViewDistance(): number {
-    return (this.reach * 1.9) / Math.tan(rad(FOV / 2))
+    // FOV 是竖直方向的；竖屏（手机）水平视野更窄，按宽高比放远，整条链也能完整入框
+    const aspect = this.width > 0 && this.height > 0 ? this.width / this.height : 1
+    return (this.reach * 1.9) / Math.tan(rad(FOV / 2)) / Math.min(1, aspect)
   }
 
   setMode(mode: FtMode): void {

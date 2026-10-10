@@ -626,7 +626,7 @@ onBeforeUnmount(() => {
           @copy-raw="handleCopyRaw"
         />
       </template>
-      <div v-else class="text-caption on-surface-variant pa-3">{{ t('pg.noActive') }}</div>
+      <v-empty-state v-else icon="mdi-api" :title="t('pg.noActive')" />
     </div>
 
     <!-- right floating collapsible sidebar: templates + globals -->
@@ -769,6 +769,13 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* 宽屏：面板展开时给页面右侧让位，否则悬浮面板正好盖住页头的导出 / 导入按钮 */
+@media (min-width: 721px) {
+  .pg-root:has(> .pg-panel:not(.pg-panel--collapsed)) {
+    padding-right: 336px;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Narrow screens (≤720px): the 320px right panel would cover ~80% of a phone,
  * so it becomes a bottom overlaying sheet instead. The collapsed FAB moves to
@@ -780,12 +787,10 @@ onBeforeUnmount(() => {
     display: none;
   }
 
+  /* 标题独占一行，导出 / 导入按钮在下一行靠左并排（与其它页面手机端一致） */
   .pg-header__title {
     min-width: 0;
-  }
-
-  .pg-header .v-btn {
-    margin-left: auto;
+    flex: 1 1 100%;
   }
 
   .pg-panel {

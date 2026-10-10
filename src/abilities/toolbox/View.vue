@@ -204,7 +204,7 @@ defineExpose({ onActivate })
           @keydown.enter.prevent="open(tool.id)"
           @keydown.space.prevent="open(tool.id)"
         >
-          <div class="d-flex align-center ga-3 mb-4">
+          <div class="d-flex align-center ga-3 mb-4 tool-top">
             <ToolIcon :icon="tool.icon" :size="28" /><v-spacer /><v-btn
               :icon="favoriteIds.includes(tool.id) ? 'mdi-star' : 'mdi-star-outline'"
               variant="text"
@@ -214,18 +214,22 @@ defineExpose({ onActivate })
               @keydown.stop
             />
           </div>
-          <h3 class="text-subtitle-1 font-weight-bold mb-2">{{ title(tool) }}</h3>
+          <h3 class="text-subtitle-1 font-weight-bold mb-2 tool-title">{{ title(tool) }}</h3>
           <p class="text-body-2 text-medium-emphasis tool-description">
             {{ english ? (tool.descriptionEn ?? tool.description) : tool.description }}
           </p>
-          <div class="text-caption text-medium-emphasis mt-4">
+          <div class="text-caption text-medium-emphasis mt-4 tool-meta">
             {{ t(`toolbox.category.${tool.category}`)
             }}<span v-if="tool.dependency"> · {{ tool.dependency }}</span
             ><span v-if="tool.network"> · {{ t('toolbox.network') }}</span>
           </div>
         </v-card>
       </div>
-      <v-alert v-if="!visible.length" type="info" variant="tonal" :text="t('toolbox.empty')" />
+      <v-empty-state
+        v-if="!visible.length"
+        icon="mdi-toolbox-outline"
+        :title="t('toolbox.empty')"
+      />
       <p class="text-caption text-medium-emphasis mt-6">{{ t('toolbox.privacyNote') }}</p>
     </template>
   </div>
@@ -284,5 +288,83 @@ defineExpose({ onActivate })
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 24px;
+}
+
+/* 手机：标题缩一号、分类改成横向滑动的一行（之前换成 4 行占掉半屏）、
+   工具卡改成「图标 | 标题 + 说明 | 收藏」的横排紧凑卡，一屏能看到 5～6 个而不是 2 个 */
+@media (max-width: 600px) {
+  .directory-heading {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .directory-heading h1 {
+    font-size: 1.5rem !important;
+    margin-bottom: 6px !important;
+  }
+  .directory-heading p {
+    font-size: 0.875rem !important;
+  }
+  .category-buttons {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin: 12px -12px 16px;
+    padding: 0 12px;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  .category-buttons::-webkit-scrollbar {
+    display: none;
+  }
+  .category-buttons > .v-btn {
+    flex-shrink: 0;
+  }
+  .tool-grid {
+    gap: 10px;
+  }
+  .tool-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 14px;
+    align-items: start;
+    min-height: 0;
+    padding: 14px 8px 14px 16px !important;
+  }
+  .tool-top {
+    display: contents !important;
+  }
+  .tool-top > :first-child {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    margin-top: 2px;
+  }
+  .tool-top > .v-spacer {
+    display: none;
+  }
+  .tool-top > .v-btn {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    margin-top: -6px;
+  }
+  .tool-title {
+    grid-column: 2;
+    grid-row: 1;
+    margin-bottom: 2px !important;
+    font-size: 0.95rem !important;
+  }
+  .tool-description {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .tool-meta {
+    grid-column: 2;
+    grid-row: 3;
+    margin-top: 6px !important;
+  }
 }
 </style>

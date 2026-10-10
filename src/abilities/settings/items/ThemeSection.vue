@@ -107,7 +107,7 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
 
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: 8px;
 }
 
@@ -138,11 +138,14 @@ function previewColors(s: (typeof schemeList)[number]): { bg: string; dots: stri
 }
 
 .theme-card__label {
-  padding: 2px 8px 8px;
+  /* 底部留白用 margin 而不是 padding：overflow 在 padding 盒处裁剪，
+     padding-bottom 会让被 line-clamp 截掉的第三行露出半截（「深色 (Material… 3)」） */
+  padding: 2px 8px 0;
+  margin-bottom: 8px;
   font-size: 0.8rem;
   line-height: 1.3;
   /* 最多两行：「极光（紫罗兰）」这类名字窄格子里换行而不是截成「极光（…」 */
-  min-height: calc(2 * 1.3em + 10px);
+  min-height: calc(2 * 1.3em + 2px);
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

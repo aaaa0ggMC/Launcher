@@ -770,9 +770,9 @@ onUnmounted(() => {
       </div>
 
       <!-- Summary Stats Row（总额 → 隐私标签，AI 快照 / 截图脱敏） -->
-      <v-row v-privacy="'balance.amount'" class="ma-0 ga-3 ga-md-0" dense>
+      <v-row v-privacy="'balance.amount'" class="ma-n1" dense>
         <!-- Total CNY -->
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="6" md="3">
           <v-card variant="tonal" class="rounded-xl stat-card pa-4" color="primary">
             <div class="d-flex align-center justify-space-between mb-1">
               <span class="text-caption text-uppercase font-weight-bold">
@@ -785,7 +785,7 @@ onUnmounted(() => {
         </v-col>
 
         <!-- Total USD -->
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="6" md="3">
           <v-card variant="tonal" class="rounded-xl stat-card pa-4" color="success">
             <div class="d-flex align-center justify-space-between mb-1">
               <span class="text-caption text-uppercase font-weight-bold">
@@ -798,7 +798,7 @@ onUnmounted(() => {
         </v-col>
 
         <!-- Total Credits -->
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="6" md="3">
           <v-card variant="tonal" class="rounded-xl stat-card pa-4" color="info">
             <div class="d-flex align-center justify-space-between mb-1">
               <span class="text-caption text-uppercase font-weight-bold">
@@ -814,7 +814,7 @@ onUnmounted(() => {
         </v-col>
 
         <!-- Health Status -->
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="6" md="3">
           <v-card
             variant="tonal"
             class="rounded-xl stat-card pa-4"
@@ -864,7 +864,7 @@ onUnmounted(() => {
 
       <!-- Search and Filter Bar -->
       <div class="d-flex align-center justify-space-between flex-wrap ga-3">
-        <div class="d-flex align-center flex-grow-1" style="max-width: 480px">
+        <div class="d-flex align-center balance-search">
           <v-text-field
             v-model="searchQuery"
             density="comfortable"
@@ -894,17 +894,12 @@ onUnmounted(() => {
       </div>
 
       <!-- Empty State -->
-      <div
+      <v-empty-state
         v-if="filteredBalances.length === 0 && !loadingAll"
-        class="d-flex flex-column align-center justify-center py-12 text-center"
+        icon="mdi-wallet-bifold-outline"
+        :title="t('balance.empty_title', '暂无匹配的平台数据')"
+        :text="t('balance.empty_desc', '点击上方「添加平台」或「导入旧配置」开始使用')"
       >
-        <v-icon icon="mdi-wallet-bifold-outline" size="64" color="medium-emphasis" class="mb-3" />
-        <h3 class="text-subtitle-1 font-weight-bold mb-1">
-          {{ t('balance.empty_title', '暂无匹配的平台数据') }}
-        </h3>
-        <p class="text-caption text-medium-emphasis mb-4">
-          {{ t('balance.empty_desc', '点击上方「添加平台」或「导入旧配置」开始使用') }}
-        </p>
         <v-btn
           color="primary"
           variant="flat"
@@ -914,7 +909,7 @@ onUnmounted(() => {
         >
           {{ t('balance.add_platform', '添加平台') }}
         </v-btn>
-      </div>
+      </v-empty-state>
 
       <!-- Platform Cards Grid -->
       <v-row class="ma-0" dense>
@@ -1765,6 +1760,25 @@ onUnmounted(() => {
 
 .stat-card {
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  height: 100%;
+}
+
+.balance-search {
+  flex: 1 1 260px;
+  max-width: 480px;
+}
+
+/* 手机：总额卡两两并排，数字缩一号，避免四张卡竖排占满一整屏 */
+@media (max-width: 599px) {
+  .stat-card {
+    padding: 12px 14px !important;
+  }
+  .stat-card :deep(.text-h5) {
+    font-size: 1.25rem !important;
+  }
+  .balance-search {
+    max-width: none;
+  }
 }
 
 .balance-card {

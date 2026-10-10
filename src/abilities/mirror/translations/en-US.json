@@ -15,5 +15,7 @@
   "mirror.mdTestFail": "  - Test: failed — {error}",
   "mirror.get.desc": "Current mirror list and status",
   "mirror.toggle.desc": "Enable/disable a mirror (--name --enable true|false, pkexec)",
-  "mirror.test.desc": "Test all mirrors for connectivity and speed"
+  "mirror.test.desc": "Test all mirrors for connectivity and speed",
+  "mirror.empty": "No mirrors",
+  "mirror.emptyText": "/etc/pacman.d/mirrorlist is missing or has no Server entries (this page needs Arch Linux)."
 }

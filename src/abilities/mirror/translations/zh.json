@@ -15,5 +15,7 @@
   "mirror.mdTestFail": "  - 测速: 失败 — {error}",
   "mirror.get.desc": "当前镜像源列表与状态",
   "mirror.toggle.desc": "启用/禁用镜像源 (--name --enable true|false, pkexec)",
-  "mirror.test.desc": "测试所有镜像源连通性与速度"
+  "mirror.test.desc": "测试所有镜像源连通性与速度",
+  "mirror.empty": "没有镜像源",
+  "mirror.emptyText": "/etc/pacman.d/mirrorlist 不存在或没有 Server 条目（非 Arch 系统上这一页不可用）。"
 }

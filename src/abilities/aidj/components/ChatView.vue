@@ -1587,15 +1587,14 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
       @scroll="onChatScroll"
     >
       <TransitionGroup name="msg" tag="div" class="d-flex flex-column ga-3 flex-grow-1">
-        <div
+        <v-empty-state
           v-if="messages.length === 0"
           key="empty"
-          class="empty-state flex-grow-1 d-flex flex-column align-center justify-center text-center text-medium-emphasis"
-        >
-          <v-icon size="64" class="mb-4">mdi-chat-processing-outline</v-icon>
-          <div class="text-h6">{{ t('aidj.heading') }}</div>
-          <div class="text-body-2 mt-1">{{ t('aidj.input_placeholder') }}</div>
-        </div>
+          class="empty-state flex-grow-1"
+          icon="mdi-music-note-plus"
+          :title="t('aidj.heading')"
+          :text="t('aidj.input_placeholder')"
+        />
 
         <ChatMessageVue
           v-for="(msg, idx) in visibleMessages"
@@ -1936,6 +1935,12 @@ defineExpose({ toMarkdown, loadSession, newChat, runPersistCommand })
 }
 .input-textarea {
   min-width: 120px;
+}
+/* 占位文字只占一行：窄屏下换行会露出被裁掉的半截第二行 */
+.input-textarea :deep(textarea::placeholder) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .input-bar {
   flex-shrink: 0;
