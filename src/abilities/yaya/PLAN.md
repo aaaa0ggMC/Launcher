@@ -3,7 +3,7 @@
 > **项目代号**：`yaya` (Yet Another Yes Agent)  
 > **所属架构**：Linux System Cockpit 下游智能体应用 / 独立公开子项目  
 > **设计基线**：Electron + Vue 3 + Vuetify 3 (Material 3) + TypeScript + SQLite  
-> **当前状态**（2026-10-05 核对）：Phase 1–5 闭环可用（会话树 / 多服务商含 Anthropic / Gemini 原生 / 工具循环 + 审批 / 附件与长文档检索 / 插件：MCP、Skill、Mermaid、SVG、HTML 小部件、搜索、Mention、安卓控制）；导入 ChatGPT / Claude / DeepSeek / Rikkahub。剩余：安卓自有 App 原生通道、真机 / 真实密钥实测（见第四、六节）
+> **当前状态**（2026-10-11 核对）：Phase 1–5 闭环可用（会话树 / 多服务商含 Anthropic / Gemini 原生 / 工具循环 + 审批 / 附件与长文档检索 / 插件：MCP、Skill、Mermaid、SVG、HTML 小部件、搜索、Mention、安卓控制、Ask 询问用户、Deputy 副代理 + 带工具的子 Agent SDK）；导入 ChatGPT / Claude / DeepSeek / Rikkahub。剩余：安卓自有 App 原生通道、Ask / Deputy 真机实测与推送（见 §6.7）、真机 / 真实密钥实测（见第四、六节）
 
 ---
 
@@ -479,6 +479,51 @@ Node 层：Android Controller —— 普通 YayaPlugin
 - **两种运行形态**：自有 App（nodejs-mobile，Java 桥）；纯 Termux（调不到 Java，后端换成 `termux-*` 命令 + `rish`，插件接口不变）。按 `process.platform === 'android'` 与探测结果选用。
 - **安全**：Shizuku 等于 adb 权限，比桌面 Shell 更危险。每个 Java 函数必须声明能力与 scope，Node 侧照常 guard + 审批；授予权限、改系统设置这类标 `deny`（不提供给 AI，只能用户在界面上做）。Java 侧只接受来自内嵌 Node 的通道消息。
 - 依赖 6.4 的子分组与配置界面；先在 Termux 后端验证，再做自有 App。
+
+### 6.7 Ask 询问用户 + Deputy 副代理（子 Agent）（2026-10-11 落地）
+
+**来源**：两个领先于 main 的远端分支合入本地工作分支 `yaya/ask-deputy`（Ask = `origin/claude/project-thread-fe0y1c`；Deputy + 插件 SDK 子 Agent = `origin/claude/project-thread-ijmvjh`；两分支共同改了 `runner.ts` 工具执行段，冲突已按「保留 Deputy 的 `invokeTool` 重构 + 补回 Ask 的 `callId` 透传」解决）。**尚未推送、未建 PR**。
+
+#### 插件 SDK 新增（`services/plugins/types.ts` / `services/workflow/types.ts` / `components/plugin-ui.ts`）
+
+- **`ToolRunContext.callId`**：工具执行时带上这次调用的 id，界面按它找到对应调用（ask 的提问卡片）。
+- **`ToolRunContext.workflow`（`ToolWorkflowHandle`）**：插件工具借此操纵当前工作流——`runAgent`（派带工具的子 Agent）、`subAgent`、`note`、`history`、`availableTools`。
+- **`WorkflowContext.runAgent`（`AgentRunOptions` / `AgentRunResult`）**：子 Agent 有自己的对话与工具循环，**不写进对话树**，只在过程卡片里显示成一步（展开可看它调用的每个工具与最终报告）。工具执行与主 Agent 同一套：审批（同样的设置与「本对话不再询问」）、隐私来源、插件数据流钩子、暂停 / 停止；并行子 Agent 的审批排队（一次只挂起一个）。用量记在步骤 `tokens` 上，`computeSessionUsage` 的 `subagentTokens` 已覆盖。
+- **`PluginUi.toolCards`**：某个工具调用渲染成回答里的独立卡片（位置在发起调用的那一步之后），不收进过程卡片，**不按启用状态门控**（历史对话里的卡片在插件关掉后也要能看懂）。运行中可交互（ask 的提问）。
+- **`PluginTool.noSubAgent`**：子 Agent 不提供这个工具（交互类工具在过程卡片里没有回答入口）。`AvailableTool` 同步带该字段，runner 的 `availableTools()` 映射、`runAgent` 的 `'enabled'` 路径过滤。
+- **`AvailableTool.approval`**：按当前设置的审批方式（`ask` / `auto` / `dynamic`），副代理的「只给免确认的工具」按它过滤。
+
+#### ask 插件（`plugins/ask/`）
+
+- `ask_user` 工具：1 到 4 个问题（每题 2 到 6 个选项，单选 / 多选，总能自由补充），在主进程挂起等待，用户经 `yaya.ask-answer`（`agent: 'deny'`）提交后同一轮继续。默认启用。
+- 界面：`AskCard.vue` 四种形态——等待回答（可点选 / 填写 / 提交 / 不回答）、排队中（同一轮并排多问时还没轮到，只读）、已回答（选中项 + 补充 + 跳过）、已失效 / 失败（显示失败原因）。
+- 挂起表是主进程内存：应用重启后清空（卡片显示「已失效」）；停止运行即中止等待。
+- 命令：`yaya.ask-answer`（仅用户）、`yaya.ask-pending`（查挂起的调用 id）。
+
+#### deputy 插件（`plugins/deputy/`）
+
+- `deputy_dispatch` 工具：主 Agent 把 1~6 个独立子任务交给副代理并行执行，每个副代理只收回一份书面报告（结果 + 证据 + 没能验证的），中间工具输出不进主上下文。副代理不能再派副代理；`noSubAgent` 的交互工具（ask_user）也不给副代理。
+- 工作流「分派模式」（`deputy.dispatch`）：分派子 Agent 把请求拆成可并行任务（JSON）→ 副代理并行 → 主 Agent 拿报告汇总（可再用工具核实）；拆不出 / 拆分失败就普通回答。
+- 配置：同时运行数（默认 3）、每个副代理轮数（默认 8，用完收掉工具逼它写报告）、工具范围（全部 / 只给免确认 / 不给）；单个任务还能用白名单再收窄。
+- 界面：`DeputyResultView.vue` 每个副代理一行（状态 / 工具调用数 / 失败数 / 轮数 / 轮数用完），展开看任务与报告；副代理运行中的工具调用在过程卡片的子 Agent 步骤里（`WorkflowCard` 展开可看，审批照常在回答区提示）。
+
+#### 2026-10-11 细化（本次）
+
+- `noSubAgent` 机制：副代理不再拿到 `ask_user`（原来工具表里有、系统提示词却说「没人回答提问」，副代理真调了会干等到超时）。
+- ask 并行提问排队态：同一轮并排多个 `ask_user` 时，还没轮到的那张卡只读（原来可点，提交会错答到前一张卡上——`submitAnswer` 的「会话里只有一个挂起就答它」兜底）；`waitForAnswer` 加同会话并发兜底报错。
+- ask 失败态显示真实失败原因（原来是固定文案「提问已中止」）。
+- 分派子 Agent 失败（网络 / 模型错误）回退成普通回答，不再拖垮整个工作流。
+- `reportText` 的 stopped 副代理有明确措辞（原来是 `Error: stopped`）。
+- 测试：ask 挂起表并发拒绝、Runner 级并行提问顺序回答、`deputyTools` 排除 `noSubAgent`、`reportText` 措辞、runner 级「子 Agent 不拿 `noSubAgent` 工具、调用它得到 tool_not_found」。
+
+#### 没做 / 已知限制
+
+- **未推送、未建 PR**：合并冲突的解法与本次细化只在他处（本地分支 `yaya/ask-deputy`）验证过，尚未真机 / 真实模型跑过。
+- **YAYA 自己的工作流（local-agent）提问时**：卡片渲染在 agent 独立视图里，用户未必看得到，也没有像审批那样的 `session attention` 强提示。用户自己的对话不受影响。MCP / Remote 不受影响（插件工具不经命令表，agent 调不到 `ask_user`）。
+- **副代理以后若要能提问**：需要在过程卡片的子 Agent 调用里渲染可交互的 `AskCard`（`toolCards` 目前只挂在回答段），并把 `noSubAgent` 从 ask 上去掉。
+- 分派子 Agent 的输出只有容忍式解析（代码块包裹 / 前后废话），没有 JSON Schema 强校验；拆坏了他会当「无需拆分」直接答。
+- ask 的 24h 超时只是工具级 `timeoutMs`，没有「用户离开很久」的进度提示（提交后卡片显示「已提交，正在继续…」）。
+- 6.3 遗留：图片类 mention content 仍只取文本。
 
 ### 6.3 其它候选
 

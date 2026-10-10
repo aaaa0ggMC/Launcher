@@ -5,7 +5,7 @@
   "yaya.ask.waiting": "已提交，正在继续…",
   "yaya.ask.answered": "你的回答",
   "yaya.ask.dismissed": "没有回答",
-  "yaya.ask.failed": "提问已中止",
+  "yaya.ask.failed": "提问未成功",
   "yaya.ask.expired": "提问已失效",
   "yaya.ask.expired_hint": "这次运行已经结束，可以直接发消息回答。",
   "yaya.ask.multi": "可多选",
@@ -14,5 +14,7 @@
   "yaya.ask.skipped": "已跳过",
   "yaya.ask.progress": "已答 {n}/{total}",
   "yaya.ask.dismiss": "不回答",
-  "yaya.ask.submit": "提交"
+  "yaya.ask.submit": "提交",
+  "yaya.ask.queued": "排队中的提问",
+  "yaya.ask.queued_hint": "同一轮里还有没回答的提问，轮到这组时才能作答。"
 }

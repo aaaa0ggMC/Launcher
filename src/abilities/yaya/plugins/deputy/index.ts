@@ -7,7 +7,8 @@
  * - 工作流 `deputy.dispatch`「分派模式」：先由分派子 Agent 把用户的请求拆成可并行的子任务，
  *   副代理并行执行，主 Agent 拿着各份报告（可再用工具核实）写出回答。请求简单时不拆，直接回答。
  *
- * 副代理不能再派副代理（本插件的工具不交给副代理），避免递归。
+ * 副代理不能再派副代理（本插件的工具不交给副代理），避免递归；交互类工具（如 ask_user 的提问卡片）
+ * 也不交给副代理——过程卡片里没有回答入口，给了只会让它干等（见 PluginTool.noSubAgent）。
  * 提示词固定英文（稳定，提示词缓存友好），报告语言跟随任务。
  */
 import { t, te } from '../../../../main/process/i18n'
@@ -136,14 +137,14 @@ export function parseTasks(args: Record<string, unknown>): DeputyTask[] {
   return out.slice(0, MAX_TASKS)
 }
 
-/** 交给副代理的工具：去掉本插件自己的（不递归）→ 按范围 → 按任务白名单 */
+/** 交给副代理的工具：去掉本插件自己的（不递归）→ 去掉交互类（没人回答）→ 按范围 → 按任务白名单 */
 export function deputyTools(
   available: AvailableTool[],
   scope: string,
   whitelist?: string[]
 ): string[] {
   if (scope === 'none') return []
-  let list = available.filter((x) => x.pluginId !== PLUGIN_ID)
+  let list = available.filter((x) => x.pluginId !== PLUGIN_ID && x.noSubAgent !== true)
   if (scope === 'readonly') list = list.filter((x) => x.approval === 'auto')
   if (whitelist?.length) list = list.filter((x) => whitelist.includes(x.name))
   return list.map((x) => x.name)
@@ -227,7 +228,11 @@ export function reportText(list: DeputyOutcome[]): string {
       const head = `## Deputy "${d.name}" — ${d.status}${d.exhausted ? ' (ran out of rounds)' : ''}`
       const meta = `(${d.calls} tool calls${d.failedCalls ? `, ${d.failedCalls} failed` : ''})`
       const body =
-        d.status === 'ok' ? d.report || '(empty report)' : `Error: ${d.error ?? d.status}`
+        d.status === 'ok'
+          ? d.report || '(empty report)'
+          : d.status === 'stopped'
+            ? '(stopped before it could finish)'
+            : `Error: ${d.error ?? d.status}`
       return `${head} ${meta}\n${body}`
     })
     .join('\n\n')
@@ -279,11 +284,19 @@ const dispatchWorkflow: WorkflowDefinition = {
     '能并行的请求先拆成子任务，交给多个副代理同时去做，再由主 Agent 汇总；简单问题直接回答',
   usesTools: true,
   async run(ctx) {
-    const plan = await ctx.subAgent({
-      agent: 'dispatcher',
-      label: t('yaya.deputy.step.dispatch', '拆分任务'),
-      system: DISPATCHER_SYSTEM
-    })
+    let plan: { content: string }
+    try {
+      plan = await ctx.subAgent({
+        agent: 'dispatcher',
+        label: t('yaya.deputy.step.dispatch', '拆分任务'),
+        system: DISPATCHER_SYSTEM
+      })
+    } catch {
+      // 拆分失败（网络 / 模型错误）不该拖垮整个工作流：当普通请求直接回答
+      ctx.note(t('yaya.deputy.step.dispatch_failed', '任务拆分失败，直接回答'))
+      await toolLoop(ctx)
+      return
+    }
     if (ctx.aborted) return
     const tasks = parseDispatch(plan.content) ?? []
     if (!tasks.length) {

@@ -25,5 +25,6 @@
   "yaya.deputy.view.rounds": "{n} rounds",
   "yaya.deputy.view.exhausted": "ran out of rounds",
   "yaya.deputy.view.stopped": "stopped",
-  "yaya.deputy.view.empty": "(no report)"
+  "yaya.deputy.view.empty": "(no report)",
+  "yaya.deputy.step.dispatch_failed": "Task split failed, answering directly"
 }

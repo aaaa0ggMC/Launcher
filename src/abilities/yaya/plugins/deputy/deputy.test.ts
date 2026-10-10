@@ -45,6 +45,18 @@ it('deputyTools: 不给自己的工具；readonly 只留免确认；白名单', 
   assert.deepEqual(deputyTools(available, 'all', ['web', 'deputy_dispatch']), ['web'])
 })
 
+it('deputyTools: 交互类工具（noSubAgent）不交给副代理', () => {
+  const available = [
+    { name: 'read', pluginId: 'system', approval: 'auto' as const },
+    { name: 'ask_user', pluginId: 'ask', approval: 'auto' as const, noSubAgent: true },
+    { name: 'shell', pluginId: 'system', approval: 'ask' as const }
+  ]
+  assert.deepEqual(deputyTools(available, 'all'), ['read', 'shell'])
+  assert.deepEqual(deputyTools(available, 'readonly'), ['read'])
+  // 白名单也绕不过：过程卡片里没有回答入口
+  assert.deepEqual(deputyTools(available, 'all', ['ask_user', 'read']), ['read'])
+})
+
 it('mapLimit: 并发不超过上限，结果按原顺序', async () => {
   let running = 0
   let peak = 0
@@ -91,4 +103,35 @@ it('runDeputies: 单个失败不影响其他；报告文字带状态', async () 
   const text = reportText(res)
   assert.match(text, /## Deputy "good" — ok/)
   assert.match(text, /Error: boom/)
+})
+
+it('reportText: 停止 / 轮数用完有明确措辞', () => {
+  const text = reportText([
+    {
+      name: 'stop',
+      task: 'A',
+      status: 'stopped',
+      report: '',
+      calls: 1,
+      failedCalls: 0,
+      rounds: 2,
+      tokens: 0,
+      exhausted: false
+    },
+    {
+      name: 'tired',
+      task: 'B',
+      status: 'ok',
+      report: 'partial',
+      calls: 3,
+      failedCalls: 1,
+      rounds: 8,
+      tokens: 10,
+      exhausted: true
+    }
+  ])
+  assert.match(text, /## Deputy "stop" — stopped/)
+  assert.match(text, /\(stopped before it could finish\)/)
+  assert.match(text, /## Deputy "tired" — ok \(ran out of rounds\)/)
+  assert.match(text, /partial/)
 })

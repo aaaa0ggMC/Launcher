@@ -5,7 +5,7 @@
   "yaya.ask.waiting": "Submitted, continuing…",
   "yaya.ask.answered": "Your answers",
   "yaya.ask.dismissed": "Not answered",
-  "yaya.ask.failed": "Question cancelled",
+  "yaya.ask.failed": "Question not sent",
   "yaya.ask.expired": "Question expired",
   "yaya.ask.expired_hint": "This run has ended; just reply with a message instead.",
   "yaya.ask.multi": "Pick any",
@@ -14,5 +14,7 @@
   "yaya.ask.skipped": "Skipped",
   "yaya.ask.progress": "{n}/{total} answered",
   "yaya.ask.dismiss": "Skip all",
-  "yaya.ask.submit": "Submit"
+  "yaya.ask.submit": "Submit",
+  "yaya.ask.queued": "Question in queue",
+  "yaya.ask.queued_hint": "An earlier question in this reply is still unanswered; this one opens after it."
 }

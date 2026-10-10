@@ -151,6 +151,16 @@ function key(sessionId: string, callId: string): string {
   return `${sessionId}\u0000${callId}`
 }
 
+/**
+ * 同一会话同时只允许一个挂起提问。同一轮里并排的多个 `ask_user` 是按顺序等的
+ * （界面把还没轮到的那张卡显示成「排队中」、不给作答），所以正常情况下第二个注册时
+ * 第一个已经答完。这里是兜底：万一真的出现两个同时挂起，后来的明确报错，
+ * 而不是无声地多挂一个没人回答的提问。
+ */
+function busyIn(sessionId: string): Pending | undefined {
+  return [...pending.values()].find((p) => p.sessionId === sessionId)
+}
+
 /** 登记一次提问，返回等待回答的 Promise；signal 中止时拒绝并清掉登记 */
 export function waitForAnswer(
   sessionId: string,
@@ -158,6 +168,13 @@ export function waitForAnswer(
   questions: AskQuestion[],
   signal?: AbortSignal
 ): Promise<AskResponse> {
+  if (busyIn(sessionId))
+    return Promise.reject(
+      new Error(
+        'another ask_user call in this conversation is still waiting for an answer; ' +
+          'wait for it (or ask the remaining questions in your next reply)'
+      )
+    )
   return new Promise<AskResponse>((resolve, reject) => {
     const k = key(sessionId, callId)
     const onAbort = (): void => {

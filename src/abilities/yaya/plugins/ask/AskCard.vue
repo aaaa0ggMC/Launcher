@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * ask_user 的提问卡片。三种形态：
- * - 等待回答（本轮在运行、调用还在执行）：选项可点、可写「其他」，提交 / 不回答；
+ * ask_user 的提问卡片。四种形态：
+ * - 等待回答（本轮在运行、调用正在执行）：选项可点、可写「其他」，提交 / 不回答；
+ * - 排队中（同一轮里前面还有没回答的提问，这个调用还没开始）：只读——现在作答会答到前面那张卡上；
  * - 已回答：每题显示选中的选项与补充，跳过的题标「已跳过」；
  * - 已失效：调用没有结果但运行已经结束（停止 / 应用重启），只读显示问题。
  * 同一组件也作为过程卡片里这次调用的结果视图（没有 live / sessionId，只读）。
@@ -43,12 +44,14 @@ const questions = computed<AskQuestion[]>(() => {
 const embedded = computed(() => props.live === undefined)
 const submitted = ref(false)
 const expired = ref(false)
-const state = computed<'answered' | 'asking' | 'waiting' | 'expired' | 'failed'>(() => {
+const state = computed<'answered' | 'asking' | 'queued' | 'waiting' | 'expired' | 'failed'>(() => {
   if (display.value) return 'answered'
   if (props.call.status === 'failed') return 'failed'
   if (props.call.status === 'executing' || props.call.status === 'pending') {
     if (embedded.value) return 'waiting'
-    if (props.live && !expired.value) return submitted.value ? 'waiting' : 'asking'
+    if (props.live && !expired.value)
+      // pending = 还没轮到它（同一轮里前面还有没回答的提问）：只能看，不能答
+      return submitted.value ? 'waiting' : props.call.status === 'pending' ? 'queued' : 'asking'
   }
   return 'expired'
 })
@@ -117,6 +120,8 @@ const headIcon = computed(() => {
     case 'failed':
     case 'expired':
       return 'mdi-help-circle-outline'
+    case 'queued':
+      return 'mdi-clock-outline'
     default:
       return 'mdi-chat-question-outline'
   }
@@ -125,6 +130,8 @@ const headText = computed(() => {
   switch (state.value) {
     case 'asking':
       return t('yaya.ask.title', '想问你几个问题')
+    case 'queued':
+      return t('yaya.ask.queued', '排队中的提问')
     case 'waiting':
       return t('yaya.ask.waiting', '已提交，正在继续…')
     case 'answered':
@@ -132,7 +139,7 @@ const headText = computed(() => {
         ? t('yaya.ask.dismissed', '没有回答')
         : t('yaya.ask.answered', '你的回答')
     case 'failed':
-      return t('yaya.ask.failed', '提问已中止')
+      return t('yaya.ask.failed', '提问未成功')
     default:
       return t('yaya.ask.expired', '提问已失效')
   }
@@ -267,7 +274,12 @@ const headText = computed(() => {
       </v-btn>
     </div>
     <div v-if="error" class="ask-error text-error">{{ error }}</div>
-    <div v-if="(state === 'expired' || state === 'failed') && !embedded" class="ask-foot">
+    <!-- 失败原因（通常是用户停止），与工具行的错误展示一致 -->
+    <div v-if="state === 'failed' && call.error" class="ask-error text-error">{{ call.error }}</div>
+    <div v-if="state === 'queued'" class="ask-foot">
+      {{ t('yaya.ask.queued_hint', '同一轮里还有没回答的提问，轮到这组时才能作答。') }}
+    </div>
+    <div v-if="state === 'expired' && !embedded" class="ask-foot">
       {{ t('yaya.ask.expired_hint', '这次运行已经结束，可以直接发消息回答。') }}
     </div>
   </div>
@@ -287,7 +299,8 @@ const headText = computed(() => {
 }
 .ask-card.is-answered,
 .ask-card.is-expired,
-.ask-card.is-failed {
+.ask-card.is-failed,
+.ask-card.is-queued {
   border-color: rgba(var(--v-border-color), var(--v-border-opacity));
   background: rgba(var(--v-theme-on-surface), 0.03);
 }

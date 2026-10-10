@@ -25,5 +25,6 @@
   "yaya.deputy.view.rounds": "{n} 轮",
   "yaya.deputy.view.exhausted": "轮数用完",
   "yaya.deputy.view.stopped": "已停止",
-  "yaya.deputy.view.empty": "（没有报告）"
+  "yaya.deputy.view.empty": "（没有报告）",
+  "yaya.deputy.step.dispatch_failed": "任务拆分失败，直接回答"
 }

@@ -173,6 +173,12 @@ export interface PluginTool {
   group?: string
   /** 给人看的 Markdown 说明（设置页插件详情） */
   docs?: string
+  /**
+   * 子 Agent（`ctx.workflow.runAgent` / 副代理）不提供这个工具。
+   * 交互类工具用：子 Agent 的调用记录只在过程卡片里，没有回答入口（如 ask_user 的提问卡片），
+   * 给它只会让子 Agent 干等。缺省 false（子 Agent 与主 Agent 拿同样的工具）。
+   */
+  noSubAgent?: boolean
   run(args: Record<string, unknown>, ctx: ToolRunContext): Promise<unknown>
 }
 

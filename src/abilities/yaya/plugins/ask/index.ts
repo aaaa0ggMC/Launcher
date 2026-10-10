@@ -27,7 +27,8 @@ const INSTRUCTIONS = [
   'with the answer as the tool result. Offer 2-4 concrete options (put the recommended one first and',
   'append " (Recommended)" to its label); the user can always type their own answer. Group related',
   'questions into one call (up to 4). Do not ask about trivial details you can decide yourself, and do',
-  'not ask for permission to run tools — tool approval is handled separately.'
+  'not ask for permission to run tools — tool approval is handled separately.',
+  'Call it at most once per reply: several calls in one reply queue up and the user answers them one by one.'
 ].join('\n')
 
 const DOCS = `# Ask 询问用户
@@ -37,8 +38,10 @@ const DOCS = `# Ask 询问用户
 
 - 每次最多 ${MAX_QUESTIONS} 个问题，每题 2~${MAX_OPTIONS} 个选项，可以单选或多选；
 - 每题都能写一句自己的答案（「其他」），也可以跳过某一题，或者整组「不回答」；
+- 同一轮里并排多问时会按顺序一组一组来（还没轮到的那组卡片先不给作答）；
 - 提交后 AI 在**同一轮回答**里接着干，不需要另发消息；
-- 等待回答时点「停止」会结束这次运行；应用重启后没回答的卡片会显示「已失效」。
+- 等待回答时点「停止」会结束这次运行；应用重启后没回答的卡片会显示「已失效」；
+- 副代理（子 Agent）拿不到这个工具——过程卡片里没有回答入口。
 `
 
 const plugin: YayaPlugin = {
@@ -112,6 +115,8 @@ const plugin: YayaPlugin = {
       },
       approval: 'auto',
       timeoutMs: WAIT_MS,
+      // 副代理（子 Agent）的调用只在过程卡片里，没有回答这张卡的入口，给了只会让它干等
+      noSubAgent: true,
       docs: '在对话里显示问题卡片，等你点选 / 填写后把回答交给 AI。',
       async run(args, ctx): Promise<ToolContentResult> {
         const questions = normalizeQuestions(args)

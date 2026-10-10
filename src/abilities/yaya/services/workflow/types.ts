@@ -61,6 +61,8 @@ export interface AvailableTool {
   pluginId: string
   /** 按当前设置是否要用户确认：dynamic = 看参数（插件按参数判断） */
   approval?: 'ask' | 'auto' | 'dynamic'
+  /** 子 Agent 不提供（交互类工具，如 ask_user 的提问卡片在过程卡片里没有回答入口） */
+  noSubAgent?: boolean
 }
 
 export interface AssistantStepResult {

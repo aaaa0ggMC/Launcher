@@ -104,6 +104,21 @@ it('挂起表：按调用 id 回答；对不上时会话里只有一个就答它
   assert.equal(submitAnswer('s1', 'c2', {}), false)
 })
 
+it('挂起表：同一会话同时只允许一个提问（并行调用后面的直接失败）', async () => {
+  const qs = normalizeQuestions({ question: 'q?', options: ['a', 'b'] })
+  const p = waitForAnswer('s1', 'c1', qs)
+  await assert.rejects(waitForAnswer('s1', 'c2', qs), /still waiting/)
+  // 失败不影响已经挂起的那个
+  assert.deepEqual(pendingCalls('s1'), ['c1'])
+  assert.equal(submitAnswer('s1', 'c1', { answers: [{ selected: ['a'] }] }), true)
+  assert.deepEqual((await p).answers, [{ selected: ['a'] }])
+  // 回答完就能再问
+  const q2 = waitForAnswer('s1', 'c3', qs)
+  assert.deepEqual(pendingCalls('s1'), ['c3'])
+  assert.equal(submitAnswer('s1', 'c3', { dismissed: true }), true)
+  assert.equal((await q2).dismissed, true)
+})
+
 const CONFIG = {
   defaultWorkflow: 'agent',
   systemPrompt: '',
@@ -193,4 +208,98 @@ it('经 Runner：ask_user 挂起直到用户回答，模型在同一轮拿到回
   const call = db.getMessage(anchor)!.toolCalls![0]
   assert.equal(call.status, 'success')
   assert.deepEqual((call.result as { answers: unknown }).answers, [{ selected: ['Go'] }])
+})
+
+it('经 Runner：同一轮并行两次提问，按顺序回答后都成功', async () => {
+  plugins.__resetPluginsForTest()
+  plugins.registerPlugin(ask.default)
+  plugins.refreshPlugins(CONFIG)
+  const provider: AIProvider = {
+    id: 'fake',
+    listModels: async () => [],
+    generate: async (opts) => {
+      const last = opts.messages[opts.messages.length - 1]
+      if (last.role === 'user')
+        return {
+          content: '',
+          toolCalls: [
+            {
+              id: 'call-1',
+              name: 'ask_user',
+              args: { questions: [{ question: '语言？', options: ['TS', 'Go'] }] }
+            },
+            {
+              id: 'call-2',
+              name: 'ask_user',
+              args: { questions: [{ question: '框架？', options: ['Vue', 'React'] }] }
+            }
+          ]
+        }
+      const answered = opts.messages.some(
+        (m) => m.role === 'tool' && String(m.content).includes('Answer: Go')
+      )
+      return { content: answered ? '用 Go' : '?' }
+    }
+  }
+  const sessionId = randomUUID()
+  db.createSession({ id: sessionId, title: 't' })
+  const user = randomUUID()
+  const anchor = randomUUID()
+  db.insertMessage(
+    {
+      id: user,
+      sessionId,
+      parentId: null,
+      role: 'user',
+      content: '帮我写个脚本',
+      status: 'completed',
+      createdAt: Date.now()
+    },
+    { moveLeaf: true }
+  )
+  db.insertMessage({
+    id: anchor,
+    sessionId,
+    parentId: user,
+    role: 'assistant',
+    content: '',
+    status: 'pending',
+    createdAt: Date.now()
+  })
+  const run = new Runner({
+    sessionId,
+    userMessageId: user,
+    assistantMessageId: anchor,
+    provider,
+    config: CONFIG,
+    tools: [],
+    step: 0,
+    maxSteps: 10,
+    status: 'pending',
+    ringBuffer: []
+  }).run()
+
+  // 同一轮里的多个提问按顺序等回答：先答第一组
+  for (let i = 0; i < 100 && !pendingCalls(sessionId).length; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(pendingCalls(sessionId), ['call-1'])
+  assert.equal(submitAnswer(sessionId, 'call-1', { answers: [{ selected: ['Go'] }] }), true)
+  // 第一组回答后第二组才登记（卡片在这之前是“排队中”，不给作答）
+  for (let i = 0; i < 100 && !pendingCalls(sessionId).includes('call-2'); i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(pendingCalls(sessionId), ['call-2'])
+  assert.equal(submitAnswer(sessionId, 'call-2', { answers: [{ selected: ['Vue'] }] }), true)
+  await run
+
+  const tcs = db.getMessage(anchor)!.toolCalls!
+  assert.deepEqual(
+    tcs.map((c) => [c.id, c.status]),
+    [
+      ['call-1', 'success'],
+      ['call-2', 'success']
+    ]
+  )
+  assert.deepEqual((tcs[1].result as { answers: unknown }).answers, [{ selected: ['Vue'] }])
+  const branch = db.getMessageBranch(db.getSession(sessionId)!.activeLeafId)
+  assert.equal(branch.at(-1)!.content, '用 Go')
 })

@@ -487,7 +487,8 @@ export class WorkflowRunner {
     return this.tools.map((t) => ({
       name: t.wireName,
       pluginId: t.plugin.id,
-      approval: toolApprovalMode(t, this.ctx.config)
+      approval: toolApprovalMode(t, this.ctx.config),
+      noSubAgent: t.tool.noSubAgent
     }))
   }
 
@@ -1181,7 +1182,8 @@ export class WorkflowRunner {
         ? []
         : Array.isArray(opts.tools)
           ? this.tools.filter((x) => opts.tools!.includes(x.wireName))
-          : this.tools
+          : // 'enabled'：交互类工具（noSubAgent）不给子 Agent——过程卡片里没有它们的回答入口
+            this.tools.filter((x) => !x.tool.noSubAgent)
     const local = new Map((opts.localTools ?? []).map((x) => [x.name, x]))
     const providerTools: ProviderTool[] = [
       ...allowed.map((x) => ({

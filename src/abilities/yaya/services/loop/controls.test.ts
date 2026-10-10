@@ -263,3 +263,82 @@ it('a plugin tool can run a sub-agent with tools; its calls share approval and l
   assert.equal(step.calls?.[0].status, 'success')
   assert.equal(step.detail, 'found probe-result')
 })
+
+it('sub-agents do not get noSubAgent tools; calling one fails with tool_not_found', async () => {
+  plugins.__resetPluginsForTest()
+  plugins.registerPlugin({
+    id: 'test',
+    kind: 'builtin',
+    label: '',
+    description: '',
+    namespace: false,
+    tools: () => [
+      {
+        name: 'plain',
+        description: '',
+        parameters: {},
+        run: async () => 'plain-result'
+      },
+      {
+        // 交互类工具：子 Agent 的过程卡片里没有回答入口
+        name: 'interactive',
+        description: '',
+        parameters: {},
+        noSubAgent: true,
+        run: async () => 'should never run'
+      },
+      {
+        name: 'dispatch',
+        description: '',
+        parameters: {},
+        run: async (_args, ctx) => {
+          assert.ok(ctx.workflow, 'tools run by the workflow host get a workflow handle')
+          const res = await ctx.workflow.runAgent({
+            agent: 'deputy',
+            label: 'deputy',
+            system: 'sub',
+            task: 'look',
+            tools: 'enabled'
+          })
+          return `report: ${res.content} (${res.calls.length} calls)`
+        }
+      }
+    ]
+  })
+  plugins.refreshPlugins({} as YayaConfig)
+  const id = randomUUID()
+  db.createSession({ id, title: 'test' })
+  const seen: string[][] = []
+  let main = 0
+  const r = runner(id, {
+    id: 'fake',
+    listModels: async () => [],
+    generate: async (opts) => {
+      const sys = opts.messages[0].content
+      if (sys === 'sub') {
+        seen.push((opts.tools ?? []).map((x) => x.name))
+        const last = opts.messages[opts.messages.length - 1]
+        if (last.role !== 'tool')
+          return {
+            content: '',
+            toolCalls: [{ id: 's1', name: 'interactive', args: {}, status: 'pending' }]
+          }
+        return { content: `tried: ${last.content}` }
+      }
+      return ++main === 1
+        ? { content: '', toolCalls: [{ id: 'm1', name: 'dispatch', args: {}, status: 'pending' }] }
+        : answer
+    }
+  })
+  const done = r.run()
+  await done
+  // 主 Agent 有全部工具；子 Agent 只去掉 noSubAgent 的 interactive（递归防护由 deputy 插件自己做）
+  assert.deepEqual(seen[0], ['plain', 'dispatch'])
+  const branch = db.getMessageBranch(db.getSession(id)!.activeLeafId!)
+  const toolNode = branch.find((n) => n.role === 'tool' && n.name === 'dispatch')
+  assert.match(toolNode?.content ?? '', /tried: \{"error":"工具 interactive 不存在"\}/)
+  const rec = branch.find((n) => n.meta?.workflow)?.meta?.workflow as WorkflowRecord
+  const step = rec.steps.find((s) => s.agent === 'deputy')!
+  assert.equal(step.status, 'ok')
+  assert.equal(step.calls?.[0].status, 'failed')
+})
