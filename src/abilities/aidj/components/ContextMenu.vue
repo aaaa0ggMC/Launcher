@@ -109,7 +109,7 @@ watch(
         </button>
         <button v-if="isAi" class="aidj-ctx-item" @click="copyRaw">
           <v-icon icon="mdi-code-tags" size="14" />
-          <span>CopyRaw</span>
+          <span>{{ t('aidj.contextmenu.copy_raw', 'CopyRaw') }}</span>
         </button>
         <button v-if="canRevert" class="aidj-ctx-item" @click="doRevert">
           <v-icon icon="mdi-undo" size="14" />
@@ -153,6 +153,14 @@ watch(
 }
 .aidj-ctx-item:hover {
   background: rgba(var(--v-theme-primary), 0.15);
+}
+/* 触屏：右键/长按菜单是手指点的，行高顶到 44px 命中区（同 ChatSlashPopup） */
+@media (pointer: coarse) {
+  .aidj-ctx-item {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 0.875rem;
+  }
 }
 .ctx-enter-active {
   transition:

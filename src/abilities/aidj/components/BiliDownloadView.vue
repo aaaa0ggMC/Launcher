@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject, type Ref } from 'vue'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import type { ResolvedBiliItem } from '../commands/metadata-slots'
 import type { MetadataSlotInfo } from '../services/metadata-slots'
 
@@ -220,7 +220,8 @@ onMounted(() => {
         "
         @keydown.ctrl.enter="handleResolve"
       />
-      <div class="d-flex align-center ga-2 pt-2">
+      <!-- flex-wrap：窄弹层里「解析视频 + 清空 + Ctrl+Enter 提示」放不下时换行，不裁提示 -->
+      <div class="d-flex align-center ga-2 pt-2 flex-wrap">
         <v-btn
           color="primary"
           variant="flat"
@@ -305,10 +306,17 @@ onMounted(() => {
         class="my-3"
       />
 
-      <div v-else class="d-flex flex-column ga-2 pb-2">
-        <div class="d-flex align-center justify-space-between flex-wrap ga-2 px-1 pb-1">
+      <div v-else class="d-flex flex-column ga-2 pb-2 px-1">
+        <div class="d-flex align-center justify-space-between flex-wrap ga-2 pb-1">
           <span class="text-caption text-medium-emphasis">
-            {{ `已解析 ${resolvedItems.length} 个条目（点击右侧按钮可删除误加项目）` }}
+            {{
+              translateTemplate(
+                uiLang,
+                'aidj.bili.parsed_count',
+                { n: String(resolvedItems.length) },
+                '已解析 {n} 个条目（点击右侧按钮可删除误加项目）'
+              )
+            }}
           </span>
           <v-btn variant="text" color="error" @click="handleClearAll">
             {{ t('aidj.bili.clear_all', '清空全部') }}
@@ -355,7 +363,7 @@ onMounted(() => {
                 variant="tonal"
                 class="part-chip font-weight-medium"
               >
-                {{ `P${it.page}: ${it.partTitle || '分P'}` }}
+                {{ `P${it.page}: ${it.partTitle || t('aidj.bili.part_fallback', '分P')}` }}
               </v-chip>
 
               <v-chip
@@ -364,7 +372,16 @@ onMounted(() => {
                 color="success"
                 variant="tonal"
                 class="downloaded-chip font-weight-medium"
-                :title="it.downloadedFile ? `已存在: ${it.downloadedFile}` : undefined"
+                :title="
+                  it.downloadedFile
+                    ? translateTemplate(
+                        uiLang,
+                        'aidj.bili.exists_file',
+                        { file: it.downloadedFile },
+                        '已存在: {file}'
+                      )
+                    : undefined
+                "
               >
                 <v-icon start size="12">mdi-check-circle-outline</v-icon>
                 {{ t('aidj.bili.already_downloaded', '已下载') }}
@@ -373,7 +390,14 @@ onMounted(() => {
 
             <!-- Author & BVID -->
             <div class="bili-sub text-caption text-medium-emphasis mt-1 d-flex align-center ga-2">
-              <span class="text-truncate">{{ `UP: ${it.author}` }}</span>
+              <span class="text-truncate">{{
+                translateTemplate(
+                  uiLang,
+                  'aidj.bili.up_author',
+                  { author: it.author },
+                  'UP: {author}'
+                )
+              }}</span>
               <span>•</span>
               <span class="text-mono">{{ it.bvid }}</span>
             </div>
@@ -510,10 +534,10 @@ onMounted(() => {
   border-radius: 3px;
 }
 
+/* 分P  chip：吃全局 .v-chip 规则（padding-block 4px / min-height 24px），
+   之前用 !important 压到 20px 高，和旁边的「已下载」chip 一边高一边矮 */
 .part-chip {
-  padding-block: 2px !important;
-  min-height: 20px !important;
-  font-size: 0.7rem !important;
+  font-size: 0.75rem;
 }
 
 .resolve-btn,

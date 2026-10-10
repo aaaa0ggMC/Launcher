@@ -785,7 +785,6 @@ function fmtDate(ms: number): string {
               />
               <v-btn
                 variant="tonal"
-                height="40"
                 :loading="redoing"
                 :disabled="!feedback.trim() || running"
                 prepend-icon="mdi-refresh"
@@ -1069,7 +1068,8 @@ function fmtDate(ms: number): string {
 }
 .san-row {
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-  padding: 2px 4px;
+  /* 4px 8px：映射列表行原本 2px 4px 太挤，行与行贴在一起 */
+  padding: 4px 8px;
 }
 .san-old {
   word-break: break-word;
@@ -1082,7 +1082,8 @@ function fmtDate(ms: number): string {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  padding: 2px 10px;
+  /* padding-block 4px 与全局 chip 底线一致（原 2px 偏挤） */
+  padding: 4px 10px;
   border-radius: 999px;
   font-size: 12px;
   background: rgba(var(--v-theme-primary), 0.12);

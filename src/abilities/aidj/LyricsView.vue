@@ -1380,9 +1380,8 @@ defineExpose({ toMarkdown })
   flex-direction: column;
   align-items: center;
   scroll-behavior: smooth;
-  /* Firefox */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-on-surface-variant), 0.4) transparent;
+  /* 不要写 scrollbar-width / scrollbar-color：Chromium 一看到就切回 GTK 原生
+     滚动条，下面整套 ::-webkit-scrollbar 自定义会被忽略（AGENTS.md §11.8） */
 }
 .lyric-scroll::-webkit-scrollbar {
   width: 10px;
@@ -1474,8 +1473,7 @@ defineExpose({ toMarkdown })
   max-height: 100%;
   overflow-y: auto;
   padding: 4px 8px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(var(--v-theme-on-surface-variant), 0.4) transparent;
+  /* 同 .lyric-scroll：不写 scrollbar-width / scrollbar-color，保住 webkit 自定义滚动条 */
 }
 .lyric-plain::-webkit-scrollbar {
   width: 10px;

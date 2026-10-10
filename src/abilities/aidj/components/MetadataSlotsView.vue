@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, type Ref } from 'vue'
-import { translate } from '../../../main/ui/i18n'
+import { translate, translateTemplate } from '../../../main/ui/i18n'
 import type { MetadataSlotInfo, MetadataSlotEntry } from '../services/metadata-slots'
 
 const emit = defineEmits<{
@@ -443,7 +443,14 @@ onUnmounted(() => {
                 </v-chip>
               </div>
               <div class="slot-meta text-caption text-medium-emphasis mt-1">
-                {{ `${s.selectedCount} / ${s.totalCount} 首生效` }}
+                {{
+                  translateTemplate(
+                    uiLang,
+                    'aidj.slots.effective_count',
+                    { n: String(s.selectedCount), total: String(s.totalCount) },
+                    '{n} / {total} 首生效'
+                  )
+                }}
               </div>
             </div>
 
@@ -558,7 +565,20 @@ onUnmounted(() => {
               :class="{ 'is-disabled': !item.enabled }"
               @click="handleToggleEntry(item)"
             >
-              <button class="entry-toggle-btn" @click.stop="handleToggleEntry(item)">
+              <button
+                class="entry-toggle-btn"
+                :aria-label="
+                  item.enabled
+                    ? t('aidj.slots.entry_disable', '取消该歌曲生效')
+                    : t('aidj.slots.entry_enable', '让该歌曲生效')
+                "
+                :title="
+                  item.enabled
+                    ? t('aidj.slots.entry_disable', '取消该歌曲生效')
+                    : t('aidj.slots.entry_enable', '让该歌曲生效')
+                "
+                @click.stop="handleToggleEntry(item)"
+              >
                 <v-icon
                   size="18"
                   :color="item.enabled ? 'primary' : undefined"
@@ -781,9 +801,7 @@ onUnmounted(() => {
 
 .tag-chip,
 .meta-chip {
-  padding-block: 2px !important;
-  min-height: 20px !important;
-  font-size: 0.68rem !important;
+  font-size: 0.75rem;
 }
 
 .create-btn,

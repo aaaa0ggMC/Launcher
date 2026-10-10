@@ -482,17 +482,29 @@ onUnmounted(() => {
   padding: 12px 16px;
 }
 .cv-main {
-  gap: 2px;
+  /* 四层（头部 / 状态行 / 队列 / 状态栏）之间 8px 呼吸，2px 全贴在一起 */
+  gap: 8px;
   height: 100%;
   min-width: 0;
 }
 .cv-header {
   min-height: 32px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 .cv-player-select {
   width: 200px;
   max-width: 240px;
   flex-shrink: 0;
+}
+/* 窄屏（后台任务面板内容宽 ~296px）：播放器选择器让位，头部换行后不裁右侧计数 chip */
+@media (max-width: 720px) {
+  .cv-player-select {
+    width: auto;
+    flex: 1 1 140px;
+    min-width: 0;
+    max-width: none;
+  }
 }
 .cv-player-select :deep(.v-field) {
   font-size: 0.78rem;
