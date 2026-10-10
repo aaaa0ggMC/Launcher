@@ -1,0 +1,18 @@
+{
+  "yaya.plugin.ask.label": "Ask 询问用户",
+  "yaya.plugin.ask.desc": "AI 需要你做决定时，在对话里弹出问题卡片让你点选，回答后接着干",
+  "yaya.ask.title": "想问你几个问题",
+  "yaya.ask.waiting": "已提交，正在继续…",
+  "yaya.ask.answered": "你的回答",
+  "yaya.ask.dismissed": "没有回答",
+  "yaya.ask.failed": "提问已中止",
+  "yaya.ask.expired": "提问已失效",
+  "yaya.ask.expired_hint": "这次运行已经结束，可以直接发消息回答。",
+  "yaya.ask.multi": "可多选",
+  "yaya.ask.other": "其他想法 / 补充（可选）",
+  "yaya.ask.free": "写下你的回答",
+  "yaya.ask.skipped": "已跳过",
+  "yaya.ask.progress": "已答 {n}/{total}",
+  "yaya.ask.dismiss": "不回答",
+  "yaya.ask.submit": "提交"
+}

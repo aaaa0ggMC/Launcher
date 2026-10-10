@@ -12,7 +12,8 @@ import {
   applyInlineTokensHtml,
   fenceLangs,
   fenceViewFor,
-  messageActions
+  messageActions,
+  toolCardFor
 } from './plugin-ui-registry'
 import type { MessageAction, MessageActionContext } from './plugin-ui'
 import './tokens.css'
@@ -110,15 +111,19 @@ const answerSegments = computed(() =>
  * 过程块与 AI 中途说的话交错显示（说的话不再藏进过程卡片，只有思考 / 工具调用收起）。
  * 说的话与最终回答用同一套 Markdown 分段（插件代码块照样接管）。
  */
+const isCardTool = (name: string): boolean => toolCardFor(name) !== null
 const segments = computed(() =>
   showProcess.value || props.turn.cards.length
-    ? turnSegments(props.turn).map((seg) =>
+    ? turnSegments(props.turn, 'before', isCardTool).map((seg) =>
         seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
       )
     : []
 )
 /** 回答之后的过程块 / 卡片（按过程记录在回答之后的步骤） */
-const segmentsAfter = computed(() => (props.turn.workflow ? turnSegments(props.turn, 'after') : []))
+const segmentsAfter = computed(() =>
+  props.turn.workflow ? turnSegments(props.turn, 'after', isCardTool) : []
+)
+const sessionId = computed(() => props.turn.steps[0]?.sessionId ?? '')
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
     if (segments.value[i].kind === 'process') return segments.value[i].key
@@ -263,6 +268,15 @@ async function copyTurn(): Promise<void> {
             :preview-steps="previewSteps"
           />
           <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
+          <component
+            :is="toolCardFor(seg.call.name)?.component"
+            v-else-if="seg.kind === 'toolcard'"
+            :call="seg.call"
+            :plugin-id="toolCardFor(seg.call.name)?.pluginId"
+            :tool-name="toolCardFor(seg.call.name)?.toolName"
+            :session-id="sessionId"
+            :live="live"
+          />
           <div v-else-if="'parts' in seg" class="narration">
             <template v-for="(part, i) in seg.parts" :key="i">
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
@@ -316,6 +330,15 @@ async function copyTurn(): Promise<void> {
             :preview-steps="previewSteps"
           />
           <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
+          <component
+            :is="toolCardFor(seg.call.name)?.component"
+            v-else-if="seg.kind === 'toolcard'"
+            :call="seg.call"
+            :plugin-id="toolCardFor(seg.call.name)?.pluginId"
+            :tool-name="toolCardFor(seg.call.name)?.toolName"
+            :session-id="sessionId"
+            :live="live"
+          />
         </template>
 
         <SearchSources v-if="turnSearch" :search="turnSearch" />

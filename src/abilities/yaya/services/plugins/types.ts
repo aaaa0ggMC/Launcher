@@ -115,6 +115,8 @@ export interface PluginGroup {
 export interface ToolRunContext {
   sessionId: string
   pluginId: string
+  /** 这次工具调用的 id（toolCall.id；界面按它找到对应的调用，如 ask 插件的提问卡片） */
+  callId?: string
   signal: AbortSignal
   /** 本插件的配置值（默认值已填好，secret 已解密）；插件没有配置时为 {} */
   config?: Record<string, unknown>
