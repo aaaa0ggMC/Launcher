@@ -19,6 +19,7 @@ import {
   handleDatagram,
   loadDiscovererConfig,
   sendAnnounce,
+  sendBroadcast,
   sendVerify,
   setScanActive,
   shouldAutoVerify,
@@ -89,13 +90,9 @@ registerJobHandler('discoverer.scan', async (control: JobControl) => {
     if (stopped) return
     let res: ReturnType<typeof handleDatagram> = null
     try {
-      res = handleDatagram(msg, rinfo.address, (payload) => {
-        try {
-          socket.send(payload, cfg.port, '255.255.255.255')
-        } catch {
-          /* socket closing */
-        }
-      })
+      res = handleDatagram(msg, rinfo.address, (payload) =>
+        sendBroadcast(socket, payload, cfg.port)
+      )
     } catch (e) {
       log.warn('handle datagram failed', { error: e instanceof Error ? e.message : String(e) })
       return

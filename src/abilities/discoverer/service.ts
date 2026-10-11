@@ -30,6 +30,7 @@ import {
   encodeAnnounce,
   encodeVerify,
   randomVerifyPadding,
+  subnetBroadcast,
   verifyFresh,
   type AnnouncePayload,
   type FlavorCode,
@@ -183,6 +184,64 @@ export function localAddresses(): { ipv4: string; ipv6: string } {
     }
   }
   return { ipv4: bestV4?.addr ?? '', ipv6: v6 }
+}
+
+/**
+ * 广播报文要发的目标地址列表。默认的 `255.255.255.255` 是「受限广播」，在装了
+ * 代理 TUN（Clash / FlClash 等）的机器上会被其策略路由劫持、根本出不了物理网卡
+ * （`ip route get 255.255.255.255` → 代理设备）。子网定向广播（如 `192.168.7.255`）
+ * 在 main 表里有连通的明细路由，能绕过代理直达本网段，因此对每块真实网卡都发一份，
+ * 最后再兜底受限广播（没装代理的简单网络照旧可用）。
+ */
+export function broadcastTargets(): string[] {
+  const out = new Set<string>()
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    if (VIRTUAL_IFACE.test(name)) continue
+    for (const a of addrs ?? []) {
+      if (a.internal || a.family !== 'IPv4' || typeof a.netmask !== 'string') continue
+      const b = subnetBroadcast(a.address, a.netmask)
+      if (b) out.add(b)
+    }
+  }
+  out.add('255.255.255.255')
+  return [...out]
+}
+
+/**
+ * 把一份报文发到所有候选广播地址（各网卡子网广播 + 受限广播）。每个目标独立发送、
+ * 失败只记日志不抛出；`onDone` 在全部发送收尾后回调，`hadError` 表示是否至少有一个失败。
+ */
+export function sendBroadcast(
+  socket: Socket,
+  buf: Buffer,
+  port: number,
+  onDone?: (hadError: boolean) => void
+): void {
+  const targets = broadcastTargets()
+  let remaining = targets.length
+  let hadError = false
+  const finish = (): void => {
+    remaining -= 1
+    if (remaining === 0) onDone?.(hadError)
+  }
+  for (const target of targets) {
+    try {
+      socket.send(buf, port, target, (e) => {
+        if (e) {
+          hadError = true
+          log.warn('broadcast send failed', { target, error: e.message })
+        }
+        finish()
+      })
+    } catch (e) {
+      hadError = true
+      log.warn('broadcast send threw', {
+        target,
+        error: e instanceof Error ? e.message : String(e)
+      })
+      finish()
+    }
+  }
 }
 
 /** 本机平台 / 桌面环境枚举（报文里 2 个字节，UI 据此选图标）。 */
@@ -371,13 +430,8 @@ export function buildAnnounce(): Buffer | null {
 export function sendAnnounce(socket: Socket, port: number): boolean {
   const buf = buildAnnounce()
   if (!buf) return false
-  try {
-    socket.send(buf, port, '255.255.255.255')
-    return true
-  } catch (e) {
-    log.warn('announce send failed', { error: e instanceof Error ? e.message : String(e) })
-    return false
-  }
+  sendBroadcast(socket, buf, port)
+  return true
 }
 
 /** 在已绑定 / 已开广播的 socket 上发一条验证报文。 */
@@ -386,13 +440,8 @@ export function sendVerify(socket: Socket, port: number, kind: 1 | 2): boolean {
   const password = verifyPasswordPlain()
   if (!cfg?.deviceName || !password) return false
   const buf = encodeVerify(password, kind, cfg.deviceName, Date.now(), randomVerifyPadding())
-  try {
-    socket.send(buf, port, '255.255.255.255')
-    return true
-  } catch (e) {
-    log.warn('verify send failed', { error: e instanceof Error ? e.message : String(e) })
-    return false
-  }
+  sendBroadcast(socket, buf, port)
+  return true
 }
 
 /** 一次性广播一条认识报文（不依赖扫描作业；「发送一次」按钮用）。 */
@@ -452,32 +501,17 @@ async function oneShotSend(buf: Buffer, port: number, listenMs: number): Promise
     if (bound) {
       socket.on('message', (msg: Buffer, rinfo: { address: string }) => {
         try {
-          handleDatagram(msg, rinfo.address, (payload) => {
-            try {
-              socket.send(payload, port, '255.255.255.255')
-            } catch {
-              /* closing */
-            }
-          })
+          handleDatagram(msg, rinfo.address, (payload) => sendBroadcast(socket, payload, port))
         } catch (e) {
           log.warn('one-shot handle failed', { error: e instanceof Error ? e.message : String(e) })
         }
       })
     }
-    try {
-      socket.send(buf, port, '255.255.255.255', (e) => {
-        // 发送失败立即收尾；成功则（绑了端口的）继续监听到 listenMs 等应答
-        if (e) {
-          log.warn('one-shot send error', { error: e.message })
-          done(false)
-        } else if (!bound) {
-          done(true)
-        }
-      })
-    } catch (e) {
-      log.warn('one-shot send threw', { error: e instanceof Error ? e.message : String(e) })
-      done(false)
-    }
+    // 发送失败立即收尾；成功则（绑了端口的）继续监听到 listenMs 等应答
+    sendBroadcast(socket, buf, port, (hadError) => {
+      if (hadError) done(false)
+      else if (!bound) done(true)
+    })
   })
 }
 

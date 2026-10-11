@@ -1,7 +1,8 @@
 /**
  * discoverer 的报文编解码 —— 纯函数，不依赖 electron，可单测（packet.test.ts）。
  *
- * 两种报文都走 UDP 广播（255.255.255.255:<port>），只在同一广播域内传播。
+ * 两种报文都走 UDP 广播（受限广播 255.255.255.255 或网卡的子网定向广播，见
+ * service.ts 的 broadcastTargets），只在同一广播域内传播。
  *
  * ── 认识报文（announce，「简单认识」）──────────────────────────────
  *
@@ -98,6 +99,41 @@ export function ipv4ToBytes(addr: string): Buffer {
 export function bytesToIpv4(buf: Buffer): string {
   if (buf.length < 4) return '0.0.0.0'
   return `${buf[0]}.${buf[1]}.${buf[2]}.${buf[3]}`
+}
+
+/** 点分十进制 → 4 字节；非法输入返回 null（与宽容的 ipv4ToBytes 区分开）。 */
+export function parseIpv4(addr: string): Buffer | null {
+  const parts = addr.trim().split('.')
+  if (parts.length !== 4) return null
+  const out = Buffer.alloc(4)
+  for (let i = 0; i < 4; i++) {
+    if (!/^\d{1,3}$/.test(parts[i])) return null
+    const n = Number(parts[i])
+    if (n > 255) return null
+    out[i] = n
+  }
+  return out
+}
+
+/**
+ * 子网定向广播地址：`地址 & 掩码 | ~掩码`（如 `192.168.5.10` + `255.255.248.0`
+ * → `192.168.7.255`）。地址 / 掩码非法、`/0` 掩码、`/32` 掩码返回 null。
+ */
+export function subnetBroadcast(addr: string, netmask: string): string | null {
+  if (!addr || !netmask) return null
+  const a = parseIpv4(addr)
+  const m = parseIpv4(netmask)
+  if (!a || !m) return null
+  let allZero = true
+  let allOne = true
+  for (let i = 0; i < 4; i++) {
+    if (m[i] !== 0) allZero = false
+    if (m[i] !== 255) allOne = false
+  }
+  if (allZero || allOne) return null
+  const out = Buffer.alloc(4)
+  for (let i = 0; i < 4; i++) out[i] = (a[i] & m[i]) | (~m[i] & 0xff)
+  return bytesToIpv4(out)
 }
 
 /**

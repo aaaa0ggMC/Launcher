@@ -14,7 +14,9 @@ import {
   encodeVerify,
   ipv4ToBytes,
   ipv6ToBytes,
+  parseIpv4,
   randomVerifyPadding,
+  subnetBroadcast,
   verifyFresh
 } from './packet'
 
@@ -110,6 +112,27 @@ describe('discoverer ip helpers', () => {
     assert.equal(bytesToIpv4(ipv4ToBytes('10.0.0.1')), '10.0.0.1')
     assert.equal(bytesToIpv4(ipv4ToBytes('255.255.255.0')), '255.255.255.0')
     assert.equal(bytesToIpv4(ipv4ToBytes('bogus')), '0.0.0.0')
+  })
+
+  test('parseIpv4 rejects malformed input', () => {
+    assert.deepEqual(parseIpv4('192.168.1.201'), Buffer.from([192, 168, 1, 201]))
+    assert.equal(parseIpv4('192.168.1'), null)
+    assert.equal(parseIpv4('192.168.1.256'), null)
+    assert.equal(parseIpv4('192.168.1.-1'), null)
+    assert.equal(parseIpv4('192.168.1.x'), null)
+    assert.equal(parseIpv4(''), null)
+  })
+
+  test('subnetBroadcast computes the directed broadcast address', () => {
+    // /21：192.168.5.10 + 255.255.248.0 → 192.168.7.255
+    assert.equal(subnetBroadcast('192.168.5.10', '255.255.248.0'), '192.168.7.255')
+    assert.equal(subnetBroadcast('192.168.1.5', '255.255.255.0'), '192.168.1.255')
+    assert.equal(subnetBroadcast('172.16.3.9', '255.255.0.0'), '172.16.255.255')
+    // /0、/32、非法输入都没有有意义的广播地址
+    assert.equal(subnetBroadcast('10.0.0.1', '0.0.0.0'), null)
+    assert.equal(subnetBroadcast('10.0.0.1', '255.255.255.255'), null)
+    assert.equal(subnetBroadcast('', '255.255.255.0'), null)
+    assert.equal(subnetBroadcast('10.0.0.1', 'nope'), null)
   })
 
   test('ipv6 bytes roundtrip with compression', () => {
