@@ -130,11 +130,16 @@ function onPopState(): void {
   internalDepth = entry.internal ? Math.max(0, internalDepth - 1) : 0
   currentEntry = entry
   inPopState = true
+  let handled = false
   try {
-    getBackHandler()?.()
+    handled = getBackHandler()?.() ?? false
   } finally {
     inPopState = false
   }
+  // 处理器没得弹（已到该 ability 的内部根，或 history 里是失效的旧层级）：这次
+  // 返回其实要跨 ability —— App 宿主的 requestBack 就是这么接的，浏览器宿主同样
+  // 继续往回弹，否则按键「按了没反应」。根条目（ck=0）不再往下弹，交给浏览器离开。
+  if (!handled && entry.ck !== 0) window.history.back()
 }
 
 /**
@@ -193,7 +198,9 @@ export function pushInternal(): void {
 export function resetInternal(): void {
   if (!inited) return
   if (host === 'web' && internalDepth > 0) {
-    syncPops = 1
+    // `history.go(-n)` 会连续触发 n 次 popstate：补记几层就抵消几层，
+    // 少记一次都会把补偿当成真实返回，凭空多弹一级
+    syncPops = internalDepth
     window.history.go(-internalDepth)
   }
   internalDepth = 0

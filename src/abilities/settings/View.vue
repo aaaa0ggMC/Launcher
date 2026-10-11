@@ -203,12 +203,14 @@ const pickerItems = computed(() =>
   ])
 )
 
-function selectCategory(id: string): void {
+function selectCategory(id: string, mode: 'go' | 'reset' = 'go'): void {
   const el = findScroller()
   const prev = activeCategoryId.value
   if (el && prev && !searching.value) mem.scrolls[prev] = el.scrollTop
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
-  catNav.go(id)
+  // `reset` = 把它当内部根（回收旧层级），用于跨能力着陆；`go` = 正常入链一级
+  if (mode === 'reset') catNav.reset(id)
+  else catNav.go(id)
   highlight.value = null
   query.value = ''
   // 每个分类回到自己上次的位置（没来过 = 顶部），渲染后再定位
@@ -221,14 +223,18 @@ function selectCategory(id: string): void {
 /**
  * Called by the shell when another ability opens its settings
  * (`useSettings().open(...)` → `activate('settings', { category, item })`).
- * 着陆也走 `go`（入链一级）：返回时先弹回着陆前的分类，再跨 ability——
- * 不用 reset 是因为那会让 history 里残留失效条目，返回键出现「按了没反应」。
+ *
+ * 着陆是「新的内部根」（`reset`，不再入链一级）：返回键直接跨 ability 回到来源页。
+ * 之前走 `go` 会多压一层「着陆前记住的分类」（通常是外观），返回先弹回它、再跨
+ * ability，跟来源页差一层——用户体感就是「返回没回上一级，跑回设置的外观去了」。
+ * `reset` 会连带回收对应的 history 层级（`back-nav` 的 `resetInternal`），不会残留
+ * 失效条目；历史里更早的设置层级在跨能力返回时由外壳继续向后弹（见 `onPopState`）。
  */
 function onActivate(target: unknown): void {
   const tgt = (target ?? {}) as { category?: unknown; item?: unknown }
   const id = typeof tgt.category === 'string' ? tgt.category : null
   if (!id || !sections.value.some((c) => c.id === id)) return
-  selectCategory(id)
+  selectCategory(id, 'reset')
   highlight.value = typeof tgt.item === 'string' ? tgt.item : null
 }
 
