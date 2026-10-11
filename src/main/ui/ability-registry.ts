@@ -317,7 +317,9 @@ export function resolveSidebarAbilities(platform: string): AbilityLoadReport {
       keepAlive: meta.keepAlive !== false,
       shareTarget: meta.shareTarget === true,
       folder,
-      component: meta.component
+      // 异步页面组件（defineAsyncComponent 产物）绝不能进响应式容器：被 ref/reactive
+      // 深代理会触发 Vue 的 "Component that was made a reactive object" 警告。
+      component: markRaw(meta.component)
     })
   }
   loaded.sort((a, b) => {
