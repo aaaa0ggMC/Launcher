@@ -543,7 +543,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | :--- | :--------------------------- | :---: | :---------: | :--------------------------------------------------------------------------------------- | :---- |
 | 1    | **Waifu 拟真对话**           |  中   |  **最高**   | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口  | `[x]` |
 | 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[x]` |
-| 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[ ]` |
+| 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[x]` |
 | 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[ ]` |
 | 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[ ]` |
 | 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置                          | `[ ]` |
@@ -612,6 +612,17 @@ Node 层：Android Controller —— 普通 YayaPlugin
   - 未验证（留待以后）：图片表情包的**界面**路径（`<img>` 芯片与内联）——用临时图标包单独验一次
 - [ ] **2. React**：`reactionSets` + `meta.reactions` + `yaya.reaction-set` + 表情条与选择器（图标包：emoji 集 + `gi:` 单色 SVG）
 - [ ] **3. Waifu × React**：`meta.reactionNote` 注入（复用 mentionNote 的白名单模式）
+- [x] **3. Waifu × React 打通**（2026-10-11 完成，提交 `d414170`）
+  - 气泡级回应：`MessageReaction.segment?` + `yaya.reaction-set --segment`；`mergeReactions` 只换「自己那一份」、
+    其余原位原顺序（`reactionNote` 才稳定）；分段时每个气泡一条 `ReactionBar`，消息级那条只在未分段或
+    已有消息级回应时才额外出现
+  - 回传：`reactionNote(meta)` 在 `sanitizeHistory` 里拼到对应 assistant 消息尾部——
+    `[user reacted to this message: …]` / `[user reacted to your segment "b1": …]`；没点过 = 空串、一个字节不变。
+    新增隐私 scope `yaya.reactions`（personal，命令 `reads` 声明）
+  - **DeepSeek 真实模型实测**（用户提供的 key，只写在 `/tmp` 隔离配置、测完已清除）：真实回复自动切成 4 个气泡
+    → 对第 1 段点 👍 → 追问「我点了哪一段、什么表情」，模型答「你点的是 b1，也就是第一段，表情是 👍」并原样引用
+    那段话 → 回传链路通；截图 `screenshots/waifu/12–13`
+  - 检查：`typecheck` / `eslint` / `pnpm test` **840 pass / 0 fail**
 - [ ] **4. InteractGame**：成对标签 + 同卡片增量 + 点击回传（生成 `<g||move …/>` 用户消息走正常发送链路）
 - [ ] **5. Regex**：规则 `{ pattern, flags, replacement, target: user|ai|both, mode: visual|raw, format: regex|html }`
 - [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
