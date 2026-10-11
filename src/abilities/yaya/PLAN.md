@@ -635,6 +635,21 @@ Node 层：Android Controller —— 普通 YayaPlugin
   - 检查：`typecheck`（268 模板 0 错）/ `eslint` / `pnpm test` 842 pass 0 fail
   - 已知限制：AI 偶尔旁白与 state 不一致（这次说「占中间」却把 X 写在第 9 格）——渲染忠实于 state，
     属模型保真度问题；棋类目前只接了井字棋（标记名 `ttt`），加棋类 = 再注册一个 `blockViews` 名字
+
+### 7.5 竖屏移动端回归（2026-10-11，playwright `--mobile` 360×732 / resize 400×800 与 650×900）
+
+截图 `screenshots/waifu/mobile/01–12`（不入库）。**每档宽度 `scrollWidth - clientWidth === 0`（无横向溢出）**。
+
+- 聊天页：waifu 多气泡、气泡级表情芯片（图片 / emoji 两种形态）、触屏常显操作条与表情「+」、
+  「回到底部」FAB、输入框与发送（**触屏 Enter = 换行，必须点发送**——测试时踩过）、停止按钮 ✓
+- 表情选择器：198×405，落在 360 视口内（x=23，右缘 221），8 项每行 ≈50px 可点 ✓
+- 井字棋：三列自适应、旁白在上、旧盘「这盘已在下面继续」只读、走子回声「你落子第 N 格」；
+  **模型自己在新回复里又带了棋盘**（正好是「同一张卡继续下」）✓
+- 流式：`对方输入中… ●●●` 实测抓到（短回复窗口只有 ~600ms，用 200ms 采样命中）→ 截图 11；
+  回复切成 2 个气泡、无原始标记 ✓
+- 设置：分类下拉 + 搜索一行式、主题卡两列、YAYA 插件列表、拟真对话详情**单列**（<640px 规则）✓
+- 修了一处：棋盘卡片在宽屏被 `stretch` 拉满 → `align-self: flex-start` + `width:248px/max-width:100%`
+  （避免 width:100% 与 flex-start 循环依赖）
 - [ ] **5. Regex**：规则 `{ pattern, flags, replacement, target: user|ai|both, mode: visual|raw, format: regex|html }`
 - [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
 - [ ] **7. Forge**：加载器 + 解压边界 + `guard(SCOPE_EXEC)` 确认；渲染端动态组件放二期
