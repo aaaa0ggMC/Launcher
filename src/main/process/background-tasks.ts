@@ -101,18 +101,42 @@ export type JobHandler = (
  *  handler as unknown (mode-gated features are not startable). */
 export type JobHandlerGate = () => boolean | Promise<boolean>
 
+/** Per-handler options (3rd arg of `registerJobHandler`). */
+export interface JobHandlerOptions {
+  /** Runtime gate (see `JobHandlerGate`). */
+  gate?: JobHandlerGate
+  /**
+   * Whether quitting must ask before killing this task (default true). Set
+   * `false` for jobs whose result is not worth guarding (LAN beacon, cache
+   * warmer, ...): whichever way it was started (page button, CLI, boot
+   * service) it is then terminated silently on quit. An explicit
+   * `startJobByName` `opts.mustComplete` still wins.
+   */
+  mustComplete?: boolean
+}
+
 interface RegisteredJob {
   handler: JobHandler
   gate?: JobHandlerGate
+  mustComplete?: boolean
 }
 
 const jobHandlers = new Map<string, RegisteredJob>()
 
-/** Register a named job handler (called once at ability/service load). An
- *  optional `gate` controls whether the handler is startable right now. */
-export function registerJobHandler(name: string, handler: JobHandler, gate?: JobHandlerGate): void {
+/**
+ * Register a named job handler (called once at ability/service load). The
+ * optional 3rd argument is either a `gate` function (legacy positional form) or
+ * a `JobHandlerOptions` bag (`{ gate?, mustComplete? }`).
+ */
+export function registerJobHandler(
+  name: string,
+  handler: JobHandler,
+  options?: JobHandlerGate | JobHandlerOptions
+): void {
   if (jobHandlers.has(name)) throw new Error(`重复作业处理器: ${name}`)
-  jobHandlers.set(name, { handler, gate })
+  const opts: JobHandlerOptions =
+    typeof options === 'function' ? { gate: options } : (options ?? {})
+  jobHandlers.set(name, { handler, gate: opts.gate, mustComplete: opts.mustComplete })
 }
 
 /** Registered named job handlers, sorted (for `ability.describe`). */
@@ -1042,8 +1066,11 @@ export function startJobTask(opts: StartJobOptions): JobControl {
  * → task finishes; rejecting → task marked errored.
  *
  * `opts.mustComplete` (default true) marks the task as expendable for the
- * quit-confirmation — used by boot services (see `boot-services.ts`); the
- * user-facing `background.job` command never sets it.
+ * quit-confirmation. Resolution order: explicit `opts.mustComplete` → the
+ * handler's own `registerJobHandler(..., { mustComplete })` → true. Boot
+ * services pass it per-service (see `boot-services.ts`); the generic
+ * `background.job` command never sets it, so a handler that is inherently
+ * expendable should declare `mustComplete: false` at registration.
  */
 export async function startJobByName(
   name: string,
@@ -1076,7 +1103,7 @@ export async function startJobByName(
     description: args.description ? String(args.description) : undefined,
     view: typeof args.view === 'string' ? args.view : 'log',
     tags: Array.isArray(rawTags) ? rawTags.map((x) => String(x)) : undefined,
-    mustComplete: opts.mustComplete !== false,
+    mustComplete: opts.mustComplete ?? reg.mustComplete ?? true,
     onCancel: undefined
   })
   // Fire-and-forget: do not await the job — return control to the caller.

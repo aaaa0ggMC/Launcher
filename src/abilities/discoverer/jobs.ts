@@ -32,7 +32,11 @@ const log = makeLogger('discoverer-scan')
 /** 同一进程内只允许一个扫描作业（端口会被第二个实例绑定失败，提前拦下） */
 let scanRunning = false
 
-registerJobHandler('discoverer.scan', async (control: JobControl) => {
+/**
+ * 局域网信标：内容仅设备名与 IP，丢了无所谓 —— `mustComplete: false` 让任何启动途径
+ *（页面「开始发现」/ CLI / 开机服务）退出时都直接终结、不弹确认框。
+ */
+const scanHandler = async (control: JobControl): Promise<void> => {
   const cfg = await loadDiscovererConfig()
   if (!cfg.deviceName) {
     control.pushLine(
@@ -142,4 +146,6 @@ registerJobHandler('discoverer.scan', async (control: JobControl) => {
   setScanActive(false)
   control.pushLine(t('discoverer.log.stopped', '设备发现已停止'))
   control.finish('exited')
-})
+}
+
+registerJobHandler('discoverer.scan', scanHandler, { mustComplete: false })

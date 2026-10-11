@@ -392,10 +392,10 @@ Ability 可以向 Launcher 申请「开机自启服务」：启动 Launcher 时�
 - **申请**：ability 的 `commands.ts`（主进程唯一加载点）里调 `registerBootService({ id, label, job, mustComplete? })`；`job` 必须是本能力 `registerJobHandler` 注册过的作业名。重复 id 抛错。
 - **开关**：默认**全部关闭**；用户在 设置 → 开机服务（settings 能力注入的分类，组件 `items/BootServicesSection.vue`）逐项打开，状态存全局 `config.json` 的 `boot`（`{ '<服务 id>': true }`），命令 `boot.list` / `boot.set`（`boot.set` 要 `SCOPE_CONTROL`）。改动**下一次启动生效**。
 - **启动**：模块加载时自注册 startup hook（`registerAbilityCommands()` 之后、首个窗口创建前跑；Electron 与无头宿主同序），按 `boot` 表 `startJobByName(job, { name: label })`，同进程不重复启动。
-- **`mustComplete`（默认 false）决定退出时的行为**：
-  - `true` → 任务没跑完关程序会弹确认框（和现在行为一样，计入 `runningTaskCount()`）；
-  - `false` → 关程序直接终结、不弹窗（`BtTaskInfo.mustComplete` / `startJobByName(name, args, { mustComplete })`，仅 boot 路径会传，`background.job` 不暴露该参数）——适合「内容不重要」的常驻任务（局域网广播、缓存预热）。
-- 参考实现：`discoverer`（局域网设备发现，`mustComplete: false`）。
+- **`mustComplete` 决定退出时的行为**（默认 `true` = 计入退出确认）：`runningTaskCount()` 直接跳过 `false` 的任务，关程序即终结、不弹窗。
+  - 解析顺序：`startJobByName(name, args, { mustComplete })` 的显式入参 → 作业注册时 `registerJobHandler(name, handler, { mustComplete })` 的声明 → `true`。
+  - 只该由「内容不重要」的常驻任务（局域网广播、缓存预热）声明为 `false`；boot 服务另有自己的 `mustComplete`（默认 `false`，见 `registerBootService`）。
+- 参考实现：`discoverer`（`jobs.ts` 注册时声明 `{ mustComplete: false }`，页面 / CLI / 开机服务任何途径启动都不拦退出）。
 
 ### 主题 / 配色方案
 
@@ -538,7 +538,7 @@ Ability 可以向 Launcher 申请「开机自启服务」：启动 Launcher 时�
 - 两类任务：
   - **进程任务** `startProcessTask({ name, description, argv, cwd, env, view? })` — 真实子进程，piped stdio 环形缓冲，资源统计（CPU/内存经跨平台的 `pidusage`，GPU 显存经 nvidia-smi，缺失时降级留空），支持 stdin 写入与信号（SIGINT 等）。apps 的 `exec.background: true` 就是走这条路。
   - **作业任务** `startJobTask({ name, description, onCancel, view? })` — 无进程的抽象长跑操作，返回 `JobControl`（`pushLine` / `push` / `setProgress` / `finish` / `setCancel`）。适用于下载、转换等"前端发起、后端执行"的工作。
-- **命名作业**：`registerJobHandler(name, handler)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
+- **命名作业**：`registerJobHandler(name, handler, opts?)` 注册后端函数，前端经 `background.job --name <handler> --args <json>`（或 preload `btJob`）触发。`opts` 为 `{ gate?, mustComplete? }`（旧写法直接传 gate 函数仍兼容）：`gate` 为假时视为未注册（模式门控）；`mustComplete: false` 的作业退出时不弹确认框（见「开机服务」一节的解析顺序）。handler 在后台运行（fire-and-forget，不阻塞 IPC），任务自动随 resolve/reject 标记 `exited`/`error`。
   - **⚠️ IPC 参数必须是可克隆的普通对象**：Electron 的 structured clone 无法序列化 Vue reactive proxy（会抛 `An object could not be cloned.`）。渲染端调用 `btJob`/`command` 传参前，**只要参数来自 `ref`/`computed` 的取值（数组/对象），必须先深拷贝**：`JSON.parse(JSON.stringify(data))`。尤其注意嵌套在消息里的 `playlist`/`songs` 等数组字段——`{ name, path }` 单层手动展开不一定够，统一用 JSON 深拷贝最稳妥。
 - **可定制 View**：任务带 `view` id，全局面板按 `view` 渲染详情区（`src/main/ui/bt-views.ts` 注册表）。`log`（默认控制台 + stdin 输入）内置；任意能力可 `registerBtView('custom', factory)` 注册自定义展示（如结构化 response 视图）。**终止/移除等生命周期按钮属于面板，不属于 view**。
 - **消息类型**：输出不仅是文本行——`JobControl.push({ line | data, label?, encoding?, mime?, progress? })` 支持结构化数据与 base64 二进制。`BtOutputMessage` 的 `line` 渲染为控制台行，`data` 由 view 按需渲染。
