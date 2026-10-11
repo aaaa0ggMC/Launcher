@@ -539,16 +539,16 @@ Node 层：Android Controller —— 普通 YayaPlugin
 
 ### 7.1 顺序与理由
 
-| # | 里程碑 | 难度 | 对 SDK 指导 | 主要产出 | 状态 |
-| :-- | :-- | :--: | :--: | :-- | :-- |
-| 1 | **Waifu 拟真对话** | 中 | **最高** | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口 | `[ ]` |
-| 2 | **Emoji React** | 易 | 高 | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[ ]` |
-| 3 | Waifu × React 打通 | 易 | 高 | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI | `[ ]` |
-| 4 | **InteractGame（井字棋等）** | 中 | **高** | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性 | `[ ]` |
-| 5 | **Regex 规则** | 易-中 | 中 | AI 出库替换时机、列表型配置、HTML 显示替换 | `[ ]` |
-| 6 | **信息源 `fetch_info`** | 中 | 中 | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置 | `[ ]` |
-| 7 | **Forge 动态 JS 插件** | 难 | 高但依赖 | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动 | `[ ]` |
-| 插队 | Pet 宠物（Outsider） | 易 | 低 | 零依赖休息件，随时插 | `[ ]` |
+| #    | 里程碑                       | 难度  | 对 SDK 指导 | 主要产出                                                                                 | 状态  |
+| :--- | :--------------------------- | :---: | :---------: | :--------------------------------------------------------------------------------------- | :---- |
+| 1    | **Waifu 拟真对话**           |  中   |  **最高**   | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口  | `[x]` |
+| 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[ ]` |
+| 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[ ]` |
+| 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[ ]` |
+| 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[ ]` |
+| 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置                          | `[ ]` |
+| 7    | **Forge 动态 JS 插件**       |  难   |  高但依赖   | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动                                      | `[ ]` |
+| 插队 | Pet 宠物（Outsider）         |  易   |     低      | 零依赖休息件，随时插                                                                     | `[ ]` |
 
 排序逻辑：指导意义高的先做（Waifu / React / 棋盘），好做的穿插当节奏调节（Regex / 信息源 / Pet），重且依赖别人的放最后（Forge）。
 
@@ -556,16 +556,16 @@ Node 层：Android Controller —— 普通 YayaPlugin
 
 `AssistantTurn.vue` 的实际结构：`segments(process│card│toolcard│narration) → 挂起审批 ToolCallRow → answerSegments → segmentsAfter → SearchSources → 打字点 → 提示条`，之后是 `turn-actions(复制│重新生成│插件按钮│更多│usage)`。
 
-| 冲突对象 | Naive 做法的问题 | 正交做法（本计划采用） |
-| :-- | :-- | :-- |
-| speech 等插件的 `messageActions` | `hideActions` 一把藏掉 → 朗读按钮消失 | chrome **只能裁决框架自有物**（复制 / 重新生成 / 更多 / usage）；插件按钮由自身 `visible` 决定，用户要全藏就走**右键菜单**（`View.vue` 本就往菜单里塞 messageActions）——隐藏 ≠ 功能消失 |
-| 工具审批 | 藏过程块把审批一起藏掉 → AI 永远等不到批准 | 审批是气泡外独立 `ToolCallRow`；**审批 / `toolcard`（ask 提问）/ 数据卡永不受 chrome 影响**——它们是内容不是装饰 |
-| WorkflowCard 过程块 | 直接不渲染 → 丢过程记录 | 复用它已有的折叠态：`process: 'collapsed'` 默认收起、`'hidden'` 才移出流，都可展开回去 |
-| mermaid / svg / widget（fences）、secret / roleplay（inlineTokens） | 切分在 markdown 之后做会切碎代码块里的文本、或与 token 替换抢同一段 | 切分在**最顶层**（markdown 之前），跳过 fence 与行内代码；每个气泡内部照旧走 `renderSegments → fence` 与 `applyInlineTokensHtml` |
-| 多插件争同一标记 | 先后说不清 | SDK `inlineTags` 按 **prefix** 分派，同前缀按 pluginId 字母序取第一个（沿用 fence 先例） |
-| 复制 / 导出 / 菜单 | 复制出去带标记原文 | 标记插件经**显示文本出口**剥离标记；**数据库与模型历史永远是原文**（铁律） |
-| 用户输入 | 用户随口打了标记被切 | `roles: ['assistant']`，用户消息不解析（`inlineTokens` 走用户侧，互不越界） |
-| 消息 id vs 气泡 id | 两套主键打架 | 消息 UUID（落库、react 记录）；**气泡 id 纯显示层**，只在 `reactionNote` 里作为描述回传 |
+| 冲突对象                                                            | Naive 做法的问题                                                    | 正交做法（本计划采用）                                                                                                                                                                  |
+| :------------------------------------------------------------------ | :------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| speech 等插件的 `messageActions`                                    | `hideActions` 一把藏掉 → 朗读按钮消失                               | chrome **只能裁决框架自有物**（复制 / 重新生成 / 更多 / usage）；插件按钮由自身 `visible` 决定，用户要全藏就走**右键菜单**（`View.vue` 本就往菜单里塞 messageActions）——隐藏 ≠ 功能消失 |
+| 工具审批                                                            | 藏过程块把审批一起藏掉 → AI 永远等不到批准                          | 审批是气泡外独立 `ToolCallRow`；**审批 / `toolcard`（ask 提问）/ 数据卡永不受 chrome 影响**——它们是内容不是装饰                                                                         |
+| WorkflowCard 过程块                                                 | 直接不渲染 → 丢过程记录                                             | 复用它已有的折叠态：`process: 'collapsed'` 默认收起、`'hidden'` 才移出流，都可展开回去                                                                                                  |
+| mermaid / svg / widget（fences）、secret / roleplay（inlineTokens） | 切分在 markdown 之后做会切碎代码块里的文本、或与 token 替换抢同一段 | 切分在**最顶层**（markdown 之前），跳过 fence 与行内代码；每个气泡内部照旧走 `renderSegments → fence` 与 `applyInlineTokensHtml`                                                        |
+| 多插件争同一标记                                                    | 先后说不清                                                          | SDK `inlineTags` 按 **prefix** 分派，同前缀按 pluginId 字母序取第一个（沿用 fence 先例）                                                                                                |
+| 复制 / 导出 / 菜单                                                  | 复制出去带标记原文                                                  | 标记插件经**显示文本出口**剥离标记；**数据库与模型历史永远是原文**（铁律）                                                                                                              |
+| 用户输入                                                            | 用户随口打了标记被切                                                | `roles: ['assistant']`，用户消息不解析（`inlineTokens` 走用户侧，互不越界）                                                                                                             |
+| 消息 id vs 气泡 id                                                  | 两套主键打架                                                        | 消息 UUID（落库、react 记录）；**气泡 id 纯显示层**，只在 `reactionNote` 里作为描述回传                                                                                                 |
 
 硬验收：
 
@@ -587,13 +587,19 @@ Node 层：Android Controller —— 普通 YayaPlugin
 - 每个插件声明自己的前缀（`inlineTags: [{ prefix, kind }]`），棋盘等以后用 `<g||…>` 之类独立命名空间。
 - `<wait>` 也切分（语义就是"停一下、下一条"），容错：`id=` 写法、`wait` 关键字都接受。
 
+**实现期补充的两条决策**：
+
+1. **剥离不看启用状态**（`allChatTagRules`）：`split` / `mark` 这类纯指令标记在插件关掉后照样从显示里剥掉，否则历史消息会露出 `<||…>` 原文；`block` 成对标签是内容载体，关掉时保留原文。分段 / 外观仍严格按启用状态门控。
+2. **撤回只作用于同一条回答内**（按气泡 id 全局匹配该回答），跨消息撤回暂不做；流式中没写完的尾部标记（`<||s`）由 `trimPartialTag` 先藏起来，闭合后再出现。
+
 ### 7.4 进度
 
-- [ ] **1. Waifu 核心**
-  - [ ] 1a `chat-tags.ts` 标记解析 + 气泡分段（纯函数 + 单测：代码块跳过、id 命名、延迟、撤回、流式未闭合）
-  - [ ] 1b SDK：`PluginUi.inlineTags` / `PluginUi.turnChrome` + registry 分派
-  - [ ] 1c `plugins/waifu/`（configSchema + instructions）+ `AssistantTurn.vue` 消费（多气泡渲染、隐藏内置操作栏、输入中标示、复制走显示文本）
-  - [ ] 1d playwright 实测（隔离 HOME、headless 版）：切分、撤回、隐藏操作栏、关掉插件后与今天一致
+- [x] **1. Waifu 核心**（2026-10-11 完成，提交 `2d017bb`→`43be3b0`）
+  - [x] 1a `chat-tags.ts` 标记解析 + 气泡分段（纯函数 + 17 例单测：代码块跳过、id 命名、延迟、撤回、流式未闭合）
+  - [x] 1b SDK：`PluginUi.inlineTags`（按前缀分派）/ `PluginUi.turnChrome` + registry 的 `chatTagRules` / `turnChromeFor` / `allChatTagRules`
+  - [x] 1c `plugins/waifu/`（configSchema 三项 + instructions 约 1041 字）+ `AssistantTurn.vue` 消费（多气泡渲染、隐藏内置操作栏、输入中提示、撤回占位、复制走显示文本）+ `WorkflowCard.openByDefault`
+  - [x] 1d playwright 实测（隔离 HOME + headless + 假 OpenAI 端点流式回复）：切分 / 延迟 / 撤回 / 输入中 / 操作栏隐藏 / **关插件后单气泡 + 标记剥离 + 操作栏恢复** / 设置页插件条目与配置表单，截图 `screenshots/waifu/01–08`（不提交）
+  - 未验证（留待以后）：`process: hidden/open` 需要带工具调用的真实运行；`<||1.2s>` 延迟动画只在代码里；复制结果未逐字比对
 - [ ] **2. React**：`reactionSets` + `meta.reactions` + `yaya.reaction-set` + 表情条与选择器（图标包：emoji 集 + `gi:` 单色 SVG）
 - [ ] **3. Waifu × React**：`meta.reactionNote` 注入（复用 mentionNote 的白名单模式）
 - [ ] **4. InteractGame**：成对标签 + 同卡片增量 + 点击回传（生成 `<g||move …/>` 用户消息走正常发送链路）
