@@ -1,0 +1,10 @@
+{
+  "yaya.plugin.interactgame.label": "In-chat games",
+  "yaya.plugin.interactgame.desc": "Play tic-tac-toe with the AI right in the chat (click a cell to move)",
+  "yaya.game.your_turn": "Your move — click a cell (O)",
+  "yaya.game.ai_think": "AI is thinking…",
+  "yaya.game.you_win": "You win",
+  "yaya.game.ai_win": "AI wins",
+  "yaya.game.draw": "Draw",
+  "yaya.game.cell": "cell {n}"
+}
