@@ -1,26 +1,38 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../../../main/ui/i18n'
 import type { BlockViewProps } from '../../components/plugin-ui'
+import { claimBoard, latestBoardSeq, pendingCell } from './state'
 
 /**
  * 井字棋棋盘（对话内块级小部件）：AI 的 `<g|ttt|STATE|turn=WHO>` 渲染成 3×3 棋盘，
  * 用户点格子 = 发一条 `<g|ttt|move=N>` 用户消息，AI 用新棋盘回。
- * 「增量渲染」就是 `source` 变化 → 只有格子内容重画（key 是稳定下标，棋盘外壳不重挂）；
- * 落子后到新棋盘回来之前整盘只读，防止连点出两步。
+ *
+ * - 增量渲染：`source` 变化只重画格子内容（下标即 key，外壳不重挂）；
+ * - **只有最新那块棋盘可交互**（旧棋盘静止，见 state.ts），新盘一挂载就清掉落子转圈；
+ * - 落子后到新棋盘回来之前整盘只读，防止连点出两步。
  */
 const props = defineProps<BlockViewProps>()
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 
+const mySeq = claimBoard()
+onMounted(() => {
+  latestBoardSeq.value = mySeq
+  pendingCell.value = null
+})
+/** 这块是不是对话里最新的棋盘（不是 → 只读，看下面那块接着下） */
+const isLatest = computed(() => latestBoardSeq.value === mySeq)
 const busy = ref(false)
-/** 已发出、还在等 AI 回棋盘的那一步 */
-const sent = ref<number | null>(null)
+/** 已发出、还在等 AI 回棋盘的那一步（所有棋盘共用一份，新盘挂载即清） */
+const pending = computed(() => (isLatest.value ? pendingCell.value : null))
+
+// 这块棋盘自己更新了（同一轮里状态被刷新）→ 落子等待结束
 watch(
   () => props.source,
   () => {
-    sent.value = null
+    if (pendingCell.value !== null) pendingCell.value = null
   }
 )
 
@@ -54,14 +66,20 @@ const turn = computed<'X' | 'O' | 'end'>(() => {
   return m ? (m[1].toUpperCase() as 'X' | 'O') : 'O'
 })
 const myTurn = computed(
-  () => !props.streaming && !busy.value && sent.value === null && turn.value === 'O'
+  () =>
+    isLatest.value &&
+    !props.streaming &&
+    !busy.value &&
+    pending.value === null &&
+    turn.value === 'O'
 )
 
 const status = computed(() => {
   if (winner.value === 'O') return t('yaya.game.you_win', '你赢了')
   if (winner.value === 'X') return t('yaya.game.ai_win', 'AI 赢了')
   if (over.value) return t('yaya.game.draw', '平局')
-  if (props.streaming || sent.value !== null || turn.value === 'X')
+  if (!isLatest.value) return t('yaya.game.past', '这盘已在下面继续')
+  if (props.streaming || pending.value !== null || turn.value === 'X')
     return t('yaya.game.ai_think', 'AI 思考中…')
   return t('yaya.game.your_turn', '轮到你了，点格子落子（O）')
 })
@@ -69,21 +87,22 @@ const statusIcon = computed(() => {
   if (winner.value === 'O') return 'mdi-trophy-outline'
   if (winner.value === 'X') return 'mdi-robot-outline'
   if (over.value) return 'mdi-handshake-outline'
-  if (props.streaming || sent.value !== null || turn.value === 'X') return 'mdi-brain'
+  if (!isLatest.value) return 'mdi-history'
+  if (props.streaming || pending.value !== null || turn.value === 'X') return 'mdi-brain'
   return 'mdi-cursor-default-click-outline'
 })
 
 async function play(i: number): Promise<void> {
   if (!myTurn.value || cells.value[i] !== '.' || !props.sessionId) return
   busy.value = true
-  sent.value = i
+  pendingCell.value = i
   try {
     await window.cockpit.command('yaya.workflow-start', {
       session: props.sessionId,
       prompt: `<g|ttt|move=${i}>`
     })
   } catch (e) {
-    sent.value = null
+    pendingCell.value = null
     console.warn('[yaya] tic-tac-toe move failed', e)
   } finally {
     busy.value = false
@@ -107,13 +126,13 @@ async function play(i: number): Promise<void> {
           'is-x': c === 'X',
           'is-o': c === 'O',
           'is-clickable': myTurn && c === '.',
-          'is-pending': sent === i
+          'is-pending': pending === i
         }"
         :disabled="!(myTurn && c === '.')"
         :aria-label="te('yaya.game.cell', { n: String(i + 1) }, '第 {n} 格')"
         @click="play(i)"
       >
-        <v-progress-circular v-if="sent === i" :size="22" width="2" indeterminate />
+        <v-progress-circular v-if="pending === i" :size="22" width="2" indeterminate />
         <span v-else-if="c !== '.'">{{ c }}</span>
       </button>
     </div>

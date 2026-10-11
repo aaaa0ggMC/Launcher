@@ -7,7 +7,8 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
-import { inlineTokenParts } from './plugin-ui-registry'
+import { chatTagRules, inlineTokenParts } from './plugin-ui-registry'
+import { stripBlockTags } from './chat-tags'
 import ReactionBar from './ReactionBar.vue'
 import './tokens.css'
 
@@ -55,13 +56,18 @@ function onLongPress(p: LongPressPoint): void {
 }
 
 /** 正文切成文字 / 插件记号（如 [[secret_xxxx]] 显示成标签） */
-const contentParts = computed(() =>
-  inlineTokenParts(props.message.content, {
+const contentParts = computed(() => {
+  // 对话内小部件的标记（如走子 `<g|ttt|move=4>`）不在气泡里露出来：交互由棋盘负责
+  const rules = chatTagRules('user')
+  const src = rules.some((r) => r.kind === 'block')
+    ? stripBlockTags(props.message.content, rules)
+    : props.message.content
+  return inlineTokenParts(src, {
     sessionId: props.message.sessionId,
     role: 'user',
     t
   })
-)
+})
 
 /** 这条消息里的 @ 点名（只显示；附注 mentionNote 只给模型看） */
 const mentionList = computed(() => {

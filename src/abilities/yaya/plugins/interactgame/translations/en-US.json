@@ -6,5 +6,6 @@
   "yaya.game.you_win": "You win",
   "yaya.game.ai_win": "AI wins",
   "yaya.game.draw": "Draw",
+  "yaya.game.past": "Continued below",
   "yaya.game.cell": "cell {n}"
 }
