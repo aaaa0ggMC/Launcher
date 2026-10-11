@@ -283,12 +283,15 @@ importers:
       katex:
         specifier: ^0.19.0
         version: 0.19.0
-      mermaid:
-        specifier: ^12.1.0
-        version: 12.1.0
       openai:
         specifier: ^7.4.0
         version: 7.4.0(zod@4.6.5)
+
+  src/abilities/yaya/plugins/mermaid:
+    dependencies:
+      mermaid:
+        specifier: ^12.1.0
+        version: 12.1.0
 
 packages:
 

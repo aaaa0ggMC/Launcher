@@ -1,5 +1,9 @@
 packages:
   - 'src/abilities/*'
+  # YAYA 插件各自声明第三方依赖（见 AGENTS.md §2.2）：有专属依赖的插件目录放一份
+  # package.json 即成 workspace 成员，根目录 pnpm install 一键安装、构建自动内联/打包。
+  # 没有 package.json 的插件目录不受影响。
+  - 'src/abilities/yaya/plugins/*'
 # hustnet (github:aaaa0ggMC/husthelper#path:hustnet) 依赖 hustcore@workspace:*，
 # 在本仓库里没有 hustcore workspace 成员；override 成同仓 git 子路径。
 # blockExoticSubdeps:false 允许子依赖走 git（pnpm 11 默认禁止）。

@@ -1,0 +1,9 @@
+{
+  "name": "@cockpit/yaya-plugin-mermaid",
+  "version": "1.0.0",
+  "private": true,
+  "description": "YAYA 插件：Mermaid 图表（```mermaid 代码块渲染，引擎按需动态 import）",
+  "dependencies": {
+    "mermaid": "^12.1.0"
+  }
+}

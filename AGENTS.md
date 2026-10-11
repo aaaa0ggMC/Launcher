@@ -78,8 +78,22 @@ git submodule update --remote src/main/ui/assets/game-icon-pack
 - `apps` → `chokidar`
 - `dashboard` → `gridstack`
 - `rungame` → `three`（+ devDeps `@types/three`）
-- `yaya` → `openai` / `katex`（数学公式，渲染端按需加载）
+- `yaya` → `openai` / `@modelcontextprotocol/sdk` / `katex`（都是 YAYA 核心：provider / MCP / 正文数学公式）
 - 其余 ability 只用框架提供的东西（vue/vuetify 等），`package.json` 留空
+
+**YAYA 插件自己声明依赖**（`pnpm-workspace.yaml` 的 `packages` 含 `src/abilities/yaya/plugins/*`）：某个插件专属的第三方依赖写**该插件目录自己的 `package.json`**，不要塞进 yaya 的：
+
+```jsonc
+// src/abilities/yaya/plugins/mermaid/package.json
+{
+  "name": "@cockpit/yaya-plugin-mermaid",
+  "private": true,
+  "dependencies": { "mermaid": "^12.1.0" }
+}
+```
+
+- 放了 `package.json` 的插件目录自动成为 workspace 成员（根目录 `pnpm install` 一键安装、lockfile 登记）；没放的插件不受影响。插件随 yaya 一起分发，zip 里带上这层 `package.json` 解压后同样自动识别。
+- 现有先例：`mermaid`（plugins/mermaid，渲染端按需动态 import，独立 chunk）；`katex` 是核心正文渲染用的，留在 yaya。
 
 **规则与机制**：
 
