@@ -33,14 +33,16 @@ const { t } = useI18n(lang)
 const copied = ref(false)
 const previews = ref<Record<string, string>>({})
 
-function openMenu(x: number, y: number): void {
+function openMenu(x: number, y: number, via: 'context' | 'button' = 'context'): void {
   emit('menu', {
     x,
     y,
     kind: 'user',
     messageId: props.message.id,
+    sessionId: props.message.sessionId,
     text: props.message.content,
-    selection: window.getSelection()?.toString() ?? ''
+    selection: window.getSelection()?.toString() ?? '',
+    via
   })
 }
 function onContextMenu(ev: MouseEvent): void {
@@ -185,7 +187,7 @@ function openPreview(id: string): void {
         density="comfortable"
         :title="t('yaya.more', '更多')"
         :aria-label="t('yaya.more', '更多')"
-        @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
+        @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY, 'button')"
       />
     </div>
 

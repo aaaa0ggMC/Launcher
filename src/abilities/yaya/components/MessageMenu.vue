@@ -41,15 +41,24 @@ const target = computed<[number, number]>(() => [props.request?.x ?? 0, props.re
 
 <style scoped>
 .message-menu :deep(.v-list-item) {
-  min-height: 40px;
+  min-height: 36px;
 }
 .message-menu :deep(.v-list-item-title) {
   font-size: 0.875rem;
+  line-height: 1.35;
 }
 .message-menu :deep(.v-list-item__prepend > .v-icon) {
   font-size: 20px;
 }
 .message-menu :deep(.v-list-item__spacer) {
-  width: 14px !important;
+  width: 12px !important;
+}
+/*
+ * 插件操作（朗读等）注进来后菜单会变长：封顶 + 内部滚动（.v-list 自带 overflow: auto），
+ * 不遮住半屏。高度用 --app-vh（手机上 100vh 比可见区域高，见 viewport.ts）。
+ */
+.message-menu {
+  max-height: min(380px, calc(var(--app-vh, 100vh) * 0.5));
+  overflow-y: auto;
 }
 </style>

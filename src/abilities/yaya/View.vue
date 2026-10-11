@@ -45,7 +45,11 @@ import AvatarBadge from './components/AvatarBadge.vue'
 import { modelMonogram } from './profile'
 import { normalizeSearchMode } from './services/search-mode'
 import { supportsBuiltinSearch } from './services/providers/builtin-search'
-import { ensurePluginMap, setPluginAssistant } from './components/plugin-ui-registry'
+import {
+  ensurePluginMap,
+  messageActions,
+  setPluginAssistant
+} from './components/plugin-ui-registry'
 import {
   assistantConfig,
   DEFAULT_ASSISTANT_ID,
@@ -54,6 +58,7 @@ import {
   sessionOwnerId
 } from './assistants'
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
+import type { MessageAction, MessageActionContext } from './components/plugin-ui'
 
 defineOptions({ name: 'cockpit-yaya-view' })
 
@@ -1132,22 +1137,43 @@ async function saveConfig(): Promise<void> {
 }
 
 // ---- 消息右键 / 长按菜单 ----
+/** 插件回答操作（朗读等）的上下文：与 AssistantTurn 底部操作栏读同一段文字 */
+function messageActionCtx(req: MessageMenuRequest): MessageActionContext {
+  return {
+    sessionId: req.sessionId,
+    messageId: req.messageId,
+    role: 'assistant',
+    text: req.answerText ?? req.text
+  }
+}
+function messageActionLabel(a: MessageAction, ctx: MessageActionContext): string {
+  if ((a.active?.(ctx) ?? false) && a.activeLabel)
+    return a.activeLabelKey ? t(a.activeLabelKey, a.activeLabel) : a.activeLabel
+  return a.labelKey ? t(a.labelKey, a.label) : a.label
+}
+function messageActionIcon(a: MessageAction, ctx: MessageActionContext): string {
+  return (a.active?.(ctx) ?? false) && a.activeIcon ? a.activeIcon : a.icon
+}
+
 const menuItems = computed<MessageMenuItem[]>(() => {
   const req = menuRequest.value
   if (!req) return []
   const items: MessageMenuItem[] = []
+  // 点「⋮」打开的：底部操作栏就在旁边，其中已显示的动作（复制 / 重新生成 / 插件操作）不再进菜单
+  const fromButton = req.via === 'button'
   if (req.selection.trim())
     items.push({
       key: 'copy-selection',
       icon: 'mdi-selection',
       label: t('yaya.menu.copy_selection', '复制选中内容')
     })
-  items.push({
-    key: 'copy',
-    icon: 'mdi-content-copy',
-    label:
-      req.kind === 'user' ? t('yaya.copy', '复制') : t('yaya.menu.copy_markdown', '复制 Markdown')
-  })
+  if (!fromButton)
+    items.push({
+      key: 'copy',
+      icon: 'mdi-content-copy',
+      label:
+        req.kind === 'user' ? t('yaya.copy', '复制') : t('yaya.menu.copy_markdown', '复制 Markdown')
+    })
   if (req.kind === 'assistant' && req.fullText && req.fullText !== req.text)
     items.push({
       key: 'copy-full',
@@ -1160,19 +1186,33 @@ const menuItems = computed<MessageMenuItem[]>(() => {
     label: t('yaya.menu.select_text', '选择文字')
   })
   if (req.kind === 'user') {
-    items.push({
-      key: 'edit',
-      icon: 'mdi-pencil-outline',
-      label: t('yaya.edit', '编辑并重新发送'),
-      disabled: isRunning.value
-    })
+    if (!fromButton)
+      items.push({
+        key: 'edit',
+        icon: 'mdi-pencil-outline',
+        label: t('yaya.edit', '编辑并重新发送'),
+        disabled: isRunning.value
+      })
   } else {
-    items.push({
-      key: 'regenerate',
-      icon: 'mdi-refresh',
-      label: t('yaya.regenerate', '重新生成'),
-      disabled: isRunning.value
-    })
+    if (!fromButton)
+      items.push({
+        key: 'regenerate',
+        icon: 'mdi-refresh',
+        label: t('yaya.regenerate', '重新生成'),
+        disabled: isRunning.value
+      })
+    // 插件注入的回答操作（如「朗读」）：右键 / 长按时把底部操作栏的动作也放进菜单
+    if (!fromButton) {
+      const ctx = messageActionCtx(req)
+      for (const { pluginId, action } of messageActions.value) {
+        if (action.visible?.(ctx) ?? true)
+          items.push({
+            key: `plugin:${pluginId}:${action.id}`,
+            icon: messageActionIcon(action, ctx),
+            label: messageActionLabel(action, ctx)
+          })
+      }
+    }
   }
   items.push({
     key: 'delete',
@@ -1192,6 +1232,22 @@ async function onMenuSelect(key: string): Promise<void> {
   const req = menuRequest.value
   menuRequest.value = null
   if (!req) return
+  // 插件注入的操作（如「朗读」）：与底部操作栏按钮同一套调用
+  if (key.startsWith('plugin:')) {
+    const rest = key.slice('plugin:'.length)
+    const sep = rest.indexOf(':')
+    const pluginId = sep > 0 ? rest.slice(0, sep) : rest
+    const actionId = sep > 0 ? rest.slice(sep + 1) : ''
+    const found = messageActions.value.find(
+      (m) => m.pluginId === pluginId && m.action.id === actionId
+    )
+    if (found) {
+      void Promise.resolve()
+        .then(() => found.action.run(messageActionCtx(req)))
+        .catch((e: unknown) => console.warn('[yaya] message action failed', found.action.id, e))
+    }
+    return
+  }
   switch (key) {
     case 'copy-selection':
       await window.cockpit.copyText(req.selection)

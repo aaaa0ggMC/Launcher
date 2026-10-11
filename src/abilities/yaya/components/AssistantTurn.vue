@@ -204,12 +204,13 @@ function onContentClick(ev: MouseEvent): void {
   if (handleMarkdownClick(ev, t('yaya.copied', '已复制'))) ev.preventDefault()
 }
 
-function openMenu(x: number, y: number): void {
+function openMenu(x: number, y: number, via: 'context' | 'button' = 'context'): void {
   emit('menu', {
     x,
     y,
     kind: 'assistant',
     messageId: props.turn.firstId,
+    sessionId: sessionId.value,
     text: turnText(props.turn),
     selection: window.getSelection()?.toString() ?? '',
     fullText: turnFullMarkdown(props.turn, {
@@ -218,7 +219,9 @@ function openMenu(x: number, y: number): void {
       args: t('yaya.copy_full.args', '参数'),
       result: t('yaya.copy_full.result', '结果'),
       error: t('yaya.copy_full.error', '出错')
-    })
+    }),
+    answerText: answer.value?.content ?? '',
+    via
   })
 }
 function onContextMenu(ev: MouseEvent): void {
@@ -428,7 +431,7 @@ async function copyTurn(): Promise<void> {
           density="comfortable"
           :title="t('yaya.more', '更多')"
           :aria-label="t('yaya.more', '更多')"
-          @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY)"
+          @click="(e: MouseEvent) => openMenu(e.clientX, e.clientY, 'button')"
         >
           <v-icon icon="mdi-dots-horizontal" size="20" />
         </v-btn>
