@@ -11,6 +11,7 @@ import {
   onDeactivated
 } from 'vue'
 import { translate } from '../../main/ui/i18n'
+import { useNavStack } from '../../main/ui/back-nav'
 import ChatView from './components/ChatView.vue'
 import { vLongPress, type LongPressPoint } from '../../main/ui/directives/long-press'
 import AgentModelsPanel from './components/AgentModelsPanel.vue'
@@ -27,17 +28,65 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 
 const openBt = inject('cockpit:open-bt', null) as (() => void) | null
 
-const menuOpen = ref(false)
-const menuStep = ref<'main' | 'sessions' | 'freq' | 'slots' | 'bili' | 'models'>('main')
-const statsOpen = ref(false)
-const sanitizeOpen = ref(false)
+/**
+ * 页面菜单 / 全页浮层（听歌统计、标签整理）的整体状态——统一进返回链：
+ * 系统返回 / 浏览器返回逐层弹（统计页 → 回聊天；菜单子页 → 主菜单 → 收起）。
+ * 浏览器宿主每层写一条 history，App 宿主由 onBack 直接 pop 这个栈。
+ */
+type MenuStep = 'main' | 'sessions' | 'freq' | 'slots' | 'bili' | 'models'
+type AidjPage =
+  { kind: 'chat' } | { kind: 'menu'; step: MenuStep } | { kind: 'stats' } | { kind: 'sanitize' }
+const pageNav = useNavStack<AidjPage>({ kind: 'chat' })
+const page = computed<AidjPage>(() => pageNav.current.value)
+const menuOpen = computed<boolean>({
+  get: () => page.value.kind === 'menu',
+  set: (v: boolean) => {
+    if (v) pageNav.go({ kind: 'menu', step: 'main' })
+    // 收起菜单 = 回到聊天（连同子页层级一起回收）
+    else pageNav.reset({ kind: 'chat' })
+  }
+})
+const menuStep = computed<MenuStep>({
+  get: () => (page.value.kind === 'menu' ? page.value.step : 'main'),
+  set: (s: MenuStep) => {
+    // 子页自带的「返回」箭头与各处的「收起」都写 'main'：弹一级
+    // （已经在主菜单 / 已收起时是 no-op，此时 menuOpen=false 的 reset 负责收起）
+    if (s === 'main') {
+      void pageNav.back()
+      return
+    }
+    pageNav.go({ kind: 'menu', step: s })
+  }
+})
+const statsOpen = computed<boolean>({
+  get: () => page.value.kind === 'stats',
+  set: (v: boolean) => {
+    if (!v) {
+      pageNav.reset({ kind: 'chat' })
+      return
+    }
+    // 从主菜单点进来：替换掉菜单这一层（菜单已收），返回键从统计页直接回聊天
+    if (page.value.kind === 'menu') pageNav.replace({ kind: 'stats' })
+    else pageNav.go({ kind: 'stats' })
+  }
+})
+const sanitizeOpen = computed<boolean>({
+  get: () => page.value.kind === 'sanitize',
+  set: (v: boolean) => {
+    if (!v) {
+      pageNav.reset({ kind: 'chat' })
+      return
+    }
+    if (page.value.kind === 'menu') pageNav.replace({ kind: 'sanitize' })
+    else pageNav.go({ kind: 'sanitize' })
+  }
+})
 function openSanitize(): void {
-  menuOpen.value = false
+  // 不手动收菜单：sanitizeOpen 的 setter 会把菜单这一层替换掉
   sanitizeOpen.value = true
 }
 function openStats(): void {
-  // 聊天区现在只是隐藏（v-show），菜单不收起的话回来时还开着
-  menuOpen.value = false
+  // 聊天区只是隐藏（v-show），菜单层被替换掉，回来时不会还开着
   statsOpen.value = true
 }
 const chatRef = ref<InstanceType<typeof ChatView> | null>(null)
@@ -155,8 +204,8 @@ function toggleMenu(): void {
     menuOpen.value = false
     menuStep.value = 'main'
   } else {
+    // go({ kind: 'menu', step: 'main' }) 已经落在主菜单，不用再写 menuStep
     menuOpen.value = true
-    menuStep.value = 'main'
     refreshSessions()
     void refreshMode()
     void refreshLyricsOpen()
@@ -572,7 +621,12 @@ onDeactivated(() => {
   }
 })
 
-defineExpose({ toMarkdown })
+defineExpose({ toMarkdown, onBack })
+
+/** 外壳的返回键（系统返回 / 浏览器返回）经过这里：先弹页面菜单 / 全页浮层的层级。 */
+function onBack(): boolean {
+  return pageNav.back()
+}
 </script>
 
 <template>

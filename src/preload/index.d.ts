@@ -155,6 +155,12 @@ export interface CockpitApi {
 declare global {
   interface Window {
     cockpit: CockpitApi
+    /**
+     * 安卓 App 的返回键入口（`back-nav.ts` 装）：'handled' = 这次返回被页面消化
+     * （关了浮层 / 弹了 ability 内部层级 / 切了 ability）；'root' = 已在返回链根上，
+     * Java 侧弹「再按一次退出」。浏览器 / Electron 里也存在但没人调用。
+     */
+    __cockpitBack?: () => 'handled' | 'root'
   }
 }
 

@@ -17,6 +17,7 @@ import type { SettingsCategory, SettingsItem } from '@ui/ability-registry'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import SettingsCategoryView from '@ui/components/SettingsCategoryView.vue'
 import { translate, translateTemplate } from '@ui/i18n'
+import { useNavStack } from '@ui/back-nav'
 import { scoreFields, type SearchField } from '@ui/composables/search'
 import { settingsSessionMemory } from './session-memory'
 
@@ -48,7 +49,14 @@ const mem = settingsSessionMemory
 let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 const query = ref('')
-const activeCategoryId = ref<string | null>(mem.category)
+/** 分类也是一个「整页切换」：进返回链（浏览器宿主写 history，App 宿主由 onBack pop） */
+const catNav = useNavStack<string>(mem.category ?? '')
+const activeCategoryId = computed<string | null>({
+  get: () => catNav.current.value || null,
+  set: (id) => {
+    if (id) selectCategory(id)
+  }
+})
 const highlight = ref<string | null>(null)
 
 /** 右侧内容区自己滚动（页面本身不滚动，见 .settings-view）。 */
@@ -77,7 +85,7 @@ watch(
   sections,
   (list) => {
     if (list.length && !list.some((c) => c.id === activeCategoryId.value)) {
-      activeCategoryId.value = list[0].id
+      catNav.reset(list[0].id)
     }
   },
   { immediate: true }
@@ -200,7 +208,7 @@ function selectCategory(id: string): void {
   const prev = activeCategoryId.value
   if (el && prev && !searching.value) mem.scrolls[prev] = el.scrollTop
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
-  activeCategoryId.value = id
+  catNav.go(id)
   highlight.value = null
   query.value = ''
   // 每个分类回到自己上次的位置（没来过 = 顶部），渲染后再定位
@@ -213,6 +221,8 @@ function selectCategory(id: string): void {
 /**
  * Called by the shell when another ability opens its settings
  * (`useSettings().open(...)` → `activate('settings', { category, item })`).
+ * 着陆也走 `go`（入链一级）：返回时先弹回着陆前的分类，再跨 ability——
+ * 不用 reset 是因为那会让 history 里残留失效条目，返回键出现「按了没反应」。
  */
 function onActivate(target: unknown): void {
   const tgt = (target ?? {}) as { category?: unknown; item?: unknown }
@@ -220,6 +230,17 @@ function onActivate(target: unknown): void {
   if (!id || !sections.value.some((c) => c.id === id)) return
   selectCategory(id)
   highlight.value = typeof tgt.item === 'string' ? tgt.item : null
+}
+
+/** 外壳的返回键（系统返回 / 浏览器返回）经过这里：先弹分类层级，再让外壳切 ability。 */
+function onBack(): boolean {
+  if (!catNav.back()) return false
+  const id = catNav.current.value
+  void nextTick(() => {
+    const el = findScroller()
+    if (el) el.scrollTop = mem.scrolls[id] ?? 0
+  })
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +347,7 @@ function toMarkdown(): string {
   return lines.join('\n')
 }
 
-defineExpose({ toMarkdown, onActivate })
+defineExpose({ toMarkdown, onActivate, onBack })
 </script>
 
 <template>

@@ -132,6 +132,15 @@ public class MainActivity extends Activity {
                     + "return true})()";
 
     /**
+     * 问页面的返回链（back-nav.ts 装的 window.__cockpitBack）：
+     * 1 = 页面消化了这次返回（关了浮层 / 弹了 ability 内部层级 / 切了 ability）；
+     * 0 = 已在返回链根上（Java 侧双击退出）；其它（含桥没就绪）= 走旧行为兜底。
+     */
+    private static final String JS_BACK_QUERY =
+            "(function(){var f=window.__cockpitBack;if(!f)return 2;var r=f();"
+                    + "return r==='handled'?1:(r==='root'?0:2)})()";
+
+    /**
      * 系统栏跟随网页主题：MutationObserver 盯 class/style，用 requestAnimationFrame 合并
      * （一帧最多通知一次），替换原来的 setInterval(…, 1000) 每秒轮询。
      * 5 秒的慢同步只是兜底（主题变了却没碰 html/body 属性时补上）。
@@ -399,8 +408,9 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 返回键：先收键盘（键盘开着就只收，不让网页收到 Escape），
-     * 再关网页弹窗 / 菜单，再后退，最后退到后台（连接不断）。
+     * 返回键：先收键盘（键盘开着就只收，不让网页收到 Escape），再问页面的返回链
+     * （`window.__cockpitBack`：关浮层 / ability 内部层级 / 跨 ability 都由页面消化），
+     * 到根上双击退出。页面桥没就绪时退回旧行为（关浮层 → WebView 历史 → 后台）。
      */
     void onBack() {
         if (imeVisible()) {
@@ -411,11 +421,31 @@ public class MainActivity extends Activity {
             webLogin.back();
             return;
         }
-        web.evaluateJavascript(JS_DISMISS_OVERLAY, handled -> {
-            if ("true".equals(handled)) return;
-            if (web.canGoBack()) web.goBack();
-            else moveTaskToBack(true);
+        web.evaluateJavascript(JS_BACK_QUERY, res -> {
+            if ("1".equals(res)) return; // 页面消化了这次返回
+            if ("0".equals(res)) { // 返回链根上：双击退出
+                backOrExit();
+                return;
+            }
+            web.evaluateJavascript(JS_DISMISS_OVERLAY, handled -> {
+                if ("true".equals(handled)) return;
+                if (web.canGoBack()) web.goBack();
+                else moveTaskToBack(true);
+            });
         });
+    }
+
+    /** 返回链根上的返回键：2s 内第二次按才退出，第一次只提示 */
+    private long lastBackAt = 0;
+
+    private void backOrExit() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastBackAt < 2000) {
+            finish();
+            return;
+        }
+        lastBackAt = now;
+        Toast.makeText(this, R.string.back_again_to_exit, Toast.LENGTH_SHORT).show();
     }
 
     private boolean imeVisible() {

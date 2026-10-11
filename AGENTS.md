@@ -358,6 +358,27 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 - **渲染**：markdown-it（`html:false` → 原始 HTML 一律转义）+ markdown-it-anchor + 按需加载的 highlight.js；配色全部取 `--v-theme-*`，跟随 10 套主题。
 - 浮窗导航项必须 `:title` + `:aria-label` 暴露无障碍名，否则 inspector / AI 拿不到 ref（图标按钮同理，见上文「UI 写法要求」）。
 
+### 返回链 / 路由（`src/main/ui/back-nav.ts`）
+
+网页（桌面 + 手机浏览器）与安卓 App 通用的「返回」处理，两级结构：
+
+- **ability 级**：侧栏选择 / 跨能力跳转（齿轮、quick-launch、深链接、agent 跳转）。浏览器宿主写
+  history（`pushState`），浏览器返回逐个回退 ability；**安卓 App 宿主只维护内存链**——侧栏选择算
+  「新根」（清空旧链，`replaceState` 不涨 WebView 历史），跨能力跳转入链。
+- **ability 内部级**：能力里的「整页切换」。能力用 `useNavStack<T>`（`@ui/back-nav`）管自己的状态栈：
+  `go(state)` 入链（浏览器宿主同步写 history）、`back()` 弹一级、`reset(state)` 清空并回收 history、
+  `replace(state)` 换层不增减层级（AIDJ 从主菜单进全页浮层用）。能力在 `defineExpose` 里给
+  `onBack(): boolean`，外壳的返回算法经它弹内部层级。
+
+返回算法（两端一致）：**先关浮层（`.v-overlay--active` 上发 Escape，吞掉这次返回）→ 当前 ability 的
+`onBack` → pop ability 链 → 根**。根上：浏览器交给浏览器自己离开页面；App 由 Java 弹「再按一次退出」
+（`MainActivity.onBack` 问 `window.__cockpitBack()`：`'handled'` 结束，`'root'` 双击退出，
+页面桥没就绪时退回旧行为）。keep-alive 保证 ability 级返回自动恢复内部状态，无需序列化路由。
+
+已接入：设置分类、AIDJ 页面菜单（主菜单 / 会话 / 模型 / 频率 / 槽位 / B站下载 + 听歌统计 / 标签整理）。
+其余 ability 的编辑器 / 确认框都是 `v-dialog`，被「先关浮层」覆盖；gitignored 的私有能力
+（campusinfo 等）的内部导航未接入，ability 级返回对它们仍然有效。
+
 ### 主题 / 配色方案
 
 - 每个配色方案是一个独立 JSON（`src/main/ui/color_schemes/*.json`），`color_schemes/index.ts` glob 注册并构建 Vuetify `ThemeDefinition`（`buildThemeDefinitions`）。

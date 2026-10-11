@@ -13,6 +13,7 @@ import {
 } from 'vue'
 import { useTheme } from 'vuetify'
 import { DrawerSwipe } from './composables/drawer-swipe'
+import { initBackNav, navigateAbility } from './back-nav'
 import {
   applyUiScale as applyUiScaleFromConfig,
   applyFont as applyFontFromConfig
@@ -277,6 +278,8 @@ const abilityRef = ref<{
   $el?: Element
   toMarkdown?: () => string
   onActivate?: (target: unknown) => void
+  /** 能力内部的返回处理（整页切换的栈）：返回 true = 消化了这次返回 */
+  onBack?: () => boolean
 } | null>(null)
 const copySnackOpen = ref(false)
 const copySnackText = ref('')
@@ -846,9 +849,16 @@ function deliverActivate(
 }
 
 /** Navigate to an ability from the sidebar; records the open for frequency /
- * recent sorting. */
-function openAbility(id: string): void {
-  if (id !== currentId.value) recordOpen(id)
+ * recent sorting. `kind`:
+ * - `sidebar`（默认）= 用户点侧栏：App 宿主里算返回链的新根（清空旧链）；
+ * - `jump` = 跨能力跳转（齿轮 / quick-launch / 深链接带 target）：入链，返回可回到来源。 */
+function openAbility(id: string, kind: 'sidebar' | 'jump' = 'sidebar'): void {
+  if (id === currentId.value) {
+    if (sidebarOverlay.value) drawerOpen.value = false
+    return
+  }
+  recordOpen(id)
+  navigateAbility(id, kind)
   currentId.value = id
   if (sidebarOverlay.value) drawerOpen.value = false
 }
@@ -857,6 +867,7 @@ function activate(abilityId: string, target: Record<string, unknown>): void {
   if (currentId.value !== abilityId) {
     recordOpen(abilityId)
     pendingActivate.value = { ability: abilityId, target }
+    navigateAbility(abilityId, 'jump')
     currentId.value = abilityId
     // Fallback: if the ref-watch missed the mount (transition timing), retry
     // once shortly after navigation. Idempotent — only delivers while the
@@ -1215,7 +1226,7 @@ const gearLabel = computed(() => {
 function openCurrentSettings(): void {
   const owner = currentSettingsOwner.value
   if (owner && settingsApi.open(owner) !== 'none') return
-  openAbility('settings')
+  openAbility('settings', 'jump')
 }
 // Ability 可调用以打开全局面板 (BackgroundTasksDialog)，如后台任务已在运行。
 provide('cockpit:open-bt', (): void => {
@@ -1272,7 +1283,9 @@ watch(
   () => {
     sidebarReport.value = resolveSidebarAbilities(window.cockpit.platform)
     if (currentId.value && !abilities.value.some((a) => a.id === currentId.value)) {
-      currentId.value = abilities.value[0]?.id ?? null
+      const next = abilities.value[0]?.id ?? null
+      if (next) navigateAbility(next, 'sidebar')
+      currentId.value = next
     }
   }
 )
@@ -1290,6 +1303,14 @@ onMounted(async () => {
   const valid = (id: string | null): boolean => !!id && abilities.value.some((a) => a.id === id)
   if (!valid(currentId.value)) currentId.value = valid(def) ? def : fallback
   restoreUiState()
+  // 返回链 / 路由：以当前能力为根初始化（浏览器宿主写 history，App 宿主维护内存链）
+  initBackNav({
+    initial: currentId.value ?? '',
+    switchAbility: (id) => {
+      currentId.value = id
+    },
+    getBackHandler: () => abilityRef.value?.onBack ?? null
+  })
   unsub = window.cockpit.on('cockpit:apps-changed', () => {
     if (searchDebounce) {
       clearTimeout(searchDebounce)

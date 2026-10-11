@@ -10,6 +10,7 @@
     <string name="err_http">The host returned an error:</string>
     <string name="err_disconnected">Lost connection to the host</string>
     <string name="loading">Loading…</string>
+    <string name="back_again_to_exit">Press back again to exit</string>
     <string name="media_channel">Media controls</string>
     <string name="media_play">Play</string>
     <string name="media_pause">Pause</string>
