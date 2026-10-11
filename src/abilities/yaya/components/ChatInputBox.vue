@@ -129,7 +129,8 @@ const sheetMode = computed(() => coarse || narrow.value)
 
 // ---- 底部弹层：全局下滑收起 ----
 // 面板上任意位置（含按钮 / 列表项）和面板外的遮罩上，按住往下划都能收起：
-// 面板内阈值 72px、遮罩上 40px（外面没有内容要保留，随手一划就收）。
+// 面板内阈值 72px、遮罩上 40px（外面没有内容要保留，随手一划就收）；甩得快
+// （≥0.5px/ms）时 32px 就收——手指一甩本来就没多长距离，别只认死距离。
 // 监听挂在 document 上（捕获阶段）——弹层 teleport 到 body，scoped 样式和
 // 组件内 @pointer 都盖不到遮罩；拖拽判定成立后吞掉随后补发的 click，
 // 不然在按钮上起手会把按钮也点一下。
@@ -137,6 +138,7 @@ const sheetCardEl = ref<HTMLElement | null>(null)
 const sheetDragY = ref(0)
 const sheetDragging = ref(false)
 let sheetStartY = 0
+let sheetStartT = 0
 let sheetPointerId: number | null = null
 let sheetDecided = false
 let sheetInside = false
@@ -153,6 +155,7 @@ function onSheetDocDown(e: PointerEvent): void {
   sheetJustDragged = false
   sheetInside = !!sheetCardNode()?.contains(e.target as Node)
   sheetStartY = e.clientY
+  sheetStartT = e.timeStamp
   sheetPointerId = e.pointerId
   sheetDecided = false
 }
@@ -172,15 +175,20 @@ function onSheetDocUp(e: PointerEvent): void {
   if (sheetPointerId !== e.pointerId) return
   const dy = sheetDragY.value
   const dragged = sheetDecided
+  const dt = Math.max(1, e.timeStamp - sheetStartT)
   sheetPointerId = null
   sheetDecided = false
-  sheetDragging.value = false
-  sheetDragY.value = 0
   const threshold = sheetInside ? 72 : 40
-  if (dragged && dy > threshold) {
+  if (dragged && (dy > threshold || (dy >= 32 && dy / dt >= 0.5))) {
     sheetJustDragged = true
     plusOpen.value = false
+    // 收起时保持拖拽位置直接离场（is-dragging 仍生效 = 无过渡）：
+    // 这里若把位移归零，面板会先回弹上去、再播往下的离场动画，快速一甩就是
+    // 一上一下地抽搐。拖拽状态留到下次打开时复位（见下面的 watch）。
+    return
   }
+  sheetDragging.value = false
+  sheetDragY.value = 0
 }
 
 /** 拖拽收起后吞掉抬手时浏览器补发的 click（点不到面板里的按钮） */
@@ -214,6 +222,9 @@ watch(plusOpen, (open) => {
     sheetUnbindTimer = null
   }
   if (open) {
+    // 上次收起时保留了拖拽位移（让它直接离场不回弹），这里在渲染前归零
+    sheetDragY.value = 0
+    sheetDragging.value = false
     void nextTick(bindSheetGestures)
     return
   }
@@ -784,7 +795,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
         >
           <v-icon icon="mdi-plus" />
         </v-btn>
-        <v-bottom-sheet v-if="sheetMode" v-model="plusOpen">
+        <v-bottom-sheet v-if="sheetMode" v-model="plusOpen" class="plus-overlay">
           <v-card
             ref="sheetCardEl"
             class="plus-sheet yaya-pop"
@@ -1163,6 +1174,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
      （面板内容设计上放得下，不需要内部滚动） */
   touch-action: none;
 }
+/* 弹层 teleport 到 body，遮罩的 touch-action 只能写在文件末尾的非 scoped 块里 */
 .plus-sheet.is-dragging {
   transition: none;
 }
@@ -1338,5 +1350,16 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   .wf-pick-label {
     display: none;
   }
+}
+</style>
+
+<style>
+/* 「+」底部弹层的遮罩：弹层整体 teleport 到 body，scoped 样式（连 data-v 属性）
+   够不到 .v-overlay，所以只能写在非 scoped 块里；类名由
+   <v-bottom-sheet class="plus-overlay"> 透传过去。遮罩不写的话，浏览器会把下滑
+   当成「滚动后面的页面」接管掉（pointercancel），拖拽在 ~10px 处就断——慢划收不起、
+   甩快了面板弹回，还会把背后的聊天页甩飞。 */
+.v-overlay.plus-overlay {
+  touch-action: none;
 }
 </style>

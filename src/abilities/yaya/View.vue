@@ -204,8 +204,11 @@ watch([drawerOpen, wide], resetDrawerSwipe)
 // 全区判定（抽屉开着才是左划收回，关着才认右划开），两个避让：
 //   1. 最左 OPEN_EDGE_MARGIN px 留给外壳侧栏的边缘手势，不抢；
 //   2. 正在划文字选择时让位——选择会被滑动延长，检查按下时与触发时各一次。
+// 慢划 / 快甩都要能触发：横划交给 JS 之前，浏览器会在 ~20px 处把手势当成滚动
+// 接管掉（pointercancel，见下方 .yaya-shell 的 touch-action），44px 的门槛根本攒不到，
+// 于是只有「一步跨过 44px」的快甩才碰巧能开。门槛与角度放宽到日常手划的范围。
 const OPEN_EDGE_MARGIN = 24
-const OPEN_TRIGGER_PX = 44
+const OPEN_TRIGGER_PX = 32
 let openSwipeId: number | null = null
 let openSwipeX = 0
 let openSwipeY = 0
@@ -232,8 +235,8 @@ function onShellPointerMove(e: PointerEvent): void {
   if (openSwipeId !== e.pointerId || openSwipeFired) return
   const dx = e.clientX - openSwipeX
   const dy = Math.abs(e.clientY - openSwipeY)
-  // 横向主导才算划屏（竖向留给消息列表滚动）
-  if (dx < OPEN_TRIGGER_PX || dx < dy * 1.5) return
+  // 横向主导才算划屏（竖向留给消息列表滚动——那种手势浏览器自己接管并发 pointercancel）
+  if (dx < OPEN_TRIGGER_PX || dx < dy * 1.25) return
   // 触发前再查一次：滑到一半开始/正在进行文字选择就放弃
   if (selectingText()) {
     openSwipeId = null
@@ -256,6 +259,13 @@ function onShellClick(e: MouseEvent): void {
   e.preventDefault()
   e.stopImmediatePropagation()
 }
+
+// 这个标志只对「手势开栏后紧跟的那次 click」有效：抽屉一关就作废。左划收回 /
+// 程序化关闭时并没有 click 经过这里（程序化 .click() 还因 detail===0 直接放过），
+// 标志挂着会让用户下一次真实点按被白吃一次（表现为「关掉后第一次点没反应」）。
+watch(drawerOpen, (open) => {
+  if (!open) openBlockClick = false
+})
 
 // ---- 派生状态 ----
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value))
@@ -2029,6 +2039,21 @@ watch(isRunning, (now, before) => {
   background: rgba(0, 0, 0, 0.35);
   /* 横划（左划收回）交给 JS 手势，别让浏览器把横划当页面导航 */
   touch-action: pan-y;
+}
+
+/* ---- 触屏横划开栏交给 JS（见 onShellPointerDown） ----
+   浏览器默认（touch-action: auto）会在划出 ~20px 时把横划认成「滚动」接管掉并发
+   pointercancel，onShellPointerMove 只收到两三步就断了——慢划根本攒不到触发距离，
+   只有一步跨过去的快甩才碰巧能开。声明「只许竖向平移」之后浏览器不再抢横划，
+   慢划 / 快甩 / 稍斜的划都能完整送到 JS；竖划照旧交给浏览器滚消息列表。
+   注意 touch-action 只算到「最近的滚动容器」为止：外层写了对消息列表不生效
+   （.scroll 自己就是滚动容器），所以滚动容器要单独写一次；保留 pinch-zoom，
+   捏合缩放不受影响。 */
+.yaya-shell {
+  touch-action: pan-y pinch-zoom;
+}
+.main .scroll {
+  touch-action: pan-y pinch-zoom;
 }
 
 /* ---- 主列 ---- */
