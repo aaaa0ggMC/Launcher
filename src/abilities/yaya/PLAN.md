@@ -544,7 +544,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | 1    | **Waifu 拟真对话**           |  中   |  **最高**   | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口  | `[x]` |
 | 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[x]` |
 | 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[x]` |
-| 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[ ]` |
+| 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[x]` |
 | 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[ ]` |
 | 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置                          | `[ ]` |
 | 7    | **Forge 动态 JS 插件**       |  难   |  高但依赖   | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动                                      | `[ ]` |
@@ -623,7 +623,18 @@ Node 层：Android Controller —— 普通 YayaPlugin
     → 对第 1 段点 👍 → 追问「我点了哪一段、什么表情」，模型答「你点的是 b1，也就是第一段，表情是 👍」并原样引用
     那段话 → 回传链路通；截图 `screenshots/waifu/12–13`
   - 检查：`typecheck` / `eslint` / `pnpm test` **840 pass / 0 fail**
-- [ ] **4. InteractGame**：成对标签 + 同卡片增量 + 点击回传（生成 `<g||move …/>` 用户消息走正常发送链路）
+- [x] **4. InteractGame（井字棋）**（2026-10-11 完成，提交 `ec8cb8a` / `489a0a0` / `285cd5c` / `9dfbb70`）
+  - SDK：`kind: 'block'` 块级标记解析（`findBlockTags` / `stripBlockTags`：跳过代码区、命名空间 `<g|>` 与 `<||>`
+    互不越界、3 例单测）+ `PluginUi.blockViews`（组件渲染在**回答末尾**，旁白文字在它上方）
+    - `blockEchoes`（用户消息里的标记换成插件给的人话）+ `BlockViewProps.sessionId`
+  - `plugins/interactgame/`：3×3 棋盘按 `turn=` 决定可点，落子发 `<g|ttt|move=N>` 用户消息走正常发送链路；
+    **只有最新那块棋盘可交互**（旧盘显示「这盘已在下面继续」），新盘挂载即清落子转圈；增量更新靠下标 key；
+    instructions 固定英文（AI 执 X 先手、9 字符 row-major state、非法走子不许作弊）
+  - **DeepSeek 真实对局实测**：AI 先手 → 棋盘渲染（旁白在上、页面无原始标记）→ 点第 5 格 →
+    用户气泡显示「你落子第 5 格」→ AI 回新棋盘 O 落在第 5 格 → 旧盘转只读
+  - 检查：`typecheck`（268 模板 0 错）/ `eslint` / `pnpm test` 842 pass 0 fail
+  - 已知限制：AI 偶尔旁白与 state 不一致（这次说「占中间」却把 X 写在第 9 格）——渲染忠实于 state，
+    属模型保真度问题；棋类目前只接了井字棋（标记名 `ttt`），加棋类 = 再注册一个 `blockViews` 名字
 - [ ] **5. Regex**：规则 `{ pattern, flags, replacement, target: user|ai|both, mode: visual|raw, format: regex|html }`
 - [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
 - [ ] **7. Forge**：加载器 + 解压边界 + `guard(SCOPE_EXEC)` 确认；渲染端动态组件放二期
