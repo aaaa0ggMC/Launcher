@@ -14,9 +14,12 @@ import type {
   InlineTokenView,
   MessageAction,
   PluginUi,
+  ReactionItem,
+  ReactionSet,
   TurnChrome,
   TurnChromeContext
 } from './plugin-ui'
+import { DEFAULT_REACTION_SET } from './plugin-ui'
 import type { InlineTagRule } from './chat-tags'
 import type { PluginInfo, PluginKind } from '../services/plugins/types'
 
@@ -238,6 +241,53 @@ export const messageActions = computed<{ pluginId: string; action: MessageAction
     .filter((ui) => pluginOn.value.get(ui.pluginId) === true && ui.messageActions?.length)
     .flatMap((ui) => ui.messageActions!.map((action) => ({ pluginId: ui.pluginId, action })))
 )
+
+// ---------------------------------------------------------------------------
+// 表情回应（PluginUi.reactionSets）
+// ---------------------------------------------------------------------------
+
+function sortedUis(): PluginUi[] {
+  return [...uis].sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+}
+
+/** 全部表情组（**不**按启用状态门控：历史消息里的表情插件关掉也要显示得出来） */
+function allReactionSets(): ReactionSet[] {
+  const out: ReactionSet[] = [DEFAULT_REACTION_SET]
+  const seen = new Set([DEFAULT_REACTION_SET.id])
+  for (const ui of sortedUis()) {
+    for (const set of ui.reactionSets ?? []) {
+      if (seen.has(set.id)) continue
+      seen.add(set.id)
+      out.push(set)
+    }
+  }
+  return out
+}
+
+/**
+ * 选择器里可选的表情组：默认集 + **已启用**插件的组，按角色过滤、set id 去重。
+ * 图标包插件只要声明 `reactionSets` 就会出现在这里。
+ */
+export function reactionSetsFor(role: 'user' | 'assistant'): ReactionSet[] {
+  const enabled = new Set<string>([DEFAULT_REACTION_SET.id])
+  for (const ui of sortedUis()) {
+    if (!uiEnabled(ui)) continue
+    for (const set of ui.reactionSets ?? []) enabled.add(set.id)
+  }
+  return allReactionSets().filter((set) => {
+    if (!enabled.has(set.id)) return false
+    return (set.roles ?? ['user', 'assistant']).includes(role)
+  })
+}
+
+/** key → 表情定义（找得到就按 `icon` / label 渲染，找不到就直接显示 key 文本） */
+export function reactionItemFor(key: string): ReactionItem | null {
+  for (const set of allReactionSets()) {
+    const item = set.items.find((i) => i.key === key)
+    if (item) return item
+  }
+  return null
+}
 
 // ---------------------------------------------------------------------------
 // 命名空间标记（PluginUi.inlineTags）与回答外观（PluginUi.turnChrome）

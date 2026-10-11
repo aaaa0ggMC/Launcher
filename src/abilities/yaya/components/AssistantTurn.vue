@@ -24,6 +24,7 @@ import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import DataCard from './DataCard.vue'
+import ReactionBar from './ReactionBar.vue'
 import WorkflowCard from './WorkflowCard.vue'
 import SearchSources from './SearchSources.vue'
 import type { BuiltinSearchInfo } from '../services/providers/types'
@@ -405,6 +406,9 @@ async function copyTurn(): Promise<void> {
             />
           </template>
         </template>
+
+        <!-- 消息表情回应（默认集 + 插件图标包）；这轮定稿后才出现 -->
+        <ReactionBar v-if="!live && turn.steps[0]" :node="turn.steps[0]" />
 
         <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
         <template v-for="seg in segmentsAfter" :key="seg.key">

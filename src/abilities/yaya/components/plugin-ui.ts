@@ -9,6 +9,7 @@
  * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
  * - `messageActions`：每条回答下面操作栏里的按钮（如「朗读」）。
  * - `inlineTags`：正文里的命名空间标记（如拟真对话的 `<||…>` 换气泡 / 撤回），按前缀分派。
+ * - `reactionSets`：消息下面可选的表情组（图标包）；默认表情集由框架自带。
  * - `turnChrome`：回答的外观偏好（隐藏内置操作栏、折叠过程卡片、输入提示文案）；
  *   只能影响框架自有元素，插件注入物（toolCards / fences / messageActions / 数据卡 / 审批）不受影响。
  * - `cardViews`：插件工作流写进对话的数据卡片（`ctx.addCard({ type })`）按 type 渲染。
@@ -138,6 +139,47 @@ export interface InlineTagDef extends InlineTagRule {
   roles?: ('user' | 'assistant')[]
 }
 
+/** 一个可选表情 */
+export interface ReactionItem {
+  /**
+   * 唯一 key，同时是**存进 `meta.reactions` 的值**：默认表情集里它就是 emoji 本身（👍），
+   * 图标包里是图标名（配合 `icon`）。
+   */
+  key: string
+  /** 图标包：`parseIcon` 语法（`gi:<name>` / `default/<name>` / `emoji/…`）。不给就直接显示 key 文本 */
+  icon?: string
+  label?: string
+  labelKey?: string
+}
+
+/** 一组表情（一个图标包 = 一个 set），出现在消息下的选择器里 */
+export interface ReactionSet {
+  /** 全局唯一：内置默认集是 `default`，插件建议用插件 id */
+  id: string
+  label?: string
+  labelKey?: string
+  items: ReactionItem[]
+  /** 哪一侧的消息可以 react，缺省两侧都可以 */
+  roles?: ('user' | 'assistant')[]
+}
+
+/** 框架自带的默认表情集（不看插件启用状态：历史消息的表情总要显示得出来） */
+export const DEFAULT_REACTION_SET: ReactionSet = {
+  id: 'default',
+  label: '表情',
+  labelKey: 'yaya.react.set_default',
+  items: [
+    { key: '👍', label: '赞', labelKey: 'yaya.react.thumbsup' },
+    { key: '👎', label: '踩', labelKey: 'yaya.react.thumbsdown' },
+    { key: '❤️', label: '喜欢', labelKey: 'yaya.react.heart' },
+    { key: '😂', label: '笑哭', labelKey: 'yaya.react.laugh' },
+    { key: '😮', label: '惊讶', labelKey: 'yaya.react.surprised' },
+    { key: '😢', label: '难过', labelKey: 'yaya.react.sad' },
+    { key: '🎉', label: '庆祝', labelKey: 'yaya.react.tada' },
+    { key: '🙏', label: '谢谢', labelKey: 'yaya.react.thanks' }
+  ]
+}
+
 /** `turnChrome` 能看到的上下文 */
 export interface TurnChromeContext {
   sessionId: string
@@ -189,6 +231,11 @@ export interface PluginUi {
    * 只改显示：数据库与发给模型的历史保留标记原文。
    */
   inlineTags?: InlineTagDef[]
+  /**
+   * 消息下面可选的表情组（图标包）。选择器只列**已启用**插件的组，
+   * 已经落在历史消息里的表情即使插件关掉也照样显示（按 key 找不到就显示 key 本身）。
+   */
+  reactionSets?: ReactionSet[]
   /**
    * 回答的外观偏好（隐藏内置操作栏 / 折叠过程卡片 / 输入提示文案）。
    * 按 pluginId 字母序合并，后者覆盖前者；只影响框架自有元素，见 `TurnChrome`。

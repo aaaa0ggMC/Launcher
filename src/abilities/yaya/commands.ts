@@ -16,6 +16,7 @@ import {
   listSessions,
   getSession,
   getMessage,
+  updateMessage,
   createSession,
   deleteSession,
   getMessageBranchWithSiblings,
@@ -28,6 +29,7 @@ import {
   getSessionMessages,
   getMessageBranch
 } from './services/db'
+import { readReactions, toggleReaction } from './services/reactions'
 import { computeSessionUsage, type ToolRisk } from './services/usage'
 import { normalizeContextConfig } from './services/context'
 import { assistantConfig, findAssistant, sessionAssistantId } from './assistants'
@@ -473,6 +475,31 @@ const commands: CommandSpec[] = [
       if (!msg || msg.sessionId !== sessionId) throw new Error('message not in session')
       abortWorkflow(sessionId)
       return { ok: true, activeLeafId: deleteMessageSubtree(msg.id) }
+    }
+  },
+
+  {
+    name: 'yaya.reaction-set',
+    // 表情是用户自己的动作：AI 不能替用户表态
+    privacy: { agent: 'deny' },
+    description: '给 / 取消一条消息的表情回应（reactions 是该消息当前的全部表情）',
+    usage:
+      'yaya.reaction-set --session <sessionId> --message <messageId> --key <emoji 或图标名> [--remove]',
+    run: (ctx) => {
+      const sessionId = String(ctx.named.session ?? '')
+      const message = String(ctx.named.message ?? '')
+      const key = String(ctx.named.key ?? '').trim()
+      const remove = ctx.named.remove === true || ctx.named.remove === 'true'
+      if (!key) throw new Error('missing --key')
+      const msg = getMessage(message)
+      if (!msg || msg.sessionId !== sessionId) throw new Error('message not in session')
+      const next = toggleReaction(readReactions(msg.meta), key, { remove })
+      const meta = { ...(msg.meta ?? {}) }
+      if (next.length) meta.reactions = next
+      else delete meta.reactions
+      updateMessage(message, { meta })
+      getBroadcast()('cockpit:yaya-reactions', { session: sessionId, message, reactions: next })
+      return { ok: true, reactions: next }
     }
   },
 

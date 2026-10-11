@@ -8,6 +8,7 @@ import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
 import { inlineTokenParts } from './plugin-ui-registry'
+import ReactionBar from './ReactionBar.vue'
 import './tokens.css'
 
 const props = defineProps<{
@@ -160,6 +161,8 @@ function openPreview(id: string): void {
         >
       </template>
     </div>
+
+    <ReactionBar :node="message" />
 
     <div class="user-actions">
       <v-btn
