@@ -7,6 +7,7 @@
  */
 
 import { networkInterfaces } from 'os'
+import { readFileSync } from 'fs'
 import type { Socket } from 'dgram'
 import { abilityConfigPath } from '../../main/process/paths'
 import { readOrCreateJson, writeJsonAtomic } from '../../main/process/util'
@@ -164,6 +165,31 @@ const VIRTUAL_IFACE = /^(lo|docker\d*|veth.*|br-.*|virbr.*|zt.*|tun.*|tap.*|wg.*
 /** 真实网卡名前缀打分（越高越优先） */
 const REAL_IFACE = /^(eth|en|em|wl|wlan|wlp|eno|enp|ens)/i
 
+/** Linux 网卡标志位（`/sys/class/net/<name>/flags`，十六进制） */
+const IFF_BROADCAST = 0x2
+const IFF_LOOPBACK = 0x8
+const IFF_POINTOPOINT = 0x10
+
+/**
+ * 这块网卡有没有广播域（能不能收子网定向广播）。Linux 下读
+ * `/sys/class/net/<name>/flags`：点对点隧道（NetBird / WireGuard 的 `wt0`、
+ * Clash 的 TUN）与回环都没有 `IFF_BROADCAST`，往它们的「广播地址」发会报错。
+ * 读不到（非 Linux）返回 null，由 `subnetBroadcast` 的掩码校验兜底。
+ */
+function broadcastCapable(name: string): boolean | null {
+  let raw: string
+  try {
+    raw = readFileSync(`/sys/class/net/${name}/flags`, 'utf8').trim()
+  } catch {
+    return null
+  }
+  const flags = Number.parseInt(raw, 16)
+  if (!Number.isFinite(flags)) return null
+  if (flags & IFF_LOOPBACK) return false
+  if (flags & IFF_POINTOPOINT) return false
+  return (flags & IFF_BROADCAST) !== 0
+}
+
 /** 本机局域网 IPv4 / 全局 IPv6（没有则为空串）。 */
 export function localAddresses(): { ipv4: string; ipv6: string } {
   const ifaces = networkInterfaces()
@@ -192,11 +218,17 @@ export function localAddresses(): { ipv4: string; ipv6: string } {
  * （`ip route get 255.255.255.255` → 代理设备）。子网定向广播（如 `192.168.7.255`）
  * 在 main 表里有连通的明细路由，能绕过代理直达本网段，因此对每块真实网卡都发一份，
  * 最后再兜底受限广播（没装代理的简单网络照旧可用）。
+ *
+ * 只挑「有广播域」的网卡：点对点隧道（WireGuard / NetBird 的 `wt0`、Clash 的 TUN）
+ * 与回环没有广播地址，往它们的地址发必然失败（曾每 5s 刷
+ * `Unknown system error -126`）。Linux 下按 `IFF_BROADCAST` / `IFF_POINTOPOINT`
+ * 判定，其他平台按掩码兜底。
  */
 export function broadcastTargets(): string[] {
   const out = new Set<string>()
   for (const [name, addrs] of Object.entries(networkInterfaces())) {
     if (VIRTUAL_IFACE.test(name)) continue
+    if (broadcastCapable(name) === false) continue
     for (const a of addrs ?? []) {
       if (a.internal || a.family !== 'IPv4' || typeof a.netmask !== 'string') continue
       const b = subnetBroadcast(a.address, a.netmask)
@@ -209,7 +241,8 @@ export function broadcastTargets(): string[] {
 
 /**
  * 把一份报文发到所有候选广播地址（各网卡子网广播 + 受限广播）。每个目标独立发送、
- * 失败只记日志不抛出；`onDone` 在全部发送收尾后回调，`hadError` 表示是否至少有一个失败。
+ * 失败不抛出；只要有一个目标发出去就算成功（个别网卡发不了是正常的，只在全部失败
+ * 时记 warn）。`onDone` 在全部发送收尾后回调，`hadError` = 一个都没发出去。
  */
 export function sendBroadcast(
   socket: Socket,
@@ -219,26 +252,30 @@ export function sendBroadcast(
 ): void {
   const targets = broadcastTargets()
   let remaining = targets.length
-  let hadError = false
+  let sent = 0
+  const failures: { target: string; error: string }[] = []
   const finish = (): void => {
     remaining -= 1
-    if (remaining === 0) onDone?.(hadError)
+    if (remaining > 0) return
+    if (sent === 0) {
+      log.warn('broadcast send failed on every target', {
+        targets,
+        errors: failures.map((f) => `${f.target}: ${f.error}`)
+      })
+    } else if (failures.length) {
+      log.debug('broadcast send partially failed', { failures })
+    }
+    onDone?.(sent === 0)
   }
   for (const target of targets) {
     try {
       socket.send(buf, port, target, (e) => {
-        if (e) {
-          hadError = true
-          log.warn('broadcast send failed', { target, error: e.message })
-        }
+        if (e) failures.push({ target, error: e.message })
+        else sent += 1
         finish()
       })
     } catch (e) {
-      hadError = true
-      log.warn('broadcast send threw', {
-        target,
-        error: e instanceof Error ? e.message : String(e)
-      })
+      failures.push({ target, error: e instanceof Error ? e.message : String(e) })
       finish()
     }
   }

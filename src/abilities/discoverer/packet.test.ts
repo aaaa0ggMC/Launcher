@@ -128,8 +128,9 @@ describe('discoverer ip helpers', () => {
     assert.equal(subnetBroadcast('192.168.5.10', '255.255.248.0'), '192.168.7.255')
     assert.equal(subnetBroadcast('192.168.1.5', '255.255.255.0'), '192.168.1.255')
     assert.equal(subnetBroadcast('172.16.3.9', '255.255.0.0'), '172.16.255.255')
-    // /0、/32、非法输入都没有有意义的广播地址
+    // /0、/31、/32、非法输入都没有有意义的广播地址
     assert.equal(subnetBroadcast('10.0.0.1', '0.0.0.0'), null)
+    assert.equal(subnetBroadcast('10.0.0.1', '255.255.255.254'), null)
     assert.equal(subnetBroadcast('10.0.0.1', '255.255.255.255'), null)
     assert.equal(subnetBroadcast('', '255.255.255.0'), null)
     assert.equal(subnetBroadcast('10.0.0.1', 'nope'), null)

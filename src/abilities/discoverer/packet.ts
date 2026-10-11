@@ -117,7 +117,8 @@ export function parseIpv4(addr: string): Buffer | null {
 
 /**
  * 子网定向广播地址：`地址 & 掩码 | ~掩码`（如 `192.168.5.10` + `255.255.248.0`
- * → `192.168.7.255`）。地址 / 掩码非法、`/0` 掩码、`/32` 掩码返回 null。
+ * → `192.168.7.255`）。地址 / 掩码非法、`/0`、`/31`、`/32` 掩码返回 null
+ * （没有有意义的广播地址）。
  */
 export function subnetBroadcast(addr: string, netmask: string): string | null {
   if (!addr || !netmask) return null
@@ -130,7 +131,9 @@ export function subnetBroadcast(addr: string, netmask: string): string | null {
     if (m[i] !== 0) allZero = false
     if (m[i] !== 255) allOne = false
   }
+  // /0、/32 没有广播地址；/31（255.255.255.254）是点对点链路（RFC 3021）也没有
   if (allZero || allOne) return null
+  if (m[0] === 255 && m[1] === 255 && m[2] === 255 && m[3] === 254) return null
   const out = Buffer.alloc(4)
   for (let i = 0; i < 4; i++) out[i] = (a[i] & m[i]) | (~m[i] & 0xff)
   return bytesToIpv4(out)
