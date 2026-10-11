@@ -8,6 +8,9 @@
  * - `inlineTokens`：把消息正文里的某种记号（如 `[[secret_xxxx]]`）渲染成标签 / 替换文字。
  * - `usageView`：用量统计里本插件分区（后端 `hooks.usage` 返回）的自定义视图。
  * - `messageActions`：每条回答下面操作栏里的按钮（如「朗读」）。
+ * - `inlineTags`：正文里的命名空间标记（如拟真对话的 `<||…>` 换气泡 / 撤回），按前缀分派。
+ * - `turnChrome`：回答的外观偏好（隐藏内置操作栏、折叠过程卡片、输入提示文案）；
+ *   只能影响框架自有元素，插件注入物（toolCards / fences / messageActions / 数据卡 / 审批）不受影响。
  * - `cardViews`：插件工作流写进对话的数据卡片（`ctx.addCard({ type })`）按 type 渲染。
  * - `toolCards`：某个工具的调用渲染成回答里的独立卡片（不收进过程卡片），运行中可交互（如 ask 的提问）。
  * - `inputExtension`：输入框扩展组件；往「+」面板加项用 `context.addAction`（见 plugin-input.ts）。
@@ -19,6 +22,7 @@
  */
 import type { Component } from 'vue'
 import type { ToolCallItem } from '../types'
+import type { InlineTagRule } from './chat-tags'
 import type { PluginInfo } from '../services/plugins/types'
 import type { SessionUsage, UsageSection } from '../services/usage'
 
@@ -125,6 +129,39 @@ export interface MessageAction {
   run: (ctx: MessageActionContext) => void | Promise<void>
 }
 
+/**
+ * 正文里的命名空间标记（如拟真对话的 `<||…>`）：按**前缀**分派给插件。
+ * 解析规则见 `chat-tags.ts`；同前缀多个插件声明时按 pluginId 字母序取第一个。
+ */
+export interface InlineTagDef extends InlineTagRule {
+  /** 生效角色，默认 `['assistant']`（用户输入里的同名文本永远当普通文字） */
+  roles?: ('user' | 'assistant')[]
+}
+
+/** `turnChrome` 能看到的上下文 */
+export interface TurnChromeContext {
+  sessionId: string
+  /** 本轮第一个 assistant 节点 id */
+  messageId: string
+  /** 本轮正在运行（流式 / 工具执行 / 等待确认） */
+  live: boolean
+}
+
+/**
+ * 回答的外观偏好（拟真对话等插件）。**只能影响框架自有元素**：
+ * 复制 / 重新生成 / 更多 / usage 这条操作栏、过程卡片的折叠态、运行中的输入提示。
+ * 插件注入物（`toolCards` / `fences` / `messageActions` / 数据卡 / 工具审批）不在清单内，
+ * 永远不被它影响——审批与提问卡必须在任何配置下可见可交互。
+ */
+export interface TurnChrome {
+  /** 隐藏回答下方的内置操作栏（复制 / 重新生成 / 更多 / usage）。插件按钮走右键 / 长按菜单仍可用 */
+  hideActions?: boolean
+  /** 过程卡片（思考 / 工具调用）：open 正常 | collapsed 默认收起（可展开）| hidden 不渲染 */
+  process?: 'open' | 'collapsed' | 'hidden'
+  /** 运行中的「正在输入」提示文案（空 = 默认打字点） */
+  typingLabel?: string
+}
+
 export interface PluginUi {
   /** 对应后端插件 id；动态插件可用 `kind:<mcp|skill>` 匹配同类全部插件 */
   pluginId: string
@@ -147,6 +184,16 @@ export interface PluginUi {
   usageView?: Lazy
   /** 回答下面操作栏的按钮（复制 / 重新生成之后） */
   messageActions?: MessageAction[]
+  /**
+   * 正文里的命名空间标记（按前缀分派，见 `chat-tags.ts`）。默认只在 assistant 输出里解析。
+   * 只改显示：数据库与发给模型的历史保留标记原文。
+   */
+  inlineTags?: InlineTagDef[]
+  /**
+   * 回答的外观偏好（隐藏内置操作栏 / 折叠过程卡片 / 输入提示文案）。
+   * 按 pluginId 字母序合并，后者覆盖前者；只影响框架自有元素，见 `TurnChrome`。
+   */
+  turnChrome?: (ctx: TurnChromeContext) => TurnChrome | null | undefined
   /** 数据卡片类型 → 视图组件（props 见 CardViewProps）；没有就显示卡片的 markdown */
   cardViews?: Record<string, Lazy>
   /**

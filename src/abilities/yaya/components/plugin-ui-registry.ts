@@ -9,7 +9,15 @@
  * 用户正在插件详情页里操作，那里的启用开关自己也要能点。
  */
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
-import type { InlineTokenContext, InlineTokenView, MessageAction, PluginUi } from './plugin-ui'
+import type {
+  InlineTokenContext,
+  InlineTokenView,
+  MessageAction,
+  PluginUi,
+  TurnChrome,
+  TurnChromeContext
+} from './plugin-ui'
+import type { InlineTagRule } from './chat-tags'
 import type { PluginInfo, PluginKind } from '../services/plugins/types'
 
 const modules = import.meta.glob<PluginUi>('../plugins/*/ui.ts', { eager: true, import: 'default' })
@@ -232,9 +240,49 @@ export const messageActions = computed<{ pluginId: string; action: MessageAction
 )
 
 // ---------------------------------------------------------------------------
-// 正文记号（PluginUi.inlineTokens）
+// 命名空间标记（PluginUi.inlineTags）与回答外观（PluginUi.turnChrome）
 // ---------------------------------------------------------------------------
 
+/**
+ * 已启用插件声明的标记规则（按角色过滤；`roles` 缺省 = 只作用于 assistant 输出）。
+ * 同一前缀多个插件声明时按 pluginId 字母序取第一个——与 fence 抢同一语言的约定一致。
+ */
+export function chatTagRules(role: 'user' | 'assistant'): InlineTagRule[] {
+  const seen = new Set<string>()
+  const out: InlineTagRule[] = []
+  for (const ui of [...uis].sort((a, b) => a.pluginId.localeCompare(b.pluginId))) {
+    if (!uiEnabled(ui)) continue
+    for (const tag of ui.inlineTags ?? []) {
+      if (!(tag.roles ?? ['assistant']).includes(role)) continue
+      if (seen.has(tag.prefix)) continue
+      seen.add(tag.prefix)
+      out.push({ prefix: tag.prefix, kind: tag.kind })
+    }
+  }
+  return out
+}
+
+/**
+ * 回答的外观偏好：已启用插件按 pluginId 字母序合并，后者覆盖前者。
+ * 只影响框架自有元素（内置操作栏 / 过程卡片折叠态 / 输入提示），见 `TurnChrome`。
+ */
+export function turnChromeFor(ctx: TurnChromeContext): TurnChrome | null {
+  let out: TurnChrome | null = null
+  for (const ui of [...uis].sort((a, b) => a.pluginId.localeCompare(b.pluginId))) {
+    if (!uiEnabled(ui) || !ui.turnChrome) continue
+    try {
+      const v = ui.turnChrome(ctx)
+      if (v) out = { ...(out ?? {}), ...v }
+    } catch (e) {
+      console.warn('[yaya] turnChrome failed', ui.pluginId, e)
+    }
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 正文记号（PluginUi.inlineTokens）
+// ---------------------------------------------------------------------------
 const tokenRules = uis.flatMap((u) => u.inlineTokens ?? [])
 
 export type InlineTokenPart =
