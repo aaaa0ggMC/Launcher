@@ -375,9 +375,11 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 （`MainActivity.onBack` 问 `window.__cockpitBack()`：`'handled'` 结束，`'root'` 双击退出，
 页面桥没就绪时退回旧行为）。keep-alive 保证 ability 级返回自动恢复内部状态，无需序列化路由。
 
-已接入：设置分类、AIDJ 页面菜单（主菜单 / 会话 / 模型 / 频率 / 槽位 / B站下载 + 听歌统计 / 标签整理）。
-其余 ability 的编辑器 / 确认框都是 `v-dialog`，被「先关浮层」覆盖；gitignored 的私有能力
-（campusinfo 等）的内部导航未接入，ability 级返回对它们仍然有效。
+已接入：设置分类、AIDJ 页面菜单（主菜单 / 会话 / 模型 / 频率 / 槽位 / B站下载 + 听歌统计 / 标签整理）、
+campusinfo 区块导航（私有仓库，随主框架的 `@ui/back-nav` 一起用）。
+其余 ability 的编辑器 / 确认框都是 `v-dialog`，被「先关浮层」覆盖；modorg / biliviewer 的
+v-tabs / v-btn-toggle 是纯视图切换，按约定不入链；其余私有能力的内部导航（若有）未接入，
+ability 级返回对它们仍然有效。
 
 ### 主题 / 配色方案
 
