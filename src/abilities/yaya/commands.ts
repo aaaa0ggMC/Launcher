@@ -29,7 +29,13 @@ import {
   getSessionMessages,
   getMessageBranch
 } from './services/db'
-import { readReactions, toggleReaction } from './services/reactions'
+import {
+  mergeReactions,
+  readAllReactions,
+  readReactions,
+  toggleReaction
+} from './services/reactions'
+import { P } from './privacy'
 import { computeSessionUsage, type ToolRisk } from './services/usage'
 import { normalizeContextConfig } from './services/context'
 import { assistantConfig, findAssistant, sessionAssistantId } from './assistants'
@@ -481,19 +487,25 @@ const commands: CommandSpec[] = [
   {
     name: 'yaya.reaction-set',
     // 表情是用户自己的动作：AI 不能替用户表态
-    privacy: { agent: 'deny' },
-    description: '给 / 取消一条消息的表情回应（reactions 是该消息当前的全部表情）',
+    privacy: { agent: 'deny', reads: [P.reactions] },
+    description: '给 / 取消一条消息（或其中某个气泡）的表情回应；reactions 是这一份当前的全部表情',
     usage:
-      'yaya.reaction-set --session <sessionId> --message <messageId> --key <emoji 或图标名> [--remove]',
+      'yaya.reaction-set --session <sessionId> --message <messageId> --key <emoji 或图标名> [--segment <气泡 id>] [--remove]',
     run: (ctx) => {
       const sessionId = String(ctx.named.session ?? '')
       const message = String(ctx.named.message ?? '')
       const key = String(ctx.named.key ?? '').trim()
+      const segment = String(ctx.named.segment ?? '').trim() || undefined
       const remove = ctx.named.remove === true || ctx.named.remove === 'true'
       if (!key) throw new Error('missing --key')
       const msg = getMessage(message)
       if (!msg || msg.sessionId !== sessionId) throw new Error('message not in session')
-      const next = toggleReaction(readReactions(msg.meta), key, { remove })
+      // 只在「这一份」（消息级 / 某个气泡）里增删，其余的保持原位原顺序
+      const next = mergeReactions(
+        readAllReactions(msg.meta),
+        segment,
+        toggleReaction(readReactions(msg.meta, segment), key, { remove, segment })
+      )
       const meta = { ...(msg.meta ?? {}) }
       if (next.length) meta.reactions = next
       else delete meta.reactions

@@ -21,13 +21,16 @@ const props = defineProps<{
   node: MessageNode
   /** 运行中（流式）不显示，等这轮定稿再 react */
   live?: boolean
+  /** 挂在某个气泡上（拟真对话的分段 id）；缺省 = 整条消息级 */
+  segment?: string
 }>()
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t } = useI18n(lang)
 
 const busy = ref(false)
-const reactions = computed(() => readReactions(props.node.meta))
+/** 只读「这一份」：消息级与各气泡级互不串台 */
+const reactions = computed(() => readReactions(props.node.meta, props.segment))
 /** 已有表情 + 它们的图标定义（找不到定义就按 key 文本显示） */
 const reactionRows = computed(() =>
   reactions.value.map((r) => ({ reaction: r, item: reactionItemFor(r.key) }))
@@ -65,6 +68,7 @@ async function apply(next: MessageReaction[], key: string, remove: boolean): Pro
       session: target().sessionId,
       message: target().id,
       key,
+      segment: props.segment ?? '',
       remove
     })) as { ok?: boolean; reactions?: MessageReaction[] }
     if (Array.isArray(res?.reactions)) target().meta = { ...meta, reactions: res.reactions }

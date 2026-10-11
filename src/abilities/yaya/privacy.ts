@@ -6,6 +6,13 @@
 import { definePrivacyScopes } from '../../main/process/privacy'
 
 export const P = definePrivacyScopes('yaya', {
+  // 用户在消息 / 气泡上的表情回应：本地个人表达，默认对 AI 可见（回传时由
+  // sanitizeHistory 拼进对应 assistant 消息，命令本身 agent 不可调）
+  reactions: {
+    level: 'personal',
+    label: 'yaya.privacy.reactions',
+    description: 'yaya.privacy.reactions_desc'
+  },
   android_location: {
     level: 'sensitive',
     label: 'yaya.privacy.android_location',

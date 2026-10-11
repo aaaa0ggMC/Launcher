@@ -15,6 +15,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { normalizeEffort } from '../providers/reasoning'
+import { reactionNote } from '../reactions'
 import { chosenSearchMode, useBuiltinSearch, withoutGenericSearch } from '../search-mode'
 import { BuiltinSearchUnsupportedError, builtinSearchRejected } from '../providers/builtin-search'
 import { getBroadcast } from '../../../../main/process/broadcast'
@@ -1438,9 +1439,12 @@ export function sanitizeHistory(nodes: import('../../types').MessageNode[]): Pro
     // @ 点名的附注存在用户消息上，发给模型时拼在它后面（只影响这条及之后，前缀不变）
     const note =
       n.role === 'user' && typeof n.meta?.mentionNote === 'string' ? n.meta.mentionNote : ''
+    // 用户点的表情回应回传给 AI（消息级与气泡级各一行；没点过就是空串，一个字节都不多）
+    const reacted = n.role === 'assistant' ? reactionNote(n.meta) : ''
+    const tail = [note, reacted].filter(Boolean).join('\n\n')
     out.push({
       role: n.role,
-      content: note ? `${n.content}\n\n${note}` : n.content,
+      content: tail ? `${n.content}\n\n${tail}` : n.content,
       name: n.name,
       toolCallId: n.toolCallId,
       toolCalls: n.toolCalls,

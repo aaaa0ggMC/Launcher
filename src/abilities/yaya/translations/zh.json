@@ -614,6 +614,8 @@
   "yaya.usage.jump": "在对话中定位",
   "yaya.jump_not_found": "找不到这条消息，可能已被删除",
   "yaya.usage.chart_hint": "点柱子可定位到那次调用",
+  "yaya.privacy.reactions": "消息表情回应",
+  "yaya.privacy.reactions_desc": "你在消息或气泡上点的表情（会作为你的回应告知 AI）",
   "yaya.privacy.android_location": "手机定位",
   "yaya.privacy.android_location_desc": "YAYA 读取手机当前的 GPS / 网络定位",
   "yaya.privacy.android_camera": "手机相机",

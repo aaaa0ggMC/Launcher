@@ -614,6 +614,8 @@
   "yaya.usage.jump": "Show in conversation",
   "yaya.jump_not_found": "Can't find this message — it may have been deleted",
   "yaya.usage.chart_hint": "Click a bar to jump to that call",
+  "yaya.privacy.reactions": "Message reactions",
+  "yaya.privacy.reactions_desc": "Reactions you put on a message or bubble (told to the AI as your feedback)",
   "yaya.privacy.android_location": "Phone location",
   "yaya.privacy.android_location_desc": "YAYA reads the phone's current GPS / network location",
   "yaya.privacy.android_camera": "Phone camera",

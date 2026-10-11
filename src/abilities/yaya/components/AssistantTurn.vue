@@ -6,6 +6,7 @@ import type { ApprovalScope, ToolCallItem, YayaProfile } from '../types'
 import { modelMonogram } from '../profile'
 import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
+import { readReactions } from '../services/reactions'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
 import { splitBubbles, trimPartialTag, type ChatBubble } from './chat-tags'
@@ -161,6 +162,12 @@ const bubbleSplit = computed(() => {
 const bubbles = computed(() => bubbleSplit.value?.bubbles ?? [])
 const bubbleParts = computed(() => bubbles.value.map((b) => renderWithTokens(b.text)))
 const isSplit = computed(() => bubbleSplit.value !== null)
+/** 分段气泡时每个气泡自带表情条；已有消息级回应才额外显示消息级那条 */
+const showMessageBar = computed(() => {
+  if (!isSplit.value) return true
+  const node = props.turn.steps[0]
+  return node ? readReactions(node.meta).length > 0 : false
+})
 /** 气泡进入延迟（`<||1.2s/>`）走 animation-delay，动画只在挂载时跑一次 */
 function bubbleStyle(b: ChatBubble): CSSProperties {
   return b.delay ? { animationDelay: `${b.delay}ms` } : {}
@@ -388,6 +395,8 @@ async function copyTurn(): Promise<void> {
                   :streaming="live && !seg.closed"
                 />
               </template>
+              <!-- 气泡级表情：每个气泡一份，回应记在同一个节点的 meta 上（带 segment） -->
+              <ReactionBar v-if="!live" :node="turn.steps[0]" :segment="b.id" />
             </template>
           </div>
         </template>
@@ -407,8 +416,9 @@ async function copyTurn(): Promise<void> {
           </template>
         </template>
 
-        <!-- 消息表情回应（默认集 + 插件图标包）；这轮定稿后才出现 -->
-        <ReactionBar v-if="!live && turn.steps[0]" :node="turn.steps[0]" />
+        <!-- 消息表情回应（默认集 + 插件图标包）；这轮定稿后才出现。
+             分段气泡时由每个气泡自带表情条，只有已有消息级回应才额外显示这一条 -->
+        <ReactionBar v-if="!live && turn.steps[0] && showMessageBar" :node="turn.steps[0]" />
 
         <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
         <template v-for="seg in segmentsAfter" :key="seg.key">
