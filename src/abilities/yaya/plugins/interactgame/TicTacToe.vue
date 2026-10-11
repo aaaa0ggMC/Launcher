@@ -146,6 +146,8 @@ async function play(i: number): Promise<void> {
   gap: 10px;
   padding: 12px;
   max-width: 100%;
+  /* 卡片贴合棋盘宽度：宽屏不再被拉成整行空白 */
+  align-self: flex-start;
   border-radius: 14px;
   background: rgba(var(--v-theme-surface), var(--glass-a, 0.78));
   backdrop-filter: blur(16px) saturate(1.15);
@@ -163,7 +165,9 @@ async function play(i: number): Promise<void> {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  width: min(248px, 100%);
+  /* 固定 248 + max-width 兜底：避免 width:100% 与 align-self:flex-start 的循环依赖 */
+  width: 248px;
+  max-width: 100%;
 }
 .ttt-cell {
   aspect-ratio: 1;
