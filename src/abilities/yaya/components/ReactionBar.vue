@@ -5,7 +5,9 @@ import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import type { MessageNode } from '../types'
 import type { ReactionItem, ReactionSet } from './plugin-ui'
 import { readReactions, toggleReaction, type MessageReaction } from '../services/reactions'
+import { emoteSrcUrl } from './emotes'
 import { reactionItemFor, reactionSetsFor } from './plugin-ui-registry'
+import { fileIconUrl } from '@ui/icon'
 
 /**
  * 消息下面的表情回应（GitHub 式）：已有表情是可点的开关，右侧「+」弹选择器
@@ -41,6 +43,10 @@ function itemLabel(item: ReactionItem | null, key: string): string {
 }
 function setLabel(set: ReactionSet): string {
   return set.labelKey ? t(set.labelKey, set.label ?? set.id) : (set.label ?? set.id)
+}
+/** 表情包图片地址（`file/` 走 cockpit-icon 协议，其余是 URL / data URL） */
+function emoteUrl(src: string): string {
+  return emoteSrcUrl(src, fileIconUrl)
 }
 
 async function apply(next: MessageReaction[], key: string, remove: boolean): Promise<void> {
@@ -89,7 +95,15 @@ function pick(key: string): void {
       :aria-label="itemLabel(item, reaction.key)"
       @click="pick(reaction.key)"
     >
-      <AbilityIcon v-if="item?.icon" :icon="item.icon" :size="16" />
+      <img
+        v-if="item?.src"
+        class="reaction-img"
+        :src="emoteUrl(item.src)"
+        :alt="reaction.key"
+        loading="lazy"
+      />
+      <v-icon v-else-if="item?.icon?.startsWith('mdi-')" :icon="item.icon" size="16" />
+      <AbilityIcon v-else-if="item?.icon" :icon="item.icon" :size="16" />
       <span v-else class="reaction-glyph">{{ reaction.key }}</span>
     </button>
 
@@ -121,7 +135,15 @@ function pick(key: string): void {
           >
             <template #prepend>
               <span class="reaction-pick">
-                <AbilityIcon v-if="item.icon" :icon="item.icon" :size="18" />
+                <img
+                  v-if="item.src"
+                  class="reaction-img"
+                  :src="emoteUrl(item.src)"
+                  :alt="item.key"
+                  loading="lazy"
+                />
+                <v-icon v-else-if="item.icon?.startsWith('mdi-')" :icon="item.icon" size="18" />
+                <AbilityIcon v-else-if="item.icon" :icon="item.icon" :size="18" />
                 <span v-else class="reaction-glyph">{{ item.key }}</span>
               </span>
             </template>
