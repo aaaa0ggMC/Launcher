@@ -1,0 +1,14 @@
+{
+  "yaya.plugin.waifu.label": "拟真对话",
+  "yaya.plugin.waifu.desc": "把回答切成多条气泡、收起操作栏、显示「对方输入中」，接近真实聊天",
+  "yaya.plugin.waifu.cfg_hide_actions": "隐藏回答下方的操作栏",
+  "yaya.plugin.waifu.cfg_hide_actions_desc": "复制 / 重新生成 / 更多 / 用量都收起；右键或长按气泡仍能用全部操作",
+  "yaya.plugin.waifu.cfg_process": "中途的思考与工具调用",
+  "yaya.plugin.waifu.cfg_process_desc": "「收起」仍可点开看；「不显示」最接近纯对话，审批与提问卡片不受影响",
+  "yaya.plugin.waifu.proc_collapse": "显示（默认收起）",
+  "yaya.plugin.waifu.proc_open": "显示并展开",
+  "yaya.plugin.waifu.proc_hidden": "不显示",
+  "yaya.plugin.waifu.cfg_typing": "输入中提示",
+  "yaya.plugin.waifu.cfg_typing_desc": "运行中气泡下方的提示文字；留空用默认的「对方输入中…」",
+  "yaya.plugin.waifu.retracted": "对方撤回了一条消息"
+}

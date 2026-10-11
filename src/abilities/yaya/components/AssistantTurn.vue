@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed, inject, ref, type CSSProperties } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import { vLongPress, type LongPressPoint } from '../../../main/ui/directives/long-press'
 import type { ApprovalScope, ToolCallItem, YayaProfile } from '../types'
@@ -8,14 +8,17 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
+import { splitBubbles, type ChatBubble } from './chat-tags'
 import {
   applyInlineTokensHtml,
+  chatTagRules,
   fenceLangs,
   fenceViewFor,
   messageActions,
-  toolCardFor
+  toolCardFor,
+  turnChromeFor
 } from './plugin-ui-registry'
-import type { MessageAction, MessageActionContext } from './plugin-ui'
+import type { MessageAction, MessageActionContext, TurnChrome } from './plugin-ui'
 import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
@@ -51,6 +54,19 @@ const { t, te } = useI18n(lang)
 
 const copied = ref(false)
 const answer = computed(() => answerStep(props.turn))
+const sessionId = computed(() => props.turn.steps[0]?.sessionId ?? '')
+
+// ---- 聊天标记与回答外观（插件 SDK：inlineTags / turnChrome，全部按插件启用状态门控） ----
+/** 已启用插件声明的标记规则（只解析 assistant 输出） */
+const tagRules = computed(() => chatTagRules('assistant'))
+/** 外观偏好：只影响框架自有元素（内置操作栏 / 过程卡片 / 输入提示） */
+const chrome = computed<TurnChrome | null>(() =>
+  turnChromeFor({ sessionId: sessionId.value, messageId: props.turn.firstId, live: props.live })
+)
+/** 过程卡片显示方式（缺省 = 现状：收起 + 预览最近几步） */
+const processMode = computed(() => chrome.value?.process ?? 'collapsed')
+/** 隐藏回答下方的内置操作栏（右键 / 长按菜单仍可用） */
+const hideActions = computed(() => chrome.value?.hideActions === true)
 
 /** 本轮各步模型自带搜索的查询词与来源（合并去重） */
 const turnSearch = computed<BuiltinSearchInfo | null>(() => {
@@ -96,8 +112,10 @@ function runAction(a: MessageAction): void {
 
 /** Markdown 分段 + 插件的正文记号（如 [[secret_xxxx]]）：只改显示 */
 function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
-  const ctx = { sessionId: props.turn.steps[0]?.sessionId ?? '', role: 'assistant' as const, t }
-  return renderSegments(text, fenceLangs.value, labels.value).map((part) =>
+  const ctx = { sessionId: sessionId.value, role: 'assistant' as const, t }
+  // 标记只在显示层剥掉：复制 / 导出 / 菜单与气泡正文都走这份，数据库与模型历史保留原文
+  const src = tagRules.value.length ? splitBubbles(text, tagRules.value).plain : text
+  return renderSegments(src, fenceLangs.value, labels.value).map((part) =>
     part.kind === 'html' ? { ...part, html: applyInlineTokensHtml(part.html, ctx) } : part
   )
 }
@@ -112,18 +130,39 @@ const answerSegments = computed(() =>
  * 说的话与最终回答用同一套 Markdown 分段（插件代码块照样接管）。
  */
 const isCardTool = (name: string): boolean => toolCardFor(name) !== null
-const segments = computed(() =>
-  showProcess.value || props.turn.cards.length
-    ? turnSegments(props.turn, 'before', isCardTool).map((seg) =>
-        seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
-      )
-    : []
-)
+const segments = computed(() => {
+  if (!(showProcess.value || props.turn.cards.length)) return []
+  const segs = turnSegments(props.turn, 'before', isCardTool).map((seg) =>
+    seg.kind === 'text' ? { ...seg, parts: renderWithTokens(seg.node.content) } : seg
+  )
+  // 外观偏好「不显示」只砍过程块：数据卡 / 提问卡 / AI 说的话是内容，照常显示
+  return processMode.value === 'hidden' ? segs.filter((s) => s.kind !== 'process') : segs
+})
 /** 回答之后的过程块 / 卡片（按过程记录在回答之后的步骤） */
-const segmentsAfter = computed(() =>
-  props.turn.workflow ? turnSegments(props.turn, 'after', isCardTool) : []
-)
-const sessionId = computed(() => props.turn.steps[0]?.sessionId ?? '')
+const segmentsAfter = computed(() => {
+  if (!props.turn.workflow) return []
+  const segs = turnSegments(props.turn, 'after', isCardTool)
+  return processMode.value === 'hidden' ? segs.filter((s) => s.kind !== 'process') : segs
+})
+
+/** 回答切成的气泡：标记启用且正文里真有标记才分段（否则渲染路径与今天完全一致） */
+const bubbleSplit = computed(() => {
+  const content = answer.value?.content
+  if (!tagRules.value.length || !content) return null
+  const r = splitBubbles(content, tagRules.value)
+  return r.hadTags ? r : null
+})
+const bubbles = computed(() => bubbleSplit.value?.bubbles ?? [])
+const bubbleParts = computed(() => bubbles.value.map((b) => renderWithTokens(b.text)))
+const isSplit = computed(() => bubbleSplit.value !== null)
+/** 气泡进入延迟（`<||1.2s/>`）走 animation-delay，动画只在挂载时跑一次 */
+function bubbleStyle(b: ChatBubble): CSSProperties {
+  return b.delay ? { animationDelay: `${b.delay}ms` } : {}
+}
+/** 复制 / 菜单用的显示文本：剥掉标记（数据库与模型历史保留原文） */
+function displayText(s: string): string {
+  return tagRules.value.length ? splitBubbles(s, tagRules.value).plain : s
+}
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
     if (segments.value[i].kind === 'process') return segments.value[i].key
@@ -153,6 +192,14 @@ const waiting = computed(() => {
   if (answer.value?.content) return false
   return !showProcess.value
 })
+/** 外观偏好给的「输入中」提示（没有这个字段 = 保持原来的打字点） */
+const typingLabel = computed(() => {
+  const v = chrome.value?.typingLabel
+  if (v === undefined) return ''
+  return v.trim() || t('yaya.typing_hint', '对方输入中…')
+})
+/** 运行中显示：拟真模式下整轮都显示「输入中」，其余情况只在还看不到内容时打点 */
+const showTyping = computed(() => props.live && (waiting.value || !!typingLabel.value))
 
 /** 最后一个出错 / 中断的步骤 */
 const problem = computed(() => {
@@ -211,7 +258,7 @@ function openMenu(x: number, y: number, via: 'context' | 'button' = 'context'): 
     kind: 'assistant',
     messageId: props.turn.firstId,
     sessionId: sessionId.value,
-    text: turnText(props.turn),
+    text: displayText(turnText(props.turn)),
     selection: window.getSelection()?.toString() ?? '',
     fullText: turnFullMarkdown(props.turn, {
       thinking: t('yaya.copy_full.thinking', '思考'),
@@ -220,7 +267,7 @@ function openMenu(x: number, y: number, via: 'context' | 'button' = 'context'): 
       result: t('yaya.copy_full.result', '结果'),
       error: t('yaya.copy_full.error', '出错')
     }),
-    answerText: answer.value?.content ?? '',
+    answerText: displayText(answer.value?.content ?? ''),
     via
   })
 }
@@ -233,7 +280,7 @@ function onLongPress(p: LongPressPoint): void {
 }
 
 async function copyTurn(): Promise<void> {
-  await window.cockpit.copyText(turnText(props.turn))
+  await window.cockpit.copyText(displayText(turnText(props.turn)))
   copied.value = true
   setTimeout(() => (copied.value = false), 1500)
 }
@@ -257,7 +304,8 @@ async function copyTurn(): Promise<void> {
 
       <div
         v-long-press="onLongPress"
-        class="bubble"
+        class="turn-body"
+        :class="isSplit ? 'is-split' : 'bubble'"
         @contextmenu="onContextMenu"
         @click="onContentClick"
       >
@@ -272,6 +320,7 @@ async function copyTurn(): Promise<void> {
             :live="live"
             :pending-approval-id="pendingApprovalId"
             :preview-steps="previewSteps"
+            :open-by-default="processMode === 'open'"
           />
           <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
           <component
@@ -308,18 +357,48 @@ async function copyTurn(): Promise<void> {
           "
         />
 
-        <template v-for="(seg, i) in answerSegments" :key="i">
-          <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+        <!-- 拟真模式：回答按 <||> 标记切成多个气泡，逐泡渲染（撤回的泡只留占位） -->
+        <template v-if="isSplit">
+          <div
+            v-for="(b, i) in bubbles"
+            :key="b.id"
+            class="bubble waifu-bubble"
+            :class="{ 'is-retracted': b.retracted }"
+            :style="bubbleStyle(b)"
+          >
+            <div v-if="b.retracted" class="waifu-retracted text-medium-emphasis">
+              <v-icon icon="mdi-undo-variant" size="16" class="flex-shrink-0" />
+              {{ t('yaya.plugin.waifu.retracted', '对方撤回了一条消息') }}
+            </div>
+            <template v-else>
+              <template v-for="(seg, j) in bubbleParts[i]" :key="j">
+                <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
+                <div v-if="seg.kind === 'html'" class="md-body" v-html="seg.html" />
+                <component
+                  :is="fenceViewFor(seg.lang)"
+                  v-else
+                  :lang="seg.lang"
+                  :source="seg.source"
+                  :streaming="live && !seg.closed"
+                />
+              </template>
+            </template>
+          </div>
+        </template>
+        <template v-else>
+          <template v-for="(seg, i) in answerSegments" :key="i">
+            <!-- eslint-disable-next-line vue/no-v-html -- markdown-it html:false 已转义原始 HTML -->
 
-          <div v-if="seg.kind === 'html'" class="md-body" v-html="seg.html" />
+            <div v-if="seg.kind === 'html'" class="md-body" v-html="seg.html" />
 
-          <component
-            :is="fenceViewFor(seg.lang)"
-            v-else
-            :lang="seg.lang"
-            :source="seg.source"
-            :streaming="live && !seg.closed"
-          />
+            <component
+              :is="fenceViewFor(seg.lang)"
+              v-else
+              :lang="seg.lang"
+              :source="seg.source"
+              :streaming="live && !seg.closed"
+            />
+          </template>
         </template>
 
         <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
@@ -334,6 +413,7 @@ async function copyTurn(): Promise<void> {
             :live="live"
             :pending-approval-id="pendingApprovalId"
             :preview-steps="previewSteps"
+            :open-by-default="processMode === 'open'"
           />
           <DataCard v-else-if="seg.kind === 'card'" :node="seg.node" />
           <component
@@ -349,8 +429,11 @@ async function copyTurn(): Promise<void> {
 
         <SearchSources v-if="turnSearch" :search="turnSearch" />
 
-        <div v-if="waiting" class="typing" :aria-label="t('yaya.generating', '生成中')">
-          <span /><span /><span />
+        <div v-if="showTyping" class="typing-row">
+          <span v-if="typingLabel" class="typing-label">{{ typingLabel }}</span>
+          <div class="typing" :aria-label="t('yaya.generating', '生成中')">
+            <span /><span /><span />
+          </div>
         </div>
 
         <div v-for="r in turn.orphanResults" :key="r.id" class="orphan text-medium-emphasis">
@@ -387,7 +470,7 @@ async function copyTurn(): Promise<void> {
         </div>
       </div>
 
-      <div v-if="!live" class="turn-actions" :class="{ 'is-pinned': isLast }">
+      <div v-if="!live && !hideActions" class="turn-actions" :class="{ 'is-pinned': isLast }">
         <v-btn
           icon
           variant="text"
@@ -474,6 +557,16 @@ async function copyTurn(): Promise<void> {
   font-size: 0.95rem;
 }
 /* 助手气泡：玻璃底 + 细边框，压在背景图上也读得清；左上角收成小圆角指向头像 */
+/* turn-body 是内容容器（分段气泡时它自己不带玻璃底，气泡是它的子元素） */
+.turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.turn-body.is-split {
+  gap: 10px;
+}
 .bubble {
   display: flex;
   flex-direction: column;
@@ -486,6 +579,42 @@ async function copyTurn(): Promise<void> {
   -webkit-backdrop-filter: blur(16px) saturate(1.15);
   border: 1px solid rgba(var(--v-border-color), calc(var(--v-border-opacity) * 1.6));
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.06);
+}
+/* ---- 拟真对话：分段气泡（进入动画 + 撤回占位） ---- */
+.turn-body.is-split .waifu-bubble {
+  border-radius: 18px;
+  animation: waifu-in 0.26s ease both;
+}
+.turn-body.is-split .waifu-bubble:first-child {
+  border-radius: 6px 18px 18px 18px;
+}
+@keyframes waifu-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-body.is-split .waifu-bubble {
+    animation: none;
+  }
+}
+.waifu-bubble.is-retracted {
+  border-style: dashed;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  opacity: 0.85;
+}
+.waifu-retracted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-style: italic;
 }
 .narration {
   min-width: 0;
@@ -507,6 +636,20 @@ async function copyTurn(): Promise<void> {
 }
 .typing span:nth-child(3) {
   animation-delay: 0.3s;
+}
+/* 「输入中」提示文字（拟真模式）：与打点同一行 */
+.typing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.typing-label {
+  font-size: 0.85rem;
+  color: rgba(var(--v-theme-on-surface), 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 @keyframes yaya-dot {
   0%,

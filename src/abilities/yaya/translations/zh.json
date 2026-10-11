@@ -30,6 +30,7 @@
   "yaya.export_title": "导出会话",
   "yaya.exported": "已导出到 {path}",
   "yaya.generating": "生成中",
+  "yaya.typing_hint": "对方输入中…",
   "yaya.import_started": "已开始导入，进度见后台任务面板",
   "yaya.import_title": "选择 ChatGPT 导出的 conversations.json",
   "yaya.input.attach": "添加附件",

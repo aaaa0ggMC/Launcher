@@ -30,6 +30,7 @@
   "yaya.export_title": "Export conversation",
   "yaya.exported": "Exported to {path}",
   "yaya.generating": "Generating",
+  "yaya.typing_hint": "typing…",
   "yaya.import_started": "Import started. See the background tasks panel for progress",
   "yaya.import_title": "Choose the conversations.json exported from ChatGPT",
   "yaya.input.attach": "Add attachment",

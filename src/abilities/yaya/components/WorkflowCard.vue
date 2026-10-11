@@ -26,14 +26,16 @@ const props = withDefaults(
     last?: boolean
     /** 收起时仍预览最近几步（0 = 完全折叠） */
     previewSteps?: number
+    /** 默认展开（回答外观偏好 `process: 'open'`）；缺省 false = 现状的收起 + 预览 */
+    openByDefault?: boolean
   }>(),
-  { items: undefined, first: true, last: true, previewSteps: 1 }
+  { items: undefined, first: true, last: true, previewSteps: 1, openByDefault: false }
 )
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 
-const open = ref(false)
+const open = ref(!!props.openByDefault)
 
 /**
  * 展开 / 收起：预览和完整过程共用一个容器，只对容器高度做一次过渡（旧高度 → 新高度），

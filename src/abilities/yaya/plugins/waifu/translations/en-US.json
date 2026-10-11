@@ -1,0 +1,14 @@
+{
+  "yaya.plugin.waifu.label": "Realistic chat",
+  "yaya.plugin.waifu.desc": "Splits replies into chat bubbles, hides the action bar and shows a typing hint — close to a real conversation",
+  "yaya.plugin.waifu.cfg_hide_actions": "Hide the action bar under replies",
+  "yaya.plugin.waifu.cfg_hide_actions_desc": "Copy / regenerate / more / usage are hidden; right-click or long-press a bubble still gives every action",
+  "yaya.plugin.waifu.cfg_process": "Mid-turn thinking and tool calls",
+  "yaya.plugin.waifu.cfg_process_desc": "Collapsed stays expandable; hidden feels like a plain chat — approvals and question cards are unaffected",
+  "yaya.plugin.waifu.proc_collapse": "Show (collapsed by default)",
+  "yaya.plugin.waifu.proc_open": "Show expanded",
+  "yaya.plugin.waifu.proc_hidden": "Hide",
+  "yaya.plugin.waifu.cfg_typing": "Typing hint",
+  "yaya.plugin.waifu.cfg_typing_desc": "Text under the bubbles while a reply is being generated; empty uses the default “typing…”",
+  "yaya.plugin.waifu.retracted": "A message was retracted"
+}
