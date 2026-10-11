@@ -180,6 +180,68 @@ export function trimPartialTag(text: string, rules: InlineTagRule[]): string {
 }
 
 /**
+ * 块级标记（插件的对话内小部件，如井字棋）：`<g|ttt|X.O.X...|turn=O>`。
+ * 与 split/mark 同规则：跳过代码区、按前缀分派、流式未闭合不当标记。
+ * `name` = 前缀后到第一个 `|` 的部分（决定交给哪个组件渲染），其余是 `payload`。
+ */
+export interface BlockTagHit {
+  prefix: string
+  name: string
+  payload: string
+  raw: string
+  start: number
+  end: number
+}
+
+export function findBlockTags(text: string, rules: InlineTagRule[]): BlockTagHit[] {
+  const active = rules.filter((r) => r.kind === 'block')
+  if (!active.length || !text) return []
+  const masked = maskCodeRegions(text)
+  const ordered = [...active].sort((a, b) => b.prefix.length - a.prefix.length)
+  const hits: BlockTagHit[] = []
+  for (const rule of ordered) {
+    let from = 0
+    for (;;) {
+      const at = masked.indexOf(rule.prefix, from)
+      if (at < 0) break
+      const close = masked.indexOf('>', at + rule.prefix.length)
+      const nextOpen = masked.indexOf('<', at + 1)
+      if (close < 0 || (nextOpen >= 0 && nextOpen < close)) {
+        from = at + rule.prefix.length
+        continue
+      }
+      const inner = text
+        .slice(at + rule.prefix.length, close)
+        .trim()
+        .replace(/\/$/, '')
+        .trim()
+      const bar = inner.indexOf('|')
+      const name = (bar >= 0 ? inner.slice(0, bar) : inner).trim()
+      if (name)
+        hits.push({
+          prefix: rule.prefix,
+          name,
+          payload: bar >= 0 ? inner.slice(bar + 1).trim() : '',
+          raw: text.slice(at, close + 1),
+          start: at,
+          end: close + 1
+        })
+      from = close + 1
+    }
+  }
+  return hits.sort((a, b) => a.start - b.start)
+}
+
+/** 去掉块级标记（显示时只留旁白正文，小部件单独渲染） */
+export function stripBlockTags(text: string, rules: InlineTagRule[]): string {
+  const hits = findBlockTags(text, rules)
+  if (!hits.length) return text
+  let out = text
+  for (const h of hits) out = out.replace(h.raw, '')
+  return out
+}
+
+/**
  * 把回答正文切成气泡。**标记关闭并命名它前面的那一段**；标记前面没内容时不产生
  * 空气泡，id 与延迟顺延给下一段——于是开头写 `<||s1/>` 就是给第一段命名。
  */

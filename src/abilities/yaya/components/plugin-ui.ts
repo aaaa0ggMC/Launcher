@@ -42,6 +42,21 @@ export interface FenceViewProps {
 }
 
 /**
+ * 块级小部件（`PluginUi.blockViews`）拿到的 props：正文里的 `<g|ttt|…>` 这类标记
+ * 会被替换成组件，渲染在**这条回答的末尾**（旁白文字都在它上方）。
+ */
+export interface BlockViewProps {
+  /** 标记名（前缀后到第一个 `|`），如 `ttt` */
+  name: string
+  /** 名字之后的载荷原样（如 `X.O.X...|turn=O`） */
+  source: string
+  /** 流式输出中（标记可能还没写完） */
+  streaming: boolean
+  /** 这条回答所在的会话（小部件要回传用户操作时用，如棋盘落子） */
+  sessionId: string
+}
+
+/**
  * 工具卡片（`toolCards`）拿到的 props：固定显示在回答正文里（过程卡片里仍保留这次调用的记录行）。
  * `live` = 本轮正在运行，卡片可据此决定能否交互（如提问卡片的提交按钮）。
  */
@@ -223,6 +238,11 @@ export interface PluginUi {
   toolViews?: Record<string, Lazy>
   /** 代码块语言（小写）→ 组件 */
   fences?: Record<string, Lazy>
+  /**
+   * 对话内块级小部件：标记名（`<g|ttt|…>` 里的 `ttt`）→ 组件，渲染在这条回答的末尾，
+   * 旁白文字在它上方。按插件启用状态门控（关掉就按原文显示标记）。
+   */
+  blockViews?: Record<string, Lazy>
   /** 设置 → 插件详情里的配置界面（没有就用 schema 自动生成的表单） */
   settingsView?: Lazy
   /** 插件详情页里配置下面的附加面板（如「测试搜索」），props: { pluginId, info } */

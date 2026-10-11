@@ -1,10 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  findBlockTags,
   findChatTags,
   maskCodeRegions,
   parseTagBody,
   splitBubbles,
+  stripBlockTags,
   trimPartialTag,
   type InlineTagRule
 } from './chat-tags'
@@ -125,4 +127,29 @@ test('流式尾部的半截标记先藏起来，闭合后不藏', () => {
   assert.equal(trimPartialTag('a < b', RULES), 'a < b')
   assert.equal(trimPartialTag('标签<br>后面', RULES), '标签<br>后面')
   assert.equal(trimPartialTag('你好', RULES), '你好')
+})
+
+const BLOCK: InlineTagRule[] = [{ prefix: '<g|', kind: 'block' }]
+
+test('块级标记：name / payload 解析', () => {
+  const hits = findBlockTags('旁白<g|ttt|X.O.X...|turn=O>结尾', BLOCK)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].name, 'ttt')
+  assert.equal(hits[0].payload, 'X.O.X...|turn=O')
+  assert.equal(hits[0].raw, '<g|ttt|X.O.X...|turn=O>')
+  // 没有 payload 时 name = 全部
+  assert.deepEqual(
+    findBlockTags('<g|ttt>', BLOCK).map((h) => [h.name, h.payload]),
+    [['ttt', '']]
+  )
+})
+
+test('块级标记：代码区跳过、未闭合不当标记、strip 只留旁白', () => {
+  assert.equal(findBlockTags('```\n<g|ttt|x>\n```', BLOCK).length, 0)
+  assert.equal(findBlockTags('行内 `<g|ttt|x>` 也不算', BLOCK).length, 0)
+  assert.equal(findBlockTags('还没写完<g|ttt', BLOCK).length, 0)
+  assert.equal(stripBlockTags('旁白一<g|ttt|X..>旁白二', BLOCK), '旁白一旁白二')
+  // split 规则不认块级前缀（命名空间互不越界）
+  assert.equal(findChatTags('a<g|ttt|x>b', RULES).length, 0)
+  assert.equal(findBlockTags('a<||>b', BLOCK).length, 0)
 })

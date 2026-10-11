@@ -214,6 +214,32 @@ export function fenceViewFor(lang: string): Component | null {
   return null
 }
 
+export interface ResolvedBlockView {
+  component: Component
+  pluginId: string
+  /** 标记名（`<g|ttt|…>` 里的 `ttt`） */
+  name: string
+}
+
+/**
+ * 对话内块级小部件的组件（`PluginUi.blockViews`；没有返回 null）。
+ * 按插件启用状态门控——关掉插件时标记按原文显示（内容载体，不剥）。
+ * 同名多个插件接管时按 pluginId 字母序取第一个（同 fence 的约定）。
+ */
+export function blockViewFor(name: string): ResolvedBlockView | null {
+  for (const ui of sortedUis()) {
+    if (!uiEnabled(ui)) continue
+    const loader = ui.blockViews?.[name]
+    if (loader)
+      return {
+        component: lazy(`block:${ui.pluginId}:${name}`, loader),
+        pluginId: ui.pluginId,
+        name
+      }
+  }
+  return null
+}
+
 /** Composer extensions are enabled only after the backend confirms plugin availability. */
 export const inputExtensions = computed(() =>
   [...uis]

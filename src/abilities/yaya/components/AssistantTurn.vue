@@ -9,10 +9,17 @@ import type { AssistantTurn } from './turns'
 import { readReactions } from '../services/reactions'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
-import { splitBubbles, trimPartialTag, type ChatBubble } from './chat-tags'
+import {
+  findBlockTags,
+  splitBubbles,
+  stripBlockTags,
+  trimPartialTag,
+  type ChatBubble
+} from './chat-tags'
 import {
   allChatTagRules,
   applyInlineTokensHtml,
+  blockViewFor,
   chatTagRules,
   fenceLangs,
   fenceViewFor,
@@ -121,6 +128,8 @@ function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
   // 标记只在显示层剥掉：复制 / 导出 / 菜单与气泡正文都走这份，数据库与模型历史保留原文。
   // 流式中再把没写完的尾部标记藏起来，闭合后才出现
   let src = stripRules.value.length ? splitBubbles(text, stripRules.value).plain : text
+  // 块级小部件标记交给组件渲染，正文里先剥掉（插件关掉时不剥，标记按原文显示）
+  if (blockRules.value.length) src = stripBlockTags(src, blockRules.value)
   if (props.live) src = trimPartialTag(src, stripRules.value)
   return renderSegments(src, fenceLangs.value, labels.value).map((part) =>
     part.kind === 'html' ? { ...part, html: applyInlineTokensHtml(part.html, ctx) } : part
@@ -168,13 +177,29 @@ const showMessageBar = computed(() => {
   const node = props.turn.steps[0]
   return node ? readReactions(node.meta).length > 0 : false
 })
+/** 块级小部件标记（`<g|ttt|…>`）：按启用状态解析，组件渲染在回答末尾 */
+const blockRules = computed(() => tagRules.value.filter((r) => r.kind === 'block'))
+const blockTags = computed(() => {
+  const content = answer.value?.content
+  if (!blockRules.value.length || !content) return []
+  return findBlockTags(content, blockRules.value)
+})
+/** 标记 + 组件（没接管的标记按剥掉处理，不渲染残缺外壳） */
+const blockWidgets = computed(() =>
+  blockTags.value.flatMap((tag) => {
+    const view = blockViewFor(tag.name)
+    return view ? [{ key: `${tag.name}:${tag.start}`, component: view.component, tag }] : []
+  })
+)
 /** 气泡进入延迟（`<||1.2s/>`）走 animation-delay，动画只在挂载时跑一次 */
 function bubbleStyle(b: ChatBubble): CSSProperties {
   return b.delay ? { animationDelay: `${b.delay}ms` } : {}
 }
 /** 复制 / 菜单用的显示文本：剥掉标记（数据库与模型历史保留原文） */
 function displayText(s: string): string {
-  return stripRules.value.length ? splitBubbles(s, stripRules.value).plain : s
+  let out = stripRules.value.length ? splitBubbles(s, stripRules.value).plain : s
+  if (blockRules.value.length) out = stripBlockTags(out, blockRules.value)
+  return out
 }
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
@@ -415,6 +440,17 @@ async function copyTurn(): Promise<void> {
             />
           </template>
         </template>
+
+        <!-- 对话内块级小部件（井字棋等）：渲染在回答末尾，旁白文字都在它上方 -->
+        <component
+          :is="w.component"
+          v-for="w in blockWidgets"
+          :key="w.key"
+          :name="w.tag.name"
+          :source="w.tag.payload"
+          :streaming="live"
+          :session-id="sessionId"
+        />
 
         <!-- 消息表情回应（默认集 + 插件图标包）；这轮定稿后才出现。
              分段气泡时由每个气泡自带表情条，只有已有消息级回应才额外显示这一条 -->
