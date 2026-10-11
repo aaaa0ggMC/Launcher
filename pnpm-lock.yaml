@@ -159,6 +159,8 @@ importers:
         specifier: ^13.0.2
         version: 13.0.2
 
+  src/abilities/discoverer: {}
+
   src/abilities/display: {}
 
   src/abilities/ft: {}

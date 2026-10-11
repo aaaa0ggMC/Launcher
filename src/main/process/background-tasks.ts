@@ -61,6 +61,11 @@ export interface StartJobOptions {
   view?: string
   /** arbitrary tags — e.g. `['aidj-playback']` to mark playback-control tasks */
   tags?: string[]
+  /**
+   * Whether quitting the app must ask about this task (default true). Set
+   * false for expendable boot services — see `BtTaskInfo.mustComplete`.
+   */
+  mustComplete?: boolean
   /** called when the user stops/cancels the task */
   onCancel?: () => void | Promise<void>
 }
@@ -996,7 +1001,8 @@ export function startJobTask(opts: StartJobOptions): JobControl {
       outputCount: 0,
       canInput: false,
       canSignal: false,
-      tags: opts.tags
+      tags: opts.tags,
+      mustComplete: opts.mustComplete !== false
     },
     output: [],
     cancel: opts.onCancel
@@ -1034,10 +1040,15 @@ export function startJobTask(opts: StartJobOptions): JobControl {
  * function returns the task snapshot immediately, so the IPC/command that
  * started it doesn't block for the whole job. The handler's promise resolving
  * → task finishes; rejecting → task marked errored.
+ *
+ * `opts.mustComplete` (default true) marks the task as expendable for the
+ * quit-confirmation — used by boot services (see `boot-services.ts`); the
+ * user-facing `background.job` command never sets it.
  */
 export async function startJobByName(
   name: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  opts: { mustComplete?: boolean } = {}
 ): Promise<BtTaskInfo | null> {
   const reg = jobHandlers.get(name)
   if (!reg) {
@@ -1065,6 +1076,7 @@ export async function startJobByName(
     description: args.description ? String(args.description) : undefined,
     view: typeof args.view === 'string' ? args.view : 'log',
     tags: Array.isArray(rawTags) ? rawTags.map((x) => String(x)) : undefined,
+    mustComplete: opts.mustComplete !== false,
     onCancel: undefined
   })
   // Fire-and-forget: do not await the job — return control to the caller.
@@ -1085,11 +1097,17 @@ export function listTasks(): BtTaskInfo[] {
   return [...tasks.values()].map(snapshot)
 }
 
-/** Number of tasks currently running (used for quit-confirmation). */
+/**
+ * Number of tasks currently running that quitting must ask about (used for
+ * quit-confirmation). Tasks marked `mustComplete: false` (expendable boot
+ * services) are excluded: closing the app terminates them directly.
+ */
 export function runningTaskCount(): number {
   let n = 0
   for (const t of tasks.values()) {
-    if (t.info.status === 'running') n++
+    if (t.info.status !== 'running') continue
+    if (t.info.mustComplete === false) continue
+    n++
   }
   return n
 }

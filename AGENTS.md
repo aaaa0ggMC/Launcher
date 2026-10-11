@@ -79,6 +79,7 @@ git submodule update --remote src/main/ui/assets/game-icon-pack
 - `dashboard` → `gridstack`
 - `rungame` → `three`（+ devDeps `@types/three`）
 - `yaya` → `openai` / `@modelcontextprotocol/sdk` / `katex`（都是 YAYA 核心：provider / MCP / 正文数学公式）
+- `discoverer` → 无第三方依赖（只用 node 内置 `dgram` / `crypto`）
 - 其余 ability 只用框架提供的东西（vue/vuetify 等），`package.json` 留空
 
 **YAYA 插件自己声明依赖**（`pnpm-workspace.yaml` 的 `packages` 含 `src/abilities/yaya/plugins/*`）：某个插件专属的第三方依赖写**该插件目录自己的 `package.json`**，不要塞进 yaya 的：
@@ -176,8 +177,11 @@ Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch
     "confirmBeforeLaunch": true
   },
   "sidebar": {
-    "default": "cli" // 初始页面（缺失/无效时回落第一个能力）
-  }
+    "default": "cli", // 初始页面（缺失/无效时回落第一个能力）
+    "sort": "alpha", // alpha 字母序（默认）| frequency 使用频次 | recent 最近使用
+    "mode": "auto" // 侧栏形态：auto（≤720px 窄屏弹出式、宽屏常驻）| always 常驻 | overlay 始终弹出式
+  },
+  "boot": {} // 开机自启服务开关表（设置 → 开机服务）：{ '<服务 id>': true }，缺省全关，见 §9「开机服务」
 }
 ```
 
@@ -372,7 +376,7 @@ ability 的 `icon` 字段用 `gi:<name>` 前缀指定 curated SVG，找不到时
 
 返回算法（两端一致）：**先关浮层（`.v-overlay--active` 上发 Escape，吞掉这次返回）→ 当前 ability 的
 `onBack` → pop ability 链 → 根**。根上：浏览器交给浏览器自己离开页面；App 由 Java 弹「再按一次退出」
-（`MainActivity.onBack` 问 `window.__cockpitBack()`：`'handled'` 结束，`'root'` 双击退出，
+（`MainActivity.onBack` 问 `window.__cockpitBack()`：`'handled'` 结束、`'root'` 双击退出，
 页面桥没就绪时退回旧行为）。keep-alive 保证 ability 级返回自动恢复内部状态，无需序列化路由。
 
 已接入：设置分类、AIDJ 页面菜单（主菜单 / 会话 / 模型 / 频率 / 槽位 / B站下载 + 听歌统计 / 标签整理）、
@@ -380,6 +384,18 @@ campusinfo 区块导航（私有仓库，随主框架的 `@ui/back-nav` 一起�
 其余 ability 的编辑器 / 确认框都是 `v-dialog`，被「先关浮层」覆盖；modorg / biliviewer 的
 v-tabs / v-btn-toggle 是纯视图切换，按约定不入链；其余私有能力的内部导航（若有）未接入，
 ability 级返回对它们仍然有效。
+
+### 开机服务（Boot services SDK）
+
+Ability 可以向 Launcher 申请「开机自启服务」：启动 Launcher 时自动运行自己注册的后台作业（框架级，`src/main/process/boot-services.ts`，与 `startup.ts` / `background-tasks.ts` 同级）。
+
+- **申请**：ability 的 `commands.ts`（主进程唯一加载点）里调 `registerBootService({ id, label, job, mustComplete? })`；`job` 必须是本能力 `registerJobHandler` 注册过的作业名。重复 id 抛错。
+- **开关**：默认**全部关闭**；用户在 设置 → 开机服务（settings 能力注入的分类，组件 `items/BootServicesSection.vue`）逐项打开，状态存全局 `config.json` 的 `boot`（`{ '<服务 id>': true }`），命令 `boot.list` / `boot.set`（`boot.set` 要 `SCOPE_CONTROL`）。改动**下一次启动生效**。
+- **启动**：模块加载时自注册 startup hook（`registerAbilityCommands()` 之后、首个窗口创建前跑；Electron 与无头宿主同序），按 `boot` 表 `startJobByName(job, { name: label })`，同进程不重复启动。
+- **`mustComplete`（默认 false）决定退出时的行为**：
+  - `true` → 任务没跑完关程序会弹确认框（和现在行为一样，计入 `runningTaskCount()`）；
+  - `false` → 关程序直接终结、不弹窗（`BtTaskInfo.mustComplete` / `startJobByName(name, args, { mustComplete })`，仅 boot 路径会传，`background.job` 不暴露该参数）——适合「内容不重要」的常驻任务（局域网广播、缓存预热）。
+- 参考实现：`discoverer`（局域网设备发现，`mustComplete: false`）。
 
 ### 主题 / 配色方案
 
