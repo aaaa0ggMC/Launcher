@@ -529,3 +529,77 @@ Node 层：Android Controller —— 普通 YayaPlugin
 
 - 第一个能力悬浮窗（如 AIDJ 迷你播放器），验证 Outsider SDK 的能力注入与设置页权限。
 - 显示类插件做完后，再看工具结果视图（toolViews）：如 Cockpit 截图对比、快照差异高亮。
+
+---
+
+## 七、 对话体验扩展：React / Waifu / 棋盘 / Forge / Pet / 信息源 / Regex（2026-10-11 立项）
+
+> 用户口述的 7 个方向。排序标准是用户定的：**好做 + 对 SDK 指导意义**（不是按依赖风险从小到大）。
+> 原则：**SDK 由真实需求逼出来，不做预研地基**；每个里程碑独立 commit，方便 review 与 revert。
+
+### 7.1 顺序与理由
+
+| # | 里程碑 | 难度 | 对 SDK 指导 | 主要产出 | 状态 |
+| :-- | :-- | :--: | :--: | :-- | :-- |
+| 1 | **Waifu 拟真对话** | 中 | **最高** | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口 | `[ ]` |
+| 2 | **Emoji React** | 易 | 高 | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[ ]` |
+| 3 | Waifu × React 打通 | 易 | 高 | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI | `[ ]` |
+| 4 | **InteractGame（井字棋等）** | 中 | **高** | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性 | `[ ]` |
+| 5 | **Regex 规则** | 易-中 | 中 | AI 出库替换时机、列表型配置、HTML 显示替换 | `[ ]` |
+| 6 | **信息源 `fetch_info`** | 中 | 中 | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置 | `[ ]` |
+| 7 | **Forge 动态 JS 插件** | 难 | 高但依赖 | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动 | `[ ]` |
+| 插队 | Pet 宠物（Outsider） | 易 | 低 | 零依赖休息件，随时插 | `[ ]` |
+
+排序逻辑：指导意义高的先做（Waifu / React / 棋盘），好做的穿插当节奏调节（Regex / 信息源 / Pet），重且依赖别人的放最后（Forge）。
+
+### 7.2 正交性约束（Waifu 与现有组件的冲突解法）
+
+`AssistantTurn.vue` 的实际结构：`segments(process│card│toolcard│narration) → 挂起审批 ToolCallRow → answerSegments → segmentsAfter → SearchSources → 打字点 → 提示条`，之后是 `turn-actions(复制│重新生成│插件按钮│更多│usage)`。
+
+| 冲突对象 | Naive 做法的问题 | 正交做法（本计划采用） |
+| :-- | :-- | :-- |
+| speech 等插件的 `messageActions` | `hideActions` 一把藏掉 → 朗读按钮消失 | chrome **只能裁决框架自有物**（复制 / 重新生成 / 更多 / usage）；插件按钮由自身 `visible` 决定，用户要全藏就走**右键菜单**（`View.vue` 本就往菜单里塞 messageActions）——隐藏 ≠ 功能消失 |
+| 工具审批 | 藏过程块把审批一起藏掉 → AI 永远等不到批准 | 审批是气泡外独立 `ToolCallRow`；**审批 / `toolcard`（ask 提问）/ 数据卡永不受 chrome 影响**——它们是内容不是装饰 |
+| WorkflowCard 过程块 | 直接不渲染 → 丢过程记录 | 复用它已有的折叠态：`process: 'collapsed'` 默认收起、`'hidden'` 才移出流，都可展开回去 |
+| mermaid / svg / widget（fences）、secret / roleplay（inlineTokens） | 切分在 markdown 之后做会切碎代码块里的文本、或与 token 替换抢同一段 | 切分在**最顶层**（markdown 之前），跳过 fence 与行内代码；每个气泡内部照旧走 `renderSegments → fence` 与 `applyInlineTokensHtml` |
+| 多插件争同一标记 | 先后说不清 | SDK `inlineTags` 按 **prefix** 分派，同前缀按 pluginId 字母序取第一个（沿用 fence 先例） |
+| 复制 / 导出 / 菜单 | 复制出去带标记原文 | 标记插件经**显示文本出口**剥离标记；**数据库与模型历史永远是原文**（铁律） |
+| 用户输入 | 用户随口打了标记被切 | `roles: ['assistant']`，用户消息不解析（`inlineTokens` 走用户侧，互不越界） |
+| 消息 id vs 气泡 id | 两套主键打架 | 消息 UUID（落库、react 记录）；**气泡 id 纯显示层**，只在 `reactionNote` 里作为描述回传 |
+
+硬验收：
+
+1. **关掉 Waifu 插件 → DOM 与今天逐像素一致**（全部效果走 `pluginOn` 门控）；
+2. **审批、ask 提问卡、数据卡在任何配置组合下可见可交互**。
+
+### 7.3 聊天标记语法（一个命名空间，短）
+
+```
+<||>          结束当前气泡（自动 id：b1/b2/… 按顺序）
+<||s2>        结束并把这段命名成 s2
+<||1.2s>      结束，下一段延迟 1.2s 再出现（认 1.2s / 300ms / 纯数字=秒，上限 10s）
+<||s2 1.2s>   命名 + 延迟
+<||-s1>       撤回气泡 s1（不切分，显示「对方撤回了一条消息」）
+```
+
+- **标记关闭并命名它前面的那一段**；要给末段命名就在末尾再写一个 `<||id>`（其后没有内容 → 不产生空泡）。缺省 id 按顺序 `b1/b2/…`（流式中稳定：段只增不改）。
+- 只在 assistant 输出里解析；**代码块与行内代码里的标记不解析**；标记原文保留在数据库与模型历史里（显示层变换）。
+- 每个插件声明自己的前缀（`inlineTags: [{ prefix, kind }]`），棋盘等以后用 `<g||…>` 之类独立命名空间。
+- `<wait>` 也切分（语义就是"停一下、下一条"），容错：`id=` 写法、`wait` 关键字都接受。
+
+### 7.4 进度
+
+- [ ] **1. Waifu 核心**
+  - [ ] 1a `chat-tags.ts` 标记解析 + 气泡分段（纯函数 + 单测：代码块跳过、id 命名、延迟、撤回、流式未闭合）
+  - [ ] 1b SDK：`PluginUi.inlineTags` / `PluginUi.turnChrome` + registry 分派
+  - [ ] 1c `plugins/waifu/`（configSchema + instructions）+ `AssistantTurn.vue` 消费（多气泡渲染、隐藏内置操作栏、输入中标示、复制走显示文本）
+  - [ ] 1d playwright 实测（隔离 HOME、headless 版）：切分、撤回、隐藏操作栏、关掉插件后与今天一致
+- [ ] **2. React**：`reactionSets` + `meta.reactions` + `yaya.reaction-set` + 表情条与选择器（图标包：emoji 集 + `gi:` 单色 SVG）
+- [ ] **3. Waifu × React**：`meta.reactionNote` 注入（复用 mentionNote 的白名单模式）
+- [ ] **4. InteractGame**：成对标签 + 同卡片增量 + 点击回传（生成 `<g||move …/>` 用户消息走正常发送链路）
+- [ ] **5. Regex**：规则 `{ pattern, flags, replacement, target: user|ai|both, mode: visual|raw, format: regex|html }`
+- [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
+- [ ] **7. Forge**：加载器 + 解压边界 + `guard(SCOPE_EXEC)` 确认；渲染端动态组件放二期
+- [ ] 插队件 **Pet**：Outsider 悬浮宠物
+
+**本轮记录**：Waifu 模式不追求极致提示词缓存（用户明确），但也不做会击穿缓存的蠢事（instructions 固定、不随配置 / 时间变化；`reactionNote` 只改最新一条 user 消息尾部）。
