@@ -29,3 +29,21 @@
   background: none;
   text-decoration: underline dotted rgba(var(--v-theme-primary), 0.6);
 }
+/* 内联表情（`:短码:`）：不加底色，跟普通文字一样流在句子里 */
+.yaya-token.is-bare {
+  padding: 0;
+  border-radius: 0;
+  font-weight: inherit;
+  font-size: 1em;
+  color: inherit;
+  background: none;
+  word-break: normal;
+}
+/* 图片表情（表情包）：按行高对齐，大小跟 Discord 内联 emote 一个量级 */
+.yaya-token-img {
+  height: 1.5em;
+  width: auto;
+  vertical-align: -0.35em;
+  border-radius: 6px;
+  object-fit: contain;
+}

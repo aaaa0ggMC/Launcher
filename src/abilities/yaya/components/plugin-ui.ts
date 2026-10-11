@@ -73,13 +73,16 @@ export interface InlineTokenContext {
   t: (key: string, fallback?: string) => string
 }
 
-/** 记号的显示：tone=chip 显示成带图标的小标签；tone=text 直接替换成文字 */
+/** 记号的显示：tone=chip 显示成带图标的小标签；tone=text 直接替换成文字；
+ * tone=bare 不加任何底色（内联表情用），`img` 则整段换成一张图（表情包） */
 export interface InlineTokenView {
   text: string
   title?: string
-  /** mdi 图标（只在 chip 时显示） */
+  /** mdi 图标（只在 chip / bare 下显示） */
   icon?: string
-  tone?: 'chip' | 'text'
+  /** 图片（表情包）：给了就渲染成 `<img>`，`text` 当 alt */
+  img?: string
+  tone?: 'chip' | 'text' | 'bare'
   /** 隐私 SDK scope：AI 快照 / 截图按它脱敏 */
   privacy?: string
 }
@@ -143,11 +146,18 @@ export interface InlineTagDef extends InlineTagRule {
 export interface ReactionItem {
   /**
    * 唯一 key，同时是**存进 `meta.reactions` 的值**：默认表情集里它就是 emoji 本身（👍），
-   * 图标包里是图标名（配合 `icon`）。
+   * 图标包里是图标名（配合 `icon` / `src`）。
    */
   key: string
+  /** 内联短码（AI 在正文里写 `:shortcode:` 就是它）；不给就用 `key` */
+  shortcode?: string
   /** 图标包：`parseIcon` 语法（`gi:<name>` / `default/<name>` / `emoji/…`）。不给就直接显示 key 文本 */
   icon?: string
+  /**
+   * **图片表情**（Discord 式表情包）：`file/<绝对路径>` 走 cockpit-icon 协议，
+   * 其余是 URL / data URL。给了 `src` 就优先用图片。
+   */
+  src?: string
   label?: string
   labelKey?: string
 }
@@ -161,6 +171,8 @@ export interface ReactionSet {
   items: ReactionItem[]
   /** 哪一侧的消息可以 react，缺省两侧都可以 */
   roles?: ('user' | 'assistant')[]
+  /** false = 这组只用于回应选择器，正文里的 `:短码:` 不解析它（默认参与） */
+  inline?: boolean
 }
 
 /** 框架自带的默认表情集（不看插件启用状态：历史消息的表情总要显示得出来） */
@@ -169,14 +181,14 @@ export const DEFAULT_REACTION_SET: ReactionSet = {
   label: '表情',
   labelKey: 'yaya.react.set_default',
   items: [
-    { key: '👍', label: '赞', labelKey: 'yaya.react.thumbsup' },
-    { key: '👎', label: '踩', labelKey: 'yaya.react.thumbsdown' },
-    { key: '❤️', label: '喜欢', labelKey: 'yaya.react.heart' },
-    { key: '😂', label: '笑哭', labelKey: 'yaya.react.laugh' },
-    { key: '😮', label: '惊讶', labelKey: 'yaya.react.surprised' },
-    { key: '😢', label: '难过', labelKey: 'yaya.react.sad' },
-    { key: '🎉', label: '庆祝', labelKey: 'yaya.react.tada' },
-    { key: '🙏', label: '谢谢', labelKey: 'yaya.react.thanks' }
+    { key: '👍', shortcode: 'thumbsup', label: '赞', labelKey: 'yaya.react.thumbsup' },
+    { key: '👎', shortcode: 'thumbsdown', label: '踩', labelKey: 'yaya.react.thumbsdown' },
+    { key: '❤️', shortcode: 'heart', label: '喜欢', labelKey: 'yaya.react.heart' },
+    { key: '😂', shortcode: 'joy', label: '笑哭', labelKey: 'yaya.react.laugh' },
+    { key: '😮', shortcode: 'surprised', label: '惊讶', labelKey: 'yaya.react.surprised' },
+    { key: '😢', shortcode: 'cry', label: '难过', labelKey: 'yaya.react.sad' },
+    { key: '🎉', shortcode: 'tada', label: '庆祝', labelKey: 'yaya.react.tada' },
+    { key: '🙏', shortcode: 'pray', label: '谢谢', labelKey: 'yaya.react.thanks' }
   ]
 }
 

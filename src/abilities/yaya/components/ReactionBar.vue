@@ -180,6 +180,16 @@ function pick(key: string): void {
 .reaction-glyph {
   line-height: 1.2;
 }
+.reaction-img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.reaction-chip .reaction-img {
+  width: 16px;
+  height: 16px;
+}
 .reaction-add {
   margin-left: -2px;
 }

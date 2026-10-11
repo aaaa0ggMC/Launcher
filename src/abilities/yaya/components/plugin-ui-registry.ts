@@ -11,6 +11,7 @@
 import { computed, defineAsyncComponent, ref, type Component } from 'vue'
 import type {
   InlineTokenContext,
+  InlineTokenRule,
   InlineTokenView,
   MessageAction,
   PluginUi,
@@ -20,6 +21,8 @@ import type {
   TurnChromeContext
 } from './plugin-ui'
 import { DEFAULT_REACTION_SET } from './plugin-ui'
+import { EMOTE_PATTERN, emoteView } from './emotes'
+import { fileIconUrl } from '../../../main/ui/icon'
 import type { InlineTagRule } from './chat-tags'
 import type { PluginInfo, PluginKind } from '../services/plugins/types'
 
@@ -280,13 +283,19 @@ export function reactionSetsFor(role: 'user' | 'assistant'): ReactionSet[] {
   })
 }
 
-/** key → 表情定义（找得到就按 `icon` / label 渲染，找不到就直接显示 key 文本） */
+/** key → 表情定义（找得到就按 `icon` / `src` / label 渲染，找不到就直接显示 key 文本） */
 export function reactionItemFor(key: string): ReactionItem | null {
   for (const set of allReactionSets()) {
     const item = set.items.find((i) => i.key === key)
     if (item) return item
   }
   return null
+}
+
+/** 正文里的内联表情短码 `:key:`（框架自带，跟插件启用状态无关：历史消息里的表情也要显示） */
+const emoteRule: InlineTokenRule = {
+  pattern: EMOTE_PATTERN,
+  render: (match, ctx) => emoteView(match[1], allReactionSets(), fileIconUrl, ctx.t)
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +362,7 @@ export function turnChromeFor(ctx: TurnChromeContext): TurnChrome | null {
 // ---------------------------------------------------------------------------
 // 正文记号（PluginUi.inlineTokens）
 // ---------------------------------------------------------------------------
-const tokenRules = uis.flatMap((u) => u.inlineTokens ?? [])
+const tokenRules: InlineTokenRule[] = [...uis.flatMap((u) => u.inlineTokens ?? []), emoteRule]
 
 export type InlineTokenPart =
   { kind: 'text'; text: string } | { kind: 'token'; view: InlineTokenView }
@@ -397,9 +406,14 @@ function escapeHtml(s: string): string {
 
 /** 记号的 HTML（回答走 v-html；文字一律转义） */
 export function inlineTokenHtml(view: InlineTokenView): string {
+  const titleAttr = view.title ? ` title="${escapeHtml(view.title)}"` : ''
+  // 图片表情（表情包）：整段换成一张图，text 当 alt
+  if (view.img)
+    return `<img class="yaya-token-img" src="${escapeHtml(view.img)}" alt="${escapeHtml(view.text)}"${titleAttr} loading="lazy" />`
+  const cls = view.tone === 'text' ? ' is-text' : view.tone === 'bare' ? ' is-bare' : ''
   const attrs = [
-    `class="yaya-token${view.tone === 'text' ? ' is-text' : ''}"`,
-    view.title ? `title="${escapeHtml(view.title)}"` : '',
+    `class="yaya-token${cls}"`,
+    titleAttr.trim(),
     view.privacy ? `data-privacy="${escapeHtml(view.privacy)}"` : ''
   ]
     .filter(Boolean)
