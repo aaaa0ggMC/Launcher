@@ -240,6 +240,20 @@ export function blockViewFor(name: string): ResolvedBlockView | null {
   return null
 }
 
+/**
+ * 用户消息里块级标记的「回声」文案（见 `PluginUi.blockEchoes`）；没有就返回 null。
+ */
+export function blockEchoFor(
+  name: string
+): ((payload: string, t: (key: string, fallback?: string) => string) => string) | null {
+  for (const ui of sortedUis()) {
+    if (!uiEnabled(ui)) continue
+    const echo = ui.blockEchoes?.[name]
+    if (echo) return echo
+  }
+  return null
+}
+
 /** Composer extensions are enabled only after the backend confirms plugin availability. */
 export const inputExtensions = computed(() =>
   [...uis]

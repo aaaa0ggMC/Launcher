@@ -8,5 +8,13 @@ import { definePluginUi } from '../../components/plugin-ui'
 export default definePluginUi({
   pluginId: 'interactgame',
   inlineTags: [{ prefix: '<g|', kind: 'block', roles: ['user', 'assistant'] }],
-  blockViews: { ttt: () => import('./TicTacToe.vue') }
+  blockViews: { ttt: () => import('./TicTacToe.vue') },
+  // 用户的走子消息在气泡里显示成人话（`<g|ttt|move=4>` → 「你落子第 5 格」）
+  blockEchoes: {
+    ttt: (payload, t) => {
+      const m = /move=(\d)/.exec(payload)
+      if (!m) return ''
+      return t('yaya.game.you_moved', '你落子第 {n} 格').replace('{n}', String(Number(m[1]) + 1))
+    }
+  }
 })

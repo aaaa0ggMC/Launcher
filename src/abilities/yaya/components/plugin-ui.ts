@@ -243,6 +243,15 @@ export interface PluginUi {
    * 旁白文字在它上方。按插件启用状态门控（关掉就按原文显示标记）。
    */
   blockViews?: Record<string, Lazy>
+  /**
+   * 标记的「回声」文案：**用户消息**里出现该标记时替换成这句人话（如走子
+   * `<g|ttt|move=4>` → 「你落子第 5 格」），避免气泡里露出原始标记或变成空气泡。
+   * 没提供就直接剥掉标记。
+   */
+  blockEchoes?: Record<
+    string,
+    (payload: string, t: (key: string, fallback?: string) => string) => string
+  >
   /** 设置 → 插件详情里的配置界面（没有就用 schema 自动生成的表单） */
   settingsView?: Lazy
   /** 插件详情页里配置下面的附加面板（如「测试搜索」），props: { pluginId, info } */

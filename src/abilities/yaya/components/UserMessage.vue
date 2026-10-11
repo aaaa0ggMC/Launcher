@@ -7,8 +7,8 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
-import { chatTagRules, inlineTokenParts } from './plugin-ui-registry'
-import { stripBlockTags } from './chat-tags'
+import { blockEchoFor, chatTagRules, inlineTokenParts } from './plugin-ui-registry'
+import { findBlockTags } from './chat-tags'
 import ReactionBar from './ReactionBar.vue'
 import './tokens.css'
 
@@ -57,11 +57,15 @@ function onLongPress(p: LongPressPoint): void {
 
 /** 正文切成文字 / 插件记号（如 [[secret_xxxx]] 显示成标签） */
 const contentParts = computed(() => {
-  // 对话内小部件的标记（如走子 `<g|ttt|move=4>`）不在气泡里露出来：交互由棋盘负责
+  // 对话内小部件的标记不在气泡里露出来：走子之类换成插件给的人话（没给就剥掉），
+  // 交互本身由棋盘负责
+  let src = props.message.content
   const rules = chatTagRules('user')
-  const src = rules.some((r) => r.kind === 'block')
-    ? stripBlockTags(props.message.content, rules)
-    : props.message.content
+  if (rules.some((r) => r.kind === 'block')) {
+    for (const hit of findBlockTags(src, rules)) {
+      src = src.replace(hit.raw, blockEchoFor(hit.name)?.(hit.payload, t) ?? '')
+    }
+  }
   return inlineTokenParts(src, {
     sessionId: props.message.sessionId,
     role: 'user',
