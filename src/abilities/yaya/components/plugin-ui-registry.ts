@@ -263,6 +263,26 @@ export function chatTagRules(role: 'user' | 'assistant'): InlineTagRule[] {
 }
 
 /**
+ * 所有插件声明的标记（**不**按启用状态门控）：只用于剥离 `split` / `mark` 这类纯指令标记——
+ * 插件关掉后，历史消息也不该露出 `<||…>` 原文（同 `inlineTokens` 的先例：记号在插件关掉后
+ * 也要能看懂）。分段渲染仍走 `chatTagRules`（按启用状态门控）。
+ * `block` 成对标签是内容载体，关掉时保留原文。
+ */
+export function allChatTagRules(): InlineTagRule[] {
+  const seen = new Set<string>()
+  const out: InlineTagRule[] = []
+  for (const ui of [...uis].sort((a, b) => a.pluginId.localeCompare(b.pluginId))) {
+    for (const tag of ui.inlineTags ?? []) {
+      if (tag.kind === 'block') continue
+      if (seen.has(tag.prefix)) continue
+      seen.add(tag.prefix)
+      out.push({ prefix: tag.prefix, kind: tag.kind })
+    }
+  }
+  return out
+}
+
+/**
  * 回答的外观偏好：已启用插件按 pluginId 字母序合并，后者覆盖前者。
  * 只影响框架自有元素（内置操作栏 / 过程卡片折叠态 / 输入提示），见 `TurnChrome`。
  */

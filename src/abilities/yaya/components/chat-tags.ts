@@ -165,6 +165,21 @@ export function parseTagBody(body: string): TagAttrs {
 }
 
 /**
+ * 流式中还没写完的尾部标记（`<||s`）先不显示，等闭合后再出现——否则打字过程中
+ * 会露出半截标记原文。只认已声明的前缀，正文里的普通 `<` 不受影响。
+ */
+export function trimPartialTag(text: string, rules: InlineTagRule[]): string {
+  if (!rules.length) return text
+  const lt = text.lastIndexOf('<')
+  if (lt < 0) return text
+  const tail = text.slice(lt)
+  if (tail.includes('>')) return text
+  return rules.some((r) => r.prefix.startsWith(tail) || tail.startsWith(r.prefix))
+    ? text.slice(0, lt)
+    : text
+}
+
+/**
  * 把回答正文切成气泡。**标记关闭并命名它前面的那一段**；标记前面没内容时不产生
  * 空气泡，id 与延迟顺延给下一段——于是开头写 `<||s1/>` 就是给第一段命名。
  */

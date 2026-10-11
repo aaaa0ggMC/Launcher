@@ -5,6 +5,7 @@ import {
   maskCodeRegions,
   parseTagBody,
   splitBubbles,
+  trimPartialTag,
   type InlineTagRule
 } from './chat-tags'
 
@@ -114,4 +115,14 @@ test('未知标记原样保留（不当标记、不去掉）', () => {
   const r = splitBubbles('a <br/> b', RULES)
   assert.equal(r.hadTags, false)
   assert.equal(r.bubbles[0].text, 'a <br/> b')
+})
+
+test('流式尾部的半截标记先藏起来，闭合后不藏', () => {
+  assert.equal(trimPartialTag('你好<||s', RULES), '你好')
+  assert.equal(trimPartialTag('你好<', RULES), '你好')
+  assert.equal(trimPartialTag('你好<||s1/>', RULES), '你好<||s1/>')
+  // 正文里的普通 < 不受影响
+  assert.equal(trimPartialTag('a < b', RULES), 'a < b')
+  assert.equal(trimPartialTag('标签<br>后面', RULES), '标签<br>后面')
+  assert.equal(trimPartialTag('你好', RULES), '你好')
 })

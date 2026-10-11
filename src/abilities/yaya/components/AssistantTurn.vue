@@ -8,8 +8,9 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { AssistantTurn } from './turns'
 import { answerStep, hasProcess, turnFullMarkdown, turnSegments, turnText } from './turns'
 import { renderSegments, handleMarkdownClick } from './markdown'
-import { splitBubbles, type ChatBubble } from './chat-tags'
+import { splitBubbles, trimPartialTag, type ChatBubble } from './chat-tags'
 import {
+  allChatTagRules,
   applyInlineTokensHtml,
   chatTagRules,
   fenceLangs,
@@ -57,8 +58,10 @@ const answer = computed(() => answerStep(props.turn))
 const sessionId = computed(() => props.turn.steps[0]?.sessionId ?? '')
 
 // ---- 聊天标记与回答外观（插件 SDK：inlineTags / turnChrome，全部按插件启用状态门控） ----
-/** 已启用插件声明的标记规则（只解析 assistant 输出） */
+/** 已启用插件声明的标记规则（只解析 assistant 输出）——决定要不要分段 */
 const tagRules = computed(() => chatTagRules('assistant'))
+/** 全部指令标记（不看启用状态）——只用于剥离，插件关掉后历史消息也不露原文 */
+const stripRules = computed(() => allChatTagRules())
 /** 外观偏好：只影响框架自有元素（内置操作栏 / 过程卡片 / 输入提示） */
 const chrome = computed<TurnChrome | null>(() =>
   turnChromeFor({ sessionId: sessionId.value, messageId: props.turn.firstId, live: props.live })
@@ -113,8 +116,10 @@ function runAction(a: MessageAction): void {
 /** Markdown 分段 + 插件的正文记号（如 [[secret_xxxx]]）：只改显示 */
 function renderWithTokens(text: string): ReturnType<typeof renderSegments> {
   const ctx = { sessionId: sessionId.value, role: 'assistant' as const, t }
-  // 标记只在显示层剥掉：复制 / 导出 / 菜单与气泡正文都走这份，数据库与模型历史保留原文
-  const src = tagRules.value.length ? splitBubbles(text, tagRules.value).plain : text
+  // 标记只在显示层剥掉：复制 / 导出 / 菜单与气泡正文都走这份，数据库与模型历史保留原文。
+  // 流式中再把没写完的尾部标记藏起来，闭合后才出现
+  let src = stripRules.value.length ? splitBubbles(text, stripRules.value).plain : text
+  if (props.live) src = trimPartialTag(src, stripRules.value)
   return renderSegments(src, fenceLangs.value, labels.value).map((part) =>
     part.kind === 'html' ? { ...part, html: applyInlineTokensHtml(part.html, ctx) } : part
   )
@@ -161,7 +166,7 @@ function bubbleStyle(b: ChatBubble): CSSProperties {
 }
 /** 复制 / 菜单用的显示文本：剥掉标记（数据库与模型历史保留原文） */
 function displayText(s: string): string {
-  return tagRules.value.length ? splitBubbles(s, tagRules.value).plain : s
+  return stripRules.value.length ? splitBubbles(s, stripRules.value).plain : s
 }
 const lastProcessKey = computed(() => {
   for (let i = segments.value.length - 1; i >= 0; i--)
