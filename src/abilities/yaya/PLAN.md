@@ -542,7 +542,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | #    | 里程碑                       | 难度  | 对 SDK 指导 | 主要产出                                                                                 | 状态  |
 | :--- | :--------------------------- | :---: | :---------: | :--------------------------------------------------------------------------------------- | :---- |
 | 1    | **Waifu 拟真对话**           |  中   |  **最高**   | `inlineTags`（命名空间标记分派）+ `turnChrome`（外观偏好）+ 顶层气泡分段 + 显示文本出口  | `[x]` |
-| 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[ ]` |
+| 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[x]` |
 | 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[ ]` |
 | 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[ ]` |
 | 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[ ]` |
@@ -600,6 +600,16 @@ Node 层：Android Controller —— 普通 YayaPlugin
   - [x] 1c `plugins/waifu/`（configSchema 三项 + instructions 约 1041 字）+ `AssistantTurn.vue` 消费（多气泡渲染、隐藏内置操作栏、输入中提示、撤回占位、复制走显示文本）+ `WorkflowCard.openByDefault`
   - [x] 1d playwright 实测（隔离 HOME + headless + 假 OpenAI 端点流式回复）：切分 / 延迟 / 撤回 / 输入中 / 操作栏隐藏 / **关插件后单气泡 + 标记剥离 + 操作栏恢复** / 设置页插件条目与配置表单，截图 `screenshots/waifu/01–08`（不提交）
   - 未验证（留待以后）：`process: hidden/open` 需要带工具调用的真实运行；`<||1.2s>` 延迟动画只在代码里；复制结果未逐字比对
+- [x] **2. Emoji React + 图标包**（2026-10-11 完成，提交 `8332605` / `045e4b9`）
+  - [x] SDK：`ReactionSet` / `ReactionItem`（`key` / `shortcode` / `icon` / `src` / `inline`）+ `PluginUi.reactionSets`；
+        `services/reactions.ts` 纯逻辑 + 4 例单测
+  - [x] 命令：`yaya.reaction-set`（`agent: 'deny'`，乐观落库 + `cockpit:yaya-reactions` 广播），
+        `ReactionBar.vue` 乐观更新失败回滚；助手轮次与用户消息两侧都有表情条
+  - [x] **图标包内联**：AI 在正文写 `:key:`（Discord 同款短码）→ `emotes.ts` 命中已注册表情集才替换，
+        图片表情（`src`，表情包）/ mdi 图标 / 纯 emoji 三种形态；未命中的普通冒号文本原样保留；
+        `emoteInstruction()` 给图标包插件生成固定英文说明；单测 8 例
+  - [x] playwright 实测：两侧表情条 + 选择器 8 项 + 增 / 删 / 刷新后仍在 + 0 控制台错误，截图 `screenshots/waifu/09–10`
+  - 未验证（留待以后）：图片表情包的**界面**路径（`<img>` 芯片与内联）——用临时图标包单独验一次
 - [ ] **2. React**：`reactionSets` + `meta.reactions` + `yaya.reaction-set` + 表情条与选择器（图标包：emoji 集 + `gi:` 单色 SVG）
 - [ ] **3. Waifu × React**：`meta.reactionNote` 注入（复用 mentionNote 的白名单模式）
 - [ ] **4. InteractGame**：成对标签 + 同卡片增量 + 点击回传（生成 `<g||move …/>` 用户消息走正常发送链路）
