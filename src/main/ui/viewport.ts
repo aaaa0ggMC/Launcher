@@ -97,6 +97,18 @@ export function installViewportVar(): void {
       apply()
     }, 60)
   }
+  // B7：键盘弹出时浏览器会对聚焦输入框做 scrollIntoView——即使 html/body 是
+  // overflow:hidden 也能被**程序滚动**，整个外壳被向下顶出去（顶部留白、顶栏消失，
+  // 高度更新后才弹回）。document 没有任何合法滚动场景，一律按回原点；
+  // 内部滚动容器（聊天 / 设置列表）有自己的 scrollTop，不受影响。
+  const resetScroll = (): void => {
+    const se = document.scrollingElement
+    if (se && (se.scrollTop !== 0 || se.scrollLeft !== 0)) {
+      se.scrollTop = 0
+      se.scrollLeft = 0
+    }
+  }
+  window.addEventListener('scroll', resetScroll, { capture: true })
   window.addEventListener('resize', schedule)
   window.addEventListener('orientationchange', schedule)
   window.visualViewport?.addEventListener('resize', schedule)
