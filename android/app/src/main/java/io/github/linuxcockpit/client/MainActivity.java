@@ -22,8 +22,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -121,8 +121,6 @@ public class MainActivity extends Activity {
     private String pendingConnect;
     /** 最近一次「静止」时量到的 IME 高度，>0 = 键盘弹着（API 30+ 以 isVisible 为准） */
     private int imeRestBottom = 0;
-    /** 键盘动画进行中：这期间不改 padding，只平移 WebView */
-    private boolean imeAnimating = false;
 
     /** 关网页弹窗 / 菜单：找到一个激活的 overlay，朝当前焦点发 Escape */
     private static final String JS_DISMISS_OVERLAY =
@@ -311,73 +309,28 @@ public class MainActivity extends Activity {
         Window w = getWindow();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
             return; // Android 8–10：系统自己留出系统栏，adjustResize 处理键盘
-        // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制），自己按系统栏 + 键盘留白：
-        // WebView 的可见区域就是真正能用的区域，网页里的 --app-vh 量到的也是它
+        // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制），只按系统栏留白。
         w.setDecorFitsSystemWindows(false);
+        // 键盘缩放**只交给 WebView 一条路**（页面 meta interactive-widget=resizes-content，
+        // 与 Chrome 同路径——Chrome 没有整屏跳变就是因为它没有下面这套原生 IME 机关）。
+        // 原先是「系统 adjustResize + 动画期平移 WebView + 结束落 IME padding」再叠加 meta
+        // 的布局缩放：两条路径在键盘动画期间互相打架 → 整个界面上移、顶部留白、动画结束
+        // 再回弹（真机录屏里的整屏跳变）。
+        w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            // Apply the final layout before onStart; progress only transforms the WebView.
-            if (!imeAnimating) applySettledInsets(insets);
+            applySettledInsets(insets);
             return WindowInsets.CONSUMED;
         });
-        // Android 11+：键盘弹起 / 收起走 WindowInsetsAnimationCallback——动画中只平移 WebView
-        // （translation，不重排），动画结束（含取消 / 被打断 / 旋转）才把最终 padding 落下去再清零。
-        root.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_STOP) {
-            /** 动画开始时 root 的底 padding，即内容的起始底边 */
-            private int startPadding;
-            private int endPadding;
-            private WindowInsetsAnimation activeIme;
-
-            @Override
-            public void onPrepare(WindowInsetsAnimation animation) {
-                if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
-                activeIme = animation;
-                imeAnimating = false;
-                startPadding = root.getPaddingBottom();
-            }
-
-            @Override
-            public WindowInsetsAnimation.Bounds onStart(WindowInsetsAnimation animation,
-                    WindowInsetsAnimation.Bounds bounds) {
-                if (animation != activeIme) return bounds;
-                imeAnimating = true;
-                endPadding = root.getPaddingBottom();
-                web.setTranslationY(endPadding - startPadding);
-                return bounds;
-            }
-
-            @Override
-            public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> running) {
-                boolean hasIme = false;
-                for (WindowInsetsAnimation a : running)
-                    if (a == activeIme) hasIme = true;
-                if (hasIme) {
-                    int cur = insets.getInsets(WindowInsets.Type.ime()).bottom;
-                    int bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()).bottom;
-                    // 目标底边 = 窗口底 - max(系统栏, 当前键盘高度)；现在底边 = 窗口底 - startPadding
-                    web.setTranslationY(endPadding - Math.max(bars, cur));
-                }
-                return insets;
-            }
-
-            @Override
-            public void onEnd(WindowInsetsAnimation animation) {
-                if (animation != activeIme) return;
-                activeIme = null;
-                imeAnimating = false;
-                WindowInsets finalInsets = root.getRootWindowInsets();
-                if (finalInsets != null) applySettledInsets(finalInsets);
-                web.setTranslationY(0f);
-                root.requestApplyInsets(); // 用静止下来的最终 inset 重算 padding
-            }
-        });
+        // （原 WindowInsetsAnimationCallback——动画中平移 WebView、结束才落 IME padding——
+        //   是与 meta 重复的第二条 IME 缩放路径，已整体移除；系统栏留白仍由 applySettledInsets 负责。）
     }
 
-    /** 键盘没动的时候：按系统栏 + 当前键盘高度设置 root padding（也是动画结束后的最终态） */
+    /** 键盘没动的时候：按系统栏设置 root padding（IME 留白交给 WebView meta，原生不再叠一条） */
     private void applySettledInsets(WindowInsets insets) {
         Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
         Insets ime = insets.getInsets(WindowInsets.Type.ime());
         imeRestBottom = ime.bottom;
-        root.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+        root.setPadding(bars.left, bars.top, bars.right, bars.bottom);
     }
 
     // ---------------------------------------------------------------- 加载指示
