@@ -309,28 +309,31 @@ public class MainActivity extends Activity {
         Window w = getWindow();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
             return; // Android 8–10：系统自己留出系统栏，adjustResize 处理键盘
-        // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制），只按系统栏留白。
+        // 统一走 edge-to-edge（targetSdk 35 在 Android 15 上强制）。
         w.setDecorFitsSystemWindows(false);
-        // 键盘缩放**只交给 WebView 一条路**（页面 meta interactive-widget=resizes-content，
-        // 与 Chrome 同路径——Chrome 没有整屏跳变就是因为它没有下面这套原生 IME 机关）。
-        // 原先是「系统 adjustResize + 动画期平移 WebView + 结束落 IME padding」再叠加 meta
-        // 的布局缩放：两条路径在键盘动画期间互相打架 → 整个界面上移、顶部留白、动画结束
-        // 再回弹（真机录屏里的整屏跳变）。
+        // **键盘只有一条缩放路径 = applySettledInsets 的 padding（按 IME 高度给 root 留白）**：
+        // 1) 系统侧 adjustNothing——不缩窗、不平移；原「动画期平移 WebView」正是整屏漂移的来源；
+        // 2) 页面 meta resizes-content 在系统 WebView 里不生效（真机实测：拆掉 padding 后输入框
+        //    不再上浮）——Chrome 靠 meta，我们靠 padding；
+        // 3) Manifest 的 adjustResize 在 R+ 被这行运行时覆盖，只对 Android 8–10 保留。
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             applySettledInsets(insets);
             return WindowInsets.CONSUMED;
         });
-        // （原 WindowInsetsAnimationCallback——动画中平移 WebView、结束才落 IME padding——
-        //   是与 meta 重复的第二条 IME 缩放路径，已整体移除；系统栏留白仍由 applySettledInsets 负责。）
     }
 
-    /** 键盘没动的时候：按系统栏设置 root padding（IME 留白交给 WebView meta，原生不再叠一条） */
+    /**
+     * 静止时按系统栏 + 当前键盘高度设置 root padding——**这是本 App 唯一的 IME 缩放路径**：
+     * 系统侧 adjustNothing（不缩窗不平移），WebView 的 meta resizes-content 在系统 WebView
+     * 里不生效（真机实测：拆掉 padding 后输入框不再上浮），所以抬升只能由这里做。
+     * 已不再做动画期平移（那才是「整个 Launcher 漂移」的来源）。
+     */
     private void applySettledInsets(WindowInsets insets) {
         Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
         Insets ime = insets.getInsets(WindowInsets.Type.ime());
         imeRestBottom = ime.bottom;
-        root.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+        root.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
     }
 
     // ---------------------------------------------------------------- 加载指示
