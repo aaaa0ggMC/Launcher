@@ -3,11 +3,12 @@ import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
 import AbilityIcon from '@ui/components/AbilityIcon.vue'
 import type { MessageNode } from '../types'
-import type { ReactionItem, ReactionSet } from './plugin-ui'
+import type { ReactionItem } from './plugin-ui'
 import { readReactions, toggleReaction, type MessageReaction } from '../services/reactions'
 import { emoteSrcUrl } from './emotes'
 import { reactionItemFor, reactionSetsFor } from './plugin-ui-registry'
 import { fileIconUrl } from '@ui/icon'
+import EmojiPanel from './EmojiPanel.vue'
 
 /**
  * 消息下面的表情回应（GitHub 式）：已有表情是可点的开关，右侧「+」弹选择器
@@ -43,9 +44,6 @@ const visible = computed(() => !props.live && sets.value.some((s) => s.items.len
 function itemLabel(item: ReactionItem | null, key: string): string {
   if (!item) return key
   return item.labelKey ? t(item.labelKey, item.label ?? item.key) : (item.label ?? item.key)
-}
-function setLabel(set: ReactionSet): string {
-  return set.labelKey ? t(set.labelKey, set.label ?? set.id) : (set.label ?? set.id)
 }
 /** 表情包图片地址（`file/` 走 cockpit-icon 协议，其余是 URL / data URL） */
 function emoteUrl(src: string): string {
@@ -85,6 +83,12 @@ function pick(key: string): void {
   const has = reactions.value.some((r) => r.key === key)
   void apply(toggleReaction(reactions.value, key, { remove: has }), key, has)
 }
+
+// R5：「+」打开弹窗式表情面板（分类分组 + 搜索），选中即点按切换
+const panelOpen = ref(false)
+function onPanelPick(item: ReactionItem): void {
+  pick(item.key)
+}
 </script>
 
 <template>
@@ -111,50 +115,24 @@ function pick(key: string): void {
       <span v-else class="reaction-glyph">{{ reaction.key }}</span>
     </button>
 
-    <v-menu location="top" scroll strategy="connected">
-      <template #activator="{ props: menu }">
-        <v-btn
-          v-bind="menu"
-          icon
-          size="small"
-          variant="text"
-          class="reaction-add"
-          :title="t('yaya.react.add', '添加表情')"
-          :aria-label="t('yaya.react.add', '添加表情')"
-        >
-          <v-icon icon="mdi-emoticon-plus-outline" size="18" />
-        </v-btn>
-      </template>
-      <v-list density="comfortable" class="reaction-menu" min-width="180">
-        <template v-for="set in sets" :key="set.id">
-          <v-subheader v-if="sets.length > 1" class="reaction-group">
-            {{ setLabel(set) }}
-          </v-subheader>
-          <v-list-item
-            v-for="item in set.items"
-            :key="`${set.id}:${item.key}`"
-            :title="itemLabel(item, item.key)"
-            :active="reactions.some((r) => r.key === item.key)"
-            @click="pick(item.key)"
-          >
-            <template #prepend>
-              <span class="reaction-pick">
-                <img
-                  v-if="item.src"
-                  class="reaction-img"
-                  :src="emoteUrl(item.src)"
-                  :alt="item.key"
-                  loading="lazy"
-                />
-                <v-icon v-else-if="item.icon?.startsWith('mdi-')" :icon="item.icon" size="18" />
-                <AbilityIcon v-else-if="item.icon" :icon="item.icon" :size="18" />
-                <span v-else class="reaction-glyph">{{ item.key }}</span>
-              </span>
-            </template>
-          </v-list-item>
-        </template>
-      </v-list>
-    </v-menu>
+    <v-btn
+      icon
+      size="small"
+      variant="text"
+      class="reaction-add"
+      :title="t('yaya.react.add', '添加表情')"
+      :aria-label="t('yaya.react.add', '添加表情')"
+      @click="panelOpen = true"
+    >
+      <v-icon icon="mdi-emoticon-plus-outline" size="18" />
+    </v-btn>
+
+    <EmojiPanel
+      v-model="panelOpen"
+      :role="role"
+      :active-keys="reactions.map((r) => r.key)"
+      @pick="onPanelPick"
+    />
   </div>
 </template>
 
@@ -218,11 +196,6 @@ function pick(key: string): void {
 }
 .reaction-add {
   margin-left: -2px;
-}
-.reaction-group {
-  min-height: 22px;
-  font-size: 0.75rem;
-  opacity: 0.7;
 }
 .reaction-pick {
   display: inline-flex;

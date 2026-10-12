@@ -9,5 +9,7 @@ import { definePluginUi } from '../../components/plugin-ui'
  */
 export default definePluginUi({
   pluginId: 'react',
-  messageReactions: () => import('../../components/ReactionBar.vue')
+  messageReactions: () => import('../../components/ReactionBar.vue'),
+  // R6：输入框「+」面板的表情项——与回应条同一张面板，选中插进消息正文
+  inputExtension: () => import('./EmojiInput.vue')
 })
