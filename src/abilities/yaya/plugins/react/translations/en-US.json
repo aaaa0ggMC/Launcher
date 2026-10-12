@@ -1,0 +1,4 @@
+{
+  "yaya.react.label": "Message reactions",
+  "yaya.react.desc": "GitHub-style reactions: react to messages and bubbles, removals are visible to the AI, and the AI can react to your messages (react_to_user). Off = the whole feature disappears"
+}

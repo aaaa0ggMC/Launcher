@@ -250,6 +250,19 @@ export function blockViewFor(name: string): ResolvedBlockView | null {
 }
 
 /**
+ * 消息表情回应条组件（`PluginUi.messageReactions`；没有返回 null）。
+ * 按插件启用状态门控——关掉插件时消息下面**整个回应 UI 不存在**（R1：react 是 plugin）。
+ */
+export function reactionBarFor(): Component | null {
+  for (const ui of sortedUis()) {
+    if (!uiEnabled(ui)) continue
+    const loader = ui.messageReactions
+    if (loader) return lazy(`reactions:${ui.pluginId}`, loader)
+  }
+  return null
+}
+
+/**
  * 用户消息里块级标记的「回声」文案（见 `PluginUi.blockEchoes`）；没有就返回 null。
  */
 export function blockEchoFor(

@@ -22,7 +22,7 @@
  * `PluginSettingsViewProps`。
  */
 import type { Component } from 'vue'
-import type { ToolCallItem } from '../types'
+import type { MessageNode, ToolCallItem } from '../types'
 import type { InlineTagRule } from './chat-tags'
 import type { PluginInfo } from '../services/plugins/types'
 import type { SessionUsage, UsageSection } from '../services/usage'
@@ -54,6 +54,20 @@ export interface BlockViewProps {
   streaming: boolean
   /** 这条回答所在的会话（小部件要回传用户操作时用，如棋盘落子） */
   sessionId: string
+}
+
+/**
+ * 消息表情回应条（`PluginUi.messageReactions`）拿到的 props：渲染在一条消息
+ * （用户 / assistant 均可）或其中某个气泡下方。按插件启用状态门控——
+ * 关掉插件 = 回应条 / 选择器 / 表情回传一并消失（R1：react 必须是 plugin）。
+ */
+export interface MessageReactionsProps {
+  /** 消息节点（回应落在它的 `meta.reactions` 上） */
+  node: MessageNode
+  /** 流式输出中不显示，等这轮定稿再 react */
+  live?: boolean
+  /** 挂在某个气泡上（拟真对话的分段 id）；缺省 = 整条消息级 */
+  segment?: string
 }
 
 /**
@@ -283,6 +297,11 @@ export interface PluginUi {
    * 只改显示：数据库与发给模型的历史保留标记原文。
    */
   inlineTags?: InlineTagDef[]
+  /**
+   * 消息下面的表情回应条组件（props 见 MessageReactionsProps；用户 / assistant 消息与
+   * 气泡都能挂）。按插件启用状态门控——关掉插件 = 回应条 UI 整个不存在（R1）。
+   */
+  messageReactions?: Lazy
   /**
    * 消息下面可选的表情组（图标包）。选择器只列**已启用**插件的组，
    * 已经落在历史消息里的表情即使插件关掉也照样显示（按 key 找不到就显示 key 本身）。

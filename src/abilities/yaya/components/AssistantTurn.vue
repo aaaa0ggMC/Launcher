@@ -24,6 +24,7 @@ import {
   fenceLangs,
   fenceViewFor,
   messageActions,
+  reactionBarFor,
   toolCardFor,
   turnChromeFor
 } from './plugin-ui-registry'
@@ -32,7 +33,6 @@ import './tokens.css'
 import type { MessageMenuRequest } from './message-menu'
 import ToolCallRow from './ToolCallRow.vue'
 import DataCard from './DataCard.vue'
-import ReactionBar from './ReactionBar.vue'
 import WorkflowCard from './WorkflowCard.vue'
 import SearchSources from './SearchSources.vue'
 import type { BuiltinSearchInfo } from '../services/providers/types'
@@ -171,6 +171,8 @@ const bubbleSplit = computed(() => {
 const bubbles = computed(() => bubbleSplit.value?.bubbles ?? [])
 const bubbleParts = computed(() => bubbles.value.map((b) => renderWithTokens(b.text)))
 const isSplit = computed(() => bubbleSplit.value !== null)
+/** 表情回应条组件（react 插件注入；关掉 = 消息下面没有回应 UI，R1） */
+const reactionBar = computed(() => reactionBarFor())
 /** 分段气泡时每个气泡自带表情条；已有消息级回应才额外显示消息级那条 */
 const showMessageBar = computed(() => {
   if (!isSplit.value) return true
@@ -421,7 +423,12 @@ async function copyTurn(): Promise<void> {
                 />
               </template>
               <!-- 气泡级表情：每个气泡一份，回应记在同一个节点的 meta 上（带 segment） -->
-              <ReactionBar v-if="!live" :node="turn.steps[0]" :segment="b.id" />
+              <component
+                :is="reactionBar"
+                v-if="!live && reactionBar"
+                :node="turn.steps[0]"
+                :segment="b.id"
+              />
             </template>
           </div>
         </template>
@@ -454,7 +461,11 @@ async function copyTurn(): Promise<void> {
 
         <!-- 消息表情回应（默认集 + 插件图标包）；这轮定稿后才出现。
              分段气泡时由每个气泡自带表情条，只有已有消息级回应才额外显示这一条 -->
-        <ReactionBar v-if="!live && turn.steps[0] && showMessageBar" :node="turn.steps[0]" />
+        <component
+          :is="reactionBar"
+          v-if="!live && reactionBar && turn.steps[0] && showMessageBar"
+          :node="turn.steps[0]"
+        />
 
         <!-- 写在回答之后的步骤（工作流回答后还有记录 / 计算 / 卡片） -->
         <template v-for="seg in segmentsAfter" :key="seg.key">

@@ -1466,6 +1466,18 @@ onMounted(async () => {
         return { ...s, meta }
       })
     }),
+    // 表情回应变化（AI 经 react_to_user 点的、其他窗口取消的）：改消息节点，
+    // 消息下面的回应条即时刷新——以前广播发了但这里没接，跨端的表情永远不显示
+    window.cockpit.on('cockpit:yaya-reactions', (payload: unknown) => {
+      const p = payload as { message?: string; reactions?: unknown[] }
+      if (!p.message) return
+      const node = messages.value.find((m) => m.id === p.message)
+      if (!node) return
+      const meta = { ...(node.meta ?? {}) }
+      if (p.reactions?.length) meta.reactions = p.reactions
+      else delete meta.reactions
+      node.meta = meta
+    }),
     // 网页版事件流断线重连：期间的 token / 状态推送都丢了，重新同步
     window.cockpit.on('cockpit:host-reconnected', () => {
       void resync()

@@ -1,0 +1,4 @@
+{
+  "yaya.react.label": "表情回应",
+  "yaya.react.desc": "GitHub 式表情回应：消息 / 气泡下点表情，取消也让 AI 知情；AI 可给你的消息表态（react_to_user）。关掉 = 整个特性消失"
+}

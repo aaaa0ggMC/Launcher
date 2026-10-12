@@ -7,9 +7,8 @@ import AvatarBadge from './AvatarBadge.vue'
 import type { MessageMenuRequest } from './message-menu'
 import ImagePreviewDialog from './ImagePreviewDialog.vue'
 import { assetUrl } from './asset-url'
-import { blockEchoFor, chatTagRules, inlineTokenParts } from './plugin-ui-registry'
+import { blockEchoFor, chatTagRules, inlineTokenParts, reactionBarFor } from './plugin-ui-registry'
 import { findBlockTags } from './chat-tags'
-import ReactionBar from './ReactionBar.vue'
 import './tokens.css'
 
 const props = defineProps<{
@@ -54,6 +53,9 @@ function onContextMenu(ev: MouseEvent): void {
 function onLongPress(p: LongPressPoint): void {
   openMenu(p.clientX, p.clientY)
 }
+
+/** 表情回应条（react 插件注入；关掉插件 = 连一块 DOM 都不渲染，R1） */
+const reactionBar = computed(() => reactionBarFor())
 
 /** 正文切成文字 / 插件记号（如 [[secret_xxxx]] 显示成标签） */
 const contentParts = computed(() => {
@@ -172,7 +174,7 @@ function openPreview(id: string): void {
       </template>
     </div>
 
-    <ReactionBar :node="message" />
+    <component :is="reactionBar" v-if="reactionBar" :node="message" />
 
     <div class="user-actions">
       <v-btn
