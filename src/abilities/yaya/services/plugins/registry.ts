@@ -361,12 +361,19 @@ export async function resolveTools(
       if (wanted && !plugin.tools().some((tool) => wireName(plugin, tool) === wanted)) continue
       try {
         await ensureStarted(plugin)
-      } catch (e) {
-        log.warn('mentioned plugin unavailable, its tools are skipped', {
-          plugin: plugin.id,
-          error: String(e)
-        })
-        continue
+      } catch {
+        // 点名插件恰好连不上（服务端重启 / 网络抖动）：稍候重试一次——
+        // 瞬时失败不该让**整条消息**失去这些工具（A2：模型视角「突然不可用」）
+        await new Promise((r) => setTimeout(r, 300)).catch(() => {})
+        try {
+          await ensureStarted(plugin)
+        } catch (e) {
+          log.warn('mentioned plugin unavailable, its tools are skipped', {
+            plugin: plugin.id,
+            error: String(e)
+          })
+          continue
+        }
       }
       const tools = plugin.tools().filter((tool) => !wanted || wireName(plugin, tool) === wanted)
       for (const tool of tools) {

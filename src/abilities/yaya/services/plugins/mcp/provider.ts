@@ -274,9 +274,32 @@ async function runTool(
   try {
     return await attempt()
   } catch (e) {
-    if (isTransportError(e) && !ctx.signal.aborted) await closeEntry(entry)
+    if (isTransportError(e) && !ctx.signal.aborted) {
+      await closeEntry(entry)
+      // 连接层面的错误（服务端重启 / 空闲断连 / 网络抖动）：重连后**自动重试一次**。
+      // 静默掉线时不该把「工具不可用」抛给模型——那正是"MCP 一条消息后突然不可用"的观感
+      // （A2）。超时**不重试**：请求可能已在服务端执行完，重试有重复执行的风险。
+      if (isConnectionError(e)) {
+        try {
+          return await attempt()
+        } catch (e2) {
+          throw new Error(describeMcpError(e2, secretsOf(entry.server)))
+        }
+      }
+    }
     throw new Error(describeMcpError(e, secretsOf(entry.server)))
   }
+}
+
+/**
+ * 连接层面的错误（值得重连重试）：与 `isTransportError` 相比**不含超时**——
+ * 超时时请求可能已经到达服务端并在执行，重试有重复副作用的风险，宁可报错让模型自己决断。
+ */
+function isConnectionError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return /not connected|connection closed|connection.*closed|fetch failed|terminated|ECONNRESET|EPIPE|socket hang up|network error/i.test(
+    msg
+  )
 }
 
 // ---------------------------------------------------------------------------
