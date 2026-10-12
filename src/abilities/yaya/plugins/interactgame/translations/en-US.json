@@ -3,10 +3,12 @@
   "yaya.plugin.interactgame.desc": "Play tic-tac-toe with the AI right in the chat (click a cell to move)",
   "yaya.game.your_turn": "Your move — click a cell (O)",
   "yaya.game.ai_think": "AI is thinking…",
+  "yaya.game.ai_pending": "AI's move — if nothing happens, say “continue” in the chat",
   "yaya.game.you_win": "You win",
   "yaya.game.ai_win": "AI wins",
   "yaya.game.draw": "Draw",
   "yaya.game.past": "Continued below",
+  "yaya.game.idle": "No game yet — ask AI to start one in the chat",
   "yaya.game.you_moved": "You played cell {n}",
   "yaya.game.cell": "cell {n}"
 }

@@ -9,18 +9,22 @@ import type { YayaPlugin } from '../../services/plugins/types'
 
 /** 固定英文（与其他插件的 instructions 一致：不随界面语言变，提示词缓存不失效） */
 const INSTRUCTIONS = [
-  '## Tic-tac-toe in the chat',
+  '## Tic-tac-toe (floating board)',
   'You can play tic-tac-toe with the user right inside the conversation:',
-  '- Put a board anywhere in your reply with a single tag `<g|ttt|STATE|turn=WHO>`:',
+  '- Every reply that continues the game contains exactly one board tag',
+  '  `<g|ttt|STATE|turn=WHO|note=ONE-LINE>`:',
   "  STATE is exactly 9 characters, row-major order: `X` = your mark, `O` = the user's, `.` = empty.",
   "  `turn` is `O` when it is the user's move (the board accepts clicks) and `X` when it is yours",
-  '  (the board is read-only). Omit it after the game ends.',
-  '- The board is rendered at the end of your message, so narration goes in the surrounding text',
-  '  and shows up above the board.',
+  '  (read-only). Omit it after the game ends.',
+  '  NEVER leave the board at `turn=X` — every reply that continues the game places YOUR mark',
+  '  in the same tag; `turn=X` alone is a dead end for the user.',
+  '  `note` is your short commentary shown ON the board — put the playful narration there,',
+  '  and never use the `|` character inside it.',
+  '- The board is ONE floating panel that updates in place (it is not re-posted into the chat):',
+  '  never paste boards into the surrounding text, and keep that text to at most one short line.',
   '- The user moves by replying with a tag like `<g|ttt|move=4>` (cells 0..8, row-major). Then',
-  '  answer with your move as an updated board. If their move is invalid (occupied, out of range,',
+  '  answer with your move as an updated board tag. If their move is invalid (occupied, out of range,',
   '  or not their turn), say so instead of cheating and repeat the current board.',
-  '- Show an updated board after every move; keep the narration short and playful.',
   '- You play X and make the first move.'
 ].join('\n')
 
@@ -31,7 +35,7 @@ const plugin: YayaPlugin = {
   defaultEnabled: false,
   label: '对话小游戏',
   labelKey: 'yaya.plugin.interactgame.label',
-  description: 'AI 在聊天里直接和你下井字棋（棋盘是对话内小部件，点格子就落子）',
+  description: 'AI 在聊天里直接和你下井字棋（棋盘是常驻悬浮面板、实时更新，点格子就落子）',
   descriptionKey: 'yaya.plugin.interactgame.desc',
   icon: 'mdi-grid',
   tools: () => [],

@@ -17,6 +17,14 @@ export default {
       label: 'YAYA 朗读播放器',
       component: () => import('./plugins/speech/TtsPlayer.vue'),
       attrs: { anchor: 'bottom-right', offset: { x: 16, y: 96 } }
+    },
+    // C1：井字棋悬浮棋盘——一整局只有一块、原地实时更新；旁白与「AI 思考中」显示在板上。
+    // 被禁用时 BoardAnchor 自动内联回退成老棋盘卡。
+    {
+      key: 'game-board',
+      label: '对话小游戏棋盘',
+      component: () => import('./plugins/interactgame/GameBoard.vue'),
+      attrs: { anchor: 'bottom-left', offset: { x: 16, y: 96 }, draggable: true, persist: true }
     }
   ],
   settings: [

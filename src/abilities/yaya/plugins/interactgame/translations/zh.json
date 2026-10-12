@@ -1,12 +1,14 @@
 {
   "yaya.plugin.interactgame.label": "对话小游戏",
-  "yaya.plugin.interactgame.desc": "AI 在聊天里直接和你下井字棋（棋盘是对话内小部件，点格子就落子）",
+  "yaya.plugin.interactgame.desc": "AI 在聊天里直接和你下井字棋（棋盘是常驻悬浮面板、实时更新，点格子就落子）",
   "yaya.game.your_turn": "轮到你了，点格子落子（O）",
   "yaya.game.ai_think": "AI 思考中…",
+  "yaya.game.ai_pending": "轮到 AI——若没动静，在对话里说一句「继续」",
   "yaya.game.you_win": "你赢了",
   "yaya.game.ai_win": "AI 赢了",
   "yaya.game.draw": "平局",
   "yaya.game.past": "这盘已在下面继续",
+  "yaya.game.idle": "还没有对局——在对话里让 AI 开一盘",
   "yaya.game.you_moved": "你落子第 {n} 格",
   "yaya.game.cell": "第 {n} 格"
 }
