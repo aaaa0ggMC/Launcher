@@ -703,7 +703,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | R4  | **reaction note 泄露到界面**（`[user reacted to your segment…]` 出现在消息流；且「并没有 react 到我的消息上」——疑似 note 被回写进 `content`，与 R3 同根） | R    | `[x]`⚠ |
 | R5  | 选择器太简陋 → **弹窗式表情面板**（分类 / 浏览更多 / 留表情包分类结构）                                                                                   | R    | `[ ]`  |
 | R6  | **输入框注册 item**（`addAction placement:'item'` / inputExtension）：点开同一张面板把表情塞进聊天                                                        | R    | `[ ]`  |
-| A1  | **子代理并发权限卡死**：第二个子代理启动时把第一个的 popup 顶掉 → 请求悬空永远卡住                                                                        | A    | `[ ]`  |
+| A1  | **子代理并发权限卡死**：第二个子代理启动时把第一个的 popup 顶掉 → 请求悬空永远卡住                                                                        | A    | `[x]`  |
 | A2  | **mention 的 MCP 一条消息后断开**：本条点名连上、下一条没了 → 工具突然不可用                                                                              | A    | `[ ]`  |
 | B1  | YAYA 每次进页重新加载上次会话 → 应 keep-alive 只加载一次、之后保持用户当前 page                                                                           | B    | `[ ]`  |
 | B2  | 点「回到 YAYA」等返回按钮会重新“刷新”ability 前端 → 闪烁 / 跳变                                                                                           | B    | `[ ]`  |
@@ -723,6 +723,13 @@ Node 层：Android Controller —— 普通 YayaPlugin
 > - **R4 ⚠**：简单场景复现不出污染（落库 content 干净、DOM 干净）；最可能是**模型把 note 复读进自己的回复**（用户贴的粘连行 `[note]正文` 与此吻合）。已上防御：`stripEchoedReactionNotes` 在 `outText`（所有 assistant 落库路径）剥复读行 / 行首前缀，单测覆盖整行 / 粘连 / 误伤规避。**若再遇到请留原始会话 id**，好继续追是否另有通道。
 > - 检查：`typecheck`（270 模板 0 错）/ `eslint` / `pnpm test` **859 pass / 0 fail**；实测截图 `screenshots/regress/react-*.png`。
 > - 环境坑（记给以后）：**直接改 yaya `config.json` 磁盘文件不生效**（主进程有内存缓存），必须走 `yaya.config-get → config-save` 或重启。
+
+> **A1 落地与实测（提交 `291eb65`）**：
+>
+> - **根因（代码路径，与用户复现序列吻合）**：审批卡片由 `snapshot.status === 'waiting_approval'` 门控（`View.vue:388`），而并行子代理 `runAgent` 一进场就 `setStatus('streaming')`（多个子代理的 save/restore 还会互相覆盖，收尾后可能永远回不到 waiting_approval）→ 卡片被顶掉、没法点批准、`approvalResolver` 永远悬空 → 整个 run 卡死。
+> - **修复**：`getSnapshot()` 让审批态与运行态**正交**——有待批工具时快照 status 恒为 `waiting_approval`（只改对外快照，内部 `ctx.status` 不动）。
+> - **E2E（deputy 并行 + DeepSeek）**：A（需审批 shell）挂起期间 B 并行搜索，审批按钮 **3 次采样（8s 间隔）全程在场**；点「本次执行都允许」即时生效；双副代理跑完 `running: 0`、报告在场、**不卡死**。截图 `screenshots/regress/a1-*.png`。
+> - 顺带观察（不在本条修）：副代理被隐私 guard 拦下拿到 `waiting for user approval` 后不会自己重试，需模型再试一次——deputy 体验项。
 
 排序理由：R 是点名「快修」的架构问题（R1/R4 涉及数据正确性，R4/R3 疑似同根，先复现）；A1 是死锁、A2 是能力突然消失；B 全是体验闪烁；C1 要动交互模型，放最后单独记设计。
 
