@@ -518,6 +518,7 @@ const workflowItems = computed(() => {
         v-else-if="page === 'mcp'"
         :key="`mcp-${selected.id}`"
         :config="scoped"
+        :root-config="config"
         :assistant-id="selected.id"
         :only="['mcp']"
       />

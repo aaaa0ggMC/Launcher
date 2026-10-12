@@ -161,8 +161,10 @@ const saveApi = inject<YayaSettingsSaveApi | null>(YAYA_SAVE_API_KEY, null)
 const settings = useSettings()
 
 // ---- 助手插件页：「自动同步根配置」（默认开） ----
-// 开：这个助手的插件开关 / 分组整份跟随根配置（YAYA → 插件），此处不显示具体开关，
-//     只给「前往根配置」；关：用助手自己那份，可「手动同步」把根配置拷过来再改。
+// 开：这个助手的插件开关 / 分组跟随根配置（YAYA → 插件）；列表照常显示（读到的是根配置
+//     的当前值），在这里**改动任何一个开关都会自动脱离跟随**——写入落到助手自己那份，
+//     不做「看似能点、其实被生效配置压掉」的假开关（Skills / MCP 的开关同此规则）。
+// 关：用助手自己那份，可「手动同步」把根配置拷过来再改。
 // scopedConfig 代理把 pluginsFollowRoot 路由到助手对象上，YayaConfig 类型里没有它
 type ScopedFlagView = { pluginsFollowRoot?: boolean }
 const followRoot = computed(
@@ -174,6 +176,33 @@ function setFollowRoot(v: boolean | null): void {
   saveApi?.saveNow()
   void loadPlugins()
 }
+
+/**
+ * 列表用的配置视图：跟随中读根配置的 pluginEnabled / pluginGroupEnabled（与
+ * assistantConfig 的生效口径一致），写入则落到助手自己那份并自动脱离跟随；
+ * 其余键原样透传（disabledTools / toolApproval / context 本来就按助手各自独立）。
+ */
+const listConfig = computed<YayaConfig>(() => {
+  if (!props.assistantId || !followRoot.value || !props.rootConfig) return props.config
+  const self = props.config
+  const root = props.rootConfig
+  return new Proxy(self, {
+    get(t, k, r) {
+      if (k === 'pluginEnabled') return root.pluginEnabled ?? {}
+      if (k === 'pluginGroupEnabled') return root.pluginGroupEnabled ?? {}
+      return Reflect.get(t, k, r)
+    },
+    set(t, k, v, r) {
+      if (k === 'pluginEnabled' || k === 'pluginGroupEnabled') {
+        const ok = Reflect.set(t, k, v, r)
+        ;(self as unknown as ScopedFlagView).pluginsFollowRoot = false
+        saveApi?.saveNow()
+        return ok
+      }
+      return Reflect.set(t, k, v, r)
+    }
+  })
+})
 
 /** 把根配置的插件开关 / 分组拷进这个助手（手动同步） */
 function syncFromRoot(): void {
@@ -216,7 +245,7 @@ onBeforeUnmount(() => offBack?.())
       v-if="selectedPlugin"
       :key="selectedPlugin.id"
       :plugin="selectedPlugin"
-      :config="config"
+      :config="listConfig"
       :assistant-id="assistantId"
       :restarting="restartingId === selectedPlugin.id"
       :hide-back="!!nav?.narrow.value"
@@ -235,8 +264,9 @@ onBeforeUnmount(() => offBack?.())
         }}
       </div>
 
-      <!-- 助手插件页：自动同步根配置（默认开）——开着就不显示具体开关，给跳转 -->
-      <v-card v-if="assistantId && tab === 'plugins'" variant="tonal" class="sync-card pa-3" border>
+      <!-- 助手插件页：自动同步根配置（默认开）——列表照常显示，改动开关即自动转独立；
+           任何页签（插件 / Skills / MCP）都显示，开关写入规则一致 -->
+      <v-card v-if="assistantId" variant="tonal" class="sync-card pa-3" border>
         <div class="d-flex align-center ga-3">
           <v-icon icon="mdi-sync-circle" class="flex-shrink-0" />
           <div class="min-w-0 flex-grow-1">
@@ -248,7 +278,7 @@ onBeforeUnmount(() => offBack?.())
                 followRoot
                   ? t(
                       'yaya.assistants.plugins_sync_hint_on',
-                      '这个助手的插件开关与分组跟随根配置（YAYA → 插件），此处不显示具体开关'
+                      '插件与分组开关跟随根配置（YAYA → 插件），列表显示的就是根配置的当前值；在这里改动任何一个开关会自动转为独立配置'
                     )
                   : t(
                       'yaya.assistants.plugins_sync_hint_off',
@@ -281,6 +311,14 @@ onBeforeUnmount(() => offBack?.())
             {{ t('yaya.assistants.plugins_sync_now', '手动同步') }}
           </v-btn>
         </div>
+        <div class="text-caption text-medium-emphasis mt-3">
+          {{
+            t(
+              'yaya.assistants.plugins_scope_note',
+              '「跟随」只管插件与分组开关（插件 / Skill / MCP 的启用都算）；工具级启停与审批始终按助手各自独立，插件配置值、MCP 服务器列表与 Skill 定义由所有助手共用。'
+            )
+          }}
+        </div>
       </v-card>
 
       <v-alert v-if="loadError" color="error" variant="tonal" density="compact" class="mb-1">
@@ -300,15 +338,15 @@ onBeforeUnmount(() => offBack?.())
       </v-tabs>
 
       <PluginList
-        v-if="tab === 'plugins' && !(assistantId && followRoot)"
+        v-if="tab === 'plugins'"
         :plugins="plugins"
-        :config="config"
+        :config="listConfig"
         :loading="loading"
         @select="selectedId = $event.id"
       />
       <McpServersPanel
         v-else-if="tab === 'mcp'"
-        :config="config"
+        :config="listConfig"
         :plugins="plugins"
         :loading="loading"
         :pending-edit="mcpEdit"
@@ -318,7 +356,7 @@ onBeforeUnmount(() => offBack?.())
       />
       <SkillsPanel
         v-else
-        :config="config"
+        :config="listConfig"
         :plugins="plugins"
         :loading="loading"
         @select-plugin="selectedId = $event"
