@@ -545,7 +545,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | 2    | **Emoji React**              |  易   |     高      | `reactionSets`（表情集 / 图标包）+ `meta.reactions` + `yaya.reaction-set` + 消息下表情条 | `[x]` |
 | 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[x]` |
 | 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[x]` |
-| 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[ ]` |
+| 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[x]` |
 | 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置                          | `[ ]` |
 | 7    | **Forge 动态 JS 插件**       |  难   |  高但依赖   | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动                                      | `[ ]` |
 | 插队 | Pet 宠物（Outsider）         |  易   |     低      | 零依赖休息件，随时插                                                                     | `[ ]` |
@@ -650,7 +650,25 @@ Node 层：Android Controller —— 普通 YayaPlugin
 - 设置：分类下拉 + 搜索一行式、主题卡两列、YAYA 插件列表、拟真对话详情**单列**（<640px 规则）✓
 - 修了一处：棋盘卡片在宽屏被 `stretch` 拉满 → `align-self: flex-start` + `width:248px/max-width:100%`
   （避免 width:100% 与 flex-start 循环依赖）
-- [ ] **5. Regex**：规则 `{ pattern, flags, replacement, target: user|ai|both, mode: visual|raw, format: regex|html }`
+- [x] **5. Regex 替换规则**（2026-10-12 完成，提交 `d4ceedf` / `87a2815` / `51beed8`）
+  - SDK 补三个缺口：① `inlineTokens` 支持**函数形式**（每次渲染读插件配置 → 配置驱动替换、保存即生效）；
+    ② 新钩子 **`assistantText`**（AI 输出**落库前**，`applyAssistantTextHooks`；runner 在生成结束 / 中断 / 出错
+    三处调用，只吃模型刚吐的原文，已落过库的不二次变换）；③ 记号新增 `tone: 'plain'` 与 `html` 注入
+    （HTML 模板原样，**被匹配到的内容先转义**——模型文本不能借模板注入）
+  - `services/text-rules.ts`：解析 / 校验 / 执行 + `$1 / $& / $$` + 按 `side × mode` 筛选（5 例单测）
+  - `plugins/regex/`：规则编辑器 `RegexRulesView.vue` —— **SDK `settingsView` 的首个消费**（5 张规则卡、
+    逐条「替换对象 / 方式 / 格式」、逐条正则与 `$` 引用校验、保存走 `yaya.plugin-config-set`）
+  - 实测（隔离 HOME + 假端点，5 条规则）：
+    - 用户 raw：输入 `hello world 用户视觉` → **存库与送给模型的都成了 `hello 世界 用户视觉`**
+      （假端点因此换了回复，顺带证明模型看到的就是替换后的文本）
+    - 用户 visual：显示 `USER-VIS`，存库仍是 `用户视觉`
+    - AI raw：模型原话 `第三段收尾啦` → **存库时变成 `第三段结束啦`**
+    - AI visual：显示 `hello`，存库仍是 `helo`
+    - HTML：`AI必答` 被 `<span class="re-test">` 包住渲染；编辑器里关掉规则 → 显示立刻回到 `helo`
+    - 编辑器保存链路：改开关 → 保存 → 读回 `firstEnabled:false`、5 条完整；截图 `screenshots/waifu/15`
+  - 检查：`typecheck`（269 模板 0 错）/ `eslint` / `pnpm test` **847 pass / 0 fail**
+  - 已知限制：视觉替换同样作用于代码块内的文本（与 secret 记号同一取舍，用 `^` / 上下文锚定规避）；
+    数据卡片内容（`ctx.addCard`）不走 raw 变换
 - [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
 - [ ] **7. Forge**：加载器 + 解压边界 + `guard(SCOPE_EXEC)` 确认；渲染端动态组件放二期
 - [ ] 插队件 **Pet**：Outsider 悬浮宠物
