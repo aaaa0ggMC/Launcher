@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
@@ -121,6 +122,8 @@ public class MainActivity extends Activity {
     private String pendingConnect;
     /** 最近一次「静止」时量到的 IME 高度，>0 = 键盘弹着（API 30+ 以 isVisible 为准） */
     private int imeRestBottom = 0;
+    /** 键盘动画进行中：这期间由动画回调逐帧调 padding，静止 listener 不插手 */
+    private boolean imeAnimating = false;
 
     /** 关网页弹窗 / 菜单：找到一个激活的 overlay，朝当前焦点发 Escape */
     private static final String JS_DISMISS_OVERLAY =
@@ -318,8 +321,42 @@ public class MainActivity extends Activity {
         // 3) Manifest 的 adjustResize 在 R+ 被这行运行时覆盖，只对 Android 8–10 保留。
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            applySettledInsets(insets);
+            if (!imeAnimating) applySettledInsets(insets);
             return WindowInsets.CONSUMED;
+        });
+        // 键盘动画**逐帧跟随**：每帧把 root 的底 padding 调成当前键盘高度（缩 WebView 表面，
+        // 输入框贴着键盘丝滑上浮）。**只调 padding、绝不平移 WebView**——平移才是整屏漂移的来源。
+        root.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_STOP) {
+            private WindowInsetsAnimation activeIme;
+
+            @Override
+            public void onPrepare(WindowInsetsAnimation animation) {
+                if ((animation.getTypeMask() & WindowInsets.Type.ime()) == 0) return;
+                activeIme = animation;
+                imeAnimating = true;
+            }
+
+            @Override
+            public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> running) {
+                boolean hasIme = false;
+                for (WindowInsetsAnimation a : running)
+                    if (a == activeIme) hasIme = true;
+                if (hasIme) {
+                    int cur = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    root.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, cur));
+                }
+                return insets;
+            }
+
+            @Override
+            public void onEnd(WindowInsetsAnimation animation) {
+                if (animation != activeIme) return;
+                activeIme = null;
+                imeAnimating = false;
+                WindowInsets finalInsets = root.getRootWindowInsets();
+                if (finalInsets != null) applySettledInsets(finalInsets);
+            }
         });
     }
 

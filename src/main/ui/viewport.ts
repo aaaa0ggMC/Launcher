@@ -86,6 +86,13 @@ export function installViewportVar(): void {
     requestAnimationFrame(update)
   }
   const schedule = (): void => {
+    // 正在输入 = 键盘动画进行中（resize 逐帧来）：**逐帧跟上**——原生侧这期间在逐帧调
+    // padding 缩 WebView 表面（MainActivity 的 WindowInsetsAnimationCallback），两边同步，
+    // 输入框才会贴着键盘丝滑上浮（90ms 缓动把它抹得更顺）。代价集中在键盘动画的几百毫秒。
+    if (isEditing()) {
+      apply()
+      return
+    }
     const now = Date.now()
     if (!timer && now - lastApply > 200) {
       apply()
