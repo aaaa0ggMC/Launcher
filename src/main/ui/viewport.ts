@@ -77,14 +77,25 @@ export function installViewportVar(): void {
     }, 1000)
   }
   // 键盘弹出 / 收起动画期间 resize 几乎每帧一次，每次都要整页重排（含毛玻璃重绘）：
-  // 合并成动画结束后的一次（尾随 120ms），外壳一步到位，不跟着逐帧抖
+  // 合并成动画结束后的一次（尾随 60ms）；但**首帧立即跟进**——收键盘时布局视口已经
+  // 恢复，纯尾随防抖会让外壳停留在挤压高度 ~200ms（半屏空白 + 猛然回弹，B4）。
   let timer: ReturnType<typeof setTimeout> | null = null
+  let lastApply = 0
+  const apply = (): void => {
+    lastApply = Date.now()
+    requestAnimationFrame(update)
+  }
   const schedule = (): void => {
+    const now = Date.now()
+    if (!timer && now - lastApply > 200) {
+      apply()
+      return
+    }
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null
-      requestAnimationFrame(update)
-    }, 120)
+      apply()
+    }, 60)
   }
   window.addEventListener('resize', schedule)
   window.addEventListener('orientationchange', schedule)

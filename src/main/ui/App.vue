@@ -1812,9 +1812,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-/* 页面宿主：至少占满 App bar 以下的可视区（64px App bar + 32px 容器上下内边距） */
+/* 页面宿主：至少占满 App bar 以下的可视区（64px App bar + 32px 容器上下内边距）；
+   90ms 缓动与外壳同参数（B4：跟上 --app-vh 的更新窗口，避免跳变） */
 .page-host {
   min-height: calc(var(--app-vh) - 64px - 32px);
+  transition: min-height 90ms linear;
 }
 .sidebar-swipeable {
   touch-action: pan-y;

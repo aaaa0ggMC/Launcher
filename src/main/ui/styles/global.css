@@ -32,6 +32,15 @@ html.vh-js #app {
 html.vh-js .v-application__wrap {
   min-height: var(--app-vh);
 }
+/* B4：--app-vh 有首帧 + 60ms 尾随的更新窗口，直接跳变就是「收键盘后半屏空白 + 猛然回弹」。
+   给外壳高度加 90ms 线性缓动，把残余跳变压成平滑滑动（重排仅这 90ms，不在键盘动画期间逐帧重排）。 */
+html.vh-js body,
+html.vh-js #app,
+html.vh-js .v-application__wrap {
+  transition:
+    height 90ms linear,
+    min-height 90ms linear;
+}
 
 /* Font family: `--cockpit-font` is injected on <html> by App.vue's applyFont()
  * (default = unset, i.e. the CJK stack below; system / custom come from
