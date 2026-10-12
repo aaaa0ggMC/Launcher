@@ -242,6 +242,20 @@ pre,
 }
 
 /* ---------------------------------------------------------------------------
+ * 移动端 / 粗指针设备：滚动条整体隐藏（B5，参考 Rikkahub web-ui 在敏感区域的做法）。
+ * 触屏滑动 + 惯性不需要常驻滚动条；滚动条出现 / 消失会挤动可用宽度 → 布局横向抖动 +
+ * 「突然出现」的闪烁（键盘弹出收起时尤其明显）。只用 webkit 伪元素——上面的注释说过，
+ * scrollbar-width / scrollbar-color 一旦出现 Chromium 就放弃整套自绘滚动条。
+ * ------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Buttons — tonal variants get a subtle border for definition on dark bg;
  * default density bumped slightly for a less cramped feel.
  * ------------------------------------------------------------------------- */
