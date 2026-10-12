@@ -72,6 +72,13 @@ export interface BootServiceState {
   enabled: boolean
   /** a task for this job is running right now */
   running: boolean
+  /**
+   * the latest task with this service's name ended in `error` while nothing is
+   * running (e.g. the job aborted on first start because the ability's config
+   * is incomplete) — the settings UI shows a red chip instead of a quiet
+   * "not running", so a failed auto-start is never silent.
+   */
+  failed: boolean
 }
 
 const services = new Map<string, BootServiceDef>()
@@ -137,12 +144,10 @@ export async function setBootServiceEnabled(id: string, enabled: boolean): Promi
 /** Services + switch state + live running state (settings UI / `boot.list`). */
 export async function listBootServiceStates(): Promise<BootServiceState[]> {
   const map = await readBootMap()
-  // 运行态由任务名反查（boot 启动与手动启动的任务名都 = def.label）
-  const runningNames = new Set(
-    listTasks()
-      .filter((t) => t.status === 'running')
-      .map((t) => t.name)
-  )
+  // 运行 / 失败态都按任务名反查（boot 启动与手动启动的任务名都 = def.label）
+  const all = listTasks()
+  const runningNames = new Set(all.filter((t) => t.status === 'running').map((t) => t.name))
+  const failedNames = new Set(all.filter((t) => t.status === 'error').map((t) => t.name))
   return listBootServices().map((def) => ({
     id: def.id,
     label: def.label,
@@ -152,7 +157,9 @@ export async function listBootServiceStates(): Promise<BootServiceState[]> {
     job: def.job,
     mustComplete: def.mustComplete === true,
     enabled: map[def.id] === true,
-    running: runningNames.has(def.label)
+    running: runningNames.has(def.label),
+    // 运行优先：同一个任务名先失败过、后来又跑起来时按运行中算
+    failed: !runningNames.has(def.label) && failedNames.has(def.label)
   }))
 }
 
