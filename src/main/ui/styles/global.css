@@ -42,6 +42,36 @@ html.vh-js .v-application__wrap {
     min-height 90ms linear;
 }
 
+/* Android App 键盘过渡渐隐带（src/main/ui/ime-fade.ts 创建，仅 App 有）：
+   原生只在键盘动画起止各落一次 padding（首尾两帧），带子淡入盖住过渡期间的布局落差、
+   落地后再淡出。pointer-events:none 不挡操作；z 低于 Vuetify 浮层（≥1000），不盖弹窗。 */
+.ime-fade-band {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(40vh, 320px);
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+/* 淡入要快（键盘动画起手 ~30ms 内布局就可能落地，先盖住再说），淡出从容一点 */
+.ime-fade-band.on {
+  opacity: 1;
+  transition-duration: 80ms;
+}
+.ime-fade-band__fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--ime-fade-bg, #121212) 45%,
+    var(--ime-fade-bg, #121212) 100%
+  );
+}
+
 /* Font family: `--cockpit-font` is injected on <html> by App.vue's applyFont()
  * (default = unset, i.e. the CJK stack below; system / custom come from
  * 设置 → 外观 → 字体). */
