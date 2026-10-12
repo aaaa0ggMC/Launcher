@@ -60,7 +60,10 @@ import {
 import type { MessageMenuItem, MessageMenuRequest } from './components/message-menu'
 import type { MessageAction, MessageActionContext } from './components/plugin-ui'
 
-defineOptions({ name: 'cockpit-yaya-view' })
+// 名字必须与 App.vue keep-alive 的 include（`cockpit-<能力 id>`）一致——
+// 以前叫 cockpit-yaya-view 匹配不上，YAYA 从不进缓存：每次进页都重新挂载、
+// 整个会话重载一次（B1「每次都加载」与 B2「返回按钮刷新」同根）
+defineOptions({ name: 'cockpit-yaya' })
 
 const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
@@ -513,6 +516,26 @@ async function scrollToBottom(force = false): Promise<void> {
     }
   })
 }
+
+/**
+ * 滚动容器尺寸变化（键盘弹出 / 收起、窗口缩放）时重新贴底（B6）：
+ * 用户本来就在底部，视口被挤压后滚动位置不会自己跟随——底部内容会被推出视野，
+ * 「出现滚动条却没滚到底」。只在贴底状态下跟随，用户上翻时绝不打扰。
+ */
+let scrollRO: ResizeObserver | null = null
+watch(
+  scrollEl,
+  (el) => {
+    scrollRO?.disconnect()
+    scrollRO = null
+    if (!el) return
+    scrollRO = new ResizeObserver(() => {
+      if (stickToBottom.value) void scrollToBottom()
+    })
+    scrollRO.observe(el)
+  },
+  { immediate: true }
+)
 
 // ---- 数据加载 ----
 async function loadConfig(): Promise<void> {
@@ -1513,6 +1536,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
   if (chunkTimer) clearTimeout(chunkTimer)
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
+  scrollRO?.disconnect()
   ro?.disconnect()
   if (reloadTimer) clearTimeout(reloadTimer)
   if (noticeTimer) clearTimeout(noticeTimer)
@@ -1538,8 +1562,9 @@ watch(isRunning, (now, before) => {
     <!-- 会话侧栏：宽屏常驻，窄屏弹出 -->
     <!-- 遮罩也挂左划手势：盖住的主区（屏幕右侧）往下划一样收回侧栏 -->
     <div
-      v-if="!wide && drawerOpen"
+      v-if="!wide"
       class="scrim"
+      :class="{ 'is-open': drawerOpen }"
       :style="scrimStyle"
       @click="drawerOpen = false"
       @pointerdown="onDrawerPointerDown"
@@ -2051,6 +2076,18 @@ watch(isRunning, (now, before) => {
   background: rgba(0, 0, 0, 0.35);
   /* 横划（左划收回）交给 JS 手势，别让浏览器把横划当页面导航 */
   touch-action: pan-y;
+  /* B3：与侧栏同速淡入淡出（0.22s），不再「突然出现」；
+     拖拽期间由 :style 覆盖成 transition:none + 实时 opacity，手势不受影响 */
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.22s ease,
+    visibility 0s linear 0.22s;
+}
+.scrim.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.22s ease;
 }
 
 /* ---- 触屏横划开栏交给 JS（见 onShellPointerDown） ----
