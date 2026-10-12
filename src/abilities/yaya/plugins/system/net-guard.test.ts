@@ -19,7 +19,7 @@ test('受限地址判定', () => {
     '::ffff:127.0.0.1'
   ])
     assert.equal(isPrivateAddress(ip), true, ip)
-  for (const ip of ['8.8.8.8', '1.1.1.1', '172.32.0.1', '2606:4700::1111'])
+  for (const ip of ['8.8.8.8', '1.1.1.1', '172.32.0.1', '2606:4700::1111', '198.18.0.49'])
     assert.equal(isPrivateAddress(ip), false, ip)
 })
 
