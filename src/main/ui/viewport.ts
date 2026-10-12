@@ -84,16 +84,8 @@ export function installViewportVar(): void {
   const apply = (): void => {
     lastApply = Date.now()
     requestAnimationFrame(update)
-    // 告诉键盘渐隐带「布局落地了」（ime-fade.ts 据此再遮一小段就淡出）
-    window.dispatchEvent(new Event('cockpit:viewport-applied'))
   }
   const schedule = (): void => {
-    // 正在输入：落地 resize（原生在键盘动画起止各落一次 padding）第一时间应用、不再压 60ms；
-    // 动画中间原生不逐帧调 padding，这里自然不会逐帧重排（逐帧 = 真机掉帧，已回退）。
-    if (isEditing()) {
-      apply()
-      return
-    }
     const now = Date.now()
     if (!timer && now - lastApply > 200) {
       apply()

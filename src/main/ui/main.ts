@@ -13,7 +13,6 @@ import { vPrivacy, vPrivacyAction, vAgentForbidden } from './privacy'
 import { installViewportVar } from './viewport'
 import { installTouchGuard } from './touch-guard'
 import { installTapRescue } from './tap-rescue'
-import { installImeFade } from './ime-fade'
 
 const vuetify = createVuetify({
   components,
@@ -110,7 +109,6 @@ async function mountRoot(): Promise<void> {
     .directive('agent-forbidden', vAgentForbidden)
     .mount('#app')
   installViewportVar()
-  installImeFade()
   installTouchGuard()
   installTapRescue()
 }

@@ -321,10 +321,6 @@ public class MainActivity extends Activity {
             applySettledInsets(insets);
             return WindowInsets.CONSUMED;
         });
-        // **键盘动画只在起止各落一次 padding（首尾两帧），动画中绝不逐帧调**——逐帧缩表面
-        // = 页面每帧整页重排（含毛玻璃重绘），真机实测掉帧比跳变更糟。过渡期间的观感由网页
-        // 侧的底部渐隐带遮丑（src/main/ui/ime-fade.ts）：淡入盖住落差 → 落地后淡出。
-        // 任何情况下都**不平移 WebView**——平移才是整屏漂移（B7）的来源。
     }
 
     /**
@@ -805,17 +801,6 @@ public class MainActivity extends Activity {
                     sp.put("asr", SpeechBridge.asrAvailable(this));
                     o.put("speech", sp);
                     reply(id, true, o);
-                    return;
-                }
-                case "ui.bg": {
-                    // 页面主题背景色（#RRGGBB）→ root 背景。键盘过渡期 root 的 padding 区会露出
-                    // root 底色，不同步的话浅色主题下会闪出 #121212 黑条（与页面同色才隐形）。
-                    String color = args.optString("color", "");
-                    if (color.matches("#[0-9a-fA-F]{6}")) {
-                        final int c = Color.parseColor(color);
-                        runOnUiThread(() -> root.setBackgroundColor(c));
-                    }
-                    reply(id, true, new JSONObject());
                     return;
                 }
                 case "shortcut.pin": {
