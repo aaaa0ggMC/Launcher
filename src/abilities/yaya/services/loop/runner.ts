@@ -292,7 +292,10 @@ export class WorkflowRunner {
     return {
       sessionId: this.ctx.sessionId,
       messageId: this.ctx.assistantMessageId,
-      status: this.ctx.status,
+      // 审批态与运行态**正交**：有工具挂着待批时恒为 waiting_approval。
+      // 否则并行子代理（runAgent）一进场就 setStatus('streaming') 会把审批卡片顶掉
+      // （界面按 status 渲染卡片），用户没地方点批准 → 整个 run 卡死（A1）。
+      status: this.ctx.pendingApprovalTool ? 'waiting_approval' : this.ctx.status,
       currentStep: this.stepCount,
       maxSteps: this.ctx.maxSteps,
       pendingApprovalTool: this.ctx.pendingApprovalTool,
