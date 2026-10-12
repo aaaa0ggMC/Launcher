@@ -161,7 +161,7 @@ function openPreview(id: string): void {
           v-else
           v-privacy="part.view.privacy || null"
           class="yaya-token"
-          :class="{ 'is-text': part.view.tone === 'text' }"
+          :class="{ 'is-text': part.view.tone === 'text', 'is-plain': part.view.tone === 'plain' }"
           :title="part.view.title"
           ><v-icon
             v-if="part.view.icon && part.view.tone !== 'text'"

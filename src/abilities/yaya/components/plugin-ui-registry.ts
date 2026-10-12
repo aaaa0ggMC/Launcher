@@ -92,6 +92,15 @@ export function pluginConfigValues(pluginId: string): Record<string, unknown> {
   return pluginValues.value.get(pluginId) ?? {}
 }
 
+/**
+ * 插件是否启用（渲染端）。插件表还没拉到 / 命令失败时按启用算——宁可先显示，
+ * 也别让代码块与变换集体失效（同 `uiEnabled` 的取舍）。
+ */
+export function pluginEnabled(pluginId: string): boolean {
+  ensurePluginMap()
+  return pluginOn.value.get(pluginId) ?? true
+}
+
 /** 首次使用时拉取一次，并跟随插件变化刷新 */
 export function ensurePluginMap(): void {
   if (!loading) void refreshPluginMap()
@@ -402,7 +411,26 @@ export function turnChromeFor(ctx: TurnChromeContext): TurnChrome | null {
 // ---------------------------------------------------------------------------
 // 正文记号（PluginUi.inlineTokens）
 // ---------------------------------------------------------------------------
-const tokenRules: InlineTokenRule[] = [...uis.flatMap((u) => u.inlineTokens ?? []), emoteRule]
+/**
+ * 全部正文记号规则：静态数组 + **函数形式**（每次求值 → 能读插件配置，且随之响应式）
+ * + 框架自带的内联表情短码。单个插件抛错只丢它自己的规则，不拖垮整条链。
+ */
+function allTokenRules(): InlineTokenRule[] {
+  const out: InlineTokenRule[] = []
+  for (const u of uis) {
+    const source = u.inlineTokens
+    if (!source) continue
+    if (typeof source === 'function') {
+      try {
+        out.push(...source())
+      } catch (e) {
+        console.warn('[yaya] inlineTokens() failed', u.pluginId, e)
+      }
+    } else out.push(...source)
+  }
+  out.push(emoteRule)
+  return out
+}
 
 export type InlineTokenPart =
   { kind: 'text'; text: string } | { kind: 'token'; view: InlineTokenView }
@@ -410,7 +438,7 @@ export type InlineTokenPart =
 /** 纯文本 → 文字 / 记号片段（用户气泡用） */
 export function inlineTokenParts(text: string, ctx: InlineTokenContext): InlineTokenPart[] {
   let parts: InlineTokenPart[] = [{ kind: 'text', text }]
-  for (const rule of tokenRules) {
+  for (const rule of allTokenRules()) {
     const next: InlineTokenPart[] = []
     for (const part of parts) {
       if (part.kind !== 'text') {
@@ -450,7 +478,17 @@ export function inlineTokenHtml(view: InlineTokenView): string {
   // 图片表情（表情包）：整段换成一张图，text 当 alt
   if (view.img)
     return `<img class="yaya-token-img" src="${escapeHtml(view.img)}" alt="${escapeHtml(view.text)}"${titleAttr} loading="lazy" />`
-  const cls = view.tone === 'text' ? ' is-text' : view.tone === 'bare' ? ' is-bare' : ''
+  // HTML 规则的替换结果：原样注入（只可能来自用户自己的规则模板；
+  // 模板里夹带的匹配内容——如 $1——已由调用方转义后才拼进去）
+  if (view.html) return view.html
+  const cls =
+    view.tone === 'text'
+      ? ' is-text'
+      : view.tone === 'bare'
+        ? ' is-bare'
+        : view.tone === 'plain'
+          ? ' is-plain'
+          : ''
   const attrs = [
     `class="yaya-token${cls}"`,
     titleAttr.trim(),
@@ -467,7 +505,7 @@ export function inlineTokenHtml(view: InlineTokenView): string {
 
 /** 已渲染的 Markdown HTML：只改标签之外的文字（文字里的 & < > 已是实体，记号本身不含这些字符） */
 export function applyInlineTokensHtml(html: string, ctx: InlineTokenContext): string {
-  if (!tokenRules.length) return html
+  if (!allTokenRules().length) return html
   return html
     .split(/(<[^>]*>)/)
     .map((seg) => {

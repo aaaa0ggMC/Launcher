@@ -47,3 +47,14 @@
   border-radius: 6px;
   object-fit: contain;
 }
+/* 纯文本替换（Regex 规则的「仅视觉」结果）：与正文完全一致，无任何装饰 */
+.yaya-token.is-plain {
+  padding: 0;
+  border-radius: 0;
+  font-weight: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  text-decoration: none;
+  word-break: normal;
+}

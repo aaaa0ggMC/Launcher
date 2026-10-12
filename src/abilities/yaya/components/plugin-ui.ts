@@ -89,7 +89,9 @@ export interface InlineTokenContext {
 }
 
 /** 记号的显示：tone=chip 显示成带图标的小标签；tone=text 直接替换成文字；
- * tone=bare 不加任何底色（内联表情用），`img` 则整段换成一张图（表情包） */
+ * tone=bare 不加任何底色（内联表情用），tone=plain 纯文本替换（无任何装饰）；
+ * `img` 整段换成一张图（表情包），`html` 直接注入 HTML 片段（**只允许来自用户自己的
+ * 规则模板**，其中夹带的匹配内容必须先由调用方转义） */
 export interface InlineTokenView {
   text: string
   title?: string
@@ -97,7 +99,9 @@ export interface InlineTokenView {
   icon?: string
   /** 图片（表情包）：给了就渲染成 `<img>`，`text` 当 alt */
   img?: string
-  tone?: 'chip' | 'text' | 'bare'
+  /** HTML 片段（HTML 规则的替换结果）：原样注入，`text` 仅作兜底 */
+  html?: string
+  tone?: 'chip' | 'text' | 'bare' | 'plain'
   /** 隐私 SDK scope：AI 快照 / 截图按它脱敏 */
   privacy?: string
 }
@@ -108,6 +112,12 @@ export interface InlineTokenRule {
   /** 返回 null = 这一处不处理，原样显示 */
   render: (match: RegExpExecArray, ctx: InlineTokenContext) => InlineTokenView | null
 }
+
+/**
+ * `PluginUi.inlineTokens`：静态数组，或**函数**——函数形式在每次渲染时求值，
+ * 于是可以读插件配置（配置驱动的替换规则，如 Regex 插件），并因此具备响应式。
+ */
+export type InlineTokenSource = InlineTokenRule[] | (() => InlineTokenRule[])
 
 /** 数据卡片视图拿到的 props */
 export interface CardViewProps {
@@ -261,8 +271,9 @@ export interface PluginUi {
   /**
    * 消息正文里的记号（用户气泡与回答都会经过）。不按插件启用状态门控：历史消息里的记号
    * 在插件关掉后也要能看懂。只改显示，数据库与模型历史不变。
+   * 可以给函数（每次渲染求值）→ 支持读插件配置做「配置驱动的替换规则」。
    */
-  inlineTokens?: InlineTokenRule[]
+  inlineTokens?: InlineTokenSource
   /** 用量统计里本插件分区的视图，props 见 UsageViewProps（后端 `hooks.usage` 给了分区才显示） */
   usageView?: Lazy
   /** 回答下面操作栏的按钮（复制 / 重新生成之后） */

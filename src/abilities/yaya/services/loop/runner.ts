@@ -62,6 +62,7 @@ import {
   type ContextState
 } from '../context'
 import {
+  applyAssistantTextHooks,
   applyToolArgsHooks,
   applyToolResultHooks,
   buildPluginInstructions,
@@ -235,7 +236,7 @@ export class WorkflowRunner {
     this.resolveApproval(false)
     this.ctx.status = 'interrupted'
     updateMessage(this.ctx.assistantMessageId, {
-      content: this.bufferedContent,
+      content: this.outText(this.bufferedContent),
       reasoningContent: this.bufferedReasoning || undefined,
       status: 'interrupted',
       error: ABORTED_MARK
@@ -928,7 +929,7 @@ export class WorkflowRunner {
     this.bufferedReasoning = reasoning
 
     updateMessage(messageId, {
-      content,
+      content: this.outText(content),
       reasoningContent: reasoning || undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       status: toolCalls.length > 0 ? 'tool_executing' : 'completed',
@@ -945,6 +946,16 @@ export class WorkflowRunner {
     if (result.usage) this.lastUsage = result.usage
     this.endStep(step, 'ok', result.usage?.total)
     return { messageId, content, toolCalls }
+  }
+
+  /**
+   * AI 输出落库前的插件变换（Regex 等的 `assistantText` 钩子 / 原始替换）。
+   * 只吃**模型刚吐出来的原文**：已经落过库的内容不再过一遍，避免非幂等规则重复替换。
+   */
+  private outText(text: string): string {
+    if (!text) return text
+    const cfg = assistantConfig(loadYayaConfig(), sessionAssistantId(this.session))
+    return applyAssistantTextHooks(this.ctx.sessionId, text, cfg)
   }
 
   private async subAgent(opts: SubAgentOptions): Promise<{ content: string }> {
@@ -1346,8 +1357,11 @@ export class WorkflowRunner {
       return
     }
     updateMessage(id, {
+      // 有流式原文 → 变换后写入；没有就说明内容早已落过库，原样保留（不二次变换）
       content:
-        id === this.ctx.assistantMessageId ? this.bufferedContent || node.content : node.content,
+        id === this.ctx.assistantMessageId && this.bufferedContent
+          ? this.outText(this.bufferedContent)
+          : node.content,
       reasoningContent:
         id === this.ctx.assistantMessageId
           ? this.bufferedReasoning || node.reasoningContent

@@ -478,6 +478,26 @@ export function applyUserTextHooks(sessionId: string, text: string, config: Yaya
   return out
 }
 
+/** AI 输出落库前（生成结束 / 中断时跑一次） */
+export function applyAssistantTextHooks(
+  sessionId: string,
+  text: string,
+  config: YayaConfig
+): string {
+  if (!text) return text
+  let out = text
+  for (const p of hookPlugins(config)) {
+    const fn = p.hooks?.assistantText
+    if (!fn) continue
+    try {
+      out = fn({ sessionId, text: out })
+    } catch (e) {
+      log.warn('plugin assistantText hook failed', { plugin: p.id, error: String(e) })
+    }
+  }
+  return out
+}
+
 /** 工具执行前 */
 export function applyToolArgsHooks(
   sessionId: string,

@@ -249,6 +249,12 @@ export interface YayaPlugin {
 export interface PluginHooks {
   /** 用户消息入库前改写正文（如把 `#Secret("…")` 换成引用）。编辑重发 / 新消息都会经过 */
   userText?: (ctx: { sessionId: string; text: string }) => string
+  /**
+   * **AI 输出落库前**改写正文（Regex 规则的「原始替换」用）。只在生成结束 / 中断时跑一次，
+   * 流式中的半截文本不经过它；库里与之后发给模型的历史都是替换后的文本。
+   * 只能做确定性变换（不依赖时间 / 随机，提示词缓存）。
+   */
+  assistantText?: (ctx: { sessionId: string; text: string }) => string
   /** 工具执行前改写参数。只影响这次执行：库里与模型看到的仍是原参数 */
   toolArgs?: (ctx: {
     sessionId: string
