@@ -15,7 +15,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { normalizeEffort } from '../providers/reasoning'
-import { reactionNote } from '../reactions'
+import { reactionNote, stripEchoedReactionNotes } from '../reactions'
 import { chosenSearchMode, useBuiltinSearch, withoutGenericSearch } from '../search-mode'
 import { BuiltinSearchUnsupportedError, builtinSearchRejected } from '../providers/builtin-search'
 import { getBroadcast } from '../../../../main/process/broadcast'
@@ -68,6 +68,7 @@ import {
   buildPluginInstructions,
   collectModelHints,
   getPlugin,
+  isPluginEnabled,
   normalizeToolResult,
   pluginConfigValues,
   resolveTools,
@@ -598,7 +599,12 @@ export class WorkflowRunner {
     const state = this.contextState()
     const cut = state ? boundaryIndex(nodes, state) : -1
     if (cut > 0) nodes = nodes.slice(cut)
-    const out = sanitizeHistory(nodes)
+    // 表情回传受 react 插件门控：关掉 = 一个字节都不附加（R1）
+    const react = getPlugin('react')
+    const reactionsOn = react
+      ? isPluginEnabled(react, assistantConfig(loadYayaConfig(), sessionAssistantId(this.session)))
+      : false
+    const out = sanitizeHistory(nodes, { reactions: reactionsOn })
     if (cut > 0 && state) {
       const first = out.find((m) => m.role === 'user')
       if (first) first.content = contextPreamble(state) + first.content
@@ -955,7 +961,8 @@ export class WorkflowRunner {
   private outText(text: string): string {
     if (!text) return text
     const cfg = assistantConfig(loadYayaConfig(), sessionAssistantId(this.session))
-    return applyAssistantTextHooks(this.ctx.sessionId, text, cfg)
+    // 模型偶尔把 reaction note 复读进回复（R4）：保存前剥掉，内部记号不进消息流
+    return stripEchoedReactionNotes(applyAssistantTextHooks(this.ctx.sessionId, text, cfg))
   }
 
   private async subAgent(opts: SubAgentOptions): Promise<{ content: string }> {
@@ -1415,7 +1422,10 @@ export class WorkflowRunner {
  * - assistant 发起的 tool_calls 缺结果（运行在执行工具前被停掉）→ 补一条「已中断」结果；
  * - 没有对应调用的 tool 结果（导入数据等）→ 丢弃（否则 OpenAI 兼容端点直接 400）。
  */
-export function sanitizeHistory(nodes: import('../../types').MessageNode[]): ProviderMessage[] {
+export function sanitizeHistory(
+  nodes: import('../../types').MessageNode[],
+  opts: { reactions?: boolean } = {}
+): ProviderMessage[] {
   const kept = nodes.filter((n) => {
     const hasText = Boolean(n.content?.trim())
     if (n.role === 'assistant') return hasText || Boolean(n.toolCalls?.length)
@@ -1453,8 +1463,10 @@ export function sanitizeHistory(nodes: import('../../types').MessageNode[]): Pro
     // @ 点名的附注存在用户消息上，发给模型时拼在它后面（只影响这条及之后，前缀不变）
     const note =
       n.role === 'user' && typeof n.meta?.mentionNote === 'string' ? n.meta.mentionNote : ''
-    // 用户点的表情回应回传给 AI（消息级与气泡级各一行；没点过就是空串，一个字节都不多）
-    const reacted = n.role === 'assistant' ? reactionNote(n.meta) : ''
+    // 表情回应回传给 AI：**两种角色都传**（用户消息上的反应以前被 role 门挡掉了——R2 缺口），
+    // 措辞按角色区分；插件关闭时 opts.reactions=false，一个字节都不附加
+    const reacted =
+      opts.reactions === false ? '' : reactionNote(n.meta, n.role === 'user' ? 'user' : 'assistant')
     const tail = [note, reacted].filter(Boolean).join('\n\n')
     out.push({
       role: n.role,

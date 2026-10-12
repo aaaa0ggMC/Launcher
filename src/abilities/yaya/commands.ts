@@ -30,9 +30,12 @@ import {
   getMessageBranch
 } from './services/db'
 import {
+  addTombstone,
+  clearTombstone,
   mergeReactions,
   readAllReactions,
   readReactions,
+  readTombstones,
   toggleReaction
 } from './services/reactions'
 import { P } from './privacy'
@@ -486,9 +489,10 @@ const commands: CommandSpec[] = [
 
   {
     name: 'yaya.reaction-set',
-    // 表情是用户自己的动作：AI 不能替用户表态
+    // 表情是用户自己的动作：AI 不能替用户表态（AI 的表态走插件工具 react_to_user，点在用户消息上）
     privacy: { agent: 'deny', reads: [P.reactions] },
-    description: '给 / 取消一条消息（或其中某个气泡）的表情回应；reactions 是这一份当前的全部表情',
+    description:
+      '给 / 取消一条消息（或其中某个气泡）的表情回应；reactions 是这一份当前的全部表情，取消会记入取消回执让 AI 知情',
     usage:
       'yaya.reaction-set --session <sessionId> --message <messageId> --key <emoji 或图标名> [--segment <气泡 id>] [--remove]',
     run: (ctx) => {
@@ -500,15 +504,23 @@ const commands: CommandSpec[] = [
       if (!key) throw new Error('missing --key')
       const msg = getMessage(message)
       if (!msg || msg.sessionId !== sessionId) throw new Error('message not in session')
+      const before = readReactions(msg.meta, segment)
+      const had = before.some((r) => r.key === key)
       // 只在「这一份」（消息级 / 某个气泡）里增删，其余的保持原位原顺序
       const next = mergeReactions(
         readAllReactions(msg.meta),
         segment,
-        toggleReaction(readReactions(msg.meta, segment), key, { remove, segment })
+        toggleReaction(before, key, { remove, segment })
       )
       const meta = { ...(msg.meta ?? {}) }
       if (next.length) meta.reactions = next
       else delete meta.reactions
+      // 取消也要让 AI 知情（R3）：记墓碑；重新点上则清掉对应墓碑
+      let tombs = readTombstones(meta)
+      if (had && remove) tombs = addTombstone(tombs, { key, at: Date.now(), segment })
+      else if (!had && !remove) tombs = clearTombstone(tombs, key, segment)
+      if (tombs.length) meta.reactionTombstones = tombs
+      else delete meta.reactionTombstones
       updateMessage(message, { meta })
       getBroadcast()('cockpit:yaya-reactions', { session: sessionId, message, reactions: next })
       return { ok: true, reactions: next }

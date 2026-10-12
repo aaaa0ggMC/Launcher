@@ -1,10 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  addTombstone,
+  MAX_TOMBSTONES,
   mergeReactions,
   readAllReactions,
   readReactions,
+  readTombstones,
   reactionNote,
+  stripEchoedReactionNotes,
   toggleReaction
 } from './reactions'
 
@@ -126,4 +130,92 @@ test('reactionNote：英文、稳定、消息级与气泡级各一行', () => {
   )
   // 稳定：同输入同输出（提示词缓存）
   assert.equal(reactionNote(meta), reactionNote(meta))
+})
+
+test('by：AI 点的表态带 by=ai 落库并读回（用户点的不落字段，老数据兼容）', () => {
+  const ai = toggleReaction([], '🎯', { now: 5, by: 'ai' })
+  assert.deepEqual(ai, [{ key: '🎯', at: 5, by: 'ai' }])
+  const back = readAllReactions({ reactions: ai } as never)
+  assert.equal(back[0].by, 'ai')
+  const user = toggleReaction([], '👍', { now: 6 })
+  assert.equal(user[0].by, undefined)
+  // 脏数据里的 by 不认识 → 按用户算
+  assert.equal(
+    readAllReactions({ reactions: [{ key: 'x', by: 'human' }] } as never)[0].by,
+    undefined
+  )
+})
+
+test('reactionNote：按角色措辞——用户消息区分自己点的 / AI 点的', () => {
+  const meta = {
+    reactions: [
+      { key: '👍', at: 1 },
+      { key: '🎯', at: 2, by: 'ai' }
+    ]
+  } as never
+  assert.equal(
+    reactionNote(meta, 'user'),
+    "[user reacted to their own message: 👍]\n[you reacted to this user's message: 🎯]"
+  )
+  // 同一份 meta，assistant 视角：AI 点的（by=ai）只会出现在用户消息上，这里静默跳过
+  assert.equal(reactionNote(meta, 'assistant'), '[user reacted to this message: 👍]')
+})
+
+test('取消墓碑：addTombstone 去重封顶，reactionNote 表达「点过又取消」', () => {
+  let tombs = addTombstone([], { key: '👍', at: 1 })
+  tombs = addTombstone(tombs, { key: '😂', at: 2 })
+  tombs = addTombstone(tombs, { key: '👍', at: 3 }) // 同 key 再取消 = 换新（以最新为准）
+  assert.deepEqual(
+    tombs.map((t) => [t.key, t.at]),
+    [
+      ['😂', 2],
+      ['👍', 3]
+    ]
+  )
+  for (let i = 0; i < 20; i++) tombs = addTombstone(tombs, { key: `k${i}`, at: 10 + i })
+  assert.equal(tombs.length, MAX_TOMBSTONES)
+
+  const meta = {
+    reactionTombstones: [
+      { key: '👍', at: 1 },
+      { key: '🎯', at: 2, by: 'ai' }
+    ]
+  } as never
+  assert.equal(readTombstones(meta).length, 2)
+  assert.equal(reactionNote(meta), '[user removed their reaction: 👍]')
+  assert.equal(
+    reactionNote(meta, 'user'),
+    "[user removed their reaction from their own message: 👍]\n[you removed your reaction from this user's message: 🎯]"
+  )
+  // 既有表情 + 取消墓碑同时出现：当前状态在前、墓碑在后
+  const both = {
+    reactions: [{ key: '❤️', at: 9 }],
+    reactionTombstones: [{ key: '👍', at: 1 }]
+  } as never
+  assert.equal(
+    reactionNote(both),
+    '[user reacted to this message: ❤️]\n[user removed their reaction: 👍]'
+  )
+})
+
+test('stripEchoedReactionNotes：只剥复读的 note 行，普通文本不动', () => {
+  // 整行复读 → 丢弃该行
+  assert.equal(
+    stripEchoedReactionNotes('收到\n\n[user reacted to your segment "b3": 👍]\n\n哈哈别夸'),
+    '收到\n\n哈哈别夸'
+  )
+  // 行首粘连 → 只剥前缀
+  assert.equal(
+    stripEchoedReactionNotes('[user reacted to your segment "b1": ❤️]想不想看个小的？'),
+    '想不想看个小的？'
+  )
+  // 取消 / AI 自己的 note 同样剥
+  assert.equal(
+    stripEchoedReactionNotes('[user removed their reaction: 👍]\n[your reply]'),
+    '[your reply]'
+  )
+  // 普通含方括号的文本（不匹配前缀）原样保留
+  const plain = '看这个 [示例] 和 [user guide] 都留着'
+  assert.equal(stripEchoedReactionNotes(plain), plain)
+  assert.equal(stripEchoedReactionNotes(''), '')
 })
