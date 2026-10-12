@@ -713,7 +713,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | B6  | **内容未超范围时点聊天栏 → 画面被挤压出现滚动条但没滚到底部跟随视野**（键盘弹出后 scroll 位置不同步）                                                     | B    | `[x]`  |
 | B7  | **唤出键盘整个 Launcher 外壳都漂移**（顶栏被推走 / 收键盘后半屏空白再回弹）——框架级视口锁定问题，用户判断与整个框架的移动端适配有关                       | B    | `[ ]`  |
 | B8  | **键盘弹出/收起时背景层跳变**（Chrome 里也有）——背景高度来源与外壳不一致 / 无过渡，视口一变就跳                                                           | B    | `[ ]`  |
-| C1  | **boardgame 重设计**：一整局一块 board 实时更新，AI 思考 / 旁白显示在 board 上；现在是「操作一下 chatflow 往下滚一次」，思路错了                          | C    | `[ ]`  |
+| C1  | **boardgame 重设计**：一整局一块 board 实时更新，AI 思考 / 旁白显示在 board 上；现在是「操作一下 chatflow 往下滚一次」，思路错了                          | C    | `[x]`  |
 
 > **R1–R4 落地与实测（2026-10-12 下午，提交 `875373c` + `b9b78b8`）**：
 >
@@ -744,6 +744,13 @@ Node 层：Android Controller —— 普通 YayaPlugin
 > - **B3**：蒙层由 `v-if` 现挂改为常驻 + `is-open` 类驱动 `opacity/visibility` 过渡（0.22s 与侧栏滑入同速；拖拽时仍由 `:style` 覆盖为 `transition:none`）。实测：开抽屉后 `.scrim` 带 `is-open`、`transition: opacity 0.22s` ✓。
 > - **B6**：滚动容器挂 ResizeObserver——尺寸变化（键盘弹出/收起、窗口缩放）且**当前贴底**时重新贴底；用户上翻（`stickToBottom=false`）绝不打扰。实测：贴底后窗口高度 800 → 560，`scrollHeight-scrollTop-clientHeight ≈ 0`（修复前会瞬间藏起 ~240px）✓。
 > - 检查：`typecheck`（272 模板 0 错）/ `eslint` / `pnpm test` **859 pass / 0 fail**；截图 `b3-scrim-fade.png`。
+
+> **C1 落地与实测（提交 `5fd623c`）**：
+>
+> - **设计**：棋盘改为 **Outsider 悬浮面板**（`yaya.game-board`，能力 index.ts 声明；可拖动 / 贴边 / 位置记忆）。原 blockView 位置换成 `BoardAnchor.vue`——**不再画可见棋盘**，只把每条 `<g|ttt|…>` 标记汇聚成 `gameView`（棋盘 / 轮次 / `note=` 旁白 / 流式状态）喂给面板；面板全局只有一块、**原地实时更新**，胜负 / 轮次 /「AI 思考中」与旁白全部显示在板上。悬浮窗被用户禁用时 `openOutsider` 返回 false → `BoardAnchor` **内联回退**成老棋盘卡（TicTacToe.vue 原逻辑保留兜底）。
+> - **模型纪律**：标记新增 `note=`（旁白上板、内部禁用 `|`），聊天正文 ≤ 一行；加「绝不发 `turn=X` 空等」——实测模型真会偷懒发中间态，面板把该状态显示成「轮到 AI——若没动静说继续」而不是永远「思考中」。
+> - **实测（DeepSeek 全流程）**：开局 → 面板自动打开（旁白「我执 X 先手占中，等你落子」上板）→ 点格子 → `move=N` 回声入聊天 → AI 新标签 → **面板原地更新**（棋盘 / 旁白 / 状态逐次变化），聊天零棋盘卡（`boards: 1, inline: 0` 全程保持）；400px 面板宽 279 无溢出。截图 `c1-board-open / c1-after-move / c1-board-updated / c1-midgame / c1-move-loop / c1-board-400`。
+> - 已知取舍：模型偶尔一条消息塞多个标签 / 发中间态（已用指令约束 + 面板提示兜底）；切到无棋局的会话时悬浮面板保留上一局内容（面板常驻语义，随手关掉即可）。
 
 排序理由：R 是点名「快修」的架构问题（R1/R4 涉及数据正确性，R4/R3 疑似同根，先复现）；A1 是死锁、A2 是能力突然消失；B 全是体验闪烁；C1 要动交互模型，放最后单独记设计。
 
