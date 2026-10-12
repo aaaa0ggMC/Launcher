@@ -546,7 +546,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 | 3    | Waifu × React 打通           |  易   |     高      | `meta.reactionNote` 白名单键 → 对某个气泡的反应回传给 AI                                 | `[x]` |
 | 4    | **InteractGame（井字棋等）** |  中   |   **高**    | `inlineTags` 的第二个用例（成对标签 + 增量卡片），反向校验 SDK 通用性                    | `[x]` |
 | 5    | **Regex 规则**               | 易-中 |     中      | AI 出库替换时机、列表型配置、HTML 显示替换                                               | `[x]` |
-| 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），复用 5 的列表型配置                          | `[ ]` |
+| 6    | **信息源 `fetch_info`**      |  中   |     中      | type + template 实例化（多实例、逐个开关），11 种免 key 类型注册表                       | `[x]` |
 | 7    | **Forge 动态 JS 插件**       |  难   |  高但依赖   | zip / 单 js 加载器 + 安全门；等 1–6 把 SDK 磨完再动                                      | `[ ]` |
 | 插队 | Pet 宠物（Outsider）         |  易   |     低      | 零依赖休息件，随时插                                                                     | `[ ]` |
 
@@ -669,7 +669,25 @@ Node 层：Android Controller —— 普通 YayaPlugin
   - 检查：`typecheck`（269 模板 0 错）/ `eslint` / `pnpm test` **847 pass / 0 fail**
   - 已知限制：视觉替换同样作用于代码块内的文本（与 secret 记号同一取舍，用 `^` / 上下文锚定规避）；
     数据卡片内容（`ctx.addCard`）不走 raw 变换
-- [ ] **6. 信息源**：先调研免费公开 API（Wikipedia / OpenAlex / arXiv / Crossref / StackExchange / HackerNews / Open-Meteo / REST Countries…，按免 key / 免费 key 分类）→ type + template 实例 → `fetch_info(query, sources?)`
+- [x] **6. 信息源**（2026-10-12 落地）：
+  - 调研（Tavily，免 key 优先）：Wikipedia / Wiktionary / OpenAlex（10 req/s）/ Crossref（50/s）/
+    arXiv（3/s）/ HN Algolia（1 万/h）/ Open-Meteo geocoding / REST Countries / DuckDuckGo Instant /
+    GitHub 搜索（60/h/IP）均可免 key 个人使用；StackExchange、Semantic Scholar 等留作扩展类型
+  - 实现：`services/info-sources.ts` 纯逻辑（**11 种类型注册表** = URL 模板 + 抽取函数 + 实例筛选 +
+    结果排版 + AI 目录，8 例单测）→ `plugins/infosource/`（`fetch_info` 并发取数、私网 `guard(SCOPE_EXEC)`、
+    `query` 留空返回目录——instructions 固定不变，缓存友好；**第二个 `settingsView`** 编辑器
+    `InfoSourcesView.vue`：类型 / 模板 / 参数 / 说明 / 逐实例启停）
+  - 实例模型 `{name, type, template?, params?, note?, enabled?}`，种子 5 个（维基 / OpenAlex / HN /
+    地名 / 国家）；`sources` 按「实例名或类型 id」点名，**一条命令并发查多个渠道**，单渠道失败不殃及
+  - 实测（headless + DeepSeek + 真实公网，截图 `screenshots/waifu/16–18`、`mobile/13`）：
+    - 目录发现 → 4 个启用渠道；`sources: ['OpenAlex 学术']` 取回真实题名 / 被引 / DOI
+    - 不指定 sources → **5 渠道一次并发**：HN 真实贴命中、地名 / 国家自然「没有命中」并被 AI 说明
+    - 编辑器启用「国家资料」→ 保存 → 下一次目录**多出第 5 个渠道**（AI 自己指出变化）
+    - 竖屏 400px：编辑器 `scrollWidth == innerWidth`，无横向溢出
+  - **顺带修掉真 bug**：`net-guard` 曾把 `198.18.0.0/15` 当私网——那正是 TUN 代理（Clash / sing-box）
+    的 fake-IP 段，本机所有公网域名都解析成 `198.18.x.x` → 取数 / `fetch_url` 一律误弹 `SCOPE_EXEC`
+    授权（2 分钟过期即失败）；已从受限段移除并加断言
+  - 检查：`typecheck`（270 模板 0 错）/ `eslint` / `pnpm test` **855 pass / 2 skip / 0 fail**
 - [ ] **7. Forge**：加载器 + 解压边界 + `guard(SCOPE_EXEC)` 确认；渲染端动态组件放二期
 - [ ] 插队件 **Pet**：Outsider 悬浮宠物
 
