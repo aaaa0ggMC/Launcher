@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * C1 的悬浮棋盘面板（outsider `yaya.game-board`）：**一整局只有一块、原地实时更新**。
+ * C1 修正版的棋盘条带（`PluginUi.bottomStrip` → 钉在聊天窗口底部的固定条带）：
+ * **消息在它上面出现，棋盘不动**（用户澄清原意：非悬浮、不遮消息、不抢滚动）。
  * 数据来自 `gameView`（所有 `<g|ttt|…>` 标记经 BoardAnchor 汇聚）：
  * - 状态行 = 胜负 / 轮次 / 落子等待 /「AI 思考中…」（流式与落子等待都算）；
- * - 旁白行 = 标记里的 `note=`（AI 的一句话评论显示在板上，不再往聊天里堆棋盘卡）；
- * - 点格子 = 发一条 `<g|ttt|move=N>` 消息（与内联模式同一通路）。
- * 面板由 OutsiderItem 提供拖动 / 贴边 / 关闭 / 位置记忆。
+ * - 旁白行 = 标记里的 `note=`（AI 的一句话评论显示在条带上，不往聊天里堆棋盘卡）；
+ * - 点格子 = 发一条 `<g|ttt|move=N>` 消息（与旧内联模式同一通路）。
+ * 无对局 / 不是当前会话的对局时整条不渲染（容器为空即不占位）；× 收起本次展示
+ * （下一次走子/流式更新会把它带回来）。
  */
 import { computed, inject, ref } from 'vue'
 import { useI18n } from '../../../../main/ui/i18n'
@@ -17,6 +19,13 @@ const lang = inject('cockpit:lang', ref('zh'))
 const { t, te } = useI18n(lang)
 
 const busy = ref(false)
+
+/** 只在「有对局且属于当前会话」时显示（切走的会话不带棋盘过来） */
+const visible = computed(
+  () =>
+    !!gameView.value &&
+    (!props.sessionId || !gameView.value.sessionId || gameView.value.sessionId === props.sessionId)
+)
 
 const cells = computed(() => (gameView.value?.state ?? '.........').split(''))
 
@@ -50,7 +59,7 @@ const myTurn = computed(
 )
 
 const status = computed(() => {
-  if (!gameView.value) return t('yaya.game.idle', '还没有对局——在对话里让 AI 开一盘')
+  if (!gameView.value) return ''
   if (winner.value === 'O') return t('yaya.game.you_win', '你赢了')
   if (winner.value === 'X') return t('yaya.game.ai_win', 'AI 赢了')
   if (over.value) return t('yaya.game.draw', '平局')
@@ -86,13 +95,34 @@ async function play(i: number): Promise<void> {
     busy.value = false
   }
 }
+
+/** 收起条带（本次展示）；下一次走子 / 流式更新标记时会重新出现 */
+function dismiss(): void {
+  pendingCell.value = null
+  gameView.value = null
+}
 </script>
 
 <template>
-  <div class="gboard" role="group" :aria-label="t('yaya.plugin.interactgame.label', '对话小游戏')">
-    <div class="gboard-status text-medium-emphasis">
-      <v-icon :icon="statusIcon" size="16" />
-      <span>{{ status }}</span>
+  <div
+    v-if="visible"
+    class="gboard"
+    role="group"
+    :aria-label="t('yaya.plugin.interactgame.label', '对话小游戏')"
+  >
+    <div class="gboard-head">
+      <div class="gboard-status text-medium-emphasis">
+        <v-icon :icon="statusIcon" size="16" />
+        <span>{{ status }}</span>
+      </div>
+      <v-btn
+        icon="mdi-close"
+        variant="text"
+        size="x-small"
+        :title="t('yaya.input.collapse', '收起')"
+        :aria-label="t('yaya.input.collapse', '收起')"
+        @click="dismiss"
+      />
     </div>
 
     <!-- 旁白上板：AI 的一句话评论显示在这里，不再往聊天里追加棋盘卡 -->
@@ -135,9 +165,10 @@ async function play(i: number): Promise<void> {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  min-width: 236px;
-  /* 悬浮面板必须有自己的底（同 TtsPlayer 的房子样式 / AGENTS 玻璃面板规范）：
-     透明面板会让聊天文字整层透上来，两层内容互相穿插 = 不可读 */
+  box-sizing: border-box;
+  width: 100%;
+  /* 悬浮/常驻面板必须有自己的底（同 TtsPlayer 的房子样式 / AGENTS 玻璃面板规范）：
+     透明会让聊天文字透上来、两层内容互相穿插不可读 */
   border-radius: 16px;
   background: rgba(var(--v-theme-surface), var(--glass-a, 0.92));
   backdrop-filter: blur(18px) saturate(1.2);
@@ -146,12 +177,19 @@ async function play(i: number): Promise<void> {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
   color: rgb(var(--v-theme-on-surface));
 }
+.gboard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .gboard-status {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 0.85rem;
   min-height: 20px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .gboard-note {
   display: flex;
@@ -172,10 +210,9 @@ async function play(i: number): Promise<void> {
 }
 .gboard-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  width: 216px;
-  max-width: 100%;
+  width: min(216px, 100%);
 }
 .gboard-cell {
   aspect-ratio: 1;

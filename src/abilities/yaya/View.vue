@@ -46,6 +46,7 @@ import { modelMonogram } from './profile'
 import { normalizeSearchMode } from './services/search-mode'
 import { supportsBuiltinSearch } from './services/providers/builtin-search'
 import {
+  bottomStrips,
   ensurePluginMap,
   messageActions,
   setPluginAssistant
@@ -1866,6 +1867,17 @@ watch(isRunning, (now, before) => {
         </div>
       </div>
 
+      <!-- 底部固定条带（PluginUi.bottomStrip）：钉在聊天窗口底部、消息在它上面出现；
+           如对话小游戏棋盘（C1 修正：非悬浮、不遮消息、不抢滚动）。组件无内容时自身不占位 -->
+      <div v-if="bottomStrips.length" class="bottom-strip">
+        <component
+          :is="strip.component"
+          v-for="strip in bottomStrips"
+          :key="strip.pluginId"
+          :session-id="activeSessionId || ''"
+        />
+      </div>
+
       <div class="composer" :class="{ 'is-expanded': composerExpanded }">
         <transition name="fade">
           <v-btn
@@ -2325,6 +2337,14 @@ watch(isRunning, (now, before) => {
 }
 
 /* ---- 输入区 ---- */
+/* 底部固定条带（PluginUi.bottomStrip）：钉在消息区与输入框之间，有内容才占位 */
+.bottom-strip {
+  flex-shrink: 0;
+  padding: 8px 24px 0;
+}
+.bottom-strip:empty {
+  display: none;
+}
 .composer {
   flex-shrink: 0;
   position: relative;
@@ -2404,6 +2424,9 @@ watch(isRunning, (now, before) => {
     padding: 16px 12px 12px;
     gap: 20px;
   }
+  .bottom-strip {
+    padding: 6px 8px 0;
+  }
   .composer {
     padding: 6px 8px 10px;
   }
@@ -2450,6 +2473,9 @@ watch(isRunning, (now, before) => {
   .thread {
     padding: 12px 10px 8px;
     gap: 14px;
+  }
+  .bottom-strip {
+    padding: 4px 8px 0;
   }
   .composer {
     padding: 4px 8px 8px;

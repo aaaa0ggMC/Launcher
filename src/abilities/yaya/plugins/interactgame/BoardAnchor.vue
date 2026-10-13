@@ -1,17 +1,13 @@
 <script setup lang="ts">
 /**
- * C1 重设计的「锚点」：`<g|ttt|…>` 标记的占位组件——**不画可见棋盘**，
- * 把每条标记汇聚成 `gameView`（当前对局）喂给悬浮面板（`yaya.game-board`），
- * 面板只有一块、原地实时更新；「AI 思考中」的流式状态与 `note=` 旁白都显示在面板上。
- *
- * 悬浮窗被用户禁用时 `openOutsider` 返回 false → **内联回退**：按老样子在标记处
- * 渲染 TicTacToe 卡（此时多块棋盘的旧交互由 TicTacToe 自己的 latestSeq 逻辑兜底）。
+ * C1 修正版的「锚点」：`<g|ttt|…>` 标记的占位组件——**不画可见棋盘**，
+ * 把每条标记汇聚成 `gameView`（当前对局）喂给输入框上方的固定条带
+ * （`PluginUi.bottomStrip` → GameBoard.vue）：棋盘钉在聊天窗口底部、
+ * 消息在它上面出现，原地实时更新，不悬浮、不遮消息、不抢滚动。
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import { isOutsiderOpen, openOutsider } from '@ui/outsider'
+import { onMounted, watch } from 'vue'
 import type { BlockViewProps } from '../../components/plugin-ui'
-import TicTacToe from './TicTacToe.vue'
-import { GAME_OUTSIDER_ID, gameView } from './state'
+import { gameView } from './state'
 
 const props = defineProps<BlockViewProps>()
 
@@ -32,9 +28,6 @@ function parse(source: string): { state: string; turn: 'X' | 'O'; note: string }
   return { state: (raw + '.........').slice(0, 9), turn, note }
 }
 
-/** 悬浮窗不可用（被禁用 / 被能力名单拦下）→ 内联渲染老棋盘卡 */
-const inlineMode = ref(false)
-
 function push(): void {
   const p = parse(props.source)
   gameView.value = {
@@ -44,11 +37,6 @@ function push(): void {
     streaming: props.streaming,
     sessionId: props.sessionId
   }
-  // 已经开着就不重复开；被用户关掉后下一次走子会重新拉起（对局还在进行）
-  inlineMode.value = !(
-    isOutsiderOpen(GAME_OUTSIDER_ID) ||
-    openOutsider(GAME_OUTSIDER_ID, { sessionId: props.sessionId })
-  )
 }
 
 onMounted(push)
@@ -56,19 +44,16 @@ watch(
   () => [props.source, props.streaming] as const,
   () => push()
 )
-
-const inlineProps = computed(() => props)
 </script>
 
 <template>
-  <TicTacToe v-if="inlineMode" v-bind="inlineProps" />
-  <div v-else class="ttt-anchor" aria-hidden="true" />
+  <!-- 棋盘本体在输入框上方的固定条带里渲染；这里只是标记汇聚点 -->
+  <span class="game-anchor" hidden />
 </template>
 
 <style scoped>
-/* 悬浮模式下的占位：不占任何视觉空间（标记仍要“存在”，气泡/复制剥离逻辑照旧） */
-.ttt-anchor {
-  height: 0;
-  overflow: hidden;
+/* 锚点不产生可见内容（棋盘 = bottomStrip 条带） */
+.game-anchor {
+  display: none;
 }
 </style>

@@ -288,6 +288,20 @@ export const inputExtensions = computed(() =>
 )
 
 /**
+ * 输入框上方的常驻条带（`PluginUi.bottomStrip`）：钉在聊天窗口底部、消息在上面出现
+ * （如对话小游戏棋盘——用户澄清的原意：非悬浮、不遮消息）。按插件启用状态门控。
+ */
+export const bottomStrips = computed(() =>
+  [...uis]
+    .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+    .filter((ui) => pluginOn.value.get(ui.pluginId) === true && ui.bottomStrip)
+    .map((ui) => ({
+      pluginId: ui.pluginId,
+      component: lazy(`strip:${ui.pluginId}`, ui.bottomStrip!)
+    }))
+)
+
+/**
  * 数据卡片的视图。不按启用状态门控：历史对话里的卡片在插件关掉后也要能看懂
  * （同 inlineTokens）。没有返回 null，显示卡片自带的 markdown。
  */

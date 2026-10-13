@@ -751,6 +751,7 @@ Node 层：Android Controller —— 普通 YayaPlugin
 > - **模型纪律**：标记新增 `note=`（旁白上板、内部禁用 `|`），聊天正文 ≤ 一行；加「绝不发 `turn=X` 空等」——实测模型真会偷懒发中间态，面板把该状态显示成「轮到 AI——若没动静说继续」而不是永远「思考中」。
 > - **实测（DeepSeek 全流程）**：开局 → 面板自动打开（旁白「我执 X 先手占中，等你落子」上板）→ 点格子 → `move=N` 回声入聊天 → AI 新标签 → **面板原地更新**（棋盘 / 旁白 / 状态逐次变化），聊天零棋盘卡（`boards: 1, inline: 0` 全程保持）；400px 面板宽 279 无溢出。截图 `c1-board-open / c1-after-move / c1-board-updated / c1-midgame / c1-move-loop / c1-board-400`。
 > - 已知取舍：模型偶尔一条消息塞多个标签 / 发中间态（已用指令约束 + 面板提示兜底）；切到无棋局的会话时悬浮面板保留上一局内容（面板常驻语义，随手关掉即可）。
+> - **修正（2026-10-13，用户澄清原意）**：C1 落地时我自作主张做成了 **Outsider 悬浮面板**——用户原意是「**固定到聊天窗口的底部，消息都在它上面出现**」。已改：新增 `PluginUi.bottomStrip` 注入点（注册表 `bottomStrips`；View.vue 挂在消息滚动区与输入框之间，组件无内容即不占位），interactgame 的 ui.ts 把 GameBoard 注册成条带；BoardAnchor 只汇聚 gameView（不再 openOutsider、去掉内联回退，TicTacToe.vue 删除）；条带**按会话门控**（切走的会话不带棋盘）+ 头部 × 收起（下次走子/流式更新带回）；yaya/index.ts 的 game-board 悬浮声明与 state.ts 的 GAME_OUTSIDER_ID / latestBoardSeq 移除。实测（400px，DB 注入对局）：DOM 序 `scroll < strip < composer`、非悬浮、状态与旁白正确、× 收起后条带为空不占位；截图 `board-strip-open.png`。
 
 > **B4/B7/B8 落地（提交 `640bded` + `0b1fafe`，真机录屏两轮驱动）**：
 >
