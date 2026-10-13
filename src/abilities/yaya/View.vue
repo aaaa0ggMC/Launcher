@@ -1865,17 +1865,17 @@ watch(isRunning, (now, before) => {
             />
           </template>
         </div>
-      </div>
 
-      <!-- 底部固定条带（PluginUi.bottomStrip）：钉在聊天窗口底部、消息在它上面出现；
-           如对话小游戏棋盘（C1 修正：非悬浮、不遮消息、不抢滚动）。组件无内容时自身不占位 -->
-      <div v-if="bottomStrips.length" class="bottom-strip">
-        <component
-          :is="strip.component"
-          v-for="strip in bottomStrips"
-          :key="strip.pluginId"
-          :session-id="activeSessionId || ''"
-        />
+        <!-- 底部条带（PluginUi.bottomStrip）：**在文档流里**、固定是滚动内容的最后一块——
+             新消息插在它上面，它随内容一起滚，上翻可查看历史（单次游戏始终在文档流底部） -->
+        <div v-if="bottomStrips.length" class="bottom-strip">
+          <component
+            :is="strip.component"
+            v-for="strip in bottomStrips"
+            :key="strip.pluginId"
+            :session-id="activeSessionId || ''"
+          />
+        </div>
       </div>
 
       <div class="composer" :class="{ 'is-expanded': composerExpanded }">
@@ -2337,10 +2337,11 @@ watch(isRunning, (now, before) => {
 }
 
 /* ---- 输入区 ---- */
-/* 底部固定条带（PluginUi.bottomStrip）：钉在消息区与输入框之间，有内容才占位 */
+/* 底部条带（PluginUi.bottomStrip）：文档流里的最后一块（滚动内容内），对齐消息列 */
 .bottom-strip {
-  flex-shrink: 0;
-  padding: 8px 24px 0;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 0 24px 16px;
 }
 .bottom-strip:empty {
   display: none;
@@ -2425,7 +2426,7 @@ watch(isRunning, (now, before) => {
     gap: 20px;
   }
   .bottom-strip {
-    padding: 6px 8px 0;
+    padding: 0 12px 12px;
   }
   .composer {
     padding: 6px 8px 10px;
@@ -2475,7 +2476,7 @@ watch(isRunning, (now, before) => {
     gap: 14px;
   }
   .bottom-strip {
-    padding: 4px 8px 0;
+    padding: 0 10px 8px;
   }
   .composer {
     padding: 4px 8px 8px;

@@ -288,8 +288,9 @@ export const inputExtensions = computed(() =>
 )
 
 /**
- * 输入框上方的常驻条带（`PluginUi.bottomStrip`）：钉在聊天窗口底部、消息在上面出现
- * （如对话小游戏棋盘——用户澄清的原意：非悬浮、不遮消息）。按插件启用状态门控。
+ * 滚动区底部的常驻条带（`PluginUi.bottomStrip`）：**文档流的最后一块**——新消息插在
+ * 它上面、它随内容一起滚（如棋盘：单次游戏始终在文档流底部，上翻可看历史）。
+ * 按插件启用状态门控。
  */
 export const bottomStrips = computed(() =>
   [...uis]

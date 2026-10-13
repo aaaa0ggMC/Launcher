@@ -283,8 +283,9 @@ export interface PluginUi {
   /** Composer extension: receives PluginInputProps, registers triggers/hooks and owns its UI. */
   inputExtension?: Lazy
   /**
-   * 输入框上方的常驻条带：钉在聊天窗口底部（消息滚动区与输入框之间），消息在它上面出现。
-   * 与 `outsiders`（自由悬浮小窗）相对——内容不想遮消息、不想抢滚动时用这个。
+   * 滚动区底部的常驻条带：作为**文档流的最后一块**（消息滚动内容内、输入框上方）——
+   * 新消息插在它上面，它随内容一起滚，上翻可查看历史（如对话小游戏棋盘）。
+   * 与 `outsiders`（自由悬浮小窗）相对——内容不想悬浮遮挡时用这个。
    * 组件自己按需隐藏（无内容时渲染 null/v-if，条带容器为空即不占位）；按插件启用状态门控。
    */
   bottomStrip?: Lazy

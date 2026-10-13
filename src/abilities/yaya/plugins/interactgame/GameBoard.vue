@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * C1 修正版的棋盘条带（`PluginUi.bottomStrip` → 钉在聊天窗口底部的固定条带）：
- * **消息在它上面出现，棋盘不动**（用户澄清原意：非悬浮、不遮消息、不抢滚动）。
+ * C1 修正版的棋盘条带（`PluginUi.bottomStrip` → 滚动区底部、**文档流的最后一块**）：
+ * 单次游戏固定在滚动内容底部——新消息插在它上面，它随内容一起滚、上翻可看历史
+ * （用户澄清原意：非悬浮、不与输入框同级）。
  * 数据来自 `gameView`（所有 `<g|ttt|…>` 标记经 BoardAnchor 汇聚）：
  * - 状态行 = 胜负 / 轮次 / 落子等待 /「AI 思考中…」（流式与落子等待都算）；
  * - 旁白行 = 标记里的 `note=`（AI 的一句话评论显示在条带上，不往聊天里堆棋盘卡）；
@@ -166,7 +167,9 @@ function dismiss(): void {
   gap: 8px;
   padding: 12px;
   box-sizing: border-box;
-  width: 100%;
+  /* 文档流里的一块（像张消息卡）：宽度随内容，不撑满整行 */
+  width: fit-content;
+  max-width: 100%;
   /* 悬浮/常驻面板必须有自己的底（同 TtsPlayer 的房子样式 / AGENTS 玻璃面板规范）：
      透明会让聊天文字透上来、两层内容互相穿插不可读 */
   border-radius: 16px;
@@ -212,7 +215,8 @@ function dismiss(): void {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  width: min(216px, 100%);
+  width: 216px;
+  max-width: 100%;
 }
 .gboard-cell {
   aspect-ratio: 1;
