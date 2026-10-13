@@ -371,6 +371,9 @@ const currentWorkflow = computed(
 // 工作流菜单：插件越装越多，带搜索 + 限高滚动
 const wfOpen = ref(false)
 const wfQuery = ref('')
+/** 思考强度 / 联网搜索菜单：受控以便同样参与「关掉回焦输入框」（见 onOverlay） */
+const reasonOpen = ref(false)
+const searchOpen = ref(false)
 // 触屏上自动聚焦会顶出键盘，只在鼠标设备上自动聚焦
 const finePointer = typeof matchMedia !== 'undefined' && matchMedia('(pointer: fine)').matches
 const filteredWorkflows = computed(() =>
@@ -394,6 +397,49 @@ function pickFirstWorkflow(): void {
   const first = filteredWorkflows.value[0]
   if (first) pickWorkflow(first.id)
 }
+
+/**
+ * 浮层（「+」面板 / 工作流 / 思考 / 搜索菜单）开关时保住输入焦点：
+ * 打开时输入框有焦点就记下，关掉时把焦点还回去——遮罩 / 面板外的点按会把焦点甩到 body，
+ * 手机上键盘一收、输入框就降下去（底部这些都算「在输入」，不该把键盘挤掉）。
+ * 打开时键盘本来就收着的话，关掉也不自动弹键盘。
+ *
+ * 底部弹层（「+」的 sheet 模式）内部是 VDialog：afterEnter 会把焦点吸到弹层内容，
+ * 键盘当场收起、上面的消息区跟着跳。它只吸一次——开场几百毫秒内把焦点拽回输入框即可，
+ * 键盘全程不收（仅键盘本来就开着时）。
+ */
+let refocusOnClose = false
+let sheetKeepFocus: ReturnType<typeof setInterval> | null = null
+function stopSheetKeepFocus(): void {
+  if (sheetKeepFocus) {
+    clearInterval(sheetKeepFocus)
+    sheetKeepFocus = null
+  }
+}
+function onOverlay(open: boolean, sheet = false): void {
+  if (open) {
+    refocusOnClose = document.activeElement === nativeTextarea()
+    if (refocusOnClose && sheet && sheetMode.value && !sheetKeepFocus) {
+      let ticks = 0
+      sheetKeepFocus = setInterval(() => {
+        const ta = nativeTextarea()
+        if (ta && document.activeElement !== ta) ta.focus()
+        if (++ticks > 10 || !plusOpen.value) stopSheetKeepFocus()
+      }, 60)
+    }
+    return
+  }
+  stopSheetKeepFocus()
+  if (refocusOnClose) {
+    refocusOnClose = false
+    textarea.value?.focus()
+  }
+}
+watch(plusOpen, (o) => onOverlay(o, true))
+watch(wfOpen, onOverlay)
+watch(reasonOpen, onOverlay)
+watch(searchOpen, onOverlay)
+onBeforeUnmount(stopSheetKeepFocus)
 
 function send(): void {
   if (!canSend.value) return
@@ -820,6 +866,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               class="wf-pick"
               :title="t('yaya.input.workflow', '工作流')"
               :aria-label="`${t('yaya.input.workflow', '工作流')}: ${currentWorkflow?.label ?? ''}`"
+              @pointerdown="keepFocus"
             >
               <v-icon icon="mdi-source-branch" size="16" />
               <span class="wf-pick-label">{{ currentWorkflow?.label }}</span>
@@ -847,6 +894,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
                 :key="w.id"
                 :active="w.id === workflowId"
                 color="primary"
+                @pointerdown.prevent
                 @click="pickWorkflow(w.id)"
               >
                 <template v-if="w.icon" #prepend>
@@ -864,7 +912,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
             </v-list>
           </v-card>
         </v-menu>
-        <v-menu location="top start">
+        <v-menu v-model="reasonOpen" location="top start">
           <template #activator="{ props: menuProps }">
             <button
               v-bind="menuProps"
@@ -872,6 +920,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               class="wf-pick"
               :title="t('yaya.reasoning.title', '思考强度')"
               :aria-label="`${t('yaya.reasoning.title', '思考强度')}: ${reasoningLabel(reasoning)}`"
+              @pointerdown="keepFocus"
             >
               <v-icon :icon="reasoningIcon" size="16" />
               <span class="wf-pick-label">{{ reasoningLabel(reasoning) }}</span>
@@ -886,6 +935,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               :active="o.value === reasoning"
               :prepend-icon="o.icon"
               color="primary"
+              @pointerdown.prevent
               @click="reasoning = o.value"
             >
               <v-list-item-title>{{ reasoningLabel(o.value) }}</v-list-item-title>
@@ -895,7 +945,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
             </v-list-item>
           </v-list>
         </v-menu>
-        <v-menu v-if="builtinSearchAvailable" location="top start">
+        <v-menu v-if="builtinSearchAvailable" v-model="searchOpen" location="top start">
           <template #activator="{ props: menuProps }">
             <button
               v-bind="menuProps"
@@ -903,6 +953,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               class="wf-pick"
               :title="t('yaya.search_mode.title', '联网搜索')"
               :aria-label="`${t('yaya.search_mode.title', '联网搜索')}: ${searchLabel(searchMode)}`"
+              @pointerdown="keepFocus"
             >
               <v-icon
                 :icon="searchMode === 'builtin' ? 'mdi-web' : 'mdi-magnify'"
@@ -921,6 +972,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
               :active="o.value === searchMode"
               :prepend-icon="o.icon"
               color="primary"
+              @pointerdown.prevent
               @click="searchMode = o.value"
             >
               <v-list-item-title>{{ searchLabel(o.value) }}</v-list-item-title>

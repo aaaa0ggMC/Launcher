@@ -3,7 +3,7 @@
  * storyteller 插件的输入框扩展：「+」→「故事档案」，浮层里看当前分支的完整设定
  * （世界、角色、线索、剧情摘要）。角色的秘密默认遮住（剧透），点「显示秘密」才露出。
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useI18n } from '@ui/i18n'
 import type { PluginInputContext } from '../../components/plugin-input'
@@ -21,11 +21,15 @@ const error = ref('')
 const bible = ref<StoryBible | null>(null)
 const showSecrets = ref(false)
 
+/** 打开时输入框有焦点：关掉对话框后还回去（Vuetify 只还给 activator，这里没有） */
+let refocusOnClose = false
+
 const narrow = typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches
 const openThreads = computed(() => bible.value?.threads.filter((x) => x.status === 'open') ?? [])
 const resolved = computed(() => bible.value?.threads.filter((x) => x.status === 'resolved') ?? [])
 
 async function show(): Promise<void> {
+  refocusOnClose = document.activeElement instanceof HTMLTextAreaElement
   open.value = true
   showSecrets.value = false
   error.value = ''
@@ -56,6 +60,13 @@ onMounted(() => {
   })
 })
 onBeforeUnmount(() => dispose?.())
+
+watch(open, (o) => {
+  if (!o && refocusOnClose) {
+    refocusOnClose = false
+    context.value.focus()
+  }
+})
 </script>
 
 <template>

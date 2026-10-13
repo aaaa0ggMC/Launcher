@@ -61,6 +61,7 @@ function isDisabled(a: InputMenuAction): boolean {
         :disabled="isDisabled(a)"
         rounded="lg"
         :aria-pressed="a.active ? isActive(a) : undefined"
+        @pointerdown.prevent
         @click="emit('run', a)"
       >
         <v-list-item-title>{{ a.label }}</v-list-item-title>
