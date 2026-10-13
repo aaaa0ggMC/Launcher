@@ -291,12 +291,14 @@ const inputContext: PluginInputContext = {
       end: el?.selectionEnd ?? draft.value.length
     }
   },
-  replaceRange: (start, end, text) => {
+  replaceRange: (start, end, text, opts) => {
     draft.value = draft.value.slice(0, start) + text + draft.value.slice(end)
     void nextTick(() => {
       const el = nativeTextarea()
-      el?.focus()
-      el?.setSelectionRange(start + text.length, start + text.length)
+      if (!el) return
+      if (opts?.refocus !== false) el.focus()
+      // 焦点之外也推进选区：不回焦的场景（表情连选）下次插入接着排
+      el.setSelectionRange(start + text.length, start + text.length)
     })
   },
   register: (hooks) => {

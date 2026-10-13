@@ -19,8 +19,10 @@ const props = withDefaults(
     role?: 'user' | 'assistant'
     /** 当前已有的表情 key（回应模式高亮用） */
     activeKeys?: string[]
+    /** 点完表情关面板（回应模式）；插入模式传 false——QQ 式连选多枚，面板留着 */
+    closeOnPick?: boolean
   }>(),
-  { role: 'assistant', activeKeys: () => [] }
+  { role: 'assistant', activeKeys: () => [], closeOnPick: true }
 )
 
 const emit = defineEmits<{
@@ -54,7 +56,7 @@ let prevFocus: HTMLElement | null = null
 
 function onPick(item: ReactionItem): void {
   emit('pick', item)
-  open.value = false
+  if (props.closeOnPick) open.value = false
 }
 
 /** 焦点跑到面板外的输入元素（点输入条想打字）= 键盘换面板：关掉 */

@@ -48,11 +48,12 @@ watch(open, (o) => {
 function onPick(item: ReactionItem): void {
   const text = item.src || item.icon ? `:${item.key}:` : item.key
   const { start, end } = props.context.selection()
-  props.context.replaceRange(start, end, text)
-  props.context.focus()
+  // QQ 式连选：插进草稿但不回焦——回焦会触发「键盘换面板」的互斥关闭，面板得留着；
+  // 选区已在 replaceRange 里推进，下一枚接着排
+  props.context.replaceRange(start, end, text, { refocus: false })
 }
 </script>
 
 <template>
-  <EmojiPanel v-model="open" role="user" @pick="onPick" />
+  <EmojiPanel v-model="open" role="user" :close-on-pick="false" @pick="onPick" />
 </template>

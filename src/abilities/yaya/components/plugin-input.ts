@@ -100,7 +100,11 @@ export interface PluginInputContext {
   addAction: (action: InputMenuAction) => () => void
   focus: () => void
   selection: () => { start: number; end: number }
-  replaceRange: (start: number, end: number, text: string) => void
+  /**
+   * `opts.refocus = false`：插入后不把焦点还给输入框（如表情面板留在原地连选多枚）——
+   * 选区照常推进，下次插入接着排；缺省插入后聚焦输入框（语音等「放完就走」的流）。
+   */
+  replaceRange: (start: number, end: number, text: string, opts?: { refocus?: boolean }) => void
   /** One registration per mounted extension; dispose on unmount. */
   register: (hooks: PluginInputHooks) => () => void
 }
