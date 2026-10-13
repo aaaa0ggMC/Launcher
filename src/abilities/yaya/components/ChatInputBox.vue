@@ -127,14 +127,12 @@ narrowMq?.addEventListener('change', onNarrowChange)
 onBeforeUnmount(() => narrowMq?.removeEventListener('change', onNarrowChange))
 const sheetMode = computed(() => coarse || narrow.value)
 
-// ---- 底部弹层：全局下滑收起 ----
-// 面板上任意位置（含按钮 / 列表项）和面板外的遮罩上，按住往下划都能收起：
-// 面板内阈值 72px、遮罩上 40px（外面没有内容要保留，随手一划就收）；甩得快
-// （≥0.5px/ms）时 32px 就收——手指一甩本来就没多长距离，别只认死距离。
-// 监听挂在 document 上（捕获阶段）——弹层 teleport 到 body，scoped 样式和
-// 组件内 @pointer 都盖不到遮罩；拖拽判定成立后吞掉随后补发的 click，
+// ---- QQ 式抽屉（窄屏 / 触屏）：面板就地展开在输入条下方，键盘让位 ----
+// 抽屉内 / 输入条上按住往下划都能收起：抽屉内阈值 72px、外面 40px（外面没有内容要
+// 保留，随手一划就收）；甩得快（≥0.5px/ms）时 32px 就收。监听挂在 document 上
+// （捕获阶段）——组件内 @pointer 盖不到；拖拽判定成立后吞掉随后补发的 click，
 // 不然在按钮上起手会把按钮也点一下。
-const sheetCardEl = ref<HTMLElement | null>(null)
+const drawerEl = ref<HTMLElement | null>(null)
 const sheetDragY = ref(0)
 const sheetDragging = ref(false)
 let sheetStartY = 0
@@ -144,10 +142,8 @@ let sheetDecided = false
 let sheetInside = false
 let sheetJustDragged = false
 
-/** v-card 是组件：模板 ref 拿到的是组件实例，根 DOM 在 $el 上 */
 function sheetCardNode(): HTMLElement | null {
-  const v = sheetCardEl.value as unknown as { $el?: HTMLElement } | null
-  return v?.$el ?? null
+  return drawerEl.value
 }
 
 function onSheetDocDown(e: PointerEvent): void {
@@ -217,6 +213,12 @@ function unbindSheetGestures(): void {
 
 let sheetUnbindTimer: ReturnType<typeof setTimeout> | null = null
 watch(plusOpen, (open) => {
+  onOverlay(open)
+  // QQ 式互斥：手机/触屏开面板 = 键盘让位（失焦收键盘，抽屉顶替原键盘位；
+  // 关面板时若此前在打字，onOverlay 把键盘换回来）
+  if (open && sheetMode.value) nativeTextarea()?.blur()
+  // 输入框 SDK 钩子：面板开合（语音插件据此预热麦克风）
+  for (const hooks of inputHooks.values()) hooks.onPanelOpen?.(open)
   if (sheetUnbindTimer) {
     clearTimeout(sheetUnbindTimer)
     sheetUnbindTimer = null
@@ -364,6 +366,11 @@ function toggleExpanded(): void {
   textarea.value?.focus()
 }
 
+/** QQ 式互斥：面板开着时点输入框 = 键盘换面板（收面板；键盘本来就在就不用动） */
+function onTextareaFocusIn(): void {
+  if (plusOpen.value) plusOpen.value = false
+}
+
 const currentWorkflow = computed(
   () => props.workflows.find((w) => w.id === workflowId.value) ?? props.workflows[0]
 )
@@ -409,31 +416,26 @@ function pickFirstWorkflow(): void {
  * 改为监听 focusin **同步**拽回：抢焦与回焦在同一个事件循环里完成，系统来不及收键盘。
  * plusOpen 已关就不动手——表情等后续对话框正常接管焦点（runPlusAction 先关面板再 run）。
  */
+/**
+ * 浮层开关时的焦点契约：打开时输入框有焦点就记下，关掉时把焦点还回去——遮罩 / 面板外
+ * 的点按会把焦点甩到 body，不还的话手机上键盘一收、输入框就降下去。打开时键盘本来就
+ * 收着的话，关掉也不自动弹键盘。手机上开抽屉时会主动失焦让键盘（见 plusOpen 的 watch），
+ * 关抽屉时靠这里把键盘换回来（QQ 式互斥）。
+ */
 let refocusOnClose = false
-function keepSheetInputFocus(e: FocusEvent): void {
-  if (!plusOpen.value || !refocusOnClose) return
-  const t = e.target
-  if (t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) return
-  textarea.value?.focus()
-}
-function onOverlay(open: boolean, sheet = false): void {
+function onOverlay(open: boolean): void {
   if (open) {
     refocusOnClose = document.activeElement === nativeTextarea()
-    if (refocusOnClose && sheet && sheetMode.value)
-      document.addEventListener('focusin', keepSheetInputFocus, true)
     return
   }
-  document.removeEventListener('focusin', keepSheetInputFocus, true)
   if (refocusOnClose) {
     refocusOnClose = false
     textarea.value?.focus()
   }
 }
-watch(plusOpen, (o) => onOverlay(o, true))
 watch(wfOpen, onOverlay)
 watch(reasonOpen, onOverlay)
 watch(searchOpen, onOverlay)
-onBeforeUnmount(() => document.removeEventListener('focusin', keepSheetInputFocus, true))
 
 function send(): void {
   if (!canSend.value) return
@@ -777,6 +779,7 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
           @click="onInput"
           @keyup="onInput"
           @paste="onPaste"
+          @focusin="onTextareaFocusIn"
         />
         <v-btn
           v-if="canExpand"
@@ -835,17 +838,6 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
         >
           <v-icon icon="mdi-plus" />
         </v-btn>
-        <v-bottom-sheet v-if="sheetMode" v-model="plusOpen" class="plus-overlay">
-          <v-card
-            ref="sheetCardEl"
-            class="plus-sheet yaya-pop"
-            :class="{ 'is-dragging': sheetDragging }"
-            :style="sheetDragY ? { transform: `translateY(${sheetDragY}px)` } : undefined"
-          >
-            <div class="plus-sheet-handle" aria-hidden="true" />
-            <InputPlusPanel sheet :actions="plusActions" @run="runPlusAction" />
-          </v-card>
-        </v-bottom-sheet>
         <div ref="toolbarTarget" class="plugin-input-tools" />
         <v-menu
           v-if="workflows.length > 1"
@@ -1023,6 +1015,19 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
         </v-btn>
       </div>
     </div>
+    <!-- QQ 式抽屉（窄屏/触屏）：就地展开在输入条下方，键盘让位、面板顶替原键盘位 -->
+    <Transition name="plus-drawer">
+      <div
+        v-if="plusOpen && sheetMode"
+        ref="drawerEl"
+        class="plus-drawer yaya-pop"
+        :class="{ 'is-dragging': sheetDragging }"
+        :style="sheetDragY ? { transform: `translateY(${sheetDragY}px)` } : undefined"
+      >
+        <div class="plus-sheet-handle" aria-hidden="true" />
+        <InputPlusPanel sheet :actions="plusActions" @run="runPlusAction" />
+      </div>
+    </Transition>
     <ImagePreviewDialog v-model="previewOpen" :images="previewImages" :index="previewIndex" />
     <div v-if="attachError" class="attach-error text-error">{{ attachError }}</div>
   </div>
@@ -1211,18 +1216,30 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
 .plus-btn.is-open :deep(.v-icon) {
   transform: rotate(45deg);
 }
-.plus-sheet {
-  border-radius: 24px 24px 0 0 !important;
+/* QQ 式抽屉：就地展开在输入条下方（不再是有遮罩、盖住输入条的悬浮弹层）。
+   开面板收键盘、抽屉顶替原键盘位，输入条钉在面板上方；整体下滑收起（见拖拽逻辑）。 */
+.plus-drawer {
+  margin-top: 8px;
+  border-radius: 20px 20px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
   /* 下滑收起：拖拽跟手（无过渡），松手回弹 / 关闭有过渡 */
   transition: transform 0.2s ease;
-  /* 整块面板都是拖拽热区：禁掉默认触控行为，下滑手势才跟手
-     （面板内容设计上放得下，不需要内部滚动） */
+  /* 整块面板都是拖拽热区：禁掉默认触控行为，下滑手势才跟手 */
   touch-action: none;
 }
-/* 弹层 teleport 到 body，遮罩的 touch-action 只能写在文件末尾的非 scoped 块里 */
-.plus-sheet.is-dragging {
+.plus-drawer.is-dragging {
   transition: none;
+}
+.plus-drawer-enter-active,
+.plus-drawer-leave-active {
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
+}
+.plus-drawer-enter-from,
+.plus-drawer-leave-to {
+  transform: translateY(20px);
+  opacity: 0;
 }
 .plus-sheet-handle {
   width: 36px;
@@ -1396,16 +1413,5 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
   .wf-pick-label {
     display: none;
   }
-}
-</style>
-
-<style>
-/* 「+」底部弹层的遮罩：弹层整体 teleport 到 body，scoped 样式（连 data-v 属性）
-   够不到 .v-overlay，所以只能写在非 scoped 块里；类名由
-   <v-bottom-sheet class="plus-overlay"> 透传过去。遮罩不写的话，浏览器会把下滑
-   当成「滚动后面的页面」接管掉（pointercancel），拖拽在 ~10px 处就断——慢划收不起、
-   甩快了面板弹回，还会把背后的聊天页甩飞。 */
-.v-overlay.plus-overlay {
-  touch-action: none;
 }
 </style>
