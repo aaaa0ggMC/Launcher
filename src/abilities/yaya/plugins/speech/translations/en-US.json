@@ -48,6 +48,7 @@
   "yaya.speech.asr.done": "Stop and transcribe",
   "yaya.speech.asr.listening": "Listening…",
   "yaya.speech.asr.connecting": "Connecting… wait a moment before speaking",
+  "yaya.speech.asr.opening_mic": "Opening microphone…",
   "yaya.speech.asr.transcribing": "Transcribing…",
   "yaya.speech.asr.denied": "Microphone permission denied",
   "yaya.speech.asr.no_mic": "No microphone found",

@@ -122,8 +122,10 @@ async function startSystem(): Promise<void> {
   const language = String(pluginConfigValues('speech').asr_language ?? '').trim()
   // 识别服务连上（麦克风真正开始收音）之前一直显示「正在连接」：
   // 提前显示「正在听」的话，用户开口的头几个字会在建连期间丢掉
+  const t0 = performance.now()
   const ready = (): void => {
     if (rec !== r || state.value !== 'starting') return
+    console.warn(`[asr] system ready in ${Math.round(performance.now() - t0)}ms`)
     state.value = 'recording'
     startTimer()
   }
@@ -171,6 +173,7 @@ async function start(): Promise<void> {
     return
   }
   state.value = 'starting'
+  const t0 = performance.now()
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true }
@@ -200,9 +203,10 @@ async function start(): Promise<void> {
   }
   recorder.onstop = () => void finishRecording(recorder?.mimeType || mime || 'audio/webm')
   const r = recorder
-  // 录音机真正开始（onstart）才算在听
+  // 录音机真正开始（onstart）才算在听；耗时打进宿主日志（[asr]），真机排查开麦延迟用
   r.onstart = () => {
     if (recorder !== r || state.value !== 'starting') return
+    console.warn(`[asr] mic open in ${Math.round(performance.now() - t0)}ms`)
     state.value = 'recording'
     startTimer()
   }
@@ -375,7 +379,9 @@ onBeforeUnmount(() => {
         class="flex-shrink-0"
       />
       <span class="asr-hint asr-connecting">{{
-        t('yaya.speech.asr.connecting', '正在连接，稍等再开口…')
+        engine === 'system'
+          ? t('yaya.speech.asr.connecting', '正在连接，稍等再开口…')
+          : t('yaya.speech.asr.opening_mic', '正在打开麦克风…')
       }}</span>
       <v-spacer />
       <v-btn
