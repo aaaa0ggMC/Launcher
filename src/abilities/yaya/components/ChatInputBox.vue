@@ -404,32 +404,26 @@ function pickFirstWorkflow(): void {
  * 手机上键盘一收、输入框就降下去（底部这些都算「在输入」，不该把键盘挤掉）。
  * 打开时键盘本来就收着的话，关掉也不自动弹键盘。
  *
- * 底部弹层（「+」的 sheet 模式）内部是 VDialog：afterEnter 会把焦点吸到弹层内容，
- * 键盘当场收起、上面的消息区跟着跳。它只吸一次——开场几百毫秒内把焦点拽回输入框即可，
- * 键盘全程不收（仅键盘本来就开着时）。
+ * 底部弹层（「+」的 sheet 模式）内部是 VDialog：afterEnter 把焦点吸到弹层内容，IME 当场
+ * 收起、随后回焦又弹回——真机录屏里就是键盘「一闪」（轮询回焦慢一步，空窗 ~125ms）。
+ * 改为监听 focusin **同步**拽回：抢焦与回焦在同一个事件循环里完成，系统来不及收键盘。
+ * plusOpen 已关就不动手——表情等后续对话框正常接管焦点（runPlusAction 先关面板再 run）。
  */
 let refocusOnClose = false
-let sheetKeepFocus: ReturnType<typeof setInterval> | null = null
-function stopSheetKeepFocus(): void {
-  if (sheetKeepFocus) {
-    clearInterval(sheetKeepFocus)
-    sheetKeepFocus = null
-  }
+function keepSheetInputFocus(e: FocusEvent): void {
+  if (!plusOpen.value || !refocusOnClose) return
+  const t = e.target
+  if (t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) return
+  textarea.value?.focus()
 }
 function onOverlay(open: boolean, sheet = false): void {
   if (open) {
     refocusOnClose = document.activeElement === nativeTextarea()
-    if (refocusOnClose && sheet && sheetMode.value && !sheetKeepFocus) {
-      let ticks = 0
-      sheetKeepFocus = setInterval(() => {
-        const ta = nativeTextarea()
-        if (ta && document.activeElement !== ta) ta.focus()
-        if (++ticks > 10 || !plusOpen.value) stopSheetKeepFocus()
-      }, 60)
-    }
+    if (refocusOnClose && sheet && sheetMode.value)
+      document.addEventListener('focusin', keepSheetInputFocus, true)
     return
   }
-  stopSheetKeepFocus()
+  document.removeEventListener('focusin', keepSheetInputFocus, true)
   if (refocusOnClose) {
     refocusOnClose = false
     textarea.value?.focus()
@@ -439,7 +433,7 @@ watch(plusOpen, (o) => onOverlay(o, true))
 watch(wfOpen, onOverlay)
 watch(reasonOpen, onOverlay)
 watch(searchOpen, onOverlay)
-onBeforeUnmount(stopSheetKeepFocus)
+onBeforeUnmount(() => document.removeEventListener('focusin', keepSheetInputFocus, true))
 
 function send(): void {
   if (!canSend.value) return
