@@ -412,11 +412,14 @@ onBeforeUnmount(() => {
         @pointerdown.prevent
         @click="cancel"
       />
+      <!-- 主操作比取消大一档：盒子 20→22px、字形 scale(1.1)，各 +10% 做视觉强调；
+           两者间距见 .asr-done 的 margin-left（10px 行 gap 外再让 8px，防误点叉） -->
       <v-btn
         icon="mdi-check"
         color="primary"
         variant="tonal"
         size="small"
+        class="asr-done"
         :title="t('yaya.speech.asr.done', '结束并识别')"
         :aria-label="t('yaya.speech.asr.done', '结束并识别')"
         @pointerdown.prevent
@@ -456,6 +459,16 @@ onBeforeUnmount(() => {
 }
 .asr-row.is-error {
   border-bottom-color: rgba(var(--v-theme-error), 0.3);
+}
+/* 结束按钮（✓）：比取消（✕，20px）整体大 10% = 盒子 22px + 字形 scale(1.1)，
+   并与 ✕ 拉开到 18px（行 gap 10 + 这里 8）——手指不容易点错叉。 */
+.asr-done {
+  width: 22px !important;
+  height: 22px !important;
+  margin-left: 8px;
+}
+.asr-done :deep(.v-icon) {
+  transform: scale(1.1);
 }
 .asr-dot {
   width: 10px;
