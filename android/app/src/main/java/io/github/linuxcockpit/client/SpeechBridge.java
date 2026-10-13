@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -49,6 +50,8 @@ final class SpeechBridge {
     private final ArrayList<Runnable> ttsWaiting = new ArrayList<>();
 
     private SpeechRecognizer recognizer;
+    /** 有会话在进行（begin 到 final/end/cancel）：下次 begin 前先掐掉再开新的 */
+    private boolean asrActive = false;
     /** 等录音权限时暂存的 asr.start 参数 */
     private JSONObject pendingAsr;
 
@@ -402,15 +405,33 @@ final class SpeechBridge {
     }
 
     private void begin(JSONObject args) {
-        if (recognizer != null) recognizer.destroy();
-        recognizer = SpeechRecognizer.createSpeechRecognizer(act);
-        recognizer.setRecognitionListener(listener);
+        // 保活复用：每次冷建连（bind 识别服务 + 服务初始化，云端引擎还有握手）要 1–2 秒，
+        // 正是语音输入开头那段「正在连接」。改成整个生命周期共用一个连接，会话间只 cancel
+        // 不 destroy——第二次起建连几乎瞬时（用户要的「异步等服务器」：把等待挪出点击路径）。
+        if (recognizer == null) {
+            recognizer = createRecognizer();
+            recognizer.setRecognitionListener(listener);
+        } else if (asrActive) {
+            recognizer.cancel(); // 上一次会话还挂着：先掐掉再开新的
+        }
+        asrActive = true;
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, args.optBoolean("partial", true));
         String lang = args.optString("lang", "");
         if (!lang.isEmpty()) intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
         recognizer.startListening(intent);
+    }
+
+    /**
+     * Android 12+ 且系统提供端内识别：不走网络，建连与识别都更快（拿不到就退回系统服务）。
+     */
+    private SpeechRecognizer createRecognizer() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && SpeechRecognizer.isOnDeviceRecognitionAvailable(act)) {
+            return SpeechRecognizer.createOnDeviceSpeechRecognizer(act);
+        }
+        return SpeechRecognizer.createSpeechRecognizer(act);
     }
 
     void stopAsr() {
@@ -422,11 +443,9 @@ final class SpeechBridge {
     void cancelAsr() {
         act.runOnUiThread(() -> {
             pendingAsr = null;
-            if (recognizer != null) {
-                recognizer.cancel();
-                recognizer.destroy();
-                recognizer = null;
-            }
+            asrActive = false;
+            // 只取消本次会话，识别服务连接留着复用（destroy 会让下次重新冷建连）
+            if (recognizer != null) recognizer.cancel();
         });
     }
 
@@ -483,16 +502,21 @@ final class SpeechBridge {
 
         @Override
         public void onError(int error) {
+            asrActive = false;
             asrEvent("error", null, errorText(error));
             asrEvent("end", null, null);
-            destroyRecognizer();
+            // 卡死类错误（忙 / 音频异常）销毁重建；网络 / 无语音等保留连接继续复用
+            if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_AUDIO) {
+                destroyRecognizer();
+            }
         }
 
         @Override
         public void onResults(Bundle results) {
+            asrActive = false;
             asrEvent("final", first(results), null);
             asrEvent("end", null, null);
-            destroyRecognizer();
+            // 会话正常结束：连接保活（不 destroy），下次 startListening 直接复用
         }
 
         @Override
@@ -507,6 +531,7 @@ final class SpeechBridge {
     };
 
     private void destroyRecognizer() {
+        asrActive = false;
         if (recognizer != null) {
             recognizer.destroy();
             recognizer = null;
