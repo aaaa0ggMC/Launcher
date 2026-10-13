@@ -136,6 +136,15 @@ async function play(i: number): Promise<void> {
   gap: 8px;
   padding: 12px;
   min-width: 236px;
+  /* 悬浮面板必须有自己的底（同 TtsPlayer 的房子样式 / AGENTS 玻璃面板规范）：
+     透明面板会让聊天文字整层透上来，两层内容互相穿插 = 不可读 */
+  border-radius: 16px;
+  background: rgba(var(--v-theme-surface), var(--glass-a, 0.92));
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid rgba(var(--v-border-color), calc(var(--v-border-opacity) * 1.5));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  color: rgb(var(--v-theme-on-surface));
 }
 .gboard-status {
   display: flex;
