@@ -1,18 +1,16 @@
 <script setup lang="ts">
 /**
- * 表情面板（R5：弹窗式，取代旧的小菜单）：
- * - 分类 = 表情集（`reactionSets`：默认集 + 已启用插件的图标包），分组显示；
- * - 顶部搜索（跨组按 key / label 匹配）；
- * - 两种用法：回应模式（ReactionBar 的「+」→ `pick` 回调里点按切换）与
- *   插入模式（react 插件的输入框 item → 把表情塞进消息正文）。
+ * 表情面板外壳（R5 弹窗式 → 手机 QQ 式）：
+ * - 桌面：原样中屏对话框；
+ * - 手机 / 触屏：Teleport 到输入条下方的「底部面板区」（bottom-panel.ts），与键盘互斥——
+ *   打开先收软键盘（仅粗指针，桌面窄窗口不丢输入焦点）、点输入条换回键盘、
+ *   关掉时把焦点还回去。回应条（ReactionBar）与插入模式（EmojiInput）共用这一套。
  */
-import { computed, inject, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from '../../../main/ui/i18n'
-import AbilityIcon from '@ui/components/AbilityIcon.vue'
-import { fileIconUrl } from '@ui/icon'
-import type { ReactionItem, ReactionSet } from './plugin-ui'
-import { reactionSetsFor } from './plugin-ui-registry'
-import { emoteSrcUrl } from './emotes'
+import type { ReactionItem } from './plugin-ui'
+import EmojiPanelCard from './EmojiPanelCard.vue'
+import { bottomPanelEl } from './bottom-panel'
 
 const props = withDefaults(
   defineProps<{
@@ -33,164 +31,157 @@ const emit = defineEmits<{
 const lang = inject('cockpit:lang', ref('zh'))
 const { t } = useI18n(lang)
 
-const query = ref('')
-
 const open = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v)
 })
 
-interface Group {
-  id: string
-  label: string
-  items: ReactionItem[]
+/** 底部面板形态的判定与输入框的 sheetMode 同一套（粗指针 / ≤720px） */
+const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+const narrowMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null
+const narrow = ref(narrowMq?.matches ?? false)
+const onNarrowChange = (e: MediaQueryListEvent): void => {
+  narrow.value = e.matches
 }
+narrowMq?.addEventListener('change', onNarrowChange)
+onBeforeUnmount(() => narrowMq?.removeEventListener('change', onNarrowChange))
 
-/** 分类分组：每个表情集一组；搜索同时命中组名与条目（key / label） */
-const groups = computed<Group[]>(() => {
-  const q = query.value.trim().toLowerCase()
-  const out: Group[] = []
-  for (const set of reactionSetsFor(props.role) as ReactionSet[]) {
-    if (!set.items.length) continue
-    const label = set.labelKey ? t(set.labelKey, set.label ?? set.id) : (set.label ?? set.id)
-    const items = set.items.filter(
-      (i) =>
-        !q ||
-        i.key.toLowerCase().includes(q) ||
-        (i.label ?? '').toLowerCase().includes(q) ||
-        label.toLowerCase().includes(q)
-    )
-    if (items.length) out.push({ id: set.id, label, items })
-  }
-  return out
-})
+const useBottom = computed(() => (coarse || narrow.value) && !!bottomPanelEl.value)
 
-const totalCount = computed(() => groups.value.reduce((n, g) => n + g.items.length, 0))
+const dockEl = ref<HTMLElement | null>(null)
+/** 打开前的焦点（关掉时还回去 = 键盘换回来） */
+let prevFocus: HTMLElement | null = null
 
-function itemLabel(item: ReactionItem): string {
-  return item.labelKey ? t(item.labelKey, item.label ?? item.key) : (item.label ?? item.key)
-}
-function emoteUrl(src: string): string {
-  return emoteSrcUrl(src, fileIconUrl)
-}
-function choose(item: ReactionItem): void {
+function onPick(item: ReactionItem): void {
   emit('pick', item)
   open.value = false
 }
+
+/** 焦点跑到面板外的输入元素（点输入条想打字）= 键盘换面板：关掉 */
+function onFocusIn(e: FocusEvent): void {
+  if (!open.value) return
+  const t = e.target
+  if (
+    t instanceof HTMLElement &&
+    (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') &&
+    !dockEl.value?.contains(t)
+  )
+    open.value = false
+}
+
+/** 安卓返回键（原生把返回转成 Escape）：先关面板 */
+function onKeydown(e: KeyboardEvent): void {
+  if (open.value && e.key === 'Escape') open.value = false
+}
+
+watch(open, (o) => {
+  if (!useBottom.value) return // 桌面对话框自己管焦点
+  if (o) {
+    prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // QQ 式互斥：面板顶替键盘——把当前可输入焦点收掉（只在触屏上，桌面窄窗口不丢焦点）
+    const a = document.activeElement
+    if (coarse && a instanceof HTMLElement && a !== document.body) a.blur()
+    document.addEventListener('focusin', onFocusIn, true)
+    document.addEventListener('keydown', onKeydown, true)
+    return
+  }
+  document.removeEventListener('focusin', onFocusIn, true)
+  document.removeEventListener('keydown', onKeydown, true)
+  // 关掉：焦点还给打开前的输入元素（没打开过键盘就别乱弹）
+  const a = document.activeElement
+  const aEditable = a instanceof HTMLTextAreaElement || a instanceof HTMLInputElement
+  if (prevFocus?.isConnected && (!aEditable || a === prevFocus)) prevFocus.focus()
+  prevFocus = null
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('focusin', onFocusIn, true)
+  document.removeEventListener('keydown', onKeydown, true)
+})
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="560" scrollable>
-    <v-card rounded="lg" class="emoji-panel">
-      <v-card-title class="emoji-head">
-        <span class="text-subtitle-2">{{ t('yaya.emoji.title', '表情') }}</span>
-        <v-text-field
-          v-model="query"
-          variant="outlined"
-          density="compact"
-          hide-details
-          clearable
-          :placeholder="t('yaya.emoji.search', '搜索表情')"
-          prepend-inner-icon="mdi-magnify"
-          class="emoji-search"
-        />
-      </v-card-title>
-
-      <v-card-text class="emoji-body">
-        <div v-if="!totalCount" class="emoji-empty text-medium-emphasis">
-          {{ t('yaya.emoji.empty', '没有匹配的表情') }}
-        </div>
-
-        <section v-for="g in groups" :key="g.id" class="emoji-group">
-          <div class="emoji-cat text-medium-emphasis">{{ g.label }}</div>
-          <div class="emoji-grid">
-            <button
-              v-for="item in g.items"
-              :key="item.key"
-              type="button"
-              class="emoji-cell"
-              :class="{ active: activeKeys.includes(item.key) }"
-              :title="itemLabel(item)"
-              :aria-label="itemLabel(item)"
-              @click="choose(item)"
-            >
-              <img
-                v-if="item.src"
-                class="emoji-img"
-                :src="emoteUrl(item.src)"
-                :alt="item.key"
-                loading="lazy"
-              />
-              <v-icon v-else-if="item.icon?.startsWith('mdi-')" :icon="item.icon" size="22" />
-              <AbilityIcon v-else-if="item.icon" :icon="item.icon" :size="22" />
-              <span v-else class="emoji-glyph">{{ item.key }}</span>
-            </button>
-          </div>
-        </section>
-      </v-card-text>
-    </v-card>
+  <!-- 桌面：原中屏对话框 -->
+  <v-dialog v-if="!useBottom" v-model="open" max-width="560" scrollable>
+    <EmojiPanelCard :role="role" :active-keys="activeKeys" @pick="onPick" />
   </v-dialog>
+  <!-- 手机/触屏：QQ 式底部面板——落在输入条下方的挂载点，遮不住输入条 -->
+  <Teleport v-else :to="bottomPanelEl || 'body'">
+    <Transition name="emoji-dock">
+      <div
+        v-if="open"
+        ref="dockEl"
+        class="emoji-dock yaya-pop"
+        role="dialog"
+        :aria-label="t('yaya.emoji.title', '表情')"
+      >
+        <button
+          type="button"
+          class="emoji-dock-handle"
+          :title="t('yaya.input.collapse', '收起')"
+          :aria-label="t('yaya.input.collapse', '收起')"
+          @click="open = false"
+        >
+          <span aria-hidden="true" />
+        </button>
+        <EmojiPanelCard :role="role" :active-keys="activeKeys" @pick="onPick" />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
-.emoji-head {
+/* 底部面板：输入条下方就地展开，圆角朝上、内容内部滚动 */
+.emoji-dock {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-block: 14px 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(52vh, 460px);
+  margin-top: 8px;
+  border-radius: 20px 20px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  overflow: hidden;
 }
-.emoji-search {
-  flex: 1 1 220px;
-  min-width: 0;
-}
-.emoji-body {
-  padding-block: 4px 16px;
-}
-.emoji-group + .emoji-group {
-  margin-top: 14px;
-}
-.emoji-cat {
-  font-size: 0.78rem;
-  margin-bottom: 6px;
-}
-.emoji-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
-  gap: 4px;
-}
-.emoji-cell {
+.emoji-dock-handle {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 44px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: transparent;
+  width: 100%;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
   cursor: pointer;
+}
+.emoji-dock-handle span {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(var(--v-theme-on-surface), 0.25);
+}
+/* 面板形态下内容体吃满高度、宫格区内部滚动（对话框 scrollable 分支不受影响） */
+.emoji-dock :deep(.emoji-panel) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  box-shadow: none;
+  background: transparent;
+}
+.emoji-dock :deep(.emoji-body) {
+  min-height: 0;
+  overflow-y: auto;
+}
+.emoji-dock-enter-active,
+.emoji-dock-leave-active {
   transition:
-    background 0.12s,
-    border-color 0.12s;
+    transform 0.16s ease,
+    opacity 0.16s ease;
 }
-.emoji-cell:hover {
-  background: rgba(var(--v-theme-primary), 0.12);
-}
-.emoji-cell.active {
-  border-color: rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.16);
-}
-.emoji-glyph {
-  font-size: 1.4rem;
-  line-height: 1;
-}
-.emoji-img {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-.emoji-empty {
-  padding-block: 24px;
-  text-align: center;
-  font-size: 0.875rem;
+.emoji-dock-enter-from,
+.emoji-dock-leave-to {
+  transform: translateY(16px);
+  opacity: 0;
 }
 </style>

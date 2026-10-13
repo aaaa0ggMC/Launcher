@@ -45,6 +45,11 @@ export interface PluginInputHooks {
   hasContent?: () => boolean
   reset?: () => void
   /**
+   * 「+」面板开合（桌面菜单 / 手机底部弹层都算）。适合做「用之前要热身」的预热：
+   * 如语音插件在面板打开时提前开麦，用户点到时零等待（记得在关闭时释放）。
+   */
+  onPanelOpen?: (open: boolean) => void
+  /**
    * Load references back into the composer (editing a sent message). Records are what the
    * message stored in `meta.mentions`; each extension picks the ones it understands.
    */
@@ -75,6 +80,11 @@ export interface InputMenuAction {
   disabled?: () => boolean
   /** 点完保持面板打开（开关类）；缺省点完就关 */
   keepOpen?: boolean
+  /**
+   * 指针按下去（还没抬手）就调用：抢跑「run 之前还要等」的热身动作。
+   * 如语音输入提前开麦——抬手触发 run 时本地已就绪，省掉起步等待。
+   */
+  prepare?: () => void
   run: () => void | Promise<void>
 }
 

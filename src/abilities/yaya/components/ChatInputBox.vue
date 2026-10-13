@@ -22,6 +22,7 @@ import {
   type PluginInputHooks
 } from './plugin-input'
 import InputPlusPanel from './InputPlusPanel.vue'
+import { bottomPanelEl } from './bottom-panel'
 
 const props = defineProps<{
   isRunning: boolean
@@ -235,6 +236,10 @@ onBeforeUnmount(() => {
   if (sheetUnbindTimer) clearTimeout(sheetUnbindTimer)
   unbindSheetGestures()
 })
+// 底部面板区随组件卸载：清掉模块级挂载点，别让面板 Teleport 到已脱离文档的节点
+onBeforeUnmount(() => {
+  bottomPanelEl.value = null
+})
 
 const plusActions = computed<InputMenuAction[]>(() => {
   const builtin: InputMenuAction = {
@@ -429,7 +434,11 @@ function onOverlay(open: boolean, sheet = false): void {
     textarea.value?.focus()
   }
 }
-watch(plusOpen, (o) => onOverlay(o, true))
+watch(plusOpen, (o) => {
+  onOverlay(o, true)
+  // 输入框 SDK：面板开合钩子（语音插件据此预热麦克风等）
+  for (const hooks of inputHooks.values()) hooks.onPanelOpen?.(o)
+})
 watch(wfOpen, onOverlay)
 watch(reasonOpen, onOverlay)
 watch(searchOpen, onOverlay)
@@ -1023,6 +1032,8 @@ defineExpose({ focus: () => textarea.value?.focus(), acceptShare, loadForEdit })
         </v-btn>
       </div>
     </div>
+    <!-- 底部面板区（QQ 式）：输入条下方的挂载点，表情等底部面板 Teleport 到这里（遮不住输入条） -->
+    <div ref="bottomPanelEl" class="bottom-panel-zone" />
     <ImagePreviewDialog v-model="previewOpen" :images="previewImages" :index="previewIndex" />
     <div v-if="attachError" class="attach-error text-error">{{ attachError }}</div>
   </div>
