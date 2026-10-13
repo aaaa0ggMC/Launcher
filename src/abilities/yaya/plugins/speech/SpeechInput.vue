@@ -47,13 +47,6 @@ const partial = ref('')
 let disposeAction: (() => void) | null = null
 let disposeHooks: (() => void) | null = null
 
-/** 预热的麦克风流：面板一打开就开麦（本地 ~0.5s 的开销提前做完），点下录音零等待 */
-let warmStream: MediaStream | null = null
-let warming = false
-let releaseTimer: ReturnType<typeof setTimeout> | null = null
-/** 「+」面板是否开着（开着才值得预热；关掉后短暂留用，点完 tile 的 run 还来得及取） */
-let panelOpen = false
-
 const maxSec = computed(() => {
   const v = Number(pluginConfigValues('speech').asr_max_sec)
   return Number.isFinite(v) && v >= 10 ? Math.min(600, v) : 120
@@ -75,49 +68,6 @@ function pickMime(): string {
   const prefs = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm', 'audio/mp4']
   if (typeof MediaRecorder === 'undefined') return ''
   return prefs.find((m) => MediaRecorder.isTypeSupported(m)) ?? ''
-}
-
-function releaseWarm(): void {
-  if (releaseTimer) {
-    clearTimeout(releaseTimer)
-    releaseTimer = null
-  }
-  for (const t of warmStream?.getTracks() ?? []) t.stop()
-  warmStream = null
-}
-
-/**
- * 预热麦克风：把接口引擎 ~0.5s 的本地开麦（Chromium 音频服务 + AudioRecord）提前做完。
- * 只在「+」面板打开 / 手指按下语音按钮时做；权限没给过就不预热（弹窗时机不该是打开面板）。
- */
-async function prewarmMic(): Promise<void> {
-  if (engine.value === 'system' || state.value !== 'idle') return
-  if (warmStream || warming) return
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return
-  try {
-    const st = await navigator.permissions?.query({ name: 'microphone' })
-    if (!st || st.state !== 'granted') return
-  } catch {
-    return
-  }
-  warming = true
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true }
-    })
-    if (state.value !== 'idle') {
-      // 等待期间用户已经开录：这路流没人要，直接放掉
-      for (const t of s.getTracks()) t.stop()
-    } else {
-      warmStream = s
-      // 面板已经关了（如点完就关）：留一小段给 run 取用，没人用就释放
-      if (!panelOpen) releaseTimer = setTimeout(releaseWarm, 1500)
-    }
-  } catch {
-    /* 预热失败不打扰：真正点录音时再走原路径报错 */
-  } finally {
-    warming = false
-  }
 }
 
 function fail(message: string): void {
@@ -225,19 +175,9 @@ async function start(): Promise<void> {
   state.value = 'starting'
   const t0 = performance.now()
   try {
-    // 有预热的流直接用（面板打开时已开麦）：起步只剩 MediaRecorder 起动，近乎零等待
-    if (warmStream) {
-      stream = warmStream
-      warmStream = null
-      if (releaseTimer) {
-        clearTimeout(releaseTimer)
-        releaseTimer = null
-      }
-    } else {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true }
-      })
-    }
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true }
+    })
   } catch (e) {
     const name = e instanceof DOMException ? e.name : ''
     fail(
@@ -406,8 +346,6 @@ onMounted(() => {
     order: 10,
     active: () => state.value === 'recording',
     disabled: () => state.value === 'transcribing' || state.value === 'starting',
-    // 按下那一刻再确认一次预热（面板外的未来入口也覆盖）
-    prepare: () => void prewarmMic(),
     run: toggle
   })
   // 切换会话 / 发送后宿主会 reset：正在录的直接丢掉
@@ -415,19 +353,6 @@ onMounted(() => {
     reset: () => {
       if (state.value === 'recording' || state.value === 'starting') cancel()
       if (state.value === 'error') state.value = 'idle'
-    },
-    // QQ 式抽屉打开 = 麦克风提前热身；关掉留 1.5s（点完 tile 的 run 还来得及取用），没人用就释放
-    onPanelOpen: (open) => {
-      panelOpen = open
-      if (open) {
-        if (releaseTimer) {
-          clearTimeout(releaseTimer)
-          releaseTimer = null
-        }
-        void prewarmMic()
-      } else if (warmStream) {
-        releaseTimer = setTimeout(releaseWarm, 1500)
-      }
     }
   })
 })
@@ -437,7 +362,6 @@ onBeforeUnmount(() => {
   rec?.cancel()
   rec = null
   if (recorder && recorder.state !== 'inactive') recorder.stop()
-  releaseWarm()
   cleanup()
   disposeAction?.()
   disposeHooks?.()

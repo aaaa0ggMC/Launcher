@@ -46,7 +46,7 @@ function isDisabled(a: InputMenuAction): boolean {
         :title="a.description || a.label"
         :aria-label="a.label"
         :aria-pressed="a.active ? isActive(a) : undefined"
-        @pointerdown.prevent="a.prepare?.()"
+        @pointerdown.prevent
         @click="emit('run', a)"
       >
         <v-icon :icon="a.icon" :size="sheet ? 28 : 24" />
@@ -61,7 +61,7 @@ function isDisabled(a: InputMenuAction): boolean {
         :disabled="isDisabled(a)"
         rounded="lg"
         :aria-pressed="a.active ? isActive(a) : undefined"
-        @pointerdown.prevent="a.prepare?.()"
+        @pointerdown.prevent
         @click="emit('run', a)"
       >
         <v-list-item-title>{{ a.label }}</v-list-item-title>
