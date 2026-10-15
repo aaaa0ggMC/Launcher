@@ -76,16 +76,17 @@ const searching = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchSeq = 0
 watch(search, (value) => {
+  // 输入一变就作废正在执行的请求，而不是等下一次防抖回调才递增。
+  const seq = ++searchSeq
   if (searchTimer) clearTimeout(searchTimer)
+  contentHits.value = new Map()
   const q = (value ?? '').trim()
   if (q.length < 2) {
-    contentHits.value = new Map()
     searching.value = false
     return
   }
   searching.value = true
   searchTimer = setTimeout(async () => {
-    const seq = ++searchSeq
     try {
       const hits = (await window.cockpit.command('yaya.sessions-search', {
         query: q,
@@ -100,6 +101,7 @@ watch(search, (value) => {
   }, 250)
 })
 onBeforeUnmount(() => {
+  ++searchSeq
   if (searchTimer) clearTimeout(searchTimer)
 })
 

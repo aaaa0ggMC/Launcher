@@ -425,15 +425,17 @@ export function getMessageBranch(leafId: string | null | undefined): MessageNode
   const branch: MessageNode[] = []
   const seen = new Set<string>()
   let currId: string | null = leafId
+  const stmt = getYayaDb().prepare('SELECT * FROM messages WHERE id = ?')
 
   while (currId && !seen.has(currId)) {
     seen.add(currId)
-    const msg = getMessage(currId)
-    if (!msg) break
-    branch.unshift(msg)
+    const row = stmt.get(currId) as unknown as MessageRow | undefined
+    if (!row) break
+    const msg = parseMessageRow(row)
+    branch.push(msg)
     currId = msg.parentId
   }
-  return branch
+  return branch.reverse()
 }
 
 /** 当前分支 + 每个节点的同级分支 id（给界面的 `< i/n >` 翻页器，一次查询代替逐条请求） */
@@ -497,9 +499,10 @@ export function getMessageBranchWindow(
     seen.add(curr)
     const r = byId.get(curr)
     if (!r) break
-    path.unshift(r)
+    path.push(r)
     curr = r.parent_id
   }
+  path.reverse()
   let end = path.length
   if (opts.before) {
     end = path.findIndex((r) => r.id === opts.before)
@@ -531,9 +534,11 @@ export function getMessageBranchWindow(
     }
   }
   const messages: MessageNode[] = []
+  const stmt = d.prepare('SELECT * FROM messages WHERE id = ?')
   for (const r of path.slice(start, end)) {
-    const m = getMessage(r.id)
-    if (!m) continue
+    const row = stmt.get(r.id) as unknown as MessageRow | undefined
+    if (!row) continue
+    const m = parseMessageRow(row)
     const sib = byParent.get(m.parentId ?? '') ?? [m.id]
     messages.push(sib.length > 1 ? { ...m, siblingIds: sib } : m)
   }
@@ -579,20 +584,22 @@ export function searchSessionMessages(query: string, limit = 50): SessionSearchH
   const pattern = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
   const rows = getYayaDb()
     .prepare(
-      `SELECT m.id, m.session_id, m.role, m.content, cnt.n AS matches
-       FROM messages m
-       JOIN (
-         SELECT session_id, MAX(created_at) AS last, COUNT(*) AS n
-         FROM messages
-         WHERE role IN ('user', 'assistant') AND content LIKE ? ESCAPE '\\'
-         GROUP BY session_id
-       ) cnt ON cnt.session_id = m.session_id AND cnt.last = m.created_at
-       JOIN sessions s ON s.id = m.session_id
-       WHERE m.role IN ('user', 'assistant') AND m.content LIKE ? ESCAPE '\\'
-       ORDER BY s.updated_at DESC
-       LIMIT ?`
+      `WITH hits AS (
+         SELECT id, session_id,
+                ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC, rowid DESC) AS rank,
+                COUNT(*) OVER (PARTITION BY session_id) AS n
+          FROM messages
+          WHERE role IN ('user', 'assistant') AND content LIKE ? ESCAPE '\\'
+       )
+       SELECT m.id, m.session_id, m.role, m.content, hits.n AS matches
+        FROM hits
+        JOIN messages m ON m.id = hits.id
+        JOIN sessions s ON s.id = m.session_id
+        WHERE hits.rank = 1
+        ORDER BY s.updated_at DESC, s.id
+        LIMIT ?`
     )
-    .all(pattern, pattern, limit) as unknown as {
+    .all(pattern, limit) as unknown as {
     id: string
     session_id: string
     role: 'user' | 'assistant'

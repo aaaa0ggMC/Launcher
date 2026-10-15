@@ -60,3 +60,32 @@ it('提问 / 回答折成轮次，工具链合并，编辑与重新生成形成�
   )
   assert.equal(t.turns.length, 7)
 })
+
+it('树视图不读取全文附件与 usage，损坏的无关 JSON 不妨碍摘要展示', () => {
+  db.createSession({ id: 'tree-light', title: 'light' })
+  add('tree-light', 'light-user', null, 'user', 'question')
+  add('tree-light', 'light-answer', 'light-user', 'assistant', 'answer')
+  db.getYayaDb()
+    .prepare('UPDATE messages SET attachments = ? WHERE id = ?')
+    .run('invalid-json', 'light-answer')
+  const result = tree.buildSessionTree('tree-light')
+  assert.equal(result.current, 'light-answer')
+  assert.deepEqual(
+    result.turns.map((t) => t.active),
+    [true, true]
+  )
+})
+
+it('隐藏 system 节点，但活跃路径仍能经过它', () => {
+  db.createSession({ id: 'tree-system', title: 'system' })
+  add('tree-system', 'system-user', null, 'user', 'question')
+  add('tree-system', 'system-middle', 'system-user', 'system', 'hidden')
+  add('tree-system', 'system-answer', 'system-middle', 'assistant', 'answer')
+  const result = tree.buildSessionTree('tree-system')
+  assert.deepEqual(
+    result.turns.map((t) => t.id),
+    ['system-user', 'system-answer']
+  )
+  assert.ok(result.turns.every((t) => t.active))
+  assert.equal(result.current, 'system-answer')
+})

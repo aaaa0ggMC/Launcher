@@ -3,7 +3,7 @@
  * 一轮回答（assistant + 工具结果的连续链）= 一个 answer 节点。分叉来自编辑重发（兄弟 user 节点）
  * 与重新生成（同一提问下的兄弟回答）。只查轻量列（内容截断），长会话也便宜。
  */
-import { getYayaDb, getSession, getMessageBranch } from './db'
+import { getYayaDb, getSession } from './db'
 import type { SessionTree, TreeTurn } from '../types'
 
 export type { SessionTree, TreeTurn }
@@ -31,18 +31,27 @@ export function buildSessionTree(sessionId: string): SessionTree {
     .prepare(
       `SELECT id, parent_id, role, substr(content, 1, ${PREVIEW * 2}) AS snippet, created_at, status,
               CASE WHEN tool_calls IS NULL OR tool_calls = '' THEN NULL ELSE tool_calls END AS tool_calls
-         FROM messages WHERE session_id = ? AND role != 'system' ORDER BY created_at ASC`
+         FROM messages WHERE session_id = ? ORDER BY created_at ASC`
     )
     .all(sessionId) as unknown as Row[]
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  const allById = new Map(rows.map((r) => [r.id, r]))
+  const visibleRows = rows.filter((r) => r.role !== 'system')
+  const byId = new Map(visibleRows.map((r) => [r.id, r]))
   const children = new Map<string, Row[]>()
-  for (const r of rows) {
+  for (const r of visibleRows) {
     const key = r.parent_id && byId.has(r.parent_id) ? r.parent_id : ''
     const list = children.get(key)
     if (list) list.push(r)
     else children.set(key, [r])
   }
-  const activeIds = new Set(getMessageBranch(session.activeLeafId).map((m) => m.id))
+  // 摘要查询已包含父链：无需逐条读取/解析整条分支的正文、附件与 usage。
+  const activeIds = new Set<string>()
+  for (let id = session.activeLeafId; id && !activeIds.has(id);) {
+    const row = allById.get(id)
+    if (!row) break
+    activeIds.add(id)
+    id = row.parent_id
+  }
 
   /** 消息 id → 所在轮次 id */
   const turnOf = new Map<string, string>()
@@ -63,8 +72,8 @@ export function buildSessionTree(sessionId: string): SessionTree {
     row,
     parentTurn: null
   }))
-  while (starts.length) {
-    const { row, parentTurn } = starts.shift()!
+  for (let cursor = 0; cursor < starts.length; cursor++) {
+    const { row, parentTurn } = starts[cursor]
     if (row.role === 'user') {
       turnOf.set(row.id, row.id)
       turns.push({

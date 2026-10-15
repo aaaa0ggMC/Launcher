@@ -766,17 +766,21 @@ async function resync(): Promise<void> {
   await Promise.all([refreshTail(), refreshSnapshot()])
 }
 
+let snapshotSeq = 0
 async function refreshSnapshot(): Promise<void> {
-  if (!activeSessionId.value) {
+  const seq = ++snapshotSeq
+  const id = activeSessionId.value
+  if (!id) {
     snapshot.value = null
     return
   }
   try {
-    snapshot.value = (await window.cockpit.command('yaya.workflow-snapshot', {
-      session: activeSessionId.value
+    const result = (await window.cockpit.command('yaya.workflow-snapshot', {
+      session: id
     })) as WorkflowSnapshot | null
+    if (seq === snapshotSeq && id === activeSessionId.value) snapshot.value = result
   } catch {
-    snapshot.value = null
+    if (seq === snapshotSeq && id === activeSessionId.value) snapshot.value = null
   }
 }
 
@@ -784,11 +788,13 @@ async function selectSession(id: string): Promise<void> {
   drawerOpen.value = false
   if (id === activeSessionId.value) return
   activeSessionId.value = id
+  snapshot.value = null
   messages.value = []
   hasMore.value = false
   pendingChunks.clear()
   loadingMessages.value = true
   await Promise.all([loadMessages(), refreshSnapshot()])
+  if (id !== activeSessionId.value) return
   loadingMessages.value = false
   void scrollToBottom(true)
 }
@@ -819,11 +825,14 @@ async function switchAssistant(id: string): Promise<void> {
 }
 
 function newChat(): void {
+  ++loadSeq
+  ++snapshotSeq
   drawerOpen.value = false
   activeSessionId.value = null
   messages.value = []
   hasMore.value = false
   snapshot.value = null
+  loadingMessages.value = false
   draftWorkflow.value = null
   // 触屏上不自动聚焦：会立刻弹出键盘、整页重排，用户想打字自己点输入框
   if (!matchMedia('(pointer: coarse)').matches) void nextTick(() => inputRef.value?.focus())
@@ -1465,6 +1474,7 @@ onMounted(async () => {
     window.cockpit.on('cockpit:yaya-loop', (payload: unknown) => {
       const s = payload as WorkflowSnapshot
       if (s.sessionId !== activeSessionId.value) return
+      ++snapshotSeq // 推送比已发出的快照请求更新，旧响应不能把状态倒退。
       snapshot.value = s
       scheduleReload()
     }),
@@ -1531,6 +1541,8 @@ function onVisibility(): void {
 }
 
 onBeforeUnmount(() => {
+  ++loadSeq
+  ++snapshotSeq
   window.clearTimeout(flashTimer)
   window.clearInterval(retryTicker)
   for (const off of unsubs) off()
