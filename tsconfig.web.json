@@ -18,7 +18,9 @@
     "src/abilities/campusinfo/sections-extra/**",
     "src/abilities/campusinfo/loginlog.ts",
     "src/abilities/campusinfo/mail/**",
-    "src/abilities/campusinfo/hustpass-api.d.ts"
+    "src/abilities/campusinfo/hustpass-api.d.ts",
+    "src/abilities/beacon/providers/**",
+    "src/abilities/beacon/hustwps-api.d.ts"
   ],
   "compilerOptions": {
     "composite": true,

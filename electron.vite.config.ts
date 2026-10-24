@@ -21,17 +21,30 @@ try {
 // campusinfo 依赖的 hustpass 同理（真包是源码，typecheck 走本地声明，运行时 alias 回真包）。
 // 其验证码识别（stdchar）是独立子进程：打包后 import.meta.url 失效，因此在构建期解析出
 // stdchar CLI 与 tsx 可执行文件的绝对路径，通过 define 注入给 campusinfo/service.ts。
-const abilityRequire = createRequire(resolve('src/abilities/campusinfo/package.json'))
-let hustpassEntry: string | undefined
+// hustpass 真包可能装在任一引用它的 ability 的 node_modules 里（campusinfo / beacon）。
+const resolveFromAbility = (id: string, pkg: string): string | undefined => {
+  try {
+    return createRequire(resolve(`src/abilities/${id}/package.json`)).resolve(pkg)
+  } catch {
+    return undefined
+  }
+}
+let hustpassEntry =
+  resolveFromAbility('campusinfo', 'hustpass') ?? resolveFromAbility('beacon', 'hustpass')
 let stdcharCli = ''
 let tsxBin = ''
-try {
-  hustpassEntry = abilityRequire.resolve('hustpass')
-  stdcharCli = resolve(hustpassEntry, '..', 'stdchar', 'cli.ts')
-  tsxBin = resolve('src/abilities/campusinfo/node_modules/.bin/tsx')
-} catch {
-  hustpassEntry = undefined
+if (hustpassEntry) {
+  try {
+    stdcharCli = resolve(hustpassEntry, '..', 'stdchar', 'cli.ts')
+    tsxBin = resolve('src/abilities/campusinfo/node_modules/.bin/tsx')
+  } catch {
+    hustpassEntry = undefined
+  }
 }
+
+// beacon 依赖的 hustwps（github:aaaa0ggMC/hustwps，同样是 TS 源码）：
+// typecheck 走 src/abilities/beacon/hustwps-api.d.ts，运行时 alias 回真包。
+const hustwpsEntry = resolveFromAbility('beacon', 'hustwps')
 
 // ── src/abilities/toggle.json：构建期的能力开关 ─────────────────────────────
 // 形如 { "campusinfo": false, "fnaf": false }；缺省 = 启用，`"*": false` 把默认改成关闭
@@ -109,7 +122,8 @@ export default defineConfig({
       alias: {
         '@shared': resolve('src/shared'),
         ...(hustnetEntry ? { hustnet: hustnetEntry } : {}),
-        ...(hustpassEntry ? { hustpass: hustpassEntry } : {})
+        ...(hustpassEntry ? { hustpass: hustpassEntry } : {}),
+        ...(hustwpsEntry ? { hustwps: hustwpsEntry } : {})
       }
     },
     define: {
