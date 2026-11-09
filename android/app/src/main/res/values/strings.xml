@@ -28,6 +28,7 @@
     <string name="err_timeout">Timed out connecting to the host. Check the address, the port, and your network.</string>
     <string name="err_connect">Cannot reach the host port (refused, or blocked by a firewall). Check the address, the port, and that the host service is running.</string>
     <string name="err_remote">Cannot reach the host. Check the address, the port, and that the service is running, then retry.</string>
+    <string name="err_client_cert">The server requires a client certificate (mTLS). If you dismissed the system certificate picker, reconnect and pick one; if you have none, install a client certificate on the phone first.</string>
     <string name="loading">Loading…</string>
     <string name="back_again_to_exit">Press back again to exit</string>
     <string name="media_channel">Media controls</string>

@@ -44,6 +44,7 @@
 - **probe 的失败分级**：TLS / DNS / 超时 / 拒绝连接分开报错；Termux 专属文案（`err_unreachable`）只留给 loopback / 私网宿主，公网宿主用中性文案。以前是一律 Termux 提示，公网 https 场景完全是错的。
 - **「握手被掐断」不拦截连接**：实测有服务端 / 中间盒只放行浏览器指纹的 TLS——Java 的 ClientHello 被 RST（`SSLHandshakeException: Remote host terminated the handshake`），curl 带 Chrome UA 也被重置，只有真 Chrome 过得去。所以 probe 把「证书不受信任」（异常链含 PKIX / certification path / trust 一类信息）和「握手被掐断」分开：前者回连接页给 `err_tls`（提示装根 CA），后者**放行让 WebView 直接加载**（Chromium 与浏览器同款 TLS 栈），页面真失败了再由 `onReceivedError` / `onReceivedSslError` 报错。根 CA 装没装对都能连：装对了走证书校验，被指纹过滤时 WebView 大概率仍能加载。
 - 页面侧 `onReceivedSslError` 用 `android.net.http.SslError`（API 36 起 `android.webkit.SslError` 已挪包，不是被删）：主文档证书不受信任时回连接页说清楚，不再静默白页。
+- **mTLS 客户端证书**：实测该服务器 TLS 握手时还索要客户端证书（Chrome 连接会弹系统 KeyChain 选择框）。不处理 `onReceivedClientCertRequest` 时默认直接取消 → `net::ERR_BAD_SSL_CLIENT_AUTH_CERT`。实现与 Chrome 一致：`KeyChain.choosePrivateKeyAlias` 让用户选，选到就 `proceed(key, chain)`，取消就 cancel（随后报 `err_client_cert`）。两个 API 36 的坑：该回调从 `WebChromeClient` 挪到了 `WebViewClient`；`KeyChain.getCertificate` 已删，证书链只能走 `getCertificateChain`（API 28+，更老的机器取消并提示）。
 - 域名 80 端口可能被服务商拦截（返回「Non-compliance ICP Filing」之类页面），http:// 直连不用指望。
 
 ## 验证

@@ -30,6 +30,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import android.webkit.ClientCertRequest;
 import android.webkit.HttpAuthHandler;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -61,6 +62,8 @@ import java.net.UnknownHostException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -89,6 +92,8 @@ public class MainActivity extends Activity {
     private static final int REQ_MIC = 5;
     /** 网页的麦克风请求（语音输入）：等系统录音权限的结果 */
     private PermissionRequest pendingMic;
+    /** 等着用户在系统 KeyChain 里挑客户端证书的请求（mTLS，弹窗开着时的那个）；WebView 换了就作废 */
+    private ClientCertRequest pendingCertRequest;
     /**
      * 本进程是否已经走过一次 requestPermissions(RECORD_AUDIO)。MIUI / HyperOS 等 ROM 在系统权限之外
      * 还有一层自己的管控：在设置里手动打开后 checkSelfPermission 已经是 GRANTED，但不经过一次
@@ -614,7 +619,13 @@ public class MainActivity extends Activity {
         @Override
         public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
             if (!req.isForMainFrame()) return;
-            showConnect(getString(R.string.err_disconnected) + "（" + err.getDescription() + "）");
+            String d = String.valueOf(err.getDescription());
+            // 证书一类的问题说「证书」，别一律「连接断了」
+            if (d.contains("ERR_BAD_SSL_CLIENT_AUTH_CERT"))
+                showConnect(getString(R.string.err_client_cert) + "（" + d + "）");
+            else if (d.contains("ERR_CERT") || d.contains("ERR_SSL"))
+                showConnect(getString(R.string.err_tls) + "（" + d + "）");
+            else showConnect(getString(R.string.err_disconnected) + "（" + d + "）");
         }
 
         /**
@@ -668,6 +679,56 @@ public class MainActivity extends Activity {
             createWebView();
             connect();
             return true;
+        }
+
+        /**
+         * 服务器在 TLS 握手时索要客户端证书（mTLS）。不处理的默认行为是直接取消 → 握手失败
+         * （{@code net::ERR_BAD_SSL_CLIENT_AUTH_CERT}），用户只看到错误页；Chrome 则会弹系统
+         * KeyChain 选择框。这里和 Chrome 一样走 {@link android.security.KeyChain#choosePrivateKeyAlias}：
+         * 用户挑一个已安装的客户端证书就 proceed，取消就 cancel（随后由 {@link #onReceivedError}
+         * 报「服务器要求客户端证书」）。API 36 起这个回调在 WebViewClient 上（以前在 WebChromeClient）。
+         */
+        @Override
+        public void onReceivedClientCertRequest(WebView view, ClientCertRequest request) {
+            if (pendingCertRequest != null) pendingCertRequest.cancel(); // 只保留最新的一次
+            pendingCertRequest = request;
+            android.security.KeyChain.choosePrivateKeyAlias(
+                    MainActivity.this,
+                    alias -> {
+                        ClientCertRequest req = pendingCertRequest;
+                        pendingCertRequest = null;
+                        if (req == null) return; // WebView 已经换了：这个请求作废
+                        if (alias == null) {
+                            req.cancel();
+                            return;
+                        }
+                        // 取钥 / 读链可能慢，且 proceed 要回到 UI 线程
+                        runOnUiThread(() -> {
+                            try {
+                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                                    // getCertificateChain 是 API 28+：更老的机器读不到链，只能取消
+                                    req.cancel();
+                                    return;
+                                }
+                                PrivateKey key = android.security.KeyChain.getPrivateKey(
+                                        MainActivity.this, alias);
+                                X509Certificate[] chain = android.security.KeyChain.getCertificateChain(
+                                        MainActivity.this, alias);
+                                if (key == null || chain == null || chain.length == 0) {
+                                    req.cancel();
+                                    return;
+                                }
+                                req.proceed(key, chain);
+                            } catch (Exception e) {
+                                req.cancel(); // 取不到钥（别名失效 / 需要解锁）：当取消处理
+                            }
+                        });
+                    },
+                    request.getKeyTypes(),
+                    request.getPrincipals(),
+                    request.getHost(),
+                    request.getPort(),
+                    null);
         }
     }
 
