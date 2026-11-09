@@ -781,40 +781,52 @@ public class MainActivity extends Activity {
                             return; // WebView 已经换了：这个请求作废
                         }
                         if (alias == null) {
-                            android.util.Log.w("Cockpit", "clientCert no alias picked");
-                            req.cancel();
+                            runOnUiThread(req::cancel);
                             return;
                         }
-                        // 取钥 / 读链可能慢，且 proceed 要回到 UI 线程
-                        runOnUiThread(() -> {
+                        // KeyChain.getPrivateKey / getCertificateChain 是阻塞 binder 调用：
+                        // **主线程调会抛 IllegalStateException（"calling this from your main thread
+                        // can lead to deadlock"）**，所以取钥放后台线程，拿到再回 UI 线程 proceed。
+                        new Thread(() -> {
+                            String diag;
+                            PrivateKey key = null;
+                            X509Certificate[] chain = null;
                             try {
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                                    // getCertificateChain 是 API 28+：更老的机器读不到链，只能取消
-                                    failClientCert(req, "Android 9 以下读不到证书链");
-                                    return;
-                                }
-                                PrivateKey key = android.security.KeyChain.getPrivateKey(
+                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P)
+                                    throw new Exception("Android 9 以下读不到证书链");
+                                key = android.security.KeyChain.getPrivateKey(MainActivity.this, alias);
+                                chain = android.security.KeyChain.getCertificateChain(
                                         MainActivity.this, alias);
-                                X509Certificate[] chain = android.security.KeyChain.getCertificateChain(
-                                        MainActivity.this, alias);
-                                if (key == null || chain == null || chain.length == 0) {
-                                    failClientCert(req, "取不到私钥或证书链（alias=" + alias + "）");
-                                    return;
-                                }
+                                if (key == null || chain == null || chain.length == 0)
+                                    throw new Exception("取不到私钥或证书链（alias=" + alias + "）");
                                 // 现场记录：选的哪个、密钥算法、链有几级、每级发给谁——服务端拒了
                                 // 我们的证书时，凭这个能看出是链不全还是选错了证
                                 StringBuilder sb = new StringBuilder();
                                 for (int i = 0; i < chain.length; i++)
                                     sb.append(i == 0 ? "" : " → ")
                                             .append(chain[i].getSubjectX500Principal().getName());
-                                certDiag = "已选 alias=" + alias + " keyAlg=" + key.getAlgorithm()
+                                diag = "已选 alias=" + alias + " keyAlg=" + key.getAlgorithm()
                                         + " chainLen=" + chain.length + " [" + sb + "]";
-                                android.util.Log.i("Cockpit", "clientCert " + certDiag);
-                                req.proceed(key, chain);
                             } catch (Exception e) {
-                                failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
+                                diag = e.getClass().getSimpleName() + ": " + e.getMessage();
                             }
-                        });
+                            final PrivateKey fKey = key;
+                            final X509Certificate[] fChain = chain;
+                            final String fDiag = diag;
+                            runOnUiThread(() -> {
+                                if (fKey == null || fChain == null) {
+                                    failClientCert(req, fDiag);
+                                    return;
+                                }
+                                certDiag = fDiag;
+                                android.util.Log.i("Cockpit", "clientCert " + fDiag);
+                                try {
+                                    req.proceed(fKey, fChain);
+                                } catch (Exception e) {
+                                    failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
+                                }
+                            });
+                        }, "cockpit-keychain").start();
                     },
                     request.getKeyTypes(),
                     request.getPrincipals(),
