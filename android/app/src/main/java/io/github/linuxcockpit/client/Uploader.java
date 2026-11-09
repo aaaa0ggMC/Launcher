@@ -30,16 +30,21 @@ final class Uploader {
     private Uploader() {
     }
 
-    static List<String> uploadAll(ContentResolver cr, String base, String token, List<Uri> uris,
-                                  Progress progress) throws Exception {
+    static List<String> uploadAll(ContentResolver cr, String base, String token, String proxyAuth,
+                                  List<Uri> uris, Progress progress) throws Exception {
         List<String> paths = new ArrayList<>();
         for (int i = 0; i < uris.size(); i++) {
-            paths.add(uploadOne(cr, base, token, uris.get(i), i + 1, uris.size(), progress));
+            paths.add(uploadOne(cr, base, token, proxyAuth, uris.get(i), i + 1, uris.size(), progress));
         }
         return paths;
     }
 
-    private static String uploadOne(ContentResolver cr, String base, String token, Uri uri,
+    /**
+     * 与 {@code probe} 同一套取舍：宿主挂在反向代理后面时代理先说话，所以有代理凭据就带 Basic，
+     * 否则才带宿主的 Bearer token。401 报错时把 www-authenticate 带上，好让页面区分
+     * 「代理层认证失败」和「token 不对」。
+     */
+    private static String uploadOne(ContentResolver cr, String base, String token, String proxyAuth, Uri uri,
                                     int index, int total, Progress progress) throws Exception {
         String name = "file";
         long size = -1;
@@ -55,13 +60,17 @@ final class Uploader {
             // 有的提供方不支持查询：用缺省名
         }
         String q = URLEncoder.encode(name, StandardCharsets.UTF_8.name());
-        HttpURLConnection conn = (HttpURLConnection) new URL(base + "/api/upload?name=" + q).openConnection();
+        // 与 probe 同一套取舍：Basic 头占掉 Authorization 时 token 走 query（宿主两种都认）
+        String tk = (!proxyAuth.isEmpty() && !token.isEmpty())
+                ? "&token=" + URLEncoder.encode(token, StandardCharsets.UTF_8.name()) : "";
+        HttpURLConnection conn = (HttpURLConnection) new URL(base + "/api/upload?name=" + q + tk).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setConnectTimeout(8000);
         conn.setReadTimeout(120000);
         conn.setRequestProperty("Content-Type", "application/octet-stream");
-        if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
+        if (!proxyAuth.isEmpty()) conn.setRequestProperty("Authorization", proxyAuth);
+        else if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
         if (size >= 0) conn.setFixedLengthStreamingMode(size);
         else conn.setChunkedStreamingMode(64 * 1024);
         progress.on(index, total, size > 0 ? 0 : -1, name);
@@ -87,7 +96,12 @@ final class Uploader {
         InputStream body = code / 100 == 2 ? conn.getInputStream() : conn.getErrorStream();
         String text = body == null ? "" : new String(readAll(body), StandardCharsets.UTF_8);
         conn.disconnect();
-        if (code / 100 != 2) throw new Exception("upload " + name + " failed: HTTP " + code);
+        if (code / 100 != 2) {
+            String wa = conn.getHeaderField("www-authenticate");
+            if (code == 401 && wa != null && !wa.isEmpty())
+                throw new Exception("upload " + name + " failed: proxy authentication required");
+            throw new Exception("upload " + name + " failed: HTTP " + code);
+        }
         String path = new JSONObject(text).optString("path", "");
         if (path.isEmpty()) throw new Exception("upload " + name + " failed: no path");
         return path;

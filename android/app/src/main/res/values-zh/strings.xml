@@ -8,6 +8,19 @@
     <string name="err_token">宿主拒绝了这个 token。</string>
     <string name="err_http">宿主返回错误：</string>
     <string name="err_disconnected">与宿主的连接断开了</string>
+    <!-- 反向代理（Caddy basic_auth / forward_auth）：它和宿主自己的 token 是两套认证，别混 -->
+    <string name="err_proxy_auth">反向代理拒绝了这个用户名/密码。请检查后重连。</string>
+    <string name="err_proxy_login">代理要求先登录（它会跳到 %1$s）。用浏览器打开这个地址登录一次，再回来重试。</string>
+    <string name="err_proxy_retry">试了几次代理登录都没生效。请检查用户名/密码，然后手动重连。</string>
+    <string name="err_proxy_cancelled">已取消代理登录。</string>
+    <string name="proxy_auth_title">代理需要登录</string>
+    <string name="proxy_auth_realm">%1$s · realm %2$s</string>
+    <string name="proxy_auth_user">用户名</string>
+    <string name="proxy_auth_pass">密码</string>
+    <string name="proxy_auth_ok">登录</string>
+    <string name="proxy_auth_cancel">取消</string>
+    <string name="proxy_auth_cleared">已清除保存的代理凭据</string>
+    <string name="reauth_running">代理会话已过期，正在重新登录…</string>
     <string name="loading">正在加载…</string>
     <string name="back_again_to_exit">再按一次返回退出</string>
 </resources>

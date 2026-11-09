@@ -9,6 +9,19 @@
     <string name="err_token">The host rejected the token.</string>
     <string name="err_http">The host returned an error:</string>
     <string name="err_disconnected">Lost connection to the host</string>
+    <!-- 反向代理（Caddy basic_auth / forward_auth）：它和宿主自己的 token 是两套认证，别混 -->
+    <string name="err_proxy_auth">The reverse proxy rejected the username/password. Check them, then reconnect.</string>
+    <string name="err_proxy_login">The proxy wants you to sign in first (it redirects to %1$s). Open that address in a browser, sign in there, then retry.</string>
+    <string name="err_proxy_retry">Proxy sign-in did not take effect after several attempts. Check the username/password, then reconnect manually.</string>
+    <string name="err_proxy_cancelled">Proxy sign-in was cancelled.</string>
+    <string name="proxy_auth_title">Proxy sign-in required</string>
+    <string name="proxy_auth_realm">%1$s · realm %2$s</string>
+    <string name="proxy_auth_user">Username</string>
+    <string name="proxy_auth_pass">Password</string>
+    <string name="proxy_auth_ok">Sign in</string>
+    <string name="proxy_auth_cancel">Cancel</string>
+    <string name="proxy_auth_cleared">Saved proxy credentials cleared</string>
+    <string name="reauth_running">Proxy session expired. Signing in again…</string>
     <string name="loading">Loading…</string>
     <string name="back_again_to_exit">Press back again to exit</string>
     <string name="media_channel">Media controls</string>

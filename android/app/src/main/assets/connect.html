@@ -44,6 +44,17 @@
         white-space: pre-wrap; word-break: break-all; font-size: .82rem; }
   .actions { display: flex; justify-content: flex-end; }
   .actions button { min-width: 140px; }
+  /* 代理凭据（0.9.0）：可选，默认收起，不打扰没有代理的人 */
+  details.proxy { border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; }
+  details.proxy summary { min-height: 48px; display: flex; align-items: center; gap: 10px;
+                          cursor: pointer; color: var(--fg); font-size: .9rem; list-style: none; }
+  details.proxy summary::-webkit-details-marker { display: none; }
+  details.proxy summary::before { content: "▸"; color: var(--dim); }
+  details.proxy[open] summary::before { content: "▾"; }
+  details.proxy .body { display: flex; flex-direction: column; gap: 14px; padding-bottom: 14px; }
+  details.proxy .saved { color: var(--dim); font-size: .82rem; display: flex; align-items: center;
+                         gap: 10px; flex-wrap: wrap; }
+  details.proxy .saved button { min-height: 36px; padding: 0 12px; font-size: .82rem; }
   /* 窄屏手机：表单单列、按钮撑满、连接按钮整行 */
   @media (max-width: 420px) {
     main { padding: 24px 16px 32px; gap: 16px; }
@@ -81,6 +92,19 @@
       <input id="keep" type="checkbox" />
       <span><span data-t="keep"></span><small data-t="keepHint"></small></span>
     </label>
+    <details class="proxy" id="proxy">
+      <summary data-t="proxySummary"></summary>
+      <div class="body">
+        <div class="saved" id="proxySaved" hidden></div>
+        <label><span data-t="proxyUser"></span>
+          <input id="puser" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <label><span data-t="proxyPass"></span>
+          <input id="ppass" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" />
+        </label>
+        <span class="hint" data-t="proxyHint"></span>
+      </div>
+    </details>
     <div class="actions"><button class="primary" id="go" type="submit" data-t="connect"></button></div>
   </form>
 
@@ -104,7 +128,10 @@ node headless/index.js</pre>
     hintPrefix: '将连接到 ', errTimeout: '连接超时：确认地址、宿主已启动后重试',
     helpTitle: '怎么用', help1: '先在 Termux 里启动无头宿主（默认监听 127.0.0.1:47810）：', or: '或者用打包好的版本：',
     help2: 'Token 在宿主上这个文件里，复制后点「粘贴」：',
-    help3: '连上之后界面全部来自宿主，宿主更新后不用重装这个应用。之后想换宿主：长按桌面图标 →「连接设置」。'
+    help3: '连上之后界面全部来自宿主，宿主更新后不用重装这个应用。之后想换宿主：长按桌面图标 →「连接设置」。',
+    proxySummary: '代理认证（可选）', proxyUser: '代理用户名', proxyPass: '代理密码',
+    proxyHint: '仅当宿主挂在有自己的登录页的反向代理（Caddy basic_auth）后面时填写。留空 = 沿用已保存的；填了 = 覆盖。basic_auth 的 401 也会弹窗问一次并存下来。',
+    proxySavedPrefix: '已保存：', proxyClear: '清除'
   } : {
     title: 'Connect to Cockpit host', url: 'Host URL', token: 'Token', show: 'Show', hide: 'Hide', paste: 'Paste',
     keep: 'Keep running in background', keepHint: 'Ongoing notification keeps playback and the connection alive',
@@ -114,7 +141,10 @@ node headless/index.js</pre>
     helpTitle: 'How to use',
     help1: 'Start the headless host in Termux first (listens on 127.0.0.1:47810 by default):', or: 'or the packed build:',
     help2: 'The token is in this file on the host — copy it, then tap “Paste”:',
-    help3: 'Once connected, the whole UI comes from the host, so host updates need no app reinstall. To switch hosts later: long-press the app icon → “Connection settings”.'
+    help3: 'Once connected, the whole UI comes from the host, so host updates need no app reinstall. To switch hosts later: long-press the app icon → “Connection settings”.',
+    proxySummary: 'Proxy sign-in (optional)', proxyUser: 'Proxy username', proxyPass: 'Proxy password',
+    proxyHint: 'Only when the host sits behind a reverse proxy with its own sign-in (Caddy basic_auth). Leave empty to keep what is saved; fill in to override. A basic_auth 401 also asks once and remembers it.',
+    proxySavedPrefix: 'Saved: ', proxyClear: 'Clear'
   }
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t]
 
@@ -137,6 +167,38 @@ node headless/index.js</pre>
     const v = A ? A.pasteText().trim() : ''
     if (v) $('token').value = v
   }
+
+  /** 已保存的代理凭据提示 + 「清除」（0.9.0）。密码不回给页面，只提示用户名。 */
+  function refreshProxySaved() {
+    const box = $('proxySaved')
+    if (!st.proxyUser) { box.hidden = true; box.textContent = ''; return }
+    box.hidden = false
+    box.textContent = T.proxySavedPrefix + st.proxyUser + ' '
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = T.proxyClear
+    b.onclick = () => {
+      // 清除当前输入的地址对应的凭据（proxy.creds 用户名空 = 删这条）
+      native('proxy.creds', { host: normalize(), user: '', pass: '' }, () => {
+        st.proxyUser = ''
+        refreshProxySaved()
+      })
+    }
+    box.appendChild(b)
+  }
+  /** 连接页也能用原生桥的异步调用（CockpitAndroid.call → __cockpitNative.reply） */
+  function native(method, args, done) {
+    if (!A || !A.call) return
+    const id = 'p' + Math.random().toString(36).slice(2)
+    window.__cockpitNative = window.__cockpitNative || {}
+    const prev = window.__cockpitNative.reply
+    window.__cockpitNative.reply = (rid, ok, data) => {
+      if (rid === id) { window.__cockpitNative.reply = prev; done && done(ok, data); return }
+      prev && prev(rid, ok, data)
+    }
+    A.call(id, method, JSON.stringify(args))
+  }
+  refreshProxySaved()
 
   /** 补上协议并按 URL 解析，失败 / 非 http(s) 视为无效 */
   function normalize() {
@@ -178,7 +240,9 @@ node headless/index.js</pre>
     $('go').textContent = T.connecting
     $('form').setAttribute('aria-busy', 'true')
     $('error').hidden = true
-    A && A.connect(normalize(), $('token').value.trim(), $('keep').checked)
+    // 代理凭据：用户名非空才存 / 覆盖；都空 = 沿用已保存的（清除走上面的「清除」按钮）
+    A && A.connect(normalize(), $('token').value.trim(), $('keep').checked,
+                   $('puser').value.trim(), $('ppass').value)
     // 兜底：原生一直没把页面带走（探测卡住 / 桥没反应）时恢复表单，别把用户晾在禁用状态
     setTimeout(() => {
       if (!submitting) return

@@ -24,6 +24,10 @@ export type HostCap = 'native' | 'web' | 'none'
  *   快捷方式，icon 为 data URL；`info.pinShortcuts` 表示启动器是否支持）/
  *   `webLogin { url, doneHosts, cookieUrls, title? }`（0.6.0，盖一层网页登录页，登完 → `{ cookies:
  *   [{url, cookie}], cancelled }`，balance 用来把网页登录的会话导入无头宿主）/
+ *   `reauth`（0.9.0，无参：反向代理的会话过期时重新加载宿主页面，把认证交还给代理层——
+ *   basic_auth 自动带存过的凭据，forward_auth 留在 WebView 里走门户登录；不再走 probe，否则过期
+ *   会话只会拿到 401 而错误地回到连接页。原生侧 30s 节流 + 连续 3 次没治好就停手）/ `proxy.creds
+ *   { host, user, pass }`（连接页用：user 空 = 清除该 host 存过的代理凭据）/
  *   系统语音（0.8.0，`info.speech = { tts, asr }`）：`tts.voices` / `tts.speak { id, text, lang?, voice?,
  *   rate?, pitch? }` / `tts.stop` / `asr.start { lang?, partial? }` / `asr.stop` / `asr.cancel`
  *   ——页面不要直接调，用渲染端 SDK `@ui/speech`（它也覆盖浏览器 / Electron）…），失败 reject；
@@ -32,6 +36,8 @@ export type HostCap = 'native' | 'web' | 'none'
  *   `media-action`（系统媒体按钮：{action, position?}）、`open`（桌面快捷方式 / 深链接跳页：
  *   {ability, target?}，外壳 App.vue 处理）、`tts`（{id, type: start|range|done|stopped|error}）、
  *   `asr`（{type: ready|partial|final|level|error|end, text?, level?, error?}）。
+ *   （0.9.0 起 web-shim 在代理会话过期时本地派发 `cockpit:host-unauthorized`——不是原生事件，
+ *    纯浏览器里也会发，但没有原生桥时只是个提示，不会重载。）
  * - 媒体控制不用页面直接调：web-shim 把 `navigator.mediaSession` 自动转给原生（headless/native-media.ts）。
  */
 export interface NativeClient {

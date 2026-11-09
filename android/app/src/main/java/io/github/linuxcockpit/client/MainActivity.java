@@ -16,7 +16,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.DocumentsContract;
+import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,6 +29,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import android.webkit.HttpAuthHandler;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
@@ -35,7 +40,9 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
@@ -101,6 +108,23 @@ public class MainActivity extends Activity {
     private JSONObject prefill;
     /** 当前宿主 origin（只有它和连接页能在 WebView 里打开，其余交给系统浏览器） */
     private String hostOrigin = "";
+    /**
+     * 代理流程中（0.9.0）：服务器重定向把页面带离了宿主 origin——典型是 forward_auth 先去登录门户。
+     * 这期间页面脚本发起的导航（门户登录成功后 location.replace 回跳）也留在 App 内，
+     * 回到宿主 origin 时由 {@link Client#onPageFinished} 清除。
+     */
+    private boolean proxyFlow = false;
+    /** 代理认证对话框开着：防重入（同一挑战可能来多次，别叠对话框） */
+    private boolean authShowing = false;
+    /** 开着的代理认证对话框（showConnect / reauth 时撤掉：页面都要换了，别再问） */
+    private android.app.AlertDialog authDialog;
+    /** 待显示的代理认证挑战（host + realm），对话框关掉后才用 */
+    private String[] pendingAuth;
+    /**
+     * 同一轮加载里已经自动 proceed 过几次（存过的凭据被代理拒了会再挑战一次）。
+     * 上限 2：超过就改弹窗问用户，否则错误的凭据会让 WebView 无限重试。
+     */
+    private int autoAuthTries = 0;
     /** 宿主页面的 shim 已就绪（调过 ready），之前的事件排队 */
     private boolean pageReady = false;
     private final List<String[]> pendingEvents = new ArrayList<>();
@@ -121,6 +145,29 @@ public class MainActivity extends Activity {
     private String pendingConnect;
     /** 最近一次「静止」时量到的 IME 高度，>0 = 键盘弹着（API 30+ 以 isVisible 为准） */
     private int imeRestBottom = 0;
+
+    // ---------------------------------------------------------------- 代理认证 / 重认证（0.9.0）
+    /** 重认证节流：并发 401 只触发一次，短窗口内不重复 reload */
+    private static final long REAUTH_THROTTLE_MS = 30_000;
+    /** 重认证没治好的次数上限：超过就停手，回连接页让用户手动处理 */
+    private static final int REAUTH_MAX = 3;
+    /**
+     * 重认证「观察期」：重认证之后这么久没再触发下一次，就认为治好了（计数归零）。
+     * 没有它就麻烦了：一个用很久的会话会隔三差五过期，计数只增不减，迟早误触发降级。
+     */
+    private static final long REAUTH_HEALTHY_MS = 20_000;
+    /** 门户页面停留超时：这么久没回到宿主 origin 就降级到连接页 */
+    private static final long PORTAL_TIMEOUT_MS = 120_000;
+    /** 最近一次 reauth 的时间戳（uptimeMillis）；0 = 没有过 */
+    private long lastReauthAt = 0;
+    /** 连续重认证失败计数（每次 reauth +1，观察期内没再犯就归零） */
+    private int reauthFails = 0;
+    /** reauth 序号：观察期回调只认最新的一次（中途又触发过就作废） */
+    private int reauthSeq = 0;
+    /** 门户超时 / 重认证观察期的定时器（Handler 而不是 WebView.postDelayed：撤得干净） */
+    private final Handler timer = new Handler(Looper.getMainLooper());
+    /** 门户停留超时的 runnable（proxyFlow 时挂着，回宿主 origin 或关连接页时撤掉） */
+    private final Runnable portalTimeout = this::onPortalTimeout;
 
     /** 关网页弹窗 / 菜单：找到一个激活的 overlay，朝当前焦点发 Escape */
     private static final String JS_DISMISS_OVERLAY =
@@ -284,10 +331,11 @@ public class MainActivity extends Activity {
         sharedText = "";
         final String base = trimSlash(prefs.getString("url", DEFAULT_URL));
         final String token = prefs.getString("token", "");
+        final String proxyAuth = proxyAuthHeader(base);
         io.execute(() -> {
             JSONObject ev = new JSONObject();
             try {
-                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, uris,
+                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, proxyAuth, uris,
                         (i, n, pct, name) -> emitProgress(i, n, pct, name, "share"));
                 ev.put("paths", new JSONArray(paths));
                 ev.put("text", text);
@@ -510,13 +558,52 @@ public class MainActivity extends Activity {
     }
 
     private class Client extends WebViewClient {
+        /**
+         * 非宿主 origin 的导航：
+         * - 服务器重定向（{@code req.isRedirect()}）即使跳到别的 origin 也留在 WebView——forward_auth
+         *   的 302 去登录门户只能这样才走得通；
+         * - 代理流程中（{@link #proxyFlow}）页面脚本发起的导航也留着，覆盖门户登录成功后
+         *   {@code location.replace} 回跳；
+         * - 只有用户点击（既不是重定向、也不在流程中）的站外链接才交系统浏览器。
+         *
+         * 取舍：宿主是用户自己的服务器，信任它发起的重定向；真正的风险是「用户点了一个恶意页面上的
+         * 链接」，而 WebView 里只可能出现宿主 / 连接页 / 上面两类跳转，够用。
+         */
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
             String url = req.getUrl().toString();
             if (url.startsWith(CONNECT_PAGE)) return false;
             if (!hostOrigin.isEmpty() && hostOrigin.equals(originOf(url))) return false;
+            if (req.isRedirect() || proxyFlow) return false;
             openExternal(url);
             return true;
+        }
+
+        /**
+         * 代理层的 basic_auth 挑战（Caddy basic_auth / 别的反向代理）。宿主自己的 token 不走这里
+         * （那是 401 + 页面自己处理），所以这个回调几乎只可能是代理。
+         * 有存过的凭据就直接带上；否则弹原生对话框问一次，成功后存盘供下次自动用。
+         * 密码绝不进日志。
+         */
+        @Override
+        public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+            final String key = authKeyFor(host);
+            if (ProxyCreds.has(prefs, key) && autoAuthTries < 2) {
+                // 存过的凭据：直接带上，用户不用再输一遍。被拒的话 WebView 会再挑战一次，
+                // autoAuthTries 到上限就改弹窗——否则一条错误凭据会让它无限重试下去。
+                autoAuthTries++;
+                handler.proceed(ProxyCreds.user(prefs, key), ProxyCreds.pass(prefs, key));
+                return;
+            }
+            if (authShowing) { // 已经有一个对话框在问：后来的挑战直接取消，别叠
+                handler.cancel();
+                return;
+            }
+            authShowing = true;
+            autoAuthTries = 0;
+            pendingAuth = new String[]{host, realm == null ? "" : realm};
+            showLoading(false);
+            runOnUiThread(() -> askProxyAuth(handler));
         }
 
         @Override
@@ -533,14 +620,24 @@ public class MainActivity extends Activity {
             // 旧页面的播放器没了：撤掉媒体卡片，新页面开始播放时会重新推
             if (media != null) media.clear();
             showLoading(true);
+            // 离开了宿主 origin：代理流程中（门户登录），门户停留超时开始计时
+            if (!hostOrigin.isEmpty() && !hostOrigin.equals(originOf(url))) {
+                proxyFlow = true;
+                timer.postDelayed(portalTimeout, PORTAL_TIMEOUT_MS);
+            }
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
             showLoading(false);
+            timer.removeCallbacks(portalTimeout);
             if (url.startsWith(CONNECT_PAGE)) {
                 applyBarColor(Color.rgb(0x12, 0x12, 0x12));
                 return;
+            }
+            if (hostOrigin.isEmpty() || hostOrigin.equals(originOf(url))) {
+                proxyFlow = false;
+                autoAuthTries = 0; // 回到了宿主页面：上一轮代理挑战结束，重新计数
             }
             // 主题在运行中切换：MutationObserver 看 class/style 变更 + requestAnimationFrame
             // 合并（一帧最多通知一次），不再每秒轮询。兜底的低频慢同步留给不用属性变更的改法。
@@ -631,15 +728,173 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- 连接
 
+    /** 连接页：portalTimeout 也要跟着一起撤（onDestroy 前不能再有人引用 WebView） */
     void showConnect(String error) {
         pendingError = error == null ? "" : error;
         hostOrigin = "";
         pageReady = false;
+        proxyFlow = false;
+        dismissAuthDialog();
+        timer.removeCallbacks(portalTimeout);
         if (media != null) media.clear();
         probeSeq++; // 让还在探测中的回调作废（它属于上一次尝试）
         pendingConnect = null;
         showLoading(false);
         web.loadUrl(CONNECT_PAGE);
+    }
+
+    /**
+     * 代理登录对话框（basic_auth）。用户名 / 密码 / 取消；标题带 host 与 realm（代理给的话）。
+     * 登录成功 → {@link HttpAuthHandler#proceed} + 存盘（下次同一 host 自动带，不再问）；
+     * 取消 → {@link HttpAuthHandler#cancel} + 回连接页并说明，别让用户对着一张坏掉的主界面发呆。
+     */
+    private void askProxyAuth(HttpAuthHandler handler) {
+        final String host = pendingAuth == null ? "" : pendingAuth[0];
+        final String realm = pendingAuth == null ? "" : pendingAuth[1];
+        pendingAuth = null;
+        if (host.isEmpty()) {
+            authShowing = false;
+            handler.cancel();
+            return;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        box.setPadding(pad, pad, pad, 0);
+        final EditText user = new EditText(this);
+        user.setHint(R.string.proxy_auth_user);
+        user.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        final EditText pass = new EditText(this);
+        pass.setHint(R.string.proxy_auth_pass);
+        pass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        box.addView(user, lp);
+        box.addView(pass, lp);
+        String title = realm.isEmpty()
+                ? getString(R.string.proxy_auth_title) + " · " + host
+                : getString(R.string.proxy_auth_realm, host, realm);
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(box)
+                .setPositiveButton(R.string.proxy_auth_ok, (d, w) -> {
+                    String u = user.getText().toString().trim();
+                    String p = pass.getText().toString();
+                    if (u.isEmpty()) {
+                        handler.cancel();
+                        showConnect(getString(R.string.err_proxy_cancelled));
+                        return;
+                    }
+                    ProxyCreds.save(prefs, authKeyFor(host), u, p);
+                    autoAuthTries = 0; // 用户刚给的新凭据：重新给两次自动重试的机会
+                    handler.proceed(u, p);
+                })
+                .setNegativeButton(R.string.proxy_auth_cancel, (d, w) -> {
+                    handler.cancel();
+                    showConnect(getString(R.string.err_proxy_cancelled));
+                })
+                .setOnCancelListener(d -> {
+                    handler.cancel();
+                    authShowing = false;
+                })
+                .create();
+        dlg.setOnDismissListener(d -> {
+            authShowing = false;
+            if (authDialog == dlg) authDialog = null;
+        });
+        authDialog = dlg;
+        dlg.show();
+    }
+
+    /**
+     * 撤掉开着的代理认证对话框（页面要换了：回连接页 / 重新认证）。
+     * 不碰 {@link HttpAuthHandler}——接下来的导航会把挂起的请求一起作废；
+     * 由用户点按钮走的那两条路才负责 proceed / cancel。
+     */
+    private void dismissAuthDialog() {
+        if (authDialog == null) return;
+        android.app.AlertDialog d = authDialog;
+        authDialog = null;
+        d.dismiss();
+    }
+
+    /** 门户停留超时：登录门户 2 分钟没把用户送回宿主 origin，降级到连接页（别再干等） */
+    private void onPortalTimeout() {
+        if (!proxyFlow) return;
+        showConnect(getString(R.string.err_proxy_retry));
+    }
+
+    /**
+     * 会话过期后的重新认证（0.9.0，场景 B）：网页侧发现 401 / 被踢到登录门户时经原生桥调这里。
+     *
+     * <p><b>不再走 probe</b>：过期会话下 probe 只会拿到 401，那样会错误地回到连接页。直接重新加载
+     * 宿主页面，把认证交还给代理层：
+     * basic_auth → {@link Client#onReceivedHttpAuthRequest} 自动带上存过的凭据；
+     * forward_auth → 302 去门户，留在 WebView 里登录后回跳，shim 全新初始化，一切恢复。</p>
+     *
+     * <p>代价：整页重载会丢当前 ability / 表单状态（{@link #onRenderProcessGone} 也是整页重建，
+     * 先例如此）。可选优化见 docs/android-v5.md。</p>
+     */
+    void reauth() {
+        if (hostOrigin.isEmpty()) return; // 还在连接页 / 已经掉了：没什么可重认证的
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastReauthAt < REAUTH_THROTTLE_MS) return; // 并发 401 只触发一次
+        lastReauthAt = now;
+        if (++reauthFails > REAUTH_MAX) {
+            // 重认证没治好（多半是用户名/密码错了，或门户登录根本没成功）：停手，交给用户
+            reauthFails = 0;
+            showConnect(getString(R.string.err_proxy_retry));
+            return;
+        }
+        probeSeq++;      // 作废在途探测（它们属于上一次连接）
+        pendingConnect = null;
+        pageReady = false;
+        showLoading(true);
+        dismissAuthDialog(); // 重新加载会重新挑战，别让旧对话框留在新页面上面
+        Toast.makeText(this, R.string.reauth_running, Toast.LENGTH_SHORT).show();
+        web.loadUrl(hostPageUrl());
+        // 观察期：这段时间里没再触发 reauth 就说明这一次治好了（否则计数继续累加 → 降级）
+        final int seq = ++reauthSeq;
+        timer.postDelayed(() -> {
+            if (seq == reauthSeq) reauthFails = 0;
+        }, REAUTH_HEALTHY_MS);
+    }
+
+    /** 连接 / 重新认证都要用的宿主页面地址（token 走 query，与 connect() 一致） */
+    private String hostPageUrl() {
+        String base = trimSlash(prefs.getString("url", DEFAULT_URL));
+        String token = prefs.getString("token", "");
+        return base + (token.isEmpty() ? "" : "/?token=" + enc(token));
+    }
+
+    /** 连接页 / 原生探测要带的代理 Basic 头（该 host 存过凭据才有） */
+    private String proxyAuthHeader(String hostOrUrl) {
+        String key = ProxyCreds.keyOf(hostOrUrl);
+        if (!ProxyCreds.has(prefs, key)) return "";
+        String raw = ProxyCreds.user(prefs, key) + ":" + ProxyCreds.pass(prefs, key);
+        return "Basic " + Base64.encodeToString(raw.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    }
+
+    /**
+     * {@code onReceivedHttpAuthRequest} 给的是 host（可能不带端口）→ 存 / 查代理凭据用的 key。
+     * 端口从当前宿主地址补（代理与宿主同机同端口是常规形态；真挂在别的端口上时用户可以在连接页
+     * 手填一次，对话框里存的 key 与这里一致）。
+     */
+    private String authKeyFor(String host) {
+        if (host == null || host.isEmpty()) return "";
+        if (host.indexOf("://") >= 0) return ProxyCreds.keyOf(host);
+        if (host.indexOf(':') > 0) return host; // 已经带了端口
+        String base = trimSlash(prefs.getString("url", DEFAULT_URL));
+        try {
+            int port = new URL(base).getPort();
+            return port > 0 ? host + ":" + port : host;
+        } catch (Exception e) {
+            return host;
+        }
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     /** 先在原生侧探一次 /api/info：宿主没开 / token 不对时给出明确提示，而不是一张白页 */
@@ -666,27 +921,91 @@ public class MainActivity extends Activity {
                 }
                 hostOrigin = originOf(base);
                 pageReady = false;
-                String q = token.isEmpty() ? "" : "/?token=" + enc(token);
-                web.loadUrl(base + q); // 真正的加载进度接着由 onPageStarted / onPageFinished 显示
+                reauthFails = 0; // 新的一次连接：重新认证计数归零
+                web.loadUrl(hostPageUrl()); // 真正的加载进度接着由 onPageStarted / onPageFinished 显示
             });
         }).start();
     }
 
+    /**
+     * 探一次 {@code /api/info}，返回 null = 通过，否则是给用户看的错误（见 {@link #showConnect}）。
+     *
+     * <p>0.9.0 起把「宿主自己的 token」和「反向代理的认证」分开：代理挂在前面时代理先说话，
+     * 原来的实现会被代理的 302 跟到登录门户拿到 200，误判「宿主正常」，然后页面里所有 /api 调用
+     * 才失败。所以：</p>
+     * <ul>
+     *   <li>{@code setInstanceFollowRedirects(false)}：3xx 自己判断；</li>
+     *   <li>同 host 的 3xx 手动跟随（≤5 跳，防环）；</li>
+     *   <li>跳到别的 host → 代理要求先登录，明确报错（绝不误报成功）；</li>
+     *   <li>401 带 {@code www-authenticate} → 代理层认证失败（提示检查代理用户名/密码，
+     *       不是 cockpit token）；该 host 存过凭据时先带 preemptive Basic；</li>
+     *   <li>401 不带 {@code www-authenticate} → 保持原来的 err_token 语义。</li>
+     * </ul>
+     */
     private String probe(String base, String token) {
-        HttpURLConnection c = null;
+        String auth = proxyAuthHeader(base); // 空 = 该 host 没存过代理凭据
+        // 有代理凭据时 Basic 头占掉 Authorization，token 改走 query（宿主两种都认，见 server.ts authorized）
+        String url = base + "/api/info" + (auth.isEmpty() || token.isEmpty() ? "" : "?token=" + enc(token));
+        for (int hop = 0; hop < 5; hop++) {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(url).openConnection();
+                c.setInstanceFollowRedirects(false);
+                c.setConnectTimeout(4000);
+                c.setReadTimeout(4000);
+                // 有代理凭据时 Basic 优先：代理才是第一道关，Bearer 留给宿主自己认
+                if (!auth.isEmpty()) c.setRequestProperty("Authorization", auth);
+                else if (!token.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + token);
+                int code = c.getResponseCode();
+                if (code / 100 == 2) return null;
+                if (code == 401) {
+                    String wa = c.getHeaderField("www-authenticate");
+                    if (wa != null && !wa.isEmpty()) {
+                        // 代理层（basic_auth）认证失败：不是 cockpit token 的事
+                        return getString(R.string.err_proxy_auth);
+                    }
+                    return getString(R.string.err_token);
+                }
+                if (code / 100 == 3) {
+                    String loc = c.getHeaderField("Location");
+                    if (loc == null || loc.isEmpty()) return getString(R.string.err_http) + " " + code;
+                    String next = resolve(url, loc);
+                    if (next.isEmpty()) return getString(R.string.err_http) + " " + code;
+                    String from = originOf(url), to = originOf(next);
+                    if (!from.isEmpty() && from.equals(to)) {
+                        url = next; // 同 host：跟着跳
+                        continue;
+                    }
+                    // 跳到别的 host：代理的 forward_auth 门户。不能跟（那是用户的浏览器会话），
+                    // 也绝不能因为「跟过去拿到 200」就误报宿主正常。
+                    return getString(R.string.err_proxy_login, hostOf(next));
+                }
+                return getString(R.string.err_http) + " " + code;
+            } catch (Exception e) {
+                return getString(R.string.err_unreachable);
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }
+        return getString(R.string.err_http) + " 310"; // 同 host 跳了 5 次还没完：当异常处理
+    }
+
+    /** 相对 Location → 绝对 URL；解析不了返回空串 */
+    private static String resolve(String baseUrl, String loc) {
         try {
-            c = (HttpURLConnection) new URL(base + "/api/info").openConnection();
-            c.setConnectTimeout(4000);
-            c.setReadTimeout(4000);
-            if (!token.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + token);
-            int code = c.getResponseCode();
-            if (code == 401) return getString(R.string.err_token);
-            if (code / 100 != 2) return getString(R.string.err_http) + " " + code;
-            return null;
+            return new URL(new URL(baseUrl), loc).toString();
         } catch (Exception e) {
-            return getString(R.string.err_unreachable);
-        } finally {
-            if (c != null) c.disconnect();
+            return "";
+        }
+    }
+
+    /** URL 的 host（带非默认端口）；只用于给用户看 */
+    private static String hostOf(String url) {
+        try {
+            URL u = new URL(url);
+            return u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "");
+        } catch (Exception e) {
+            return url;
         }
     }
 
@@ -755,6 +1074,7 @@ public class MainActivity extends Activity {
         probeSeq++; // 丢弃还没回来的探测结果，别让它动已销毁的界面
         pendingConnect = null;
         showLoading(false);
+        timer.removeCallbacksAndMessages(null); // 门户超时 / 重认证观察期都撤掉
         media.release();
         speech.release();
         stopService(new Intent(this, KeepAliveService.class));
@@ -854,6 +1174,27 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> showConnect(""));
                     reply(id, true, new JSONObject());
                     return;
+                case "reauth": {
+                    // 会话过期（0.9.0）：网页侧发现 401 / 被踢到登录门户时调，重新加载宿主页面，
+                    // 由代理层重新挑战（见 reauth()）。不再走 probe——过期会话下它只会 401。
+                    runOnUiThread(this::reauth);
+                    reply(id, true, new JSONObject());
+                    return;
+                }
+                case "proxy.creds": {
+                    // 连接页的可选输入：存 / 清该 host 的代理用户名密码。密码只在成功认证后才落盘。
+                    final String host = args.optString("host", "");
+                    final String u = args.optString("user", "");
+                    final String p = args.optString("pass", "");
+                    if (!host.isEmpty()) {
+                        if (u.isEmpty()) ProxyCreds.clear(prefs, ProxyCreds.keyOf(host));
+                        else ProxyCreds.save(prefs, ProxyCreds.keyOf(host), u, p);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    reply(id, true, o);
+                    return;
+                }
                 case "pickFiles":
                     runOnUiThread(() -> startPick(id, args.optBoolean("multiple", false)));
                     return;
@@ -1032,9 +1373,10 @@ public class MainActivity extends Activity {
         }
         final String base = trimSlash(prefs.getString("url", DEFAULT_URL));
         final String token = prefs.getString("token", "");
+        final String proxyAuth = proxyAuthHeader(base);
         io.execute(() -> {
             try {
-                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, uris,
+                List<String> paths = Uploader.uploadAll(getContentResolver(), base, token, proxyAuth, uris,
                         (i, n, pct, name) -> emitProgress(i, n, pct, name, id));
                 reply(id, true, new JSONObject().put("paths", new JSONArray(paths)));
             } catch (Exception e) {
@@ -1123,6 +1465,9 @@ public class MainActivity extends Activity {
                 o.put("keepAlive", prefs.getBoolean("keepAlive", true));
                 o.put("error", pendingError);
                 o.put("version", BuildConfig.VERSION_NAME);
+                // 已保存的反向代理用户名（0.9.0，连接页显示「已保存」并给「清除」按钮）；
+                // 密码不回给页面
+                o.put("proxyUser", ProxyCreds.user(prefs, ProxyCreds.keyOf(prefs.getString("url", DEFAULT_URL))));
                 if (prefill != null) o.put("prefill", prefill);
             } catch (JSONException ignored) {
             }
@@ -1131,13 +1476,21 @@ public class MainActivity extends Activity {
             return o.toString();
         }
 
+        /**
+         * 连接页提交。{@code proxyUser} / {@code proxyPass} 是可选的反向代理凭据（0.9.0）：
+         * 用户名非空 = 存 / 覆盖该 host 的凭据（之后 probe 与网页加载都自动带 Basic）；
+         * 两者都空 = 不动已保存的（清除走连接页的「清除」按钮 → {@code proxy.creds}）。
+         */
         @JavascriptInterface
-        public void connect(String url, String token, boolean keepAlive) {
+        public void connect(String url, String token, boolean keepAlive, String proxyUser, String proxyPass) {
             prefs.edit()
                     .putString("url", trimSlash(url.trim()))
                     .putString("token", token.trim())
                     .putBoolean("keepAlive", keepAlive)
                     .apply();
+            String host = trimSlash(url.trim());
+            if (proxyUser != null && !proxyUser.trim().isEmpty())
+                ProxyCreds.save(prefs, ProxyCreds.keyOf(host), proxyUser.trim(), proxyPass == null ? "" : proxyPass);
             runOnUiThread(MainActivity.this::connect);
         }
 

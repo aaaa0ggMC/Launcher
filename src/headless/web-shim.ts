@@ -59,6 +59,33 @@ function randomClientId(): string {
 }
 const clientId = randomClientId()
 
+/**
+ * 反向代理的会话过期 / 认证未过（0.9.0，安卓 App 场景 B）。
+ *
+ * 宿主挂在 Caddy 之类后面时，代理的会话（用户说约半天到一天）会过期：之后页面里的 /api 调用
+ * 拿到 401，SSE 也被挡在门外。处理方式是让外壳（安卓 App）重新加载宿主页面，把认证交还给代理层
+ * （basic_auth 自动带存过的凭据；forward_auth 留在 WebView 里走门户登录），页面整份重新初始化。
+ *
+ * - 并发 401 只触发一次（promise 单例），另有 30s 时间节流——原生侧同样节流，双保险；
+ * - 原生侧连续 3 次没治好就停手回连接页，不会无限重载；
+ * - 纯浏览器里没有原生桥：只派发一个本地事件（外壳可弹一次性提示），不重载。
+ */
+const REAUTH_THROTTLE_MS = 30_000
+let reauthInflight: Promise<unknown> | null = null
+let lastReauthAt = 0
+
+function reauth(): Promise<unknown> {
+  if (reauthInflight) return reauthInflight
+  if (Date.now() - lastReauthAt < REAUTH_THROTTLE_MS) return Promise.resolve()
+  lastReauthAt = Date.now()
+  // 外壳可据此弹一次性提示（「代理登录已过期，正在重新认证…」）；页面重载后自然消失
+  emitLocal('cockpit:host-unauthorized', { at: lastReauthAt })
+  reauthInflight = (nativeClient?.call('reauth') ?? Promise.resolve()).finally(() => {
+    reauthInflight = null
+  })
+  return reauthInflight
+}
+
 async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -67,7 +94,13 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
     body: body === undefined ? undefined : JSON.stringify({ ...(body as object), clientId }),
     signal
   })
-  if (res.status === 401) throw new Error('unauthorized: 缺少或错误的 token')
+  if (res.status === 401) {
+    // 代理层认证失败会带 www-authenticate（Caddy basic_auth）；宿主自己的 token 401 不带
+    const wa = res.headers.get('www-authenticate')
+    if (wa) console.warn('[web-shim] proxy authentication required:', wa)
+    void reauth()
+    throw new Error(wa ? 'unauthorized: 代理层认证未通过' : 'unauthorized: 缺少或错误的 token')
+  }
   return (await res.json()) as T
 }
 
@@ -270,6 +303,8 @@ let lostSince = 0
 let lastEventId = ''
 let retryDelay = 1000
 let retryTimer: ReturnType<typeof setTimeout> | null = null
+/** 连续重连失败次数：SSE 连不上未必是会话过期（宿主重启 / 断网），连错两次才去探一次 */
+let sseFails = 0
 
 function openEvents(): void {
   if (retryTimer) clearTimeout(retryTimer)
@@ -284,6 +319,7 @@ function openEvents(): void {
   source.onopen = () => {
     lastFrameAt = Date.now()
     retryDelay = 1000
+    sseFails = 0
   }
   // 宿主连上后的第一帧：resumed = 断线期间的广播已按 lastEventId 补发，页面状态是连续的；
   // 否则（宿主重启过 / 断太久）派发 host-reconnected，各页面整体重新拉取
@@ -317,8 +353,40 @@ function openEvents(): void {
 
 function scheduleReconnect(): void {
   if (retryTimer) return
-  retryTimer = setTimeout(openEvents, retryDelay)
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    // 连续两次都没连上：探一次 /api/info，看是不是代理层把会话踢了。**后台挂半天、没有任何命令
+    // 调用时这是唯一能发现会话过期的机会**（SSE 自己只会一直退避重连，页面无感知）。
+    if (++sseFails >= 2) {
+      sseFails = 0
+      void probeHostUnauthorized()
+    }
+    openEvents()
+  }, retryDelay)
   retryDelay = Math.min(retryDelay * 2, 15_000)
+}
+
+/**
+ * 探一次 {@code /api/info}（带超时）：
+ * - 401 → 认证没过（代理会话过期 / token 失效），触发重认证；
+ * - 被重定向到非宿主 origin（{@code res.redirected} / {@code res.url}）→ 代理的 forward_auth
+ *   要求先登录，同样触发；
+ * - 连不上 / 其它状态 → 不是认证问题，交给 SSE 的退避重连。
+ */
+async function probeHostUnauthorized(): Promise<void> {
+  try {
+    const res = await fetch('/api/info', {
+      headers: { ...authHeaders },
+      signal: AbortSignal.timeout(8000)
+    })
+    if (res.status === 401) {
+      void reauth()
+      return
+    }
+    if (res.redirected && new URL(res.url).origin !== location.origin) void reauth()
+  } catch {
+    /* 宿主暂时连不上：不是认证问题 */
+  }
 }
 
 function checkStale(staleMs = SSE_STALE_MS): void {
@@ -374,6 +442,8 @@ function onEventFrame(ev: MessageEvent): void {
 }
 openEvents()
 
+// 首屏只用来拿 platform：失败（断网 / 宿主没起）就兜底 'linux'，别让冷启动崩在这里。
+// 401 不走兜底逻辑之外的路——api() 里已经触发过重认证了（见上面的 reauth）。
 const info = await api<{ platform: string }>('/api/info').catch(() => ({ platform: 'linux' }))
 
 /** 宿主没有的能力：返回值按「什么都没发生」处理。 */
