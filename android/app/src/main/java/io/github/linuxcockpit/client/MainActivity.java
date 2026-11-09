@@ -13,6 +13,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -616,6 +617,19 @@ public class MainActivity extends Activity {
             showConnect(getString(R.string.err_disconnected) + "（" + err.getDescription() + "）");
         }
 
+        /**
+         * 主文档的 TLS 证书不被信任（自建 CA 没装 / 装错了 / 换了 CA）：默认行为是静默取消，
+         * 用户只看到一张空白页。回连接页把「装根 CA」说清楚。握手被掐断不走这里，走 onReceivedError。
+         */
+        @Override
+        public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, SslError error) {
+            handler.cancel();
+            // 子资源（字体 / 图片）的证书错不牵连整页
+            String u = error == null ? null : error.getUrl();
+            if (u != null && !hostOrigin.isEmpty() && hostOrigin.equals(originOf(u)))
+                showConnect(getString(R.string.err_tls));
+        }
+
         @Override
         public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
             if (url.startsWith(CONNECT_PAGE)) return;
@@ -919,10 +933,14 @@ public class MainActivity extends Activity {
                 if (seq != probeSeq) return; // 用户换了目标 / 打开连接页 / 页面已销毁：过期结果丢弃
                 pendingConnect = null;
                 showLoading(false);
-                if (err != null) {
+                if (err != null && !PROBE_TLS_CUT.equals(err)) {
                     showConnect(err);
                     return;
                 }
+                // PROBE_TLS_CUT：探针的 TLS 握手被对面掐断——不是证书问题，是服务端 / 中间盒只放行
+                // 浏览器指纹的 TLS（Java 的 ClientHello 被 RST，实测 curl 带 Chrome UA 也一样被重置，
+                // 只有真 Chrome 过得去）。WebView 是 Chromium、与浏览器同款 TLS 栈，照样加载，让页面
+                // 自己说话；真失败了有 onReceivedError / onReceivedSslError 兜底。
                 hostOrigin = originOf(base);
                 pageReady = false;
                 reauthFails = 0; // 新的一次连接：重新认证计数归零
@@ -991,8 +1009,9 @@ public class MainActivity extends Activity {
                 }
                 return getString(R.string.err_http) + " " + code;
             } catch (SSLException e) {
-                // 证书链不受信任（自建 CA / 自签，且根 CA 没在手机上装）或握手被重置
-                return getString(R.string.err_tls);
+                // 证书真的不受信任 → 明确提示装根 CA（WebView 也一样过不去，别浪费时间加载）；
+                // 只是握手被对面掐断 → 不是证书的事，放行让 WebView 去加载（见 PROBE_TLS_CUT）
+                return isCertUntrusted(e) ? getString(R.string.err_tls) : PROBE_TLS_CUT;
             } catch (UnknownHostException e) {
                 return getString(R.string.err_dns);
             } catch (SocketTimeoutException e) {
@@ -1009,6 +1028,29 @@ public class MainActivity extends Activity {
             }
         }
         return getString(R.string.err_http) + " 310"; // 同 host 跳了 5 次还没完：当异常处理
+    }
+
+    /**
+     * probe 遇到「TLS 握手被对面掐断」时返回它（{@link javax.net.ssl.SSLException} 但异常链里没有
+     * 任何证书类信息）。这不是证书问题——实测有服务端 / 中间盒只放行浏览器指纹的 TLS：Java 的
+     * ClientHello 直接被 RST，curl 带 Chrome UA 也被重置，只有真 Chrome 过得去。所以不拦截连接：
+     * WebView 是 Chromium、与浏览器同款 TLS 栈，让它直接加载页面，真失败了再由
+     * {@link Client#onReceivedError} / {@link Client#onReceivedSslError} 报错。
+     */
+    private static final String PROBE_TLS_CUT = "\u0000probe-tls-cut";
+
+    /** 异常链里有没有「证书不受信任」一类的信息（PKIX / certification path / trust / not verified…） */
+    private static boolean isCertUntrusted(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.security.cert.CertificateException) return true;
+            String m = String.valueOf(t.getMessage()).toLowerCase(java.util.Locale.ROOT);
+            String c = t.getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT);
+            if (m.contains("certificate") || m.contains("certification path") || m.contains("pkix")
+                    || m.contains("not trusted") || m.contains("untrusted") || m.contains("not verified")
+                    || c.contains("cert"))
+                return true;
+        }
+        return false;
     }
 
     /**

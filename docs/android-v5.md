@@ -38,10 +38,12 @@
 
 ## 补充：自建 CA 证书与「连不上」的报错（0.9.0）
 
-宿主挂在公网、TLS 证书来自自建根 CA（实测 `CN=dev.yslwd.eu.org` ← `CN=yslwd Home Root CA`）时，手机 Chrome 能打开、App 连不上。两个原因、两处改动：
+宿主挂在公网、TLS 证书来自自建根 CA（实测 `CN=dev.yslwd.eu.org` ← `CN=yslwd Home Root CA`）时，手机 Chrome 能打开、App 连不上。三处改动：
 
 - **App 默认不信任用户安装的 CA**（Android API 24+ 的行为；浏览器信任）。`network_security_config.xml` 显式加 `<certificates src="user"/>` 后，probe 的 HttpURLConnection 与 WebView 都跟随系统信任用户安装的根 CA。前提是用户先在手机上装好该根 CA（设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书）。
-- **probe 的失败分级**：TLS（证书不受信任 / 握手被切断）、DNS、超时、拒绝连接分开报错；Termux 专属文案（`err_unreachable`）只留给 loopback / 私网宿主，公网宿主用中性文案。以前是一律 Termux 提示，公网 https 场景完全是错的。页面加载与 probe 同一套信任（同 `network_security_config.xml`），证书不受信任时 probe 先一步拦住并给出 `err_tls`，不会走到静默白屏（API 36 公开 API 里已无 `android.webkit.SslError`，`onReceivedSslError` 挂不上，也不需要）。
+- **probe 的失败分级**：TLS / DNS / 超时 / 拒绝连接分开报错；Termux 专属文案（`err_unreachable`）只留给 loopback / 私网宿主，公网宿主用中性文案。以前是一律 Termux 提示，公网 https 场景完全是错的。
+- **「握手被掐断」不拦截连接**：实测有服务端 / 中间盒只放行浏览器指纹的 TLS——Java 的 ClientHello 被 RST（`SSLHandshakeException: Remote host terminated the handshake`），curl 带 Chrome UA 也被重置，只有真 Chrome 过得去。所以 probe 把「证书不受信任」（异常链含 PKIX / certification path / trust 一类信息）和「握手被掐断」分开：前者回连接页给 `err_tls`（提示装根 CA），后者**放行让 WebView 直接加载**（Chromium 与浏览器同款 TLS 栈），页面真失败了再由 `onReceivedError` / `onReceivedSslError` 报错。根 CA 装没装对都能连：装对了走证书校验，被指纹过滤时 WebView 大概率仍能加载。
+- 页面侧 `onReceivedSslError` 用 `android.net.http.SslError`（API 36 起 `android.webkit.SslError` 已挪包，不是被删）：主文档证书不受信任时回连接页说清楚，不再静默白页。
 - 域名 80 端口可能被服务商拦截（返回「Non-compliance ICP Filing」之类页面），http:// 直连不用指望。
 
 ## 验证
