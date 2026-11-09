@@ -53,7 +53,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.net.ConnectException;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -61,6 +64,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.net.ssl.SSLException;
 
 /**
  * Cockpit 安卓客户端：一个全屏 WebView，直接打开宿主（本机 Termux 里的无头宿主，或局域网电脑）托管的网页。
@@ -941,6 +945,11 @@ public class MainActivity extends Activity {
      *       不是 cockpit token）；该 host 存过凭据时先带 preemptive Basic；</li>
      *   <li>401 不带 {@code www-authenticate} → 保持原来的 err_token 语义。</li>
      * </ul>
+     *
+     * <p>连不上也要说清是为什么：TLS 证书 / DNS / 超时 / 拒绝连接分开报。以前是一律
+     * {@code err_unreachable}（整段 Termux 提示）——公网 https 宿主的证书来自自建 CA 时
+     * （App 默认不信任用户安装的 CA，见 {@code network_security_config.xml}），用户会看到
+     * 「Is it running in Termux?」这种完全不相干的提示。Termux 文案只留给 loopback / 私网宿主。</p>
      */
     private String probe(String base, String token) {
         String auth = proxyAuthHeader(base); // 空 = 该 host 没存过代理凭据
@@ -981,13 +990,51 @@ public class MainActivity extends Activity {
                     return getString(R.string.err_proxy_login, hostOf(next));
                 }
                 return getString(R.string.err_http) + " " + code;
+            } catch (SSLException e) {
+                // 证书链不受信任（自建 CA / 自签，且根 CA 没在手机上装）或握手被重置
+                return getString(R.string.err_tls);
+            } catch (UnknownHostException e) {
+                return getString(R.string.err_dns);
+            } catch (SocketTimeoutException e) {
+                return getString(R.string.err_timeout);
+            } catch (ConnectException e) {
+                return getString(R.string.err_connect);
             } catch (Exception e) {
-                return getString(R.string.err_unreachable);
+                // 兜底：本机 Termux 宿主保留原来的提示，公网 / 远程宿主用中性文案
+                return isLocalTarget(base)
+                        ? getString(R.string.err_unreachable)
+                        : getString(R.string.err_remote);
             } finally {
                 if (c != null) c.disconnect();
             }
         }
         return getString(R.string.err_http) + " 310"; // 同 host 跳了 5 次还没完：当异常处理
+    }
+
+    /**
+     * loopback / 私网地址 = 典型的本机 Termux 宿主：连不上时给 Termux 专属提示；
+     * 公网 / 远程宿主用中性文案（Termux 提示对它们没有意义）。
+     */
+    private static boolean isLocalTarget(String urlOrHost) {
+        String host = ProxyCreds.keyOf(urlOrHost).toLowerCase(java.util.Locale.ROOT);
+        if (host.isEmpty()) return false;
+        int at = host.indexOf('@'); // keyOf 已去 userinfo，双保险
+        if (at >= 0) host = host.substring(at + 1);
+        int colon = host.indexOf(':');
+        if (colon > 0) host = host.substring(0, colon); // 去端口（IPv6 字面量宿主不常见，误伤可接受）
+        if (host.equals("localhost") || host.endsWith(".localhost") || host.equals("::1")) return true;
+        if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("192.168.")) return true;
+        if (host.startsWith("172.")) {
+            String[] p = host.split("\\.");
+            if (p.length > 1) {
+                try {
+                    int second = Integer.parseInt(p[1]);
+                    if (second >= 16 && second <= 31) return true;
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return host.startsWith("fe80:") || host.endsWith(".local");
     }
 
     /** 相对 Location → 绝对 URL；解析不了返回空串 */

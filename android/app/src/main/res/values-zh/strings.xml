@@ -21,6 +21,12 @@
     <string name="proxy_auth_cancel">取消</string>
     <string name="proxy_auth_cleared">已清除保存的代理凭据</string>
     <string name="reauth_running">代理会话已过期，正在重新登录…</string>
+    <!-- 连不上的原因分级（0.9.0）：以前一律 err_unreachable，公网 https 宿主会看到不相干的 Termux 提示 -->
+    <string name="err_tls">服务器的 TLS 证书验证失败（不是受信任的 CA 签发的），或者握手被中断。如果是自建 CA：在手机「设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书」里装上那个根 CA——App 和浏览器一样信任用户安装的 CA。</string>
+    <string name="err_dns">解析不了宿主的域名。检查地址有没有写错，以及 DNS / 网络是否正常。</string>
+    <string name="err_timeout">连接宿主超时。检查地址、端口和网络连通性。</string>
+    <string name="err_connect">连不上宿主的端口（被拒绝，或被防火墙挡了）。确认地址、端口，以及宿主服务已经启动。</string>
+    <string name="err_remote">连不上宿主。确认地址、端口和服务是否正常，然后重试。</string>
     <string name="loading">正在加载…</string>
     <string name="back_again_to_exit">再按一次返回退出</string>
 </resources>

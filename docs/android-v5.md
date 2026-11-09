@@ -36,6 +36,14 @@
 - **401 一律触发重认证的代价**：token 不对（而非代理过期）时也会重载，最坏情况是 3 次重载后落到连接页。降级文案因此同时提到代理凭据和 token。正常路径下 probe 已经先把 token 不对拦在连接页，走不到这里。
 - 代理与宿主不同端口时，`onReceivedHttpAuthRequest` 给的 host 可能不带端口，按当前宿主地址的端口补；真挂在别的端口上时用户在连接页手填一次即可（存的 key 与查询用的 key 一致）。
 
+## 补充：自建 CA 证书与「连不上」的报错（0.9.0）
+
+宿主挂在公网、TLS 证书来自自建根 CA（实测 `CN=dev.yslwd.eu.org` ← `CN=yslwd Home Root CA`）时，手机 Chrome 能打开、App 连不上。两个原因、两处改动：
+
+- **App 默认不信任用户安装的 CA**（Android API 24+ 的行为；浏览器信任）。`network_security_config.xml` 显式加 `<certificates src="user"/>` 后，probe 的 HttpURLConnection 与 WebView 都跟随系统信任用户安装的根 CA。前提是用户先在手机上装好该根 CA（设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书）。
+- **probe 的失败分级**：TLS（证书不受信任 / 握手被切断）、DNS、超时、拒绝连接分开报错；Termux 专属文案（`err_unreachable`）只留给 loopback / 私网宿主，公网宿主用中性文案。以前是一律 Termux 提示，公网 https 场景完全是错的。页面加载与 probe 同一套信任（同 `network_security_config.xml`），证书不受信任时 probe 先一步拦住并给出 `err_tls`，不会走到静默白屏（API 36 公开 API 里已无 `android.webkit.SslError`，`onReceivedSslError` 挂不上，也不需要）。
+- 域名 80 端口可能被服务商拦截（返回「Non-compliance ICP Filing」之类页面），http:// 直连不用指望。
+
 ## 验证
 
 - Gradle `assembleDebug` **未跑**：本机没有 `/opt/android-sdk`（也没有 `android.jar` / build-tools / JDK 17 的 javac；`./gradlew` 连 distribution 都下不下来），按约定不自行安装系统组件。

@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 宿主是本机 Termux / 局域网电脑上的明文 HTTP 服务 -->
+<!--
+  宿主可能是本机 Termux / 局域网电脑上的明文 HTTP，也可能是挂在公网、TLS 证书来自自建根 CA
+  的 https 服务（如家庭 Caddy + 私有 CA）。Android 从 API 24 起应用默认不信任用户安装的 CA，
+  而浏览器信任——所以显式加上 user：在手机「设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书」
+  装过的根 CA，probe 的 HttpURLConnection 与 WebView 都认（同一套信任）。
+-->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

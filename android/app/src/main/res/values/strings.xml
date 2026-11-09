@@ -22,6 +22,12 @@
     <string name="proxy_auth_cancel">Cancel</string>
     <string name="proxy_auth_cleared">Saved proxy credentials cleared</string>
     <string name="reauth_running">Proxy session expired. Signing in again…</string>
+    <!-- Failure reasons for "cannot reach" (0.9.0): err_unreachable alone made public https hosts show an unrelated Termux hint -->
+    <string name="err_tls">The server\'s TLS certificate could not be verified (not issued by a trusted CA), or the handshake was cut. For a private CA: install that root CA on the phone under Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate — the app trusts user-installed CAs, like a browser does.</string>
+    <string name="err_dns">Cannot resolve the host name. Check the address for typos, and your DNS/network.</string>
+    <string name="err_timeout">Timed out connecting to the host. Check the address, the port, and your network.</string>
+    <string name="err_connect">Cannot reach the host port (refused, or blocked by a firewall). Check the address, the port, and that the host service is running.</string>
+    <string name="err_remote">Cannot reach the host. Check the address, the port, and that the service is running, then retry.</string>
     <string name="loading">Loading…</string>
     <string name="back_again_to_exit">Press back again to exit</string>
     <string name="media_channel">Media controls</string>
