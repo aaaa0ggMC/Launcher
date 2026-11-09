@@ -26,7 +26,10 @@ export type HostCap = 'native' | 'web' | 'none'
  *   [{url, cookie}], cancelled }`，balance 用来把网页登录的会话导入无头宿主）/
  *   `reauth`（0.9.0，无参：反向代理的会话过期时重新加载宿主页面，把认证交还给代理层——
  *   basic_auth 自动带存过的凭据，forward_auth 留在 WebView 里走门户登录；不再走 probe，否则过期
- *   会话只会拿到 401 而错误地回到连接页。原生侧 30s 节流 + 连续 3 次没治好就停手）/ `proxy.creds
+ *   会话只会拿到 401 而错误地回到连接页。原生侧 30s 节流 + 连续 3 次没治好就停手）/ `hostTokenRejected`
+ *   （0.9.0，无参：页面发现所有 /api/* 因**宿主自己的 token** 被拒时通知原生弹提示——静态页不验
+ *   token，所以表现为「壳出来了但满屏骨架转圈」；代理层的 401 走 reauth，不走到这）/
+ *   `proxy.creds
  *   { host, user, pass }`（连接页用：user 空 = 清除该 host 存过的代理凭据）/
  *   系统语音（0.8.0，`info.speech = { tts, asr }`）：`tts.voices` / `tts.speak { id, text, lang?, voice?,
  *   rate?, pitch? }` / `tts.stop` / `asr.start { lang?, partial? }` / `asr.stop` / `asr.cancel`

@@ -95,13 +95,33 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
     signal
   })
   if (res.status === 401) {
-    // 代理层认证失败会带 www-authenticate（Caddy basic_auth）；宿主自己的 token 401 不带
+    // 两种 401 必须分开：代理层（Caddy forward_auth 透传门户的错误页）回 text/html，
+    // 宿主自己的 token 401 回 application/json（server.ts 的 json()）。只有前者需要重认证——
+    // 后者重载一万次也没用，token 又不会自己变对，只会每 30s 白刷一次页面。
     const wa = res.headers.get('www-authenticate')
-    if (wa) console.warn('[web-shim] proxy authentication required:', wa)
-    void reauth()
-    throw new Error(wa ? 'unauthorized: 代理层认证未通过' : 'unauthorized: 缺少或错误的 token')
+    const ct = res.headers.get('content-type') ?? ''
+    if (wa || ct.includes('text/html')) {
+      if (wa) console.warn('[web-shim] proxy authentication required:', wa)
+      void reauth()
+      throw new Error(wa ? 'unauthorized: 代理层认证未通过' : 'unauthorized: 代理层未登录')
+    }
+    noteHostTokenRejected()
+    throw new Error('unauthorized: 缺少或错误的 token')
   }
   return (await res.json()) as T
+}
+
+/**
+ * 宿主自己的 token 被拒（401 且是 JSON）。静态页面不验 token、所有 {@code /api/*} 都要，
+ * 所以表现为「界面壳出来了但满屏骨架转圈」——告诉原生侧弹一次说明，别让用户对着转圈猜。
+ */
+let hostTokenWarnedAt = 0
+function noteHostTokenRejected(): void {
+  const now = Date.now()
+  if (now - hostTokenWarnedAt < 30_000) return // 满屏 API 都会 401：限流，别刷屏
+  hostTokenWarnedAt = now
+  emitLocal('cockpit:host-token-rejected')
+  void nativeClient?.call('hostTokenRejected').catch(() => {})
 }
 
 /**
@@ -368,9 +388,10 @@ function scheduleReconnect(): void {
 
 /**
  * 探一次 {@code /api/info}（带超时）：
- * - 401 → 认证没过（代理会话过期 / token 失效），触发重认证；
+ * - 401 且是代理层的错误页（text/html / www-authenticate）→ 认证没过，触发重认证；
  * - 被重定向到非宿主 origin（{@code res.redirected} / {@code res.url}）→ 代理的 forward_auth
  *   要求先登录，同样触发；
+ * - 401 但是 JSON → 宿主自己的 token 被拒，重认证救不了，只提示（见 noteHostTokenRejected）；
  * - 连不上 / 其它状态 → 不是认证问题，交给 SSE 的退避重连。
  */
 async function probeHostUnauthorized(): Promise<void> {
@@ -380,7 +401,9 @@ async function probeHostUnauthorized(): Promise<void> {
       signal: AbortSignal.timeout(8000)
     })
     if (res.status === 401) {
-      void reauth()
+      const ct = res.headers.get('content-type') ?? ''
+      if (ct.includes('text/html') || res.headers.get('www-authenticate')) void reauth()
+      else noteHostTokenRejected()
       return
     }
     if (res.redirected && new URL(res.url).origin !== location.origin) void reauth()

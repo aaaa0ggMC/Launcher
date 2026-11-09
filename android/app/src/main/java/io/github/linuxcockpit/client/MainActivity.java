@@ -1508,6 +1508,14 @@ public class MainActivity extends Activity {
                     reply(id, true, new JSONObject());
                     return;
                 }
+                case "hostTokenRejected": {
+                    // 页面壳不验 token、所有 /api/* 都要：连接页的 Token 没填 / 不对时，界面能
+                    // 打开但满屏骨架转圈。弹一次说明，别让用户对着一片转圈猜。
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, R.string.err_token_api,
+                            Toast.LENGTH_LONG).show());
+                    reply(id, true, new JSONObject());
+                    return;
+                }
                 case "proxy.creds": {
                     // 连接页的可选输入：存 / 清该 host 的代理用户名密码。密码只在成功认证后才落盘。
                     final String host = args.optString("host", "");

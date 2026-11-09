@@ -7,6 +7,7 @@
     <string name="shortcut_connect">Connection settings</string>
     <string name="err_unreachable">Cannot reach the host. Is it running in Termux? If it was, the system may have frozen Termux in the background: switch to Termux and back, then retry. Lock Termux in recents and set its battery usage to unrestricted.</string>
     <string name="err_token">The host rejected the token.</string>
+    <string name="err_token_api">The host rejected the token: is the Token field on the connect page filled in? Copy it from ~/.config/LinuxCockpit/headless-token on the host.</string>
     <string name="err_http">The host returned an error:</string>
     <string name="err_disconnected">Lost connection to the host</string>
     <!-- 反向代理（Caddy basic_auth / forward_auth）：它和宿主自己的 token 是两套认证，别混 -->
