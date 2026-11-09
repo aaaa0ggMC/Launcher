@@ -39,6 +39,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -126,6 +127,13 @@ public class MainActivity extends Activity {
      * 回到宿主 origin 时由 {@link Client#onPageFinished} 清除。
      */
     private boolean proxyFlow = false;
+    /**
+     * 代理层把文档挡成 401/403 了（0.9.0）：错误页上的「登录 / Authorize」是**用户手点**的导航，
+     * 不是服务器重定向，{@link #proxyFlow} 不会置位——没有这个标志它会被当成普通站外链接
+     * 甩进系统浏览器，登录流程就断了。置位后随后的导航（含手点）都留在 WebView 里，
+     * 回到宿主 origin 且加载成功时由 {@link Client#onPageStarted} 清除。
+     */
+    private boolean authFlow = false;
     /** 代理认证对话框开着：防重入（同一挑战可能来多次，别叠对话框） */
     private boolean authShowing = false;
     /** 开着的代理认证对话框（showConnect / reauth 时撤掉：页面都要换了，别再问） */
@@ -586,9 +594,22 @@ public class MainActivity extends Activity {
             String url = req.getUrl().toString();
             if (url.startsWith(CONNECT_PAGE)) return false;
             if (!hostOrigin.isEmpty() && hostOrigin.equals(originOf(url))) return false;
-            if (req.isRedirect() || proxyFlow) return false;
+            if (req.isRedirect() || proxyFlow || authFlow) return false;
             openExternal(url);
             return true;
+        }
+
+        /**
+         * 主文档被代理挡成 401/403（Caddy forward_auth 一类）：错误页上的「登录 / Authorize」
+         * 是用户手点的导航，不开 {@link #authFlow} 就会被甩进系统浏览器，登录流程断在这。
+         */
+        @Override
+        public void onReceivedHttpError(WebView view, WebResourceRequest req,
+                                        WebResourceResponse resp) {
+            if (!req.isForMainFrame()) return;
+            int code = resp == null ? 0 : resp.getStatusCode();
+            authFlow = code == 401 || code == 403;
+            android.util.Log.i("Cockpit", "httpError main frame code=" + code + " authFlow=" + authFlow);
         }
 
         /**
@@ -717,6 +738,8 @@ public class MainActivity extends Activity {
         @Override
         public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
             if (url.startsWith(CONNECT_PAGE)) return;
+            // 回到宿主 origin 重新开始加载：401 登录流程结束（紧接着的响应如果是 401 会再置位）
+            if (!hostOrigin.isEmpty() && hostOrigin.equals(originOf(url))) authFlow = false;
             // 页面（重新）加载：等新页面的 shim 再调 ready 才发事件，期间显示原生转圈
             pageReady = false;
             // 旧页面的播放器没了：撤掉媒体卡片，新页面开始播放时会重新推
