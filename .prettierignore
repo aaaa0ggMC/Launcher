@@ -7,4 +7,5 @@ tsconfig.*.json
 **/game-icon-pack
 src/abilities/aidj/loop/prompts
 src/abilities/aidj/loop/playbooks
+src/abilities/bili/workflows/duty/charter
 android
