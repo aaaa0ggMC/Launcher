@@ -580,20 +580,30 @@ public class MainActivity extends Activity {
     private class Client extends WebViewClient {
         /**
          * 非宿主 origin 的导航：
-         * - 服务器重定向（{@code req.isRedirect()}）即使跳到别的 origin 也留在 WebView——forward_auth
+         * - 同 host（不管端口）一律留在 WebView——门户的登录入口在另一个端口上（实测
+         *   dev.yslwd.eu.org:2086 的 401 指向同 host 的 :2090），而门户会话 cookie 是
+         *   {@code domain=dev.yslwd.eu.org}、同 host 各端口共享。按 origin（host:port）比会把它
+         *   当成站外链接甩去系统浏览器，**而系统浏览器的 cookie 和 WebView 完全不互通**：
+         *   用户浏览器里明明登得好好的，WebView 里永远是空会话 → 永远 401；
+         * - 服务器重定向（{@code req.isRedirect()}）即使跳到别的 host 也留在 WebView——forward_auth
          *   的 302 去登录门户只能这样才走得通；
-         * - 代理流程中（{@link #proxyFlow}）页面脚本发起的导航也留着，覆盖门户登录成功后
-         *   {@code location.replace} 回跳；
-         * - 只有用户点击（既不是重定向、也不在流程中）的站外链接才交系统浏览器。
+         * - 代理流程中（{@link #proxyFlow}）/ 401 登录流程中（{@link #authFlow}）页面脚本发起的
+         *   导航也留着，覆盖门户登录成功后 {@code location.replace} 回跳；
+         * - 只有用户点击（既不是重定向、也不在流程中）的**跨 host** 链接才交系统浏览器。
          *
-         * 取舍：宿主是用户自己的服务器，信任它发起的重定向；真正的风险是「用户点了一个恶意页面上的
-         * 链接」，而 WebView 里只可能出现宿主 / 连接页 / 上面两类跳转，够用。
+         * 取舍：宿主是用户自己的服务器，信任它发起的重定向；同 host 多端口是公网入口的常见形态
+         * （门户自己就用 domain cookie 让端口间共享会话），真正的风险是「用户点了一个恶意页面上的
+         * 跨 host 链接」，而 WebView 里只可能出现宿主 / 连接页 / 上面三类跳转，够用。
          */
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
             String url = req.getUrl().toString();
             if (url.startsWith(CONNECT_PAGE)) return false;
             if (!hostOrigin.isEmpty() && hostOrigin.equals(originOf(url))) return false;
+            // 同 host 不同端口：门户登录入口（cookie 是 domain= 的，端口间共享会话）
+            if (!hostOrigin.isEmpty() && !hostnameOf(url).isEmpty()
+                    && hostnameOf(url).equals(hostnameOf(hostOrigin)))
+                return false;
             if (req.isRedirect() || proxyFlow || authFlow) return false;
             openExternal(url);
             return true;
@@ -1883,6 +1893,16 @@ public class MainActivity extends Activity {
             if (u.getScheme() == null || u.getHost() == null) return "";
             int port = u.getPort();
             return u.getScheme() + "://" + u.getHost() + (port > 0 ? ":" + port : "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 只要 hostname（不带协议 / 端口），大小写不敏感 */
+    static String hostnameOf(String url) {
+        try {
+            String h = Uri.parse(url).getHost();
+            return h == null ? "" : h.toLowerCase(java.util.Locale.ROOT);
         } catch (Exception e) {
             return "";
         }
