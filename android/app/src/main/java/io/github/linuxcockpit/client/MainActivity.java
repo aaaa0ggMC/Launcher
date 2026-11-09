@@ -629,16 +629,86 @@ public class MainActivity extends Activity {
         }
 
         /**
-         * 主文档的 TLS 证书不被信任（自建 CA 没装 / 装错了 / 换了 CA）：默认行为是静默取消，
-         * 用户只看到一张空白页。回连接页把「装根 CA」说清楚。握手被掐断不走这里，走 onReceivedError。
+         * 主文档的 TLS 证书不被信任（自建 CA 没装 / 装错了 / 换了 CA）。默认行为是静默取消，
+         * 用户只看到一张空白页。这里把证书详情摆出来让用户决定—— Chrome 也是「高级 → 仍要连接」
+         * 这么干的；选「仍要连接」按 host 记住，后续请求直接 proceed，不再逐次问。
+         *
+         * <p>为什么需要它：Chromium（Chrome）自带证书校验器，和安卓平台的 TrustManager 不是一套；
+         * 自建根 CA 的场景下 Chrome 认、WebView（走平台校验 + 本 App 的信任锚）不认是常事。
+         * 这是连用户自己的服务器，信任由用户明确点一次头，不默认放行。</p>
          */
         @Override
         public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, SslError error) {
-            handler.cancel();
-            // 子资源（字体 / 图片）的证书错不牵连整页
             String u = error == null ? null : error.getUrl();
-            if (u != null && !hostOrigin.isEmpty() && hostOrigin.equals(originOf(u)))
-                showConnect(getString(R.string.err_tls));
+            boolean mainDoc = u != null && !hostOrigin.isEmpty() && hostOrigin.equals(originOf(u));
+            if (!mainDoc) {
+                // 子资源（字体 / 图片）的证书错：已放行过就跟主文档一起放，否则取消
+                if (sslBypassed(hostOrigin)) handler.proceed();
+                else handler.cancel();
+                return;
+            }
+            String detail = sslErrorDetail(error);
+            if (sslBypassed(hostOrigin)) {
+                handler.proceed(); // 用户已经为这个 host 点过「仍要连接」
+                return;
+            }
+            showLoading(false);
+            new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setTitle(R.string.ssl_bypass_title)
+                    .setMessage(getString(R.string.ssl_bypass_msg, hostOrigin, detail))
+                    .setPositiveButton(R.string.ssl_bypass_ok, (d, w) -> {
+                        // 按 host 记住：后续主文档 / 子资源的证书错都直接放行
+                        prefs.edit().putString("ssl_bypass", hostOrigin).apply();
+                        handler.proceed();
+                    })
+                    .setNegativeButton(R.string.ssl_bypass_cancel, (d, w) -> {
+                        handler.cancel();
+                        showConnect(getString(R.string.err_tls) + "（" + detail + "）");
+                    })
+                    .setOnCancelListener(d -> handler.cancel())
+                    .show();
+        }
+
+        /** 这个 host 用户点过「仍要连接」吗（连接页换宿主时清掉） */
+        private boolean sslBypassed(String origin) {
+            return !origin.isEmpty() && origin.equals(prefs.getString("ssl_bypass", ""));
+        }
+
+        /** 证书错的原因 + 颁发给谁 / 谁颁发的，摆给用户看 */
+        private static String sslErrorDetail(SslError error) {
+            int code = error == null ? 0 : error.getPrimaryError();
+            String reason;
+            switch (code) {
+                case SslError.SSL_UNTRUSTED:
+                    reason = "证书链不受信任（根 CA 不在手机 / App 的信任列表里）";
+                    break;
+                case SslError.SSL_IDMISMATCH:
+                    reason = "证书主机名与地址不匹配";
+                    break;
+                case SslError.SSL_EXPIRED:
+                    reason = "证书已过期";
+                    break;
+                case SslError.SSL_NOTYETVALID:
+                    reason = "证书尚未生效";
+                    break;
+                case SslError.SSL_DATE_INVALID:
+                    reason = "证书日期无效";
+                    break;
+                default:
+                    reason = "证书无效（错误码 " + code + "）";
+            }
+            String who = "";
+            try {
+                android.net.http.SslCertificate c = error == null ? null : error.getCertificate();
+                if (c != null) {
+                    java.security.cert.X509Certificate x = c.getX509Certificate();
+                    if (x != null)
+                        who = x.getSubjectX500Principal().getName() + " ← " + x.getIssuerX500Principal().getName();
+                }
+            } catch (Exception ignored) {
+                /* 读不到证书详情就算了，原因已经够用 */
+            }
+            return who.isEmpty() ? reason : reason + "：" + who;
         }
 
         @Override
@@ -815,6 +885,9 @@ public class MainActivity extends Activity {
         proxyFlow = false;
         dismissAuthDialog();
         timer.removeCallbacks(portalTimeout);
+        // 换宿主的凭证不留给下一个：证书「仍要连接」的授权按 host 存的，这里清掉
+        if (!prefs.getString("ssl_bypass", "").isEmpty())
+            prefs.edit().remove("ssl_bypass").apply();
         if (media != null) media.clear();
         probeSeq++; // 让还在探测中的回调作废（它属于上一次尝试）
         pendingConnect = null;

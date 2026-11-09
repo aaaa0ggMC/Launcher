@@ -45,6 +45,7 @@
 - **「握手被掐断」不拦截连接**：实测有服务端 / 中间盒只放行浏览器指纹的 TLS——Java 的 ClientHello 被 RST（`SSLHandshakeException: Remote host terminated the handshake`），curl 带 Chrome UA 也被重置，只有真 Chrome 过得去。所以 probe 把「证书不受信任」（异常链含 PKIX / certification path / trust 一类信息）和「握手被掐断」分开：前者回连接页给 `err_tls`（提示装根 CA），后者**放行让 WebView 直接加载**（Chromium 与浏览器同款 TLS 栈），页面真失败了再由 `onReceivedError` / `onReceivedSslError` 报错。根 CA 装没装对都能连：装对了走证书校验，被指纹过滤时 WebView 大概率仍能加载。
 - 页面侧 `onReceivedSslError` 用 `android.net.http.SslError`（API 36 起 `android.webkit.SslError` 已挪包，不是被删）：主文档证书不受信任时回连接页说清楚，不再静默白页。
 - **mTLS 客户端证书**：实测该服务器 TLS 握手时还索要客户端证书（Chrome 连接会弹系统 KeyChain 选择框）。不处理 `onReceivedClientCertRequest` 时默认直接取消 → `net::ERR_BAD_SSL_CLIENT_AUTH_CERT`。实现与 Chrome 一致：`KeyChain.choosePrivateKeyAlias` 让用户选，选到就 `proceed(key, chain)`，取消就 cancel（随后报 `err_client_cert`）。两个 API 36 的坑：该回调从 `WebChromeClient` 挪到了 `WebViewClient`；`KeyChain.getCertificate` 已删，证书链只能走 `getCertificateChain`（API 28+，更老的机器取消并提示）。
+- **证书不受信任时让用户拍板**（而不是一刀切取消）：`onReceivedSslError` 弹框摆出原因（`SSL_UNTRUSTED` / `SSL_IDMISMATCH` / 过期…）+ 证书颁发关系，用户点「仍要连接」才 `handler.proceed()`，并按 host 记进 prefs（换宿主即清）。背景：Chromium（Chrome）自带证书校验器，和安卓平台 TrustManager 不是一套——自建根 CA 场景下 Chrome 认、WebView 不认是常事，光提示「去装根 CA」解决不了。这是连用户自己的服务器，信任由用户明确点一次头，不默认放行。
 - 域名 80 端口可能被服务商拦截（返回「Non-compliance ICP Filing」之类页面），http:// 直连不用指望。
 
 ## 验证
