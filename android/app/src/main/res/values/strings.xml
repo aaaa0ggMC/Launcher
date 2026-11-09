@@ -33,6 +33,7 @@
     <string name="ssl_bypass_msg">%1$s has a TLS certificate problem:\n%2$s\n\nA browser may open it while this app cannot, because Chrome uses its own certificate verifier, not the one this app uses. Only choose “Connect anyway” if you are sure this is your own server.</string>
     <string name="ssl_bypass_ok">Connect anyway</string>
     <string name="ssl_bypass_cancel">Cancel</string>
+    <string name="client_cert_picking">The server requires a client certificate — pick one in the system dialog</string>
     <string name="loading">Loading…</string>
     <string name="back_again_to_exit">Press back again to exit</string>
     <string name="media_channel">Media controls</string>

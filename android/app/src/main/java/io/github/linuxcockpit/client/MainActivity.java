@@ -760,6 +760,11 @@ public class MainActivity extends Activity {
          */
         @Override
         public void onReceivedClientCertRequest(WebView view, ClientCertRequest request) {
+            android.util.Log.i("Cockpit", "clientCertRequest host=" + request.getHost()
+                    + " port=" + request.getPort()
+                    + " keyTypes=" + java.util.Arrays.toString(request.getKeyTypes())
+                    + " principals=" + (request.getPrincipals() == null ? 0 : request.getPrincipals().length));
+            Toast.makeText(MainActivity.this, R.string.client_cert_picking, Toast.LENGTH_LONG).show();
             if (pendingCertRequest != null) pendingCertRequest.cancel(); // 只保留最新的一次
             pendingCertRequest = request;
             android.security.KeyChain.choosePrivateKeyAlias(
@@ -767,8 +772,13 @@ public class MainActivity extends Activity {
                     alias -> {
                         ClientCertRequest req = pendingCertRequest;
                         pendingCertRequest = null;
-                        if (req == null) return; // WebView 已经换了：这个请求作废
+                        android.util.Log.i("Cockpit", "clientCert alias=" + alias);
+                        if (req == null) {
+                            android.util.Log.w("Cockpit", "clientCert request stale, dropped");
+                            return; // WebView 已经换了：这个请求作废
+                        }
                         if (alias == null) {
+                            android.util.Log.w("Cockpit", "clientCert no alias picked");
                             req.cancel();
                             return;
                         }
@@ -777,7 +787,7 @@ public class MainActivity extends Activity {
                             try {
                                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
                                     // getCertificateChain 是 API 28+：更老的机器读不到链，只能取消
-                                    req.cancel();
+                                    failClientCert(req, "Android 9 以下读不到证书链");
                                     return;
                                 }
                                 PrivateKey key = android.security.KeyChain.getPrivateKey(
@@ -785,12 +795,14 @@ public class MainActivity extends Activity {
                                 X509Certificate[] chain = android.security.KeyChain.getCertificateChain(
                                         MainActivity.this, alias);
                                 if (key == null || chain == null || chain.length == 0) {
-                                    req.cancel();
+                                    failClientCert(req, "取不到私钥或证书链（alias=" + alias + "）");
                                     return;
                                 }
+                                android.util.Log.i("Cockpit", "clientCert proceed keyAlg="
+                                        + key.getAlgorithm() + " chainLen=" + chain.length);
                                 req.proceed(key, chain);
                             } catch (Exception e) {
-                                req.cancel(); // 取不到钥（别名失效 / 需要解锁）：当取消处理
+                                failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
                             }
                         });
                     },
@@ -799,6 +811,18 @@ public class MainActivity extends Activity {
                     request.getHost(),
                     request.getPort(),
                     null);
+        }
+
+        /** 客户端证书这条路走不通了：日志 + Toast 说清卡在哪，别让用户对着通用错误猜 */
+        private void failClientCert(ClientCertRequest req, String why) {
+            android.util.Log.w("Cockpit", "clientCert failed: " + why);
+            try {
+                req.cancel();
+            } catch (Exception ignored) {
+                /* 请求可能已经失效 */
+            }
+            Toast.makeText(MainActivity.this, getString(R.string.err_client_cert) + "（" + why + "）",
+                    Toast.LENGTH_LONG).show();
         }
     }
 

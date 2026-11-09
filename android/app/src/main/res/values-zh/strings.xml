@@ -32,6 +32,7 @@
     <string name="ssl_bypass_msg">%1$s 的 TLS 证书有问题：\n%2$s\n\n浏览器能打开、App 打不开，常常是因为 Chrome 自带一套证书校验、和 App 用的不是同一个。仅当你确认这是自己的服务器时再选「仍要连接」。</string>
     <string name="ssl_bypass_ok">仍要连接</string>
     <string name="ssl_bypass_cancel">取消</string>
+    <string name="client_cert_picking">服务器要求客户端证书，请在系统弹出的选择框里选一个</string>
     <string name="loading">正在加载…</string>
     <string name="back_again_to_exit">再按一次返回退出</string>
 </resources>
