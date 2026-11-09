@@ -94,6 +94,8 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingMic;
     /** 等着用户在系统 KeyChain 里挑客户端证书的请求（mTLS，弹窗开着时的那个）；WebView 换了就作废 */
     private ClientCertRequest pendingCertRequest;
+    /** 客户端证书这条路的现场记录：选了什么、发的链有几级、卡在哪——出错时摆到连接页 */
+    private String certDiag = "";
     /**
      * 本进程是否已经走过一次 requestPermissions(RECORD_AUDIO)。MIUI / HyperOS 等 ROM 在系统权限之外
      * 还有一层自己的管控：在设置里手动打开后 checkSelfPermission 已经是 GRANTED，但不经过一次
@@ -622,7 +624,8 @@ public class MainActivity extends Activity {
             String d = String.valueOf(err.getDescription());
             // 证书一类的问题说「证书」，别一律「连接断了」
             if (d.contains("ERR_BAD_SSL_CLIENT_AUTH_CERT"))
-                showConnect(getString(R.string.err_client_cert) + "（" + d + "）");
+                showConnect(getString(R.string.err_client_cert) + "（" + d
+                        + (certDiag.isEmpty() ? "" : " · " + certDiag) + "）");
             else if (d.contains("ERR_CERT") || d.contains("ERR_SSL"))
                 showConnect(getString(R.string.err_tls) + "（" + d + "）");
             else showConnect(getString(R.string.err_disconnected) + "（" + d + "）");
@@ -798,8 +801,15 @@ public class MainActivity extends Activity {
                                     failClientCert(req, "取不到私钥或证书链（alias=" + alias + "）");
                                     return;
                                 }
-                                android.util.Log.i("Cockpit", "clientCert proceed keyAlg="
-                                        + key.getAlgorithm() + " chainLen=" + chain.length);
+                                // 现场记录：选的哪个、密钥算法、链有几级、每级发给谁——服务端拒了
+                                // 我们的证书时，凭这个能看出是链不全还是选错了证
+                                StringBuilder sb = new StringBuilder();
+                                for (int i = 0; i < chain.length; i++)
+                                    sb.append(i == 0 ? "" : " → ")
+                                            .append(chain[i].getSubjectX500Principal().getName());
+                                certDiag = "已选 alias=" + alias + " keyAlg=" + key.getAlgorithm()
+                                        + " chainLen=" + chain.length + " [" + sb + "]";
+                                android.util.Log.i("Cockpit", "clientCert " + certDiag);
                                 req.proceed(key, chain);
                             } catch (Exception e) {
                                 failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -815,6 +825,7 @@ public class MainActivity extends Activity {
 
         /** 客户端证书这条路走不通了：日志 + Toast 说清卡在哪，别让用户对着通用错误猜 */
         private void failClientCert(ClientCertRequest req, String why) {
+            certDiag = why;
             android.util.Log.w("Cockpit", "clientCert failed: " + why);
             try {
                 req.cancel();
