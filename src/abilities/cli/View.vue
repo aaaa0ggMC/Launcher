@@ -23,8 +23,13 @@ const suggestions = shallowRef<string[]>([])
 const appsCache = shallowRef<Record<string, AppEntry>>({})
 
 async function refreshAliases(): Promise<void> {
-  const res = await window.cockpit.listApps()
-  appsCache.value = res.apps
+  // apps 是可选能力（构建期开关可关）：没有就没有别名可补全，不当错误弹
+  try {
+    const res = await window.cockpit.listApps()
+    appsCache.value = res.apps ?? {}
+  } catch {
+    appsCache.value = {}
+  }
 }
 
 function completeCandidates(): string[] {

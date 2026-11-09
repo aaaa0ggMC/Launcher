@@ -89,6 +89,16 @@ export function createCockpit(t: CockpitTransport) {
       : undefined
   }
 
+  /**
+   * 可选能力的注入点（apps / mirror / autostart / systemd / display…）：提供它的能力可能被
+   * 构建期开关关掉（「等于文件夹不存在」）、被平台过滤、或因能力依赖不满足而没注册。
+   * 按 DI 语义，调用方把「命令不存在」当作「没有这个选项」处理（promise 拒绝照常抛给调用方），
+   * 但不该弹「功能不存在」的中央提示窗——`meta.silent` 就是这层的声明（registry 的 silent
+   * 语义原本只给 gated 命令用，这里补上「可选能力」这一半）。
+   */
+  const opt = (name: string, args: CommandArgs = {}): Promise<unknown> =>
+    t.invoke('command:run', name, args, { ...agentMeta(), silent: true })
+
   const cockpit = {
     /** 该宿主能力的档位 */
     cap: (id: string): HostCap => t.caps?.[id] ?? 'native',
@@ -99,8 +109,8 @@ export function createCockpit(t: CockpitTransport) {
     /** cockpit-icon:// / cockpit-audio:// / cockpit-tile:// → 当前宿主可加载的 URL */
     hostUrl: (url: string): string => t.hostUrl?.(url) ?? url,
     // -- command dispatcher (CLI-first core) ----------------------------------
-    command: (name: string, args: CommandArgs = {}): Promise<unknown> =>
-      t.invoke('command:run', name, args, agentMeta()),
+    command: (name: string, args: CommandArgs = {}, opts?: { silent?: boolean }): Promise<unknown> =>
+      t.invoke('command:run', name, args, opts?.silent ? { ...agentMeta(), silent: true } : agentMeta()),
     listCommands: (): Promise<{ name: string; description: string; usage?: string }[]> =>
       t.invoke('command:list'),
 
@@ -119,26 +129,26 @@ export function createCockpit(t: CockpitTransport) {
     yarjDebug: t.yarjDebug,
 
     // apps registry
-    listApps: (): Promise<unknown> => cockpit.command('apps.list'),
-    appsConfig: (): Promise<unknown> => cockpit.command('apps.config'),
+    listApps: (): Promise<unknown> => opt('apps.list'),
+    appsConfig: (): Promise<unknown> => opt('apps.config'),
     getEntry: (root: string, id: string): Promise<unknown> =>
-      cockpit.command('apps.get', { root, id }),
+      opt('apps.get', { root, id }),
     updateEntry: (root: string, id: string, patch: CommandArgs): Promise<unknown> =>
-      cockpit.command('apps.update', { root, id, patch }),
+      opt('apps.update', { root, id, patch }),
     createEntry: (
       root: string,
       id: string,
       patch: CommandArgs,
       opts?: { mkdir?: boolean }
     ): Promise<unknown> =>
-      cockpit.command('apps.create', { root, id, patch, mkdir: opts?.mkdir ?? false }),
+      opt('apps.create', { root, id, patch, mkdir: opts?.mkdir ?? false }),
     deleteEntry: (root: string, id: string): Promise<unknown> =>
-      cockpit.command('apps.delete', { root, id }),
-    addRoot: (path: string): Promise<unknown> => cockpit.command('apps.add-root', { path }),
-    removeRoot: (path: string): Promise<unknown> => cockpit.command('apps.remove-root', { path }),
+      opt('apps.delete', { root, id }),
+    addRoot: (path: string): Promise<unknown> => opt('apps.add-root', { path }),
+    removeRoot: (path: string): Promise<unknown> => opt('apps.remove-root', { path }),
     moveRoot: (path: string, dir: -1 | 1): Promise<unknown> =>
-      cockpit.command('apps.move-root', { path, dir }),
-    rescan: (root: string): Promise<unknown> => cockpit.command('apps.rescan', { root }),
+      opt('apps.move-root', { path, dir }),
+    rescan: (root: string): Promise<unknown> => opt('apps.rescan', { root }),
 
     // background tasks (framework-level)
     btList: (): Promise<unknown> => cockpit.command('background.list'),
@@ -160,17 +170,17 @@ export function createCockpit(t: CockpitTransport) {
     btRestart: (id: string): Promise<unknown> => cockpit.command('background.restart', { id }),
 
     // mirror
-    getMirror: (): Promise<unknown> => cockpit.command('mirror.get'),
+    getMirror: (): Promise<unknown> => opt('mirror.get'),
 
     // autostart
-    listAutostart: (): Promise<unknown> => cockpit.command('autostart.list'),
+    listAutostart: (): Promise<unknown> => opt('autostart.list'),
     toggleAutostart: (file: string, hidden: boolean): Promise<unknown> =>
-      cockpit.command('autostart.toggle', { file, hidden }),
+      opt('autostart.toggle', { file, hidden }),
 
     // systemd
-    listSystemd: (): Promise<unknown> => cockpit.command('systemd.list'),
+    listSystemd: (): Promise<unknown> => opt('systemd.list'),
     systemdAction: (name: string, action: string): Promise<unknown> =>
-      cockpit.command('systemd.action', { name, action }),
+      opt('systemd.action', { name, action }),
 
     // docker
     listDocker: (): Promise<unknown> => cockpit.command('docker.list'),
@@ -184,9 +194,9 @@ export function createCockpit(t: CockpitTransport) {
     togglePm: (): Promise<unknown> => cockpit.command('hardware.pm-toggle'),
 
     // display
-    wallpapers: (dir: string): Promise<unknown> => cockpit.command('display.wallpapers', { dir }),
-    applyWallpaper: (path: string): Promise<unknown> => cockpit.command('display.apply', { path }),
-    outputs: (): Promise<unknown> => cockpit.command('display.outputs'),
+    wallpapers: (dir: string): Promise<unknown> => opt('display.wallpapers', { dir }),
+    applyWallpaper: (path: string): Promise<unknown> => opt('display.apply', { path }),
+    outputs: (): Promise<unknown> => opt('display.outputs'),
 
     // cli
     cliExec: (cmd: string): Promise<string> => t.invoke('cli:exec', cmd, agentMeta()),

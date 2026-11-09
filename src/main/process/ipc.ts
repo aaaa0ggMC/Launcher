@@ -313,7 +313,12 @@ export function registerIpc(): void {
   // CLI-first dispatcher: single source of truth for every ability action.
   ipcMain.handle(
     'command:run',
-    async (e, name: string, args: Record<string, unknown>, meta?: { agentSession?: unknown }) => {
+    async (
+      e,
+      name: string,
+      args: Record<string, unknown>,
+      meta?: { agentSession?: unknown; silent?: unknown }
+    ) => {
       // Renderer IPC is the user (`ui`). The renderer may only DOWNGRADE itself
       // to `agent-ui` (inspector-injected input in flight, see privacy.ts) —
       // a tag can never upgrade privileges, so trusting it is safe.
@@ -332,10 +337,13 @@ export function registerIpc(): void {
         // Command not registered (backing ability removed etc.) — notify every
         // window so the renderer can show a friendly toast, then rethrow so
         // existing callers keep their current error semantics. Mode/platform-
-        // GATED commands are silent (not exposed ≠ broken), so no toast.
+        // GATED commands are silent (not exposed ≠ broken), and callers may opt
+        // out with `meta.silent`（可选能力的注入点 preload/api.ts 的 opt() 就这么声明）—
+        // no toast either way, just a rejection.
         if (err instanceof UnknownCommandError) {
           log.warn('unknown command', err.commandName)
-          if (!err.silent) getBroadcast()('cockpit:command-error', err.commandName)
+          if (!err.silent && meta?.silent !== true)
+            getBroadcast()('cockpit:command-error', err.commandName)
         } else {
           log.error(`${name} failed`, err instanceof Error ? err.message : String(err))
         }

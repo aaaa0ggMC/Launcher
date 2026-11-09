@@ -525,11 +525,14 @@ export function startServer(opts: {
             })
           } catch (err) {
             const unknown = err instanceof UnknownCommandError
+            // `meta.silent`：调用方声明这是可选能力的注入点（preload/api.ts 的 opt()），
+            // 命令不存在 ≠ 坏了，别弹「功能不存在」的中央提示窗
+            const callerSilent = (body.meta as { silent?: unknown } | undefined)?.silent === true
             sendCommandResult(res, reqId, {
               ok: false,
               error: err instanceof Error ? err.message : String(err),
               unknown,
-              silent: unknown ? (err as UnknownCommandError).silent : undefined
+              silent: unknown ? (err as UnknownCommandError).silent || callerSilent : undefined
             })
           }
         })

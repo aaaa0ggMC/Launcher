@@ -77,7 +77,11 @@ export async function downloadUrlToLocal(
       filters: [{ name: 'All files', extensions: ['*'] }]
     })
     if (!path) return false
-    const res = (await window.cockpit.command('playground.download-url', { url, path })) as {
+    const res = (await window.cockpit.command(
+      'playground.download-url',
+      { url, path },
+      { silent: true } // 可选能力注入点：playground 被构建期开关关掉时只拒绝、不弹窗
+    )) as {
       ok?: boolean
       error?: string
     } | null
@@ -108,11 +112,15 @@ export async function downloadTextToLocal(
       await copyExportText(text)
       return 'clipboard'
     }
-    await window.cockpit.command('playground.download-url', {
-      url: '',
-      path: target.path,
-      text
-    })
+    await window.cockpit.command(
+      'playground.download-url',
+      {
+        url: '',
+        path: target.path,
+        text
+      },
+      { silent: true } // 可选能力注入点：playground 被构建期开关关掉时只拒绝、不弹窗
+    )
     return 'file'
   } catch {
     return false

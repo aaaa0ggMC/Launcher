@@ -32,8 +32,9 @@ export interface CockpitApi {
   cap: (id: string) => HostCap
   hasCap: (id: string) => boolean
   hostUrl: (url: string) => string
-  /** CLI-first dispatcher: run any registered ability command. */
-  command: (name: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** CLI-first dispatcher: run any registered ability command.
+   *  `opts.silent`：可选能力的注入点声明——命令不存在时只拒绝、不弹「功能不存在」窗。 */
+  command: (name: string, args?: Record<string, unknown>, opts?: { silent?: boolean }) => Promise<unknown>
   listCommands: () => Promise<{ name: string; description: string; usage?: string }[]>
   getConfig: () => Promise<Record<string, unknown> | null>
   setConfig: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>
