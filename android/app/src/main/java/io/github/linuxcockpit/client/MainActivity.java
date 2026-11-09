@@ -786,10 +786,19 @@ public class MainActivity extends Activity {
          */
         @Override
         public void onReceivedClientCertRequest(WebView view, ClientCertRequest request) {
-            android.util.Log.i("Cockpit", "clientCertRequest host=" + request.getHost()
+            String host = request.getHost() == null ? "" : request.getHost();
+            android.util.Log.i("Cockpit", "clientCertRequest host=" + host
                     + " port=" + request.getPort()
                     + " keyTypes=" + java.util.Arrays.toString(request.getKeyTypes())
                     + " principals=" + (request.getPrincipals() == null ? 0 : request.getPrincipals().length));
+            String remembered = prefs.getString("cert_alias_" + host, "");
+            if (!remembered.isEmpty()) {
+                // 这个 host 之前选过客户端证书：直接用它，不再弹选择框（Chrome 也会记住，
+                // 而 WebView 的 onReceivedClientCertRequest 每次握手都会来一遍）
+                android.util.Log.i("Cockpit", "clientCert reuse remembered alias=" + remembered);
+                useClientCert(request, remembered, host, true);
+                return;
+            }
             Toast.makeText(MainActivity.this, R.string.client_cert_picking, Toast.LENGTH_LONG).show();
             if (pendingCertRequest != null) pendingCertRequest.cancel(); // 只保留最新的一次
             pendingCertRequest = request;
@@ -807,55 +816,70 @@ public class MainActivity extends Activity {
                             runOnUiThread(req::cancel);
                             return;
                         }
-                        // KeyChain.getPrivateKey / getCertificateChain 是阻塞 binder 调用：
-                        // **主线程调会抛 IllegalStateException（"calling this from your main thread
-                        // can lead to deadlock"）**，所以取钥放后台线程，拿到再回 UI 线程 proceed。
-                        new Thread(() -> {
-                            String diag;
-                            PrivateKey key = null;
-                            X509Certificate[] chain = null;
-                            try {
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P)
-                                    throw new Exception("Android 9 以下读不到证书链");
-                                key = android.security.KeyChain.getPrivateKey(MainActivity.this, alias);
-                                chain = android.security.KeyChain.getCertificateChain(
-                                        MainActivity.this, alias);
-                                if (key == null || chain == null || chain.length == 0)
-                                    throw new Exception("取不到私钥或证书链（alias=" + alias + "）");
-                                // 现场记录：选的哪个、密钥算法、链有几级、每级发给谁——服务端拒了
-                                // 我们的证书时，凭这个能看出是链不全还是选错了证
-                                StringBuilder sb = new StringBuilder();
-                                for (int i = 0; i < chain.length; i++)
-                                    sb.append(i == 0 ? "" : " → ")
-                                            .append(chain[i].getSubjectX500Principal().getName());
-                                diag = "已选 alias=" + alias + " keyAlg=" + key.getAlgorithm()
-                                        + " chainLen=" + chain.length + " [" + sb + "]";
-                            } catch (Exception e) {
-                                diag = e.getClass().getSimpleName() + ": " + e.getMessage();
-                            }
-                            final PrivateKey fKey = key;
-                            final X509Certificate[] fChain = chain;
-                            final String fDiag = diag;
-                            runOnUiThread(() -> {
-                                if (fKey == null || fChain == null) {
-                                    failClientCert(req, fDiag);
-                                    return;
-                                }
-                                certDiag = fDiag;
-                                android.util.Log.i("Cockpit", "clientCert " + fDiag);
-                                try {
-                                    req.proceed(fKey, fChain);
-                                } catch (Exception e) {
-                                    failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
-                                }
-                            });
-                        }, "cockpit-keychain").start();
+                        // 记住这次选的，下次同一 host 不再问
+                        prefs.edit().putString("cert_alias_" + host, alias).apply();
+                        useClientCert(req, alias, host, false);
                     },
                     request.getKeyTypes(),
                     request.getPrincipals(),
                     request.getHost(),
                     request.getPort(),
                     null);
+        }
+
+        /**
+         * 用指定 alias 走完客户端证书：取钥 / 读链在**后台线程**（KeyChain 这两个调用是阻塞
+         * binder，主线程调会抛 IllegalStateException: calling this from your main thread
+         * can lead to deadlock），拿到再回 UI 线程 proceed。
+         *
+         * @param remembered true = 用的是记忆的 alias：失败了清掉记忆并重新弹选择框，
+         *                    别把用户卡在一条坏记忆上
+         */
+        private void useClientCert(ClientCertRequest req, String alias, String host, boolean remembered) {
+            new Thread(() -> {
+                String diag;
+                PrivateKey key = null;
+                X509Certificate[] chain = null;
+                try {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P)
+                        throw new Exception("Android 9 以下读不到证书链");
+                    key = android.security.KeyChain.getPrivateKey(MainActivity.this, alias);
+                    chain = android.security.KeyChain.getCertificateChain(MainActivity.this, alias);
+                    if (key == null || chain == null || chain.length == 0)
+                        throw new Exception("取不到私钥或证书链（alias=" + alias + "）");
+                    // 现场记录：选的哪个、密钥算法、链有几级、每级发给谁——服务端拒了
+                    // 我们的证书时，凭这个能看出是链不全还是选错了证
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < chain.length; i++)
+                        sb.append(i == 0 ? "" : " → ")
+                                .append(chain[i].getSubjectX500Principal().getName());
+                    diag = "已选 alias=" + alias + " keyAlg=" + key.getAlgorithm()
+                            + " chainLen=" + chain.length + " [" + sb + "]";
+                } catch (Exception e) {
+                    diag = e.getClass().getSimpleName() + ": " + e.getMessage();
+                }
+                final PrivateKey fKey = key;
+                final X509Certificate[] fChain = chain;
+                final String fDiag = diag;
+                runOnUiThread(() -> {
+                    if (fKey == null || fChain == null) {
+                        if (remembered) {
+                            // 记忆的 alias 不好使了：清掉，让下次重新选
+                            prefs.edit().remove("cert_alias_" + host).apply();
+                            android.util.Log.w("Cockpit", "clientCert remembered alias broken, cleared");
+                        }
+                        failClientCert(req, fDiag);
+                        return;
+                    }
+                    certDiag = fDiag;
+                    android.util.Log.i("Cockpit", "clientCert " + fDiag);
+                    try {
+                        req.proceed(fKey, fChain);
+                    } catch (Exception e) {
+                        failClientCert(req, e.getClass().getSimpleName() + ": " + e.getMessage());
+                    }
+                });
+            }, "cockpit-keychain").start();
         }
 
         /** 客户端证书这条路走不通了：日志 + Toast 说清卡在哪，别让用户对着通用错误猜 */
