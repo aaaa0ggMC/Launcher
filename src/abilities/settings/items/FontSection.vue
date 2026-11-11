@@ -69,6 +69,7 @@ defineExpose({
       <v-radio :label="translate(uiLang, 'font.custom')" value="custom" />
     </v-radio-group>
     <KitTextField
+      size="inline"
       v-if="mode === 'custom'"
       v-model="family"
       :label="translate(uiLang, 'font.family')"

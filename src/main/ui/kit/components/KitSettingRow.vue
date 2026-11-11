@@ -18,6 +18,7 @@
 import { computed, toValue, useSlots } from 'vue'
 import type { Ref } from 'vue'
 import { useAdaptive } from '../composables/useAdaptive'
+import KitSlider from './KitSlider.vue'
 import KitSmartRow from '../layout/KitSmartRow.vue'
 import KitRowItem from '../layout/KitRowItem.vue'
 import KitNumberStepper from './KitNumberStepper.vue'
@@ -45,6 +46,8 @@ const props = defineProps<{
   slider?: boolean
   /** 隐藏右侧数值（数值型行默认显示） */
   hideValue?: boolean
+  /** 控件密度档（缺省 inline = 设置行行内档；独立大表单可传 'input'） */
+  controlSize?: 'input' | 'inline'
   /**
    * 窄屏判定的外部覆盖：传 true 强制按手机档渲染（步进器、隐藏数值框）。
    * 缺省跟视口断点（useAdaptive 的 720）；容器比视口窄的场景（画廊宽度模拟器、
@@ -65,6 +68,7 @@ const narrow = computed(() =>
 )
 
 const priority = computed(() => (props.secondary ? 'secondary' : 'primary'))
+const controlSize = computed(() => props.controlSize ?? 'inline')
 const showSlider = computed(() => props.slider === true && !narrow.value)
 const hasControl = computed(() => slots.default !== undefined)
 const valueText = computed<string | undefined>(() => {
@@ -88,27 +92,27 @@ const valueText = computed<string | undefined>(() => {
 
     <!-- 控件：调用方给插槽；没给插槽时按数值型行渲染步进器 / 滑块 -->
     <KitRowItem v-if="hasControl" :priority="priority" :min-width="controlWidth ?? 160">
-      <slot />
+      <!-- 行内档：设置行不该出现 44px 的方块（SPEC「密度阶」）。调用方可用 control-size 覆盖 -->
+      <slot :size="controlSize" />
     </KitRowItem>
     <KitRowItem
       v-else-if="modelValue !== undefined"
       :priority="priority"
       :min-width="controlWidth ?? 120"
     >
-      <v-slider
+      <KitSlider
         v-if="showSlider"
+        size="inline"
         :model-value="modelValue"
         :min="min ?? 0"
         :max="max ?? 100"
         :step="step ?? 1"
-        density="compact"
-        hide-details
-        color="primary"
         :aria-label="label"
         @update:model-value="$emit('update:modelValue', Number($event))"
       />
       <KitNumberStepper
         v-else
+        size="inline"
         :model-value="modelValue"
         :min="min ?? 0"
         :max="max ?? 100"

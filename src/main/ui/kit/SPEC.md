@@ -24,16 +24,27 @@
 
 ## 2. 密度阶（实测数字）
 
-| 档位                 | 控件高                            | 字号      | 用在哪                 |
-| -------------------- | --------------------------------- | --------- | ---------------------- |
-| compact（全局默认）  | 输入 44px / 开关 44px / 滑块 44px | 0.875rem  | 设置项、工具条、列表行 |
-| default              | 输入 56px                         | 0.875rem  | 独立表单、对话框主输入 |
-| tight（窄屏 ≤720px） | 输入 40px / 开关 40px             | 0.8125rem | 手机上的密集区         |
+| 档位                               | 控件高（实测）                                         | 字号      | 用在哪                      |
+| ---------------------------------- | ------------------------------------------------------ | --------- | --------------------------- |
+| `input`（独立表单 / 对话框）       | **44px**（text/select/slider/switch/stepper 全部一致） | 0.875rem  | KitFormDialog、独立大表单   |
+| `inline`（**KitSettingRow 默认**） | **35px**（四类控件全部一致）                           | 0.875rem  | 设置行：一行文字 + 一个控件 |
+| `tight`（窄屏 ≤720px）             | inline 28px / input 36px                               | 0.8125rem | 手机上的密集区              |
 
-实测备注：Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
-（实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
-四个控件（text-field / select / slider / switch / stepper）统一落在 44px 的办法是
-不碰内部高度，只把 switch / slider 拉到同一档。
+实测备注（Electron + uiScale 1.1 下量到）：
+
+- Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
+  （实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
+  五类控件统一落在 44px 的办法是不碰内部高度，只把 switch / slider 拉到同一档。
+- `inline` 档 = 文字行高（24px）+ 11px。设置行不该出现 44px 的方块：实测输入档 44-48px
+  而同行文字行高只有 24px，视觉上下坠一个大方块。inline 用 underlined 细线
+  （无 outlined 大盒、无背景块），四类控件（下拉 / 步进器 / 滑块 / 开关）高度一致 = 35px。
+- **滑块必须吃满控件槽**：`v-slider` 默认没有 width/flex，在 flex 容器里按内容宽收缩，
+  轨道溢出盒子被 `.kit-row-item` 的 `overflow:hidden` 裁掉——用户看到的「右边一个点」。
+  实测修前轨道 114px / 控件盒 104px（溢出 10px 被裁）；误加 `width:100%` 反而塌成 0
+  （父盒本身是内容宽的，百分比解析为 0）。正确做法：`.kit-control--fill { flex: 1 1 auto }`
+  让**根盒**先吃满槽，滑块再 `flex: 1 1 auto`。修后轨道 = 控件槽全宽。
+- **Vue 会把缺席的 Boolean prop 铸成 `false`**：「默认开」的开关（如 `fill`）必须用
+  `withDefaults(defineProps<…>(), { fill: true })` 声明默认值，否则默认是关的（踩过）。
 
 ## 3. 字号阶与行高
 
