@@ -375,6 +375,13 @@ props / 插槽都在各自文件头；退化行为：窄屏（≤720px）标题�
 画廊是 `@ui/kit` 的第一个真实消费者（解决 tree-shake：`build:headless --only settings`
 里能看到 `KitSmartRowDemo` / `KitSettingRowDemo` 等 chunk）。
 
+## 6.5 参考实现（迁移照抄）
+
+`src/abilities/mirror/View.vue` 是第一个整体迁到 kit 的内容页：`KitPage mode="document"`
+
+- `KitSection`（标题 + 操作插槽）+ `KitGrid` 卡片网格 + `KitSwitch` + `KitEmpty`。
+  「几分钟一个页面」照这个结构抄即可，详见 SPEC §12。
+
 ## 7. 待补积木（下一批）
 
 `KitToolbar`（图标组 `size=small + ga-1` / 文字组默认密度 + `ga-2` 分插槽，窄屏文字组收进 ⋮，
