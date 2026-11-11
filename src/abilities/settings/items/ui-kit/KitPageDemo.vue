@@ -6,7 +6,7 @@
  */
 import { inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitPage, KitSection } from '@ui/kit'
+import { KitCaption, KitPage, KitProse, KitSection, KitTitle } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 
@@ -19,7 +19,7 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
 <template>
   <KitDemoCard
     :title="t('kit.gallery.page.title', 'KitPage · 页面外壳（三种滚动模式）')"
-    import-path="import { KitPage, KitSection } from '@ui/kit'"
+    import-path="import { KitCaption, KitPage, KitProse, KitSection, KitTitle } from '@ui/kit'"
     :use="
       t(
         'kit.gallery.page.use',
@@ -36,16 +36,16 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
     <div class="kit-demo-grid">
       <!-- document：正常文档流 -->
       <div class="kit-demo-mode">
-        <div class="kit-demo-mode__head text-subtitle-2">document</div>
+        <KitTitle level="sub">document</KitTitle>
         <div class="kit-demo-mode__scroll">
           <KitPage mode="document">
             <KitSection
               :title="t('kit.gallery.page.docTitle', '长表单')"
               icon="mdi-format-list-bulleted"
             >
-              <div v-for="n in lines" :key="n" class="kit-demo-line">
+              <KitCaption v-for="n in lines" :key="n" class="kit-demo-line">
                 {{ n }}. {{ t('kit.gallery.page.row', '设置项') }}
-              </div>
+              </KitCaption>
             </KitSection>
           </KitPage>
         </div>
@@ -53,33 +53,29 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
 
       <!-- app：页面级零滚动，内部区域各自滚 -->
       <div class="kit-demo-mode">
-        <div class="kit-demo-mode__head text-subtitle-2">app</div>
+        <KitTitle level="sub">app</KitTitle>
         <div class="kit-demo-mode__app">
           <KitPage mode="app">
             <KitSection
               :title="t('kit.gallery.page.fixedHead', '固定顶栏')"
               icon="mdi-page-layout-header"
             >
-              <span class="text-body-2">{{
-                t('kit.gallery.page.fixedHeadDesc', '不滚动的头部')
-              }}</span>
+              <KitProse>t('kit.gallery.page.fixedHeadDesc', '不滚动的头部')</KitProse>
             </KitSection>
             <KitSection
               scroll
               :title="t('kit.gallery.page.scrollBody', '可滚内容区')"
               icon="mdi-format-list-bulleted"
             >
-              <div v-for="n in lines" :key="n" class="kit-demo-line">
+              <KitCaption v-for="n in lines" :key="n" class="kit-demo-line">
                 {{ n }}. {{ t('kit.gallery.page.row', '设置项') }}
-              </div>
+              </KitCaption>
             </KitSection>
             <KitSection
               :title="t('kit.gallery.page.fixedFoot', '固定底栏')"
               icon="mdi-page-layout-footer"
             >
-              <span class="text-body-2">{{
-                t('kit.gallery.page.fixedFootDesc', '输入条 / 操作区')
-              }}</span>
+              <KitProse>t('kit.gallery.page.fixedFootDesc', '输入条 / 操作区')</KitProse>
             </KitSection>
           </KitPage>
         </div>
@@ -87,7 +83,7 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
 
       <!-- canvas：两个滚动条都在 -->
       <div class="kit-demo-mode">
-        <div class="kit-demo-mode__head text-subtitle-2">canvas</div>
+        <KitTitle level="sub">canvas</KitTitle>
         <div class="kit-demo-mode__app">
           <KitPage mode="canvas">
             <KitSection
@@ -103,9 +99,9 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
               :title="t('kit.gallery.page.panel', '浮层面板（内滚）')"
               icon="mdi-format-list-bulleted"
             >
-              <div v-for="n in lines" :key="n" class="kit-demo-line">
+              <KitCaption v-for="n in lines" :key="n" class="kit-demo-line">
                 {{ n }}. {{ t('kit.gallery.page.row', '设置项') }}
-              </div>
+              </KitCaption>
             </KitSection>
           </KitPage>
         </div>

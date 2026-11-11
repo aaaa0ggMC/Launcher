@@ -33,6 +33,7 @@ import type { Ref } from 'vue'
 import { translate } from '../../i18n'
 import { useAdaptive, useContainerWidth } from '../composables/useAdaptive'
 import { useAnchor } from '../composables/useAnchor'
+import { useKitSurface } from '../composables/useKitSurface'
 import {
   applyNaturalFloor,
   planRow,
@@ -70,6 +71,7 @@ const emit = defineEmits<{
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+useKitSurface()
 const { narrow } = useAdaptive()
 const { target, width: containerWidth } = useContainerWidth()
 

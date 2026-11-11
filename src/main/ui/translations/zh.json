@@ -320,5 +320,20 @@
   "kit.gallery.stepper.draftNote": "试着在框里打「12」再删掉一位：中途不会被夹到 min，失焦/回车才落值。",
   "kit.gallery.followCount": "每天关注数",
   "kit.gallery.threads": "并发线程数",
-  "kit.gallery.cacheSize": "缓存大小"
+  "kit.gallery.cacheSize": "缓存大小",
+  "kit.gallery.foundation.title": "网格 · 圆形 stat · 占位",
+  "kit.gallery.foundation.use": "KitGrid 管多列等高与统一栏距；KitCircleStat 是「内容占 80%」的样板（直径 = 文本 × 1.25）；KitPlaceholder 代表一块全幅内容区。",
+  "kit.gallery.foundation.avoid": "不要手写 grid-template-columns 与斜纹背景——栏距、圆角、触控热区都从网格令牌算。",
+  "kit.gallery.foundation.circles": "圆形 stat（内容占直径 80%）",
+  "kit.gallery.foundation.circlesNote": "直径由文字推算：文本宽高 × 1.25（即文字占 80%），再夹在 44–132px。改字号不用改直径。",
+  "kit.gallery.foundation.grid": "网格（等宽栏 / 等高 / 统一栏距）",
+  "kit.gallery.foundation.cell": "格子 {n}",
+  "kit.gallery.foundation.gridNote": "格子里的数字是该格高度（从 4px 基础单位算）；栏距 8px、圆角 12px、触控热区 40px 都是令牌的整数倍。",
+  "kit.gallery.foundation.placeholder": "占位（代表一块全幅内容区）",
+  "kit.gallery.foundation.stripe": "stripe：画布 / 地图 / 图表区",
+  "kit.gallery.foundation.dots": "dots：列表 / 日志区",
+  "kit.gallery.foundation.plain": "plain：纯文本说明区",
+  "kit.hint.ok": "推荐",
+  "kit.hint.warn": "避免",
+  "kit.gallery.debugOutline": "布局自检：打开后本页所有元素描边，溢出容器的元素标红"
 }

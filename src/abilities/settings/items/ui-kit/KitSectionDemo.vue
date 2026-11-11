@@ -5,7 +5,7 @@
  */
 import { inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitPage, KitSection } from '@ui/kit'
+import { KitCaption, KitPage, KitProse, KitSection } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 
@@ -25,7 +25,8 @@ const lines = Array.from({ length: 18 }, (_, i) => i + 1)
 <template>
   <KitDemoCard
     :title="t('kit.gallery.section.title', 'KitSection · 分区卡片')"
-    import-path="import { KitSection } from '@ui/kit'"
+    import-path="@ui/kit"
+    :import-names="['KitSection']"
     :use="
       t(
         'kit.gallery.section.use',
@@ -45,9 +46,9 @@ const lines = Array.from({ length: 18 }, (_, i) => i + 1)
         icon="mdi-card-outline"
         :hint="t('kit.gallery.section.plainHint', '标题 + 说明 + 内容')"
       >
-        <span class="text-body-2">{{
+        <KitProse>{{
           t('kit.gallery.section.plainBody', '默认插槽放正文，纵向间距 8px。')
-        }}</span>
+        }}</KitProse>
       </KitSection>
 
       <KitSection
@@ -78,9 +79,9 @@ const lines = Array.from({ length: 18 }, (_, i) => i + 1)
             :title="t('kit.gallery.section.scroll', '内部滚动区')"
             icon="mdi-arrow-vertical-lock"
           >
-            <div v-for="n in lines" :key="n" class="kit-demo-line">
+            <KitCaption v-for="n in lines" :key="n" class="kit-demo-line">
               {{ n }}. {{ t('kit.gallery.page.row', '设置项') }}
-            </div>
+            </KitCaption>
           </KitSection>
         </KitPage>
       </div>

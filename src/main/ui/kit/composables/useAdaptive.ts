@@ -2,22 +2,9 @@ import { onScopeDispose, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useDisplay } from 'vuetify'
 import { installViewportVar } from '../../viewport'
+import { BREAKPOINTS, narrowQuery } from '../layout/tokens'
 
-/**
- * 断点令牌 —— kit 里**唯一**的一套。
- *
- * 仓里现存 480 / 520 / 560 / 600 / 640 / 720 六种断点并存（各能力各写各的），
- * kit 从这里收敛：后续能力迁移都引用这三个常量，不要再手写魔数。
- * `narrow`（720）是与全站（App.vue 侧栏、v-container 的 px-3）一致的兼容值，保留导出。
- */
-export const BREAKPOINTS = {
-  /** 小屏：手机 */
-  sm: 600,
-  /** 中屏：平板 / 窄桌面 */
-  md: 960,
-  /** 全站窄屏兼容值（App.vue / 各能力的 matchMedia 口径） */
-  narrow: 720
-} as const
+export { BREAKPOINTS, narrowQuery }
 
 /** 高度计算一律用 viewport.ts 的 --app-vh，不要写裸 100vh */
 export function appVh(): number {
@@ -114,11 +101,6 @@ export function useNarrow(bp: number | Ref<number> = BREAKPOINTS.narrow): Ref<bo
   })
 
   return narrow
-}
-
-/** 窄屏判定的 media query（单独导出便于单测与检索仓里还有没有手写魔数） */
-export function narrowQuery(bp: number): string {
-  return `(max-width: ${bp}px)`
 }
 
 export interface Adaptive {

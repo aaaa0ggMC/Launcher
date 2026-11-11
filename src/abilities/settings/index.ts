@@ -229,6 +229,26 @@ export default {
           component: defineAsyncComponent(() => import('./items/ui-kit/KitSectionDemo.vue'))
         },
         {
+          key: 'foundation',
+          label: '网格 · 圆形 stat · 占位',
+          icon: 'mdi-grid',
+          description: '80% 内容率与网格式计算：等宽等高网格、圆形数据卡、全幅内容占位',
+          keywords: [
+            '网格',
+            '单位',
+            '圆形',
+            '占比',
+            '80%',
+            '占位',
+            'grid',
+            'circle',
+            'placeholder',
+            'token'
+          ],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitFoundationDemo.vue'))
+        },
+        {
           key: 'stepper',
           label: '数字步进器',
           icon: 'mdi-numeric',

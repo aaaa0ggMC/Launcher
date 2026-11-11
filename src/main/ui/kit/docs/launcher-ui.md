@@ -25,6 +25,50 @@
 
 ---
 
+## 0.5 三条硬规则（引擎之外，所有积木都遵守）
+
+### A. 内容占容器 80%，余下 20% 做呼吸
+
+「内容占据容器的 80% 是理想状态」——落到工程上是一条可算的判据（`layout/fit.ts`，纯函数可单测）：
+
+```
+占比 = max(内容宽/容器宽, 内容高/容器高)
+≤ 80%  → roomy     （理想）
+≤ 100% → tight     （还够用，但没呼吸）
+> 100% → overflow  （必须降档，否则裁切 / 出滚动条）
+```
+
+**自动化**：`useFitBox()` / `KitFitBox` 量容器与内容（ResizeObserver，rAF 里先读后写），
+超 80% 就降档（字号 / 内边距 × `fitScale`，有 0.5 下限），并暴露
+`fit: 'roomy' | 'tight' | 'overflow'` 让调用方做更激进的退化（藏次要信息）。
+圆形 stat 是样板：**直径 = 文本宽高 × 1.25（即文字占 80%），夹在 min/max 之间**
+——「圆被裁切、文字塞满整个圆」从公式上就不成立。
+
+### B. 表面材质：一套玻璃变量，跟随全局配置
+
+`useKitSurface()` 把设置 → 外观里的 `window.fuseAlpha` / `window.fuseBlur`
+（订阅 `cockpit:config-changed`，改动即时跟随）写成四个 CSS 变量：
+
+| 变量                | 值                                        | 用途                         |
+| ------------------- | ----------------------------------------- | ---------------------------- |
+| `--kit-glass-alpha` | `fuseAlpha`（默认 1 = 不透，保持旧观感）  | 表面不透明度                 |
+| `--kit-glass-blur`  | `fuseBlur`（`blur=off`/窄屏 auto 时为 0） | 表面模糊                     |
+| `--kit-surface`     | `var(--v-theme-surface)`                  | 表面基色（主题切换自动跟随） |
+| `--kit-border`      | `rgba(var(--v-theme-on-surface), 0.12)`   | 表面描边                     |
+
+所有 kit 表面（`.kit-surface` / `.kit-overflow` / 后续的 dialog、sheet、chip 底、代码块）
+**只用这组变量**，不各写各的 `backdrop-filter`。首帧同步写默认值（实心 surface），
+不会出现「没有背景色」的一帧。
+
+### C. 网格式计算：一切尺寸从令牌算
+
+`layout/tokens.ts` 是唯一来源：**基础单位 4px**，栏距 8px、圆角 12px、触控热区 40px、
+文字按钮 36px、图标按钮 32px——全是单位的整数倍。`grid(n)` = 4n。
+组件里不写裸数字（写裸数字的地方请改成 `grid(n)` 或 `GRID.*`）。
+断点令牌也在这里：`sm 600 / md 960 / narrow 720`（全站兼容值）。
+
+---
+
 ## 1. 排版引擎（`layout/engine.ts`，纯函数、无 DOM、可单测）
 
 ### 1.1 元素的大小怎么确定
@@ -128,6 +172,27 @@ for 每个规划单元（单元素，或 KitRowGroup 捆成的一组）:
 
 不缩小字号来逃避布局问题（DESIGN §1.2）：「缩小」= 内容压缩到声明下限为止，
 下限就是「不变形的最小宽度」。
+
+### 1.7 Vuetify 控件的自然宽度 vs 引擎采用宽度（排查裁剪的入口）
+
+实测数据（Electron + 真实 Vuetify 主题量得；`minUsable` = 不裁切的最小宽度）：
+
+| 控件                      | 自然宽度                                           | kit 的类型默认值       | 要显式 minWidth 吗      |
+| ------------------------- | -------------------------------------------------- | ---------------------- | ----------------------- |
+| `v-switch`（compact）     | 28px（wrapper；轨道 36px 会溢出 wrapper 4px/侧）   | `control` 88           | 不用（但别低于 40）     |
+| `v-switch`（默认密度）    | 40px                                               | 同上                   | 不用                    |
+| `v-slider`                | 百分比宽（弹性）                                   | `slider` 120 / 手机 88 | 不用（低于 ~88 不好用） |
+| `v-select`                | 百分比宽；min-content ≈ 70px                       | `control` 88           | 要（内容长时给 120+）   |
+| `v-text-field`            | 百分比宽；min-content ≈ 60px                       | `number` 64            | 要（内容长时给 80+）    |
+| `v-btn` `size=small icon` | 50px（CSS `min-width`）                            | `icon` 40              | 要（给 56+）            |
+| `v-btn` 文字 + 图标       | min-width 64 + 文字                                | `control` 88           | 要（按文字长度）        |
+| `v-chip`                  | 文字 + 16px 内边距                                 | `label` 估算 + 8       | 要（自绘 chip 一定量）  |
+| 自绘 chip / 徽标          | **必须实测**（padding + 字号都可能和估算差 3-4px） | —                      | 要                      |
+
+**教训**：声明下限是个谎言时元素会被 `overflow:hidden` 裁一截（实测：自绘 chip 声明 46、
+自然 49 → 右缘切 3px）。引擎已内建两道防线——规划前把刚性元素的下限抬到实测自然宽度
+（`applyNaturalFloor`），应用后再做一次「溢出复核」把仍被裁的标成刚性重规划。
+**排查入口**：gallery 的「布局自检」开关打开后，被裁 / 溢出的元素会描红。
 
 ### 1.6 什么时候需要手填 minWidth
 
@@ -279,6 +344,20 @@ appVh() // 读 --app-vh（不写裸 100vh）
 - 纯图标按钮必须 `aria-label` + `title`。
 
 ---
+
+## 5.5 新增积木速查（第二批）
+
+| 积木                                   | 什么时候用                                 | 不要用什么                                    |
+| -------------------------------------- | ------------------------------------------ | --------------------------------------------- |
+| `KitGrid`                              | 多列等高 + 统一栏距（设置项并排、卡片墙）  | 不要手写 `grid-template-columns`              |
+| `KitCircleStat`                        | 圆形数据卡（CPU / 内存 / 计数）            | 不要自己用 `border-radius:50%` + 绝对定位文字 |
+| `KitPlaceholder`                       | 代表一块全幅内容区（canvas / 列表 / 说明） | 不要在各页复制斜纹背景                        |
+| `KitTitle` / `KitProse` / `KitCaption` | 标题 / 正文 / 说明小字（窄屏自动降档）     | 不要写裸 `text-body-2` / `text-caption`       |
+| `KitHint`                              | ✓/✗ 提示行（tone: ok/warn）                | 不要手写图标 + 颜色                           |
+| `KitCodeInline` / `KitImport`          | 行内代码 / import 行                       | 不要手写 `<code>` 样式                        |
+
+props / 插槽都在各自文件头；退化行为：窄屏（≤720px）标题小一档、正文降到 caption 档、
+代码与 import 行降一档字号；`KitGrid` 默认窄屏收成单列。
 
 ## 6. 画廊：设置页「UI 库」分类
 

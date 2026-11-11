@@ -320,5 +320,20 @@
   "kit.gallery.stepper.draftNote": "Try typing \"12\" then deleting a digit: nothing clamps mid-typing — only blur / Enter / ± commits.",
   "kit.gallery.followCount": "Follows per day",
   "kit.gallery.threads": "Worker threads",
-  "kit.gallery.cacheSize": "Cache size"
+  "kit.gallery.cacheSize": "Cache size",
+  "kit.gallery.foundation.title": "Grid · circle stat · placeholder",
+  "kit.gallery.foundation.use": "KitGrid owns multi-column equal heights and a unified gutter; KitCircleStat is the reference implementation of the 80% content rate (diameter = text × 1.25); KitPlaceholder stands for a full-bleed content area.",
+  "kit.gallery.foundation.avoid": "Don't hand-write grid-template-columns or diagonal stripes — gutter, radius and touch targets all come from the grid tokens.",
+  "kit.gallery.foundation.circles": "Circle stats (content = 80% of the diameter)",
+  "kit.gallery.foundation.circlesNote": "The diameter is derived from the text: box × 1.25 (i.e. text occupies 80%), clamped to 44–132px. Change the font size and the diameter follows.",
+  "kit.gallery.foundation.grid": "Grid (equal columns / equal heights / unified gutter)",
+  "kit.gallery.foundation.cell": "Cell {n}",
+  "kit.gallery.foundation.gridNote": "The number in each cell is its height (multiples of the 4px base unit); gutter 8px, radius 12px and the 40px touch target are all token multiples.",
+  "kit.gallery.foundation.placeholder": "Placeholder (stands for a full-bleed content area)",
+  "kit.gallery.foundation.stripe": "stripe: canvas / map / chart area",
+  "kit.gallery.foundation.dots": "dots: list / log area",
+  "kit.gallery.foundation.plain": "plain: plain-text notes",
+  "kit.hint.ok": "Recommended",
+  "kit.hint.warn": "Avoid",
+  "kit.gallery.debugOutline": "Layout self-check: outlines every element on this page and marks overflowing ones in red"
 }

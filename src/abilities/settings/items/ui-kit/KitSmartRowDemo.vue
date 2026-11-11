@@ -8,7 +8,14 @@
  */
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitRowGroup, KitRowItem, KitSmartRow } from '@ui/kit'
+import {
+  KitCaption,
+  KitDebugOutline,
+  KitProse,
+  KitRowGroup,
+  KitRowItem,
+  KitSmartRow
+} from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 import KitWidthStage from './KitWidthStage.vue'
@@ -39,6 +46,7 @@ const stateText = computed(() => {
   return parts.join(' · ')
 })
 
+const debugOn = ref(false)
 const qualities = [
   { title: '流畅', value: 'low' },
   { title: '均衡', value: 'medium' },
@@ -49,7 +57,8 @@ const qualities = [
 <template>
   <KitDemoCard
     :title="t('kit.gallery.smartRow.title', 'KitSmartRow · 智能行')"
-    import-path="import { KitSmartRow, KitRowItem, KitRowGroup } from '@ui/kit'"
+    import-path="@ui/kit"
+    :import-names="['KitSmartRow', 'KitRowItem', 'KitRowGroup']"
     :use="
       t(
         'kit.gallery.smartRow.use',
@@ -63,6 +72,15 @@ const qualities = [
       )
     "
   >
+    <!-- 布局自检：打开后本页所有元素描边、溢出容器的元素标红（默认关，仅演示） -->
+    <div class="kit-demo-debug">
+      <v-switch v-model="debugOn" density="compact" hide-details color="warning" />
+      <KitProse muted>
+        {{ t('kit.gallery.debugOutline', '布局自检：打开后本页所有元素描边，溢出容器的元素标红') }}
+      </KitProse>
+    </div>
+    <KitDebugOutline :active="debugOn" :interval="600" />
+
     <KitWidthStage
       :initial="720"
       :min="240"
@@ -93,10 +111,10 @@ const qualities = [
         </KitRowGroup>
       </KitSmartRow>
 
-      <div class="kit-demo-state text-caption on-surface-variant">
+      <KitProse muted class="kit-demo-state">
         <v-icon icon="mdi-information-outline" size="14" />
         <span>{{ stateText }}</span>
-      </div>
+      </KitProse>
 
       <!-- 次要元素整行隐藏 + 「更多」浮层 -->
       <KitSmartRow :gap="8" :label="t('kit.gallery.secondaryRow', '次要元素（tertiary 先藏）')">
@@ -119,10 +137,10 @@ const qualities = [
           <v-switch v-model="notify" density="compact" hide-details color="primary" />
         </KitRowItem>
         <KitRowItem kind="label" priority="tertiary" :text="t('kit.gallery.latency', '延迟 12ms')">
-          <span class="kit-demo-chip">{{ t('kit.gallery.latency', '延迟 12ms') }}</span>
+          <KitCaption class="kit-demo-chip">{{ t('kit.gallery.latency', '延迟 12ms') }}</KitCaption>
         </KitRowItem>
         <KitRowItem kind="label" priority="tertiary" :text="t('kit.gallery.fps', '60 FPS')">
-          <span class="kit-demo-chip">{{ t('kit.gallery.fps', '60 FPS') }}</span>
+          <KitCaption class="kit-demo-chip">{{ t('kit.gallery.fps', '60 FPS') }}</KitCaption>
         </KitRowItem>
       </KitSmartRow>
 
@@ -162,6 +180,12 @@ const qualities = [
   border-radius: 999px;
   font-size: 0.75rem;
   background: rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.kit-demo-debug {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .kit-demo-state {

@@ -10,7 +10,8 @@
  */
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { translate } from '../../../../main/ui/i18n'
+import { translate } from '@ui/i18n'
+import { KitCaption } from '@ui/kit'
 
 const props = withDefaults(
   defineProps<{
@@ -128,9 +129,7 @@ const boxStyle = computed(() => ({
 
     <div ref="trackEl" class="kit-stage__track">
       <div class="kit-stage__box" :style="boxStyle">
-        <div v-if="caption" class="kit-stage__caption text-caption on-surface-variant">
-          {{ caption }}
-        </div>
+        <KitCaption v-if="caption" class="kit-stage__caption">{{ caption }}</KitCaption>
         <slot />
       </div>
       <div

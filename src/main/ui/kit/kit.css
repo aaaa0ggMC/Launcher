@@ -6,6 +6,19 @@
  * 是 teleport 到 body 的（为了不被祖先的 overflow:hidden 裁掉），必须用全局样式。
  * ------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+ * 玻璃材质：所有 kit 表面只用这一组变量（值由 useKitSurface 按全局
+ * fuseAlpha / fuseBlur 写入，主题切换自动跟随 --v-theme-*）。
+ * 不各写各的 backdrop-filter——改样式改这里。
+ * ------------------------------------------------------------------------- */
+.kit-surface {
+  background: rgba(var(--kit-surface), var(--kit-glass-alpha));
+  backdrop-filter: blur(var(--kit-glass-blur));
+  -webkit-backdrop-filter: blur(var(--kit-glass-blur));
+  border: 1px solid var(--kit-border);
+  color: rgb(var(--v-theme-on-surface));
+}
+
 /* 「更多」溢出浮层：被 KitSmartRow 隐藏的控件 teleport 到这里，功能不丢失 */
 .kit-overflow {
   position: fixed;
@@ -20,8 +33,10 @@
   gap: 8px;
   padding: 12px;
   border-radius: 12px;
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  background: rgba(var(--kit-surface), var(--kit-glass-alpha));
+  backdrop-filter: blur(var(--kit-glass-blur));
+  -webkit-backdrop-filter: blur(var(--kit-glass-blur));
+  border: 1px solid var(--kit-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   color: rgb(var(--v-theme-on-surface));
 }
@@ -44,8 +59,152 @@
   flex: none;
 }
 
+/* 玻璃卡片：gallery / 需要浮起的内容面（吃全局透明与模糊配置） */
+.kit-glass-card {
+  border-radius: 12px;
+  padding: 12px;
+}
+
 /* 等宽数值（设置行右侧的数值、步进器输入）——读数不跳 */
 .kit-num {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * 排版积木（P0-1：gallery 里不允许再出现未被 kit 包裹的可见元素）。
+ * 全部走 --v-theme-*（10 套主题）+ 网格令牌；窄屏自动降档。
+ * ------------------------------------------------------------------------- */
+.kit-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: rgb(var(--v-theme-on-surface));
+  min-width: 0;
+}
+
+.kit-title--sub {
+  font-size: 0.9375rem;
+}
+
+.kit-title__icon {
+  opacity: 0.8;
+  flex: none;
+}
+
+.kit-prose {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: rgba(var(--v-theme-on-surface-variant), 0.92);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kit-caption {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface-variant), 0.8);
+  min-width: 0;
+}
+
+/* ✓/✗ 提示行：tone=ok 用 success、warn 用 warning（不再手写图标 + 颜色） */
+.kit-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  min-width: 0;
+}
+
+.kit-hint__icon {
+  margin-top: 2px;
+  flex: none;
+}
+
+.kit-hint--ok {
+  color: rgb(var(--v-theme-success));
+}
+
+.kit-hint--warn {
+  color: rgb(var(--v-theme-warning));
+}
+
+.kit-hint--plain {
+  color: rgba(var(--v-theme-on-surface-variant), 0.9);
+}
+
+/* 行内代码 */
+.kit-code {
+  font-family: 'Noto Sans Mono CJK SC', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  color: rgb(var(--v-theme-on-surface));
+  overflow-wrap: anywhere;
+}
+
+/* import 行：带图标 + 等宽，gallery 里每个积木的导入方式 */
+.kit-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-primary), 0.1);
+  border: 1px solid rgba(var(--v-theme-primary), 0.22);
+  font-family: 'Noto Sans Mono CJK SC', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: rgb(var(--v-theme-on-surface));
+  overflow-wrap: anywhere;
+}
+
+.kit-import__icon {
+  color: rgb(var(--v-theme-primary));
+  flex: none;
+}
+
+/* 窄屏降档：标题小一档、正文降到 caption 档、行内代码缩小 */
+@media (max-width: 720px) {
+  .kit-title {
+    font-size: 0.9375rem;
+  }
+
+  .kit-title--sub {
+    font-size: 0.875rem;
+  }
+
+  .kit-prose {
+    font-size: 0.8125rem;
+  }
+
+  .kit-code {
+    font-size: 0.75rem;
+  }
+
+  .kit-import {
+    font-size: 0.6875rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 布局自检（KitDebugOutline，默认关）：所有元素描边 + 溢出容器的元素标红。
+ * 打开方式：gallery「UI 库」第一项顶部的「布局自检」开关。
+ * ------------------------------------------------------------------------- */
+.kit-debug-on * {
+  outline: 1px solid rgba(var(--v-theme-primary), 0.3);
+  outline-offset: -1px;
+}
+
+.kit-debug-on .kit-debug-overflow,
+.kit-debug-on .kit-debug-overflow * {
+  outline: 1px solid rgb(var(--v-theme-error)) !important;
+  outline-offset: -1px;
+}
+
+.kit-debug-on .kit-debug-overflow {
+  background: rgba(var(--v-theme-error), 0.14) !important;
 }

@@ -5,7 +5,7 @@
  */
 import { inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitNumberStepper } from '@ui/kit'
+import { KitNumberStepper, KitProse } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 
@@ -32,7 +32,8 @@ function onFollow(v: number): void {
 <template>
   <KitDemoCard
     :title="t('kit.gallery.stepper.title', 'KitNumberStepper · 数字步进器')"
-    import-path="import { KitNumberStepper } from '@ui/kit'"
+    import-path="@ui/kit"
+    :import-names="['KitNumberStepper']"
     :use="
       t(
         'kit.gallery.stepper.use',
@@ -70,7 +71,7 @@ function onFollow(v: number): void {
         :label="t('kit.gallery.cacheSize', '缓存大小')"
       />
     </div>
-    <div class="kit-demo-hint text-caption on-surface-variant">
+    <KitProse muted class="kit-demo-hint">
       <v-icon icon="mdi-keyboard-outline" size="14" />
       <span>
         {{
@@ -81,7 +82,7 @@ function onFollow(v: number): void {
           )
         }}
       </span>
-    </div>
+    </KitProse>
   </KitDemoCard>
 </template>
 

@@ -128,13 +128,20 @@ const incLabel = (): string =>
   min-height: 40px;
 }
 
+/* 80% 内容率：文本框按「3 位数字 + 单位后缀」的量级收窄，文字放大一档，
+   整体不再比内容大一圈（用户反馈：整体大了一点、内部文字小了一点） */
 .kit-stepper__field {
   flex: 0 0 auto;
-  width: 76px;
+  width: 66px;
 }
 
 .kit-stepper__field :deep(input) {
   text-align: center;
+  font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
+}
+
+.kit-stepper__field :deep(.v-field__suffix) {
+  font-size: 0.8125rem;
 }
 </style>

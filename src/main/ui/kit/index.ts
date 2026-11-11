@@ -31,7 +31,11 @@ export {
   type RowSlot
 } from './layout/engine'
 
+// 网格令牌（所有尺寸从令牌算）
+export { BREAKPOINTS, GRID, grid, narrowQuery } from './layout/tokens'
+
 // 布局地基
+export { default as KitGrid } from './layout/KitGrid.vue'
 export { default as KitPage } from './layout/KitPage.vue'
 export { default as KitSection } from './layout/KitSection.vue'
 export { default as KitSmartRow } from './layout/KitSmartRow.vue'
@@ -41,16 +45,28 @@ export { default as KitRowGroup } from './layout/KitRowGroup.vue'
 // 设置行特化（P0）
 export { default as KitNumberStepper } from './components/KitNumberStepper.vue'
 export { default as KitSettingRow } from './components/KitSettingRow.vue'
+export { default as KitCircleStat } from './components/KitCircleStat.vue'
+export { default as KitTitle } from './components/KitTitle.vue'
+export { default as KitProse } from './components/KitProse.vue'
+export { default as KitCaption } from './components/KitCaption.vue'
+export { default as KitHint } from './components/KitHint.vue'
+export { default as KitCodeInline } from './components/KitCodeInline.vue'
+export { default as KitImport } from './components/KitImport.vue'
+export { default as KitDebugOutline } from './components/KitDebugOutline.vue'
+export { default as KitPlaceholder } from './components/KitPlaceholder.vue'
 
-// 测量 / 断点原语
+// 测量 / 断点 / 材质 / 适配原语
 export {
   appVh,
-  BREAKPOINTS,
   useAdaptive,
   useContainerWidth,
   useNarrow,
   type Adaptive
 } from './composables/useAdaptive'
+export { anchorPosition, rootZoom, useAnchor, type AnchorPlacement } from './composables/useAnchor'
+export { installKitSurface, useKitSurface } from './composables/useKitSurface'
+export { useFitBox } from './composables/useFitBox'
+export { circleDiameter, fitRatio, fitScale, fitState, type FitState } from './layout/fit'
 
 // 行内上下文类型（给要读取行状态的调用方）
 export { smartRowKey, rowGroupKey, DEFAULT_SLOT } from './layout/smart-row-context'
