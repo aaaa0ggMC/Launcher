@@ -8,7 +8,11 @@ import { useKitSurface } from '../composables/useKitSurface'
 
 defineOptions({ inheritAttrs: false })
 
-defineProps<{ modelValue?: boolean | null }>()
+defineProps<{
+  /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
+  size?: 'input' | 'inline'
+  modelValue?: boolean | null
+}>()
 const emit = defineEmits<{ 'update:modelValue': [boolean] }>()
 const attrs = useAttrs()
 useKitSurface()
@@ -17,7 +21,11 @@ const rootStyle = computed(() => ({ '--kit-fit-scale': '1' }))
 </script>
 
 <template>
-  <div class="kit-control" :style="rootStyle">
+  <div
+    class="kit-control"
+    :class="size === 'inline' ? 'kit-control--inline' : undefined"
+    :style="rootStyle"
+  >
     <v-switch
       :model-value="modelValue"
       density="compact"

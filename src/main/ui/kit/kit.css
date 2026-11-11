@@ -262,6 +262,24 @@
   min-height: 40px;
 }
 
+/* 滑块：**必须吃满控件槽**。v-slider 默认没有 width/flex，在 flex 容器里按内容宽收缩，
+   轨道会溢出盒子被 .kit-row-item 的 overflow:hidden 裁掉——用户看到的「右边一个点」。
+   实测：修前轨道 114px / 控件盒 104px（溢出 10px 被裁），修后轨道 = 控件槽全宽。 */
+/* fill 档：滑块吃满控件槽。v-slider 默认没有 width/flex，在 flex 容器里按内容宽收缩，
+   轨道会溢出盒子被 .kit-row-item 的 overflow:hidden 裁掉——用户看到的「右边一个点」。
+   实测：修前轨道 114px / 控件盒 104px（溢出 10px 被裁）；修后轨道 = 控件槽全宽。
+   注意不能给 .v-slider 写 width:100%——它的父 .kit-control 本身就是内容宽的，
+   百分比会解析成 0（实测滑轨塌成 0）。正确做法是让 .kit-control 先吃满槽。 */
+.kit-control--fill {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kit-control--fill .v-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .kit-control .v-slider-track {
   height: 4px;
 }
@@ -281,6 +299,84 @@
 .kit-control .v-selection-control {
   min-height: 40px !important;
   align-items: center;
+}
+
+/* ── inline 档（SPEC「密度阶」第三档）：设置行专用 ───────────────────────────
+   设置行是「一行文字 + 一个控件」，不该出现 44px 的方块：实测输入档 44-48px
+   而同行文字行高只有 24px，视觉上下坠一个大方块（用户原话「高了啊」）。
+   inline 档：underlined 细线（无 outlined 大盒、无背景块），高度 = 文字行高 + 8 = 32px。
+   步进器 / 下拉 / 滑块 / 开关在 inline 档下高度一致（同一条老规矩）。 */
+.kit-control--inline {
+  min-height: 32px;
+}
+
+.kit-control--inline .v-field {
+  min-height: 32px !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.kit-control--inline .v-field__outline {
+  display: none;
+}
+
+.kit-control--inline .v-field__input {
+  min-height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 0.875rem;
+}
+
+.kit-control--inline .v-slider {
+  min-height: 32px;
+}
+
+/* 步进器根盒也走 inline 档（KitNumberStepper 的根是 .kit-stepper，补 kit-control--inline 类） */
+.kit-stepper.kit-control--inline {
+  min-height: 32px;
+}
+
+.kit-stepper.kit-control--inline .v-field {
+  min-height: 32px !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.kit-stepper.kit-control--inline .v-field__outline {
+  display: none;
+}
+
+/* inline 档的数字框：3 位数字 + 单位后缀的量级（内容率 80%） */
+.kit-stepper.kit-control--inline .kit-stepper__field {
+  width: 64px;
+}
+
+.kit-stepper.kit-control--inline .kit-stepper__btn {
+  min-width: 40px;
+  min-height: 35px;
+}
+
+.kit-control--inline .v-switch,
+.kit-control--inline .v-selection-control {
+  min-height: 32px !important;
+}
+
+@media (max-width: 720px) {
+  .kit-control--inline {
+    min-height: 28px;
+  }
+
+  .kit-control--inline .v-field {
+    min-height: 28px !important;
+  }
+
+  .kit-control--inline .v-field__input {
+    font-size: 0.8125rem;
+  }
 }
 
 /* 窄屏：控件降一档（根盒 36px = grid(9)，字号小一档）——SPEC「密度阶」 */

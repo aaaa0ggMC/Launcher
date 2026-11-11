@@ -9,6 +9,8 @@ import { useKitSurface } from '../composables/useKitSurface'
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
+  /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
+  size?: 'input' | 'inline'
   modelValue?: unknown
   items?: readonly unknown[]
 }>()
@@ -23,12 +25,17 @@ void target
 </script>
 
 <template>
-  <div ref="target" class="kit-control" :style="rootStyle">
+  <div
+    ref="target"
+    class="kit-control"
+    :class="size === 'inline' ? 'kit-control--inline' : undefined"
+    :style="rootStyle"
+  >
     <v-select
       :model-value="modelValue"
       :items="items"
       density="compact"
-      variant="outlined"
+      :variant="size === 'inline' ? 'underlined' : 'outlined'"
       hide-details
       v-bind="attrs"
       @update:model-value="emit('update:modelValue', $event)"

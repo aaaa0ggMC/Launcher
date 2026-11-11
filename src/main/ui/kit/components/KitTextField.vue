@@ -13,6 +13,8 @@ import { useKitSurface } from '../composables/useKitSurface'
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
+  /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
+  size?: 'input' | 'inline'
   modelValue?: string | number | null
   /** 等宽数值框（居中 + tabular-nums） */
   numeric?: boolean
@@ -34,11 +36,19 @@ function onInput(v: unknown): void {
 </script>
 
 <template>
-  <div ref="target" class="kit-control" :class="{ 'kit-control--num': numeric }" :style="rootStyle">
+  <div
+    ref="target"
+    class="kit-control"
+    :class="[
+      size === 'inline' ? 'kit-control--inline' : undefined,
+      numeric ? 'kit-control--num' : undefined
+    ]"
+    :style="rootStyle"
+  >
     <v-text-field
       :model-value="modelValue"
       density="compact"
-      variant="outlined"
+      :variant="size === 'inline' ? 'underlined' : 'outlined'"
       hide-details
       v-bind="attrs"
       @update:model-value="onInput"

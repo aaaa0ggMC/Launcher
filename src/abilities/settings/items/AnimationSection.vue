@@ -99,6 +99,7 @@ defineExpose({
   <KitSection :title="translate(uiLang, 'animation.title')" icon="mdi-motion-play-outline">
     <KitSettingRow :label="translate(uiLang, 'animation.modernMotion')">
       <KitSwitch
+        size="inline"
         :model-value="modernMotion"
         :aria-label="translate(uiLang, 'animation.modernMotion')"
         @update:model-value="setModernMotion"
@@ -108,6 +109,7 @@ defineExpose({
 
     <KitSettingRow :label="translate(uiLang, 'animation.enabled')">
       <KitSwitch
+        size="inline"
         :model-value="enabled"
         :disabled="!modernMotion"
         :aria-label="translate(uiLang, 'animation.enabled')"

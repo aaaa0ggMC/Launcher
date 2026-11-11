@@ -15,6 +15,8 @@ import { translateTemplate } from '../../i18n'
 import KitTextField from './KitTextField.vue'
 
 const props = defineProps<{
+  /** 密度档：input = 输入档（44px）；inline = 行内档（32px，设置行用） */
+  size?: 'input' | 'inline'
   modelValue: number
   min: number
   max: number
@@ -76,7 +78,11 @@ const incLabel = (): string =>
 </script>
 
 <template>
-  <div class="kit-stepper" :style="width ? { width: `${width}px` } : undefined">
+  <div
+    class="kit-stepper kit-control"
+    :class="size === 'inline' ? 'kit-control--inline' : undefined"
+    :style="width ? { width: `${width}px` } : undefined"
+  >
     <v-btn
       class="kit-stepper__btn"
       size="small"
@@ -92,6 +98,7 @@ const incLabel = (): string =>
     <KitTextField
       v-model="draft"
       class="kit-stepper__field"
+      :size="size"
       numeric
       inputmode="numeric"
       :suffix="unit"
@@ -129,6 +136,16 @@ const incLabel = (): string =>
 
 .kit-stepper {
   min-height: 40px;
+}
+
+/* inline 档（设置行）：整行降到 32px，± 按钮热区仍 ≥40px（用内边距补，不撑高盒子） */
+.kit-stepper.kit-control--inline {
+  min-height: 32px;
+}
+
+.kit-stepper.kit-control--inline .kit-stepper__btn {
+  min-width: 40px;
+  min-height: 32px;
 }
 
 /* 框宽按「3 位数字 + 单位后缀」的量级收窄（80% 内容率：文字占输入区 80%，
