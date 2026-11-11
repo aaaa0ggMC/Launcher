@@ -32,7 +32,9 @@ import {
 import type { Ref } from 'vue'
 import { translate } from '../../i18n'
 import { useAdaptive, useContainerWidth } from '../composables/useAdaptive'
+import { useAnchor } from '../composables/useAnchor'
 import {
+  applyNaturalFloor,
   planRow,
   planSignature,
   resolveRowItems,
@@ -77,9 +79,10 @@ const MORE_WIDTH = 40
 const popEl = ref<HTMLElement | null>(null)
 const moreBtnEl = ref<HTMLElement | null>(null)
 const moreOpen = ref(false)
-const moreStyle = ref<Record<string, string>>({})
 
 const registry = reactive(new Map<string, SmartRowItemInput & { naturalWidth: number }>())
+/** 溢出复核标成的刚性元素：下限抬到实测自然宽度，不被裁 */
+const rigid = reactive(new Map<string, boolean>())
 const elements = new Map<string, HTMLElement>()
 const slots = reactive<Record<string, SmartRowSlot>>({})
 const tight = ref(false)
@@ -107,6 +110,7 @@ function unregister(id: string): void {
   if (el) childObserver?.unobserve(el)
   elements.delete(id)
   registry.delete(id)
+  rigid.delete(id)
   delete slots[id]
   schedule()
 }
@@ -135,10 +139,14 @@ function schedule(): void {
 /** rAF 里批量读宽度（先读后写，避免 layout thrash），再重规划 */
 function flush(): void {
   frame = 0
-  // 先读（一次批量读完再写，避免 layout thrash）：容器 + 各子元素
+  // 先读（一次批量读完再写，避免 layout thrash）：容器 + 各子元素的实测宽度
   const width = target.value?.clientWidth ?? containerWidth.value
   const measured: Array<[string, number]> = []
-  for (const [id, el] of elements) measured.push([id, el.clientWidth])
+  for (const [id, el] of elements) {
+    // scrollWidth 才是「内容的自然宽度」：元素被 overflow:hidden 裁住时 clientWidth
+    // 只剩盒子宽（=basis），量不到被裁掉的那几个 px
+    measured.push([id, Math.max(el.clientWidth, el.scrollWidth)])
+  }
   // 后写：回填自然宽度（grow-only，防「实测被压小 → 规划更激进 → 压得更小」的棘轮）。
   // 正在被 grow 拉伸的元素不更新——否则「grow 吃满剩余 → 实测变大 → 下限变大」会来回棘轮，
   // 它的自然宽度在首帧（basis 还是 auto）就已经量到了。
@@ -151,6 +159,45 @@ function flush(): void {
     if (w > entry.naturalWidth) entry.naturalWidth = w
   }
   plan(width)
+  scheduleVerify()
+}
+
+/* ── 溢出复核：规划用的是下限，实际渲染可能更宽 → 被 overflow:hidden 裁一截。
+     应用后再量一次，谁被裁就把谁标成刚性（下限抬到自然宽度）重规划，直到没有裁切。 ── */
+let verifyFrame = 0
+let verifyRound = 0
+
+function scheduleVerify(): void {
+  if (verifyFrame || verifyRound >= 3) return
+  verifyFrame = requestAnimationFrame(verify)
+}
+
+function verify(): void {
+  verifyFrame = 0
+  const clipped: string[] = []
+  for (const [id, el] of elements) {
+    const slot = slots[id]
+    if (!slot || slot.visible === false) continue
+    // 弹性元素（省略号文字）本来就越出盒子——scrollWidth 永远大于 clientWidth，跳过
+    if (registry.get(id)?.elastic === true) continue
+    if (el.scrollWidth > el.clientWidth + 1) clipped.push(id)
+  }
+  if (!clipped.length) {
+    verifyRound = 0
+    return
+  }
+  let changed = false
+  for (const id of clipped) {
+    if (rigid.get(id)) continue
+    rigid.set(id, true)
+    changed = true
+  }
+  if (!changed) {
+    verifyRound = 0
+    return
+  }
+  verifyRound++
+  schedule()
 }
 
 function plan(width: number): void {
@@ -165,13 +212,23 @@ function plan(width: number): void {
     return
   }
   const inputs = [...registry.values()]
+  const naturals: Record<string, number> = {}
+  const elastic: Record<string, boolean> = {}
+  for (const it of inputs) {
+    naturals[it.id] = registry.get(it.id)?.naturalWidth ?? 0
+    elastic[it.id] = it.elastic === true
+  }
   // 「更多」按钮自身占宽度：先按全宽规划，若有隐藏再让出按钮宽度重规划（最多两轮收敛）
   let reserve = 0
   let resolved: RowItem[] = []
   let result: PlanRowResult = lastResult
   for (let round = 0; round < 2; round++) {
     const available = Math.max(0, width - reserve)
-    resolved = resolveRowItems(inputs, available, { narrow: narrow.value })
+    resolved = applyNaturalFloor(
+      resolveRowItems(inputs, available, { narrow: narrow.value }),
+      naturals,
+      elastic
+    )
     const key: PlanKey = { width: available, signature: planSignature(resolved) }
     if (shouldReplan(lastKey, key)) {
       lastKey = key
@@ -219,6 +276,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (frame) cancelAnimationFrame(frame)
   frame = 0
+  if (verifyFrame) cancelAnimationFrame(verifyFrame)
+  verifyFrame = 0
   childObserver?.disconnect()
   childObserver = null
 })
@@ -233,19 +292,12 @@ function toggleMore(): void {
   // 定位放在 moreOpen 的 watcher 里（等 v-show 生效、能读到浮层真实尺寸）
 }
 
-function placePop(): void {
-  const btn = moreBtnEl.value
-  const pop = popEl.value
-  if (!btn || !pop) return
-  const rect = btn.getBoundingClientRect()
-  const w = pop.offsetWidth
-  const h = pop.offsetHeight
-  const margin = 8
-  const left = Math.max(margin, Math.min(rect.right - w, window.innerWidth - w - margin))
-  let top = rect.bottom + 4
-  if (top + h > window.innerHeight - margin) top = Math.max(margin, rect.top - h - 4)
-  moreStyle.value = { left: `${left}px`, top: `${top}px` }
-}
+/** 锚定定位：全部测量走 getBoundingClientRect 再 ÷ zoom（页面缩放下混用口径会偏 10%
+ *  并被视口右缘切掉，见 useAnchor 的说明）。打开 / 滚动 / 缩放时重算。 */
+const { place: placePop } = useAnchor(moreBtnEl, popEl, {
+  placement: 'bottom-end',
+  active: moreOpen
+})
 
 watch(moreOpen, async (open) => {
   if (!open) return
@@ -264,29 +316,20 @@ function onDocPointerDown(e: PointerEvent): void {
 function onDocKeyDown(e: KeyboardEvent): void {
   if (e.key === 'Escape') moreOpen.value = false
 }
-function onViewportChange(): void {
-  if (moreOpen.value) placePop()
-}
 watch(moreOpen, (open) => {
   if (typeof document === 'undefined') return
   if (open) {
     document.addEventListener('pointerdown', onDocPointerDown, true)
     document.addEventListener('keydown', onDocKeyDown)
-    window.addEventListener('resize', onViewportChange)
-    window.addEventListener('scroll', onViewportChange, true)
   } else {
     document.removeEventListener('pointerdown', onDocPointerDown, true)
     document.removeEventListener('keydown', onDocKeyDown)
-    window.removeEventListener('resize', onViewportChange)
-    window.removeEventListener('scroll', onViewportChange, true)
   }
 })
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('pointerdown', onDocPointerDown, true)
     document.removeEventListener('keydown', onDocKeyDown)
-    window.removeEventListener('resize', onViewportChange)
-    window.removeEventListener('scroll', onViewportChange, true)
   }
 })
 </script>
@@ -334,7 +377,6 @@ onBeforeUnmount(() => {
         v-show="moreOpen"
         ref="popEl"
         class="kit-overflow"
-        :style="moreStyle"
         role="dialog"
         tabindex="-1"
         :aria-label="moreTitle"

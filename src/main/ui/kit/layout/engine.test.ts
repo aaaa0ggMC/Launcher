@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  applyNaturalFloor,
   deriveMinWidth,
   estimateTextWidth,
   groupMinWidth,
@@ -239,6 +240,46 @@ test('groupMinWidth = 成员 minWidth 之和 + 成员间 gap', () => {
   assert.equal(groupMinWidth(group, GAP), 184)
   assert.equal(groupMinWidth([item('solo', 90, 'primary')], GAP), 90)
   assert.equal(groupMinWidth([], GAP), 0)
+})
+
+test('applyNaturalFloor：刚性元素的下限抬到实测自然宽度（防裁切），弹性元素不动', () => {
+  const items = [item('chip', 46, 'tertiary'), item('name', 32, 'primary')]
+  // chip 自然 49px（自绘 chip：padding 16 + 12px 字号的文字）——声明 46 会被裁 3px
+  const floored = applyNaturalFloor(items, { chip: 49, name: 300 }, { name: true })
+  assert.equal(floored[0].minWidth, 49, '刚性元素：下限不低于自然宽度')
+  assert.equal(floored[1].minWidth, 32, '弹性元素（省略号文字）：保持声明下限')
+  // 自然宽度没超过下限时原样返回
+  const same = applyNaturalFloor([item('a', 100, 'primary')], { a: 80 })
+  assert.equal(same[0].minWidth, 100)
+  // 没有实测数据时原样返回
+  const none = applyNaturalFloor([item('a', 46, 'primary')], {})
+  assert.equal(none[0].minWidth, 46)
+})
+
+test('不裁切：用自然宽度装行时，任何行都不超过可用宽度', () => {
+  // 声明下限偏小的控件（chip 46/自然 49、按钮 64/自然 88、开关 40/自然 36）
+  const inputs: RowItemInput[] = [
+    { id: 'name', priority: 'primary', kind: 'label', text: '主音量', naturalWidth: 90 },
+    { id: 'chip1', priority: 'tertiary', minWidth: 46, naturalWidth: 49 },
+    { id: 'btn', priority: 'secondary', minWidth: 64, naturalWidth: 88 },
+    { id: 'sw', priority: 'primary', minWidth: 40, naturalWidth: 36 }
+  ]
+  for (const width of [120, 160, 200, 240, 320, 480, 900]) {
+    const resolved = applyNaturalFloor(resolveRowItems(inputs, width, { narrow: false }), {
+      name: 90,
+      chip1: 49,
+      btn: 88,
+      sw: 36
+    })
+    const r = planRow(resolved, width, { gap: GAP })
+    for (const line of r.lines) {
+      if (line.length === 1 && line[0].minWidth > width) continue
+      let sum = 0
+      for (const it of line) sum += it.minWidth
+      sum += GAP * (line.length - 1)
+      assert.ok(sum <= width + 0.001, `宽 ${width} 行宽 ${sum} 超出 → 会被 overflow:hidden 裁掉`)
+    }
+  }
 })
 
 test('rowSlots：摊平规划结果，隐藏元素排在可见元素之后', () => {

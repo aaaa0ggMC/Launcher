@@ -210,6 +210,29 @@ function unitWidth(unit: RowItem[], gap: number): number {
   return sum + gap * (unit.length - 1)
 }
 
+/**
+ * 把实测自然宽度并回下限（「不裁切」不变量的关键一步）。
+ *
+ * 引擎用 minWidth 装行，但**实际渲染宽度可能大于 minWidth**（声明的下限是个谎言：
+ * 文字估算差几个 px、控件有最小内容宽）。这时元素会被外层 `overflow:hidden` 裁掉一截
+ * ——实测复现：自绘 chip 声明 46px、自然 49px，右缘被切 3px。
+ *
+ * 规则：**刚性元素**（内容不能优雅压缩：chip、按钮、定宽控件）的下限抬到自然宽度；
+ * **弹性元素**（省略号文字、百分比宽控件）保持声明下限——它们本来就该被压。
+ * 调用方在「溢出复核」里发现谁被裁了，就把谁标成刚性再重规划（见 KitSmartRow）。
+ */
+export function applyNaturalFloor(
+  items: RowItem[],
+  natural: Record<string, number>,
+  elastic: Record<string, boolean> = {}
+): RowItem[] {
+  return items.map((it) => {
+    const n = natural[it.id]
+    if (!n || n <= it.minWidth || elastic[it.id]) return it
+    return { ...it, minWidth: Math.ceil(n) }
+  })
+}
+
 /** Group 的规划宽度 = 成员 minWidth 之和 + 成员间 gap */
 export function groupMinWidth(items: RowItem[], gap: number): number {
   return unitWidth(items, gap)

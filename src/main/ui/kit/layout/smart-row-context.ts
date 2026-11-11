@@ -13,6 +13,11 @@ export interface SmartRowItemInput {
   grow?: boolean
   /** KitRowGroup 注入的分组 id */
   group?: string
+  /**
+   * 内容可优雅压缩（省略号文字 / 百分比宽控件）：允许被压到声明下限以下。
+   * 缺省 false = 刚性——实测自然宽度会作为下限并回来，避免被 overflow:hidden 裁掉。
+   */
+  elastic?: boolean
 }
 
 /** 单个元素在行里的排版指令（由 planRow 推导，CSS 应用，DOM 不搬家） */

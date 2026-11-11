@@ -54,7 +54,9 @@ const descriptor = computed(() => ({
   text: props.text,
   icon: props.icon,
   grow: props.grow ?? props.minWidth === undefined,
-  group: groupId ?? undefined
+  group: groupId ?? undefined,
+  // 省略号 = 允许被压到下限以下（溢出复核会跳过它，否则永远判「被裁」）
+  elastic: props.truncate === true
 }))
 
 watch(descriptor, (d) => ctx?.register(d, el.value))
