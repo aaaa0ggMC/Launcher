@@ -244,6 +244,13 @@
   --v-field-border-opacity: 0.28;
 }
 
+/* 开关：Vuetify 的 wrapper 只有 28px，而轨道 36-40px——轨道会溢出 wrapper 两侧各 ~5px，
+   一旦外层有 overflow:hidden（.kit-row-item 就有）就被切成「只剩个脑袋」。
+   把 wrapper 拉到 44px，轨道完整落在盒子内，任何祖先都裁不到它。 */
+.kit-control .v-switch .v-selection-control__wrapper {
+  width: 44px;
+}
+
 /* 数值框：等宽 + 居中（步进器用） */
 .kit-control--num .v-field__input {
   text-align: center;
