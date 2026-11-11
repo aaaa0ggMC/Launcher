@@ -5,7 +5,7 @@
  */
 import { inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitCaption, KitPage, KitProse, KitSection, KitTextField } from '@ui/kit'
+import { KitCaption, KitPage, KitProse, KitSection } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 
@@ -55,7 +55,13 @@ const lines = Array.from({ length: 18 }, (_, i) => i + 1)
         :title="t('kit.gallery.section.actions', '带操作的分区')"
         icon="mdi-gesture-tap-button"
       >
-        <KitTextField v-model="name" :label="t('kit.gallery.section.fieldLabel', '名称')" />
+        <v-text-field
+          v-model="name"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :label="t('kit.gallery.section.fieldLabel', '名称')"
+        />
         <template #actions>
           <v-btn variant="text" prepend-icon="mdi-content-save-outline" @click="save">
             {{ t('kit.gallery.section.save', '保存') }}

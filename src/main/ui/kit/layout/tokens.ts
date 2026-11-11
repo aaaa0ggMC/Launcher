@@ -4,9 +4,9 @@
  *
  * 设计口径（用户：「所有的组件都采用的是网格式计算&布局」）：
  * - 基础单位 4px：一切尺寸都是它的整数倍，肉眼可对齐；
- * - 栏距 8px（2 单位）：区块间距起步（SPEC「间距阶」：ga-2 起步，密集区至少 ga-1）；
+ * - 栏距 8px（2 单位）：区块间距起步（DESIGN §3「ga-2 起步，密集区至少 ga-1」）；
  * - 触控热区 40px（10 单位）：图标按钮的点击下界（v-btn size=small 只有 ~32px）；
- * - 控件高度：文字按钮 36px（9 单位，SPEC「密度阶」的 compact 兜底）、图标按钮 32px（8 单位）。
+ * - 控件高度：文字按钮 36px（9 单位，DESIGN §3 的 compact 兜底）、图标按钮 32px（8 单位）。
  */
 
 export const GRID = {
@@ -20,15 +20,8 @@ export const GRID = {
   pad: 12,
   /** 触控热区下界（px） */
   touch: 40,
-  /** 文字按钮高度（px）——compact 下全局兜底为 36px */
+  /** 文字按钮高度（px）——DESIGN §3：compact 下已全局兜底为 36px */
   controlHeight: 36,
-  /**
-   * 输入类控件高度（px）= 11 单位。取 Vuetify compact 的**自然高度**（实测 44）：
-   * 跟组件库的密度算式斗（硬压 min-height、给 outlined field 再加一圈 border）
-   * 实测只会得到 39.4 / 46 这种四不像。统一口径 = 不碰内部高度，让四个控件
-   * 都落在同一档（SPEC「控件尺寸表」）。
-   */
-  inputHeight: 44,
   /** 图标按钮高度（px） */
   iconHeight: 32
 } as const

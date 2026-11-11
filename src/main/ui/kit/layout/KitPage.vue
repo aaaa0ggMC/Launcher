@@ -3,7 +3,7 @@
  * KitPage —— 页面外壳，三种滚动模式。
  *
  * - `document`：正常文档流，整页垂直滚动（设置类长表单）。沿用宿主 v-container 的边距
- *   （窄屏 px-3 = 12px，见 SPEC「断点令牌」）。
+ *   （窄屏 px-3 = 12px，见 DESIGN §3）。
  * - `app`：`position:absolute; inset:0` 铺满宿主可视区，页面级零滚动，内部区域各自滚
  *   （聊天 / 日志 / 控制台：固定顶栏 + 可滚内容 + 固定底栏）。
  * - `canvas`：同样 `absolute; inset:0`，但内部区域按内容高度排、超出自行内滚，
@@ -11,7 +11,7 @@
  *
  * 为什么用 `absolute; inset:0` 而不是 `calc(100vh - 96px)`：那个 96 是
  * 「appbar 高 + 容器 padding」的魔数，appbar 实测高度会变（bili/View.vue 的注释记录
- * 实测 55px，不是历史文档口径的 48/64px），魔数壳就短一截。绝对定位不依赖任何
+ * 实测 55px，不是 DESIGN §4.6 口径的 48/64px），魔数壳就短一截。绝对定位不依赖任何
  * 魔数，键盘弹出时也跟着可视区收。高度计算一律走 viewport.ts 的 `--app-vh`，
  * 不写裸 `100vh`。
  *
@@ -26,7 +26,7 @@ const props = defineProps<{
   mode?: 'document' | 'app' | 'canvas'
   /** 可读行宽（px）；'none' = 通栏（默认） */
   maxWidth?: number | 'none'
-  /** 自己负责左右边距：窄屏 12px（SPEC「断点令牌」的 px-3，不是 px-2）。宿主 v-container 已给准时不用传 */
+  /** 自己负责左右边距：窄屏 12px（DESIGN §3 的 px-3，不是 px-2）。宿主 v-container 已给准时不用传 */
   gutter?: boolean
 }>()
 
@@ -94,7 +94,7 @@ onBeforeUnmount(releaseHost)
   touch-action: pan-y pinch-zoom;
 }
 
-/* app：外壳不出滚动条（SPEC「页面外壳」）——内容只能进内部滚动区 */
+/* app：外壳不出滚动条（DESIGN §4.6）——内容只能进内部滚动区 */
 .kit-page--app {
   overflow: hidden;
 }
@@ -104,7 +104,7 @@ onBeforeUnmount(releaseHost)
   overflow: auto;
 }
 
-/* 手机端左右边距 12px（SPEC「断点令牌」：px-3，不要 px-2） */
+/* 手机端左右边距 12px（DESIGN §3：px-3，不要 px-2） */
 .kit-page--gutter {
   padding-inline: 0;
 }

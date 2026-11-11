@@ -5,7 +5,7 @@
  */
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
-import { KitGrid, KitSelect, KitSettingRow } from '@ui/kit'
+import { KitGrid, KitSettingRow } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
 
@@ -67,9 +67,12 @@ const stages = computed(() => [
             unit="%"
           />
           <KitSettingRow :label="t('kit.gallery.theme', '配色方案')" :narrow="s.narrow">
-            <KitSelect
+            <v-select
               v-model="scheme"
               :items="schemes"
+              density="compact"
+              hide-details
+              variant="outlined"
               :aria-label="t('kit.gallery.theme', '配色方案')"
             />
           </KitSettingRow>

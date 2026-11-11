@@ -6,13 +6,12 @@
  * 打字中途不夹取（否则打 "60" 会被 "6"→min 的钳制吃掉），失焦 / 回车 / ± 才夹取落值
  * ——下发的补丁因此永远合法。仓里已有五份逐字重复的实现，这是唯一一份。
  *
- * 尺寸（SPEC「3）：± 是图标按钮，允许 size="small"；输入框 compact 密度；
+ * 尺寸（DESIGN §3）：± 是图标按钮，允许 size="small"；输入框 compact 密度；
  * ± 按钮触控热区 ≥40px（v-btn size="small" 默认 32px，用内边距补足）。
  */
 import { inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { translateTemplate } from '../../i18n'
-import KitTextField from './KitTextField.vue'
 
 const props = defineProps<{
   modelValue: number
@@ -89,10 +88,12 @@ const incLabel = (): string =>
     >
       <v-icon>mdi-minus</v-icon>
     </v-btn>
-    <KitTextField
+    <v-text-field
       v-model="draft"
       class="kit-stepper__field"
-      numeric
+      density="compact"
+      variant="outlined"
+      hide-details
       inputmode="numeric"
       :suffix="unit"
       :aria-label="label"
@@ -121,20 +122,26 @@ const incLabel = (): string =>
   gap: 2px;
 }
 
-/* ± 触控热区 = 输入档 40px（v-btn size="small" 只有 ~32px），整行与输入框同高 */
+/* 触控热区 ≥40px（v-btn size="small" 只有 ~32px） */
 .kit-stepper__btn {
   min-width: 40px;
   min-height: 40px;
 }
 
-.kit-stepper {
-  min-height: 40px;
-}
-
-/* 框宽按「3 位数字 + 单位后缀」的量级收窄（80% 内容率：文字占输入区 80%，
-   整体不再比内容大一圈）；高度 / 圆角 / 表面由 KitTextField 统一 */
+/* 80% 内容率：文本框按「3 位数字 + 单位后缀」的量级收窄，文字放大一档，
+   整体不再比内容大一圈（用户反馈：整体大了一点、内部文字小了一点） */
 .kit-stepper__field {
   flex: 0 0 auto;
-  width: 72px;
+  width: 66px;
+}
+
+.kit-stepper__field :deep(input) {
+  text-align: center;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.kit-stepper__field :deep(.v-field__suffix) {
+  font-size: 0.8125rem;
 }
 </style>

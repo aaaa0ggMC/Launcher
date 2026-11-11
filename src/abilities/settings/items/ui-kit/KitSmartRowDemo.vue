@@ -14,10 +14,7 @@ import {
   KitProse,
   KitRowGroup,
   KitRowItem,
-  KitSelect,
-  KitSlider,
-  KitSmartRow,
-  KitSwitch
+  KitSmartRow
 } from '@ui/kit'
 import { translate } from '@ui/i18n'
 import KitDemoCard from './KitDemoCard.vue'
@@ -77,7 +74,7 @@ const qualities = [
   >
     <!-- 布局自检：打开后本页所有元素描边、溢出容器的元素标红（默认关，仅演示） -->
     <div class="kit-demo-debug">
-      <KitSwitch v-model="debugOn" :aria-label="t('kit.gallery.debugToggle', '布局自检开关')" />
+      <v-switch v-model="debugOn" density="compact" hide-details color="warning" />
       <KitProse muted>
         {{ t('kit.gallery.debugOutline', '布局自检：打开后本页所有元素描边，溢出容器的元素标红') }}
       </KitProse>
@@ -97,11 +94,14 @@ const qualities = [
             <span class="kit-demo-label">{{ t('kit.gallery.masterVolume', '主音量') }}</span>
           </KitRowItem>
           <KitRowItem priority="primary" :min-width="120">
-            <KitSlider
+            <v-slider
               v-model="volume"
               :min="0"
               :max="100"
               :step="1"
+              density="compact"
+              hide-details
+              color="primary"
               :aria-label="t('kit.gallery.masterVolume', '主音量')"
             />
           </KitRowItem>
@@ -122,16 +122,19 @@ const qualities = [
           <span class="kit-demo-label">{{ t('kit.gallery.status', '状态') }}</span>
         </KitRowItem>
         <KitRowItem kind="control" priority="primary" :min-width="120">
-          <KitSelect
+          <v-select
             v-model="quality"
             :items="qualities"
             item-title="title"
             item-value="value"
+            density="compact"
+            hide-details
+            variant="outlined"
             :aria-label="t('kit.gallery.quality', '画质')"
           />
         </KitRowItem>
         <KitRowItem kind="control" priority="secondary" :min-width="88">
-          <KitSwitch v-model="notify" :aria-label="t('kit.gallery.notify', '通知')" />
+          <v-switch v-model="notify" density="compact" hide-details color="primary" />
         </KitRowItem>
         <KitRowItem kind="label" priority="tertiary" :text="t('kit.gallery.latency', '延迟 12ms')">
           <KitCaption class="kit-demo-chip">{{ t('kit.gallery.latency', '延迟 12ms') }}</KitCaption>
