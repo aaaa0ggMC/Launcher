@@ -221,3 +221,9 @@ defineExpose({ toMarkdown })
     </KitSection>
   </KitPage>
 </template>
+
+<style scoped>
+.mirror-card--enabled {
+  border: 1px solid rgba(var(--v-theme-success), 0.4);
+}
+</style>

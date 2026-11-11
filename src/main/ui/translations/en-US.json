@@ -335,5 +335,7 @@
   "kit.gallery.foundation.plain": "plain: plain-text notes",
   "kit.hint.ok": "Recommended",
   "kit.hint.warn": "Avoid",
-  "kit.gallery.debugOutline": "Layout self-check: outlines every element on this page and marks overflowing ones in red"
+  "kit.gallery.debugOutline": "Layout self-check: outlines every element on this page and marks overflowing ones in red",
+  "kit.gallery.notify": "Notifications",
+  "kit.gallery.debugToggle": "Layout self-check toggle"
 }

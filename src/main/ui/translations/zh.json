@@ -335,5 +335,7 @@
   "kit.gallery.foundation.plain": "plain：纯文本说明区",
   "kit.hint.ok": "推荐",
   "kit.hint.warn": "避免",
-  "kit.gallery.debugOutline": "布局自检：打开后本页所有元素描边，溢出容器的元素标红"
+  "kit.gallery.debugOutline": "布局自检：打开后本页所有元素描边，溢出容器的元素标红",
+  "kit.gallery.notify": "通知",
+  "kit.gallery.debugToggle": "布局自检开关"
 }
