@@ -4,6 +4,7 @@ defineOptions({ name: 'cockpit-settings-zoom' })
 import { ref, inject, onMounted } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import { KitCaption, KitRowItem, KitSection, KitSlider, KitSmartRow } from '@ui/kit'
 
 const uiScale = ref(1.1)
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -26,31 +27,28 @@ defineExpose({
 </script>
 
 <template>
-  <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'zoom.title') }}</v-card-title>
-    <v-card-text>
-      <div class="d-flex align-center justify-space-between mb-1">
-        <span class="text-body-2">{{ translate(uiLang, 'zoom.label') }}</span>
-        <span class="text-caption on-surface-variant font-family-mono">
-          {{ Math.round(uiScale * 100) }}%
-        </span>
-      </div>
-      <v-slider
-        v-model="uiScale"
-        :min="0.8"
-        :max="1.8"
-        :step="0.05"
-        color="primary"
-        thumb-label
-        show-ticks
-        hide-details
-        @end="commitUiScale"
-      />
-      <div class="d-flex justify-space-between text-caption on-surface-variant mt-1">
-        <span>{{ translate(uiLang, 'zoom.small') }}</span>
-        <span>{{ translate(uiLang, 'zoom.default') }}</span>
-        <span>{{ translate(uiLang, 'zoom.large') }}</span>
-      </div>
-    </v-card-text>
-  </v-card>
+  <KitSection :title="translate(uiLang, 'zoom.title')" icon="mdi-magnify-plus-outline">
+    <KitSmartRow :gap="8">
+      <KitRowItem kind="label" :text="translate(uiLang, 'zoom.label')" truncate grow>
+        <span>{{ translate(uiLang, 'zoom.label') }}</span>
+      </KitRowItem>
+      <KitRowItem kind="number" priority="secondary" :min-width="56">
+        <span class="kit-num">{{ Math.round(uiScale * 100) }}%</span>
+      </KitRowItem>
+    </KitSmartRow>
+    <KitSlider
+      v-model="uiScale"
+      :min="0.8"
+      :max="1.8"
+      :step="0.05"
+      thumb-label
+      show-ticks
+      @end="commitUiScale"
+    />
+    <div class="d-flex justify-space-between">
+      <KitCaption>{{ translate(uiLang, 'zoom.small') }}</KitCaption>
+      <KitCaption>{{ translate(uiLang, 'zoom.default') }}</KitCaption>
+      <KitCaption>{{ translate(uiLang, 'zoom.large') }}</KitCaption>
+    </div>
+  </KitSection>
 </template>

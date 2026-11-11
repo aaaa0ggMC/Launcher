@@ -4,6 +4,7 @@ defineOptions({ name: 'cockpit-settings-font' })
 import { ref, inject, onMounted } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
+import { KitCaption, KitSection, KitTextField } from '@ui/kit'
 
 type FontMode = 'default' | 'system' | 'custom'
 
@@ -61,34 +62,20 @@ defineExpose({
 </script>
 
 <template>
-  <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'font.title') }}</v-card-title>
-    <v-card-text class="d-flex flex-column">
-      <v-radio-group
-        :model-value="mode"
-        density="compact"
-        hide-details
-        @update:model-value="setMode"
-      >
-        <v-radio :label="translate(uiLang, 'font.default')" value="default" />
-        <v-radio :label="translate(uiLang, 'font.system')" value="system" />
-        <v-radio :label="translate(uiLang, 'font.custom')" value="custom" />
-      </v-radio-group>
-      <v-text-field
-        v-if="mode === 'custom'"
-        v-model="family"
-        class="mt-3"
-        :label="translate(uiLang, 'font.family')"
-        :placeholder="translate(uiLang, 'font.familyPlaceholder')"
-        variant="outlined"
-        density="compact"
-        hide-details
-        @blur="commitFamily"
-        @keydown.enter.prevent="commitFamily"
-      />
-      <div class="text-caption on-surface-variant mt-2">
-        {{ translate(uiLang, 'font.caption') }}
-      </div>
-    </v-card-text>
-  </v-card>
+  <KitSection :title="translate(uiLang, 'font.title')" icon="mdi-format-font">
+    <v-radio-group :model-value="mode" density="compact" hide-details @update:model-value="setMode">
+      <v-radio :label="translate(uiLang, 'font.default')" value="default" />
+      <v-radio :label="translate(uiLang, 'font.system')" value="system" />
+      <v-radio :label="translate(uiLang, 'font.custom')" value="custom" />
+    </v-radio-group>
+    <KitTextField
+      v-if="mode === 'custom'"
+      v-model="family"
+      :label="translate(uiLang, 'font.family')"
+      :placeholder="translate(uiLang, 'font.familyPlaceholder')"
+      @blur="commitFamily"
+      @keydown.enter.prevent="commitFamily"
+    />
+    <KitCaption>{{ translate(uiLang, 'font.caption') }}</KitCaption>
+  </KitSection>
 </template>

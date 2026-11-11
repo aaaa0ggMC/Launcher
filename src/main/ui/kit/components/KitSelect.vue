@@ -1,0 +1,41 @@
+<script setup lang="ts">
+/**
+ * KitSelect —— 下拉选择（v-select 的 kit 封装）。尺寸 / 表面 / 80% 内容率同 KitTextField。
+ */
+import { computed, useAttrs } from 'vue'
+import { useFitBox } from '../composables/useFitBox'
+import { useKitSurface } from '../composables/useKitSurface'
+
+defineOptions({ inheritAttrs: false })
+
+defineProps<{
+  modelValue?: unknown
+  items?: readonly unknown[]
+}>()
+
+const emit = defineEmits<{ 'update:modelValue': [unknown] }>()
+const attrs = useAttrs()
+useKitSurface()
+
+const { target, scale } = useFitBox()
+const rootStyle = computed(() => ({ '--kit-fit-scale': String(scale.value) }))
+void target
+</script>
+
+<template>
+  <div ref="target" class="kit-control" :style="rootStyle">
+    <v-select
+      :model-value="modelValue"
+      :items="items"
+      density="compact"
+      variant="outlined"
+      hide-details
+      v-bind="attrs"
+      @update:model-value="emit('update:modelValue', $event)"
+    >
+      <template v-for="(_, n) in $slots as Record<string, unknown>" :key="n" #[n]="slotProps">
+        <slot :name="n" v-bind="slotProps ?? {}" />
+      </template>
+    </v-select>
+  </div>
+</template>
