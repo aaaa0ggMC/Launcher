@@ -5,6 +5,16 @@ import { ref, inject, onMounted, computed } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import { backgrounds, isBackgroundAvailable } from '../../../background'
+import {
+  KitCaption,
+  KitProse,
+  KitSection,
+  KitSelect,
+  KitSettingRow,
+  KitSlider,
+  KitSwitch,
+  KitTextField
+} from '@ui/kit'
 
 const config = inject<{ value: Record<string, unknown> }>('cockpit:config', { value: {} })
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
@@ -135,159 +145,120 @@ defineExpose({
 </script>
 
 <template>
-  <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'window.title') }}</v-card-title>
-    <v-card-text class="d-flex flex-column">
-      <v-switch
-        v-if="hasFrame"
+  <KitSection :title="translate(uiLang, 'window.title')" icon="mdi-window-maximize">
+    <KitSettingRow v-if="hasFrame" :label="translate(uiLang, 'window.frameless')">
+      <KitSwitch
         :model-value="frameless"
-        :label="translate(uiLang, 'window.frameless')"
-        color="primary"
-        density="compact"
-        hide-details
+        :aria-label="translate(uiLang, 'window.frameless')"
         @update:model-value="setFrameless"
       />
-      <v-switch
-        v-if="hasFrame"
+    </KitSettingRow>
+
+    <KitSettingRow v-if="hasFrame" :label="translate(uiLang, 'window.rounded')">
+      <KitSwitch
         :model-value="rounded"
-        :label="translate(uiLang, 'window.rounded')"
-        color="primary"
-        density="compact"
-        hide-details
-        class="mt-1"
+        :aria-label="translate(uiLang, 'window.rounded')"
         @update:model-value="setRounded"
       />
+    </KitSettingRow>
 
-      <template v-if="hasFrame && rounded">
-        <div class="d-flex align-center justify-space-between mt-3 mb-1">
-          <span class="text-body-2">{{ translate(uiLang, 'window.radius') }}</span>
-          <span class="text-caption on-surface-variant font-family-mono">{{ radius }}px</span>
-        </div>
-        <v-slider
-          v-model="radius"
-          :min="0"
-          :max="40"
-          :step="1"
-          color="primary"
-          thumb-label
-          hide-details
-          @end="commitRadius"
-        />
-      </template>
+    <template v-if="hasFrame && rounded">
+      <KitSettingRow :label="translate(uiLang, 'window.radius')" :value="`${radius}px`">
+        <KitSlider v-model="radius" :min="0" :max="40" :step="1" thumb-label @end="commitRadius" />
+      </KitSettingRow>
+    </template>
 
-      <v-divider v-if="hasFrame" class="my-3" />
-
-      <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.background') }}</div>
-      <v-select
+    <KitSettingRow :label="translate(uiLang, 'window.bgSelect')">
+      <KitSelect
         v-model="background"
         :items="bgItems"
         item-title="name"
         item-value="id"
-        :label="translate(uiLang, 'window.bgSelect')"
-        variant="outlined"
-        density="compact"
-        hide-details
-        @update:model-value="setBackground"
+        :aria-label="translate(uiLang, 'window.bgSelect')"
+        @update:model-value="setBackground($event as string | null)"
       />
-      <div class="text-caption on-surface-variant mt-1">
-        {{ bgItems.find((b) => b.id === background)?.description }}
-      </div>
-      <div v-if="background === 'image'" class="mt-2">
-        <v-text-field
-          v-model="backgroundImage"
-          :label="translate(uiLang, 'window.imgPath')"
-          placeholder="/home/user/Pictures/wall.jpg"
-          variant="outlined"
-          density="compact"
-          hide-details
-          @change="setBackgroundImage"
-        >
-          <template #append-inner>
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-              :title="translate(uiLang, 'dialog.selectBackground')"
-              @click="browseBackgroundImage"
-            >
-              <v-icon>mdi-folder-image</v-icon>
-            </v-btn>
-          </template>
-        </v-text-field>
-      </div>
+    </KitSettingRow>
+    <KitCaption>{{ bgItems.find((b) => b.id === background)?.description }}</KitCaption>
 
-      <div class="d-flex align-center justify-space-between mt-3 mb-1">
-        <span class="text-body-2">{{ translate(uiLang, 'window.fuseAlpha') }}</span>
-        <span class="text-caption on-surface-variant font-family-mono">
-          {{ Math.round(fuseAlpha * 100) }}%
-        </span>
-      </div>
-      <v-slider
+    <KitSettingRow v-if="background === 'image'" :label="translate(uiLang, 'window.imgPath')">
+      <KitTextField
+        v-model="backgroundImage"
+        placeholder="/home/user/Pictures/wall.jpg"
+        :aria-label="translate(uiLang, 'window.imgPath')"
+        @change="setBackgroundImage"
+      >
+        <template #append-inner>
+          <v-btn
+            icon
+            variant="text"
+            size="small"
+            :title="translate(uiLang, 'dialog.selectBackground')"
+            :aria-label="translate(uiLang, 'dialog.selectBackground')"
+            @click="browseBackgroundImage"
+          >
+            <v-icon>mdi-folder-image</v-icon>
+          </v-btn>
+        </template>
+      </KitTextField>
+    </KitSettingRow>
+
+    <KitSettingRow
+      :label="translate(uiLang, 'window.fuseAlpha')"
+      :value="`${Math.round(fuseAlpha * 100)}%`"
+    >
+      <KitSlider
         v-model="fuseAlpha"
         :min="0"
         :max="1"
         :step="0.01"
-        color="primary"
         thumb-label
-        hide-details
+        :aria-label="translate(uiLang, 'window.fuseAlpha')"
         @update:model-value="commitFuseAlpha"
       />
+    </KitSettingRow>
 
-      <template v-if="background !== 'transparent'">
-        <div class="d-flex align-center justify-space-between mt-3 mb-1">
-          <span class="text-body-2">{{ translate(uiLang, 'window.bgOpacity') }}</span>
-          <span class="text-caption on-surface-variant font-family-mono">
-            {{ Math.round(backgroundOpacity * 100) }}%
-          </span>
-        </div>
-        <v-slider
-          v-model="backgroundOpacity"
-          :min="0"
-          :max="1"
-          :step="0.01"
-          color="primary"
-          thumb-label
-          hide-details
-          @update:model-value="commitBackgroundOpacity"
-        />
-      </template>
+    <KitSettingRow
+      v-if="background !== 'transparent'"
+      :label="translate(uiLang, 'window.bgOpacity')"
+      :value="`${Math.round(backgroundOpacity * 100)}%`"
+    >
+      <KitSlider
+        v-model="backgroundOpacity"
+        :min="0"
+        :max="1"
+        :step="0.01"
+        thumb-label
+        :aria-label="translate(uiLang, 'window.bgOpacity')"
+        @update:model-value="commitBackgroundOpacity"
+      />
+    </KitSettingRow>
 
-      <div class="d-flex align-center justify-space-between mt-3 mb-1">
-        <span class="text-body-2">{{ translate(uiLang, 'window.bgBlur') }}</span>
-        <span class="text-caption on-surface-variant font-family-mono"> {{ fuseBlur }}px </span>
-      </div>
-      <v-slider
+    <KitSettingRow :label="translate(uiLang, 'window.bgBlur')" :value="`${fuseBlur}px`">
+      <KitSlider
         v-model="fuseBlur"
         :min="0"
         :max="60"
         :step="1"
-        color="primary"
         thumb-label
-        hide-details
+        :aria-label="translate(uiLang, 'window.bgBlur')"
         @end="commitFuseBlur"
       />
+    </KitSettingRow>
 
-      <v-divider class="my-3" />
+    <KitProse>{{ translate(uiLang, 'window.blurMode') }}</KitProse>
+    <KitCaption>{{ translate(uiLang, 'window.blurModeHint') }}</KitCaption>
+    <v-radio-group
+      :model-value="blurMode"
+      color="primary"
+      density="compact"
+      hide-details
+      @update:model-value="setBlurMode"
+    >
+      <v-radio :label="translate(uiLang, 'window.blurOn')" value="on" />
+      <v-radio :label="translate(uiLang, 'window.blurAuto')" value="auto" />
+      <v-radio :label="translate(uiLang, 'window.blurOff')" value="off" />
+    </v-radio-group>
 
-      <div class="text-body-2 mb-1">{{ translate(uiLang, 'window.blurMode') }}</div>
-      <div class="text-caption on-surface-variant mb-2">
-        {{ translate(uiLang, 'window.blurModeHint') }}
-      </div>
-      <v-radio-group
-        :model-value="blurMode"
-        color="primary"
-        density="compact"
-        hide-details
-        @update:model-value="setBlurMode"
-      >
-        <v-radio :label="translate(uiLang, 'window.blurOn')" value="on" />
-        <v-radio :label="translate(uiLang, 'window.blurAuto')" value="auto" />
-        <v-radio :label="translate(uiLang, 'window.blurOff')" value="off" />
-      </v-radio-group>
-
-      <div class="text-caption on-surface-variant mt-2">
-        {{ translate(uiLang, 'window.note') }}
-      </div>
-    </v-card-text>
-  </v-card>
+    <KitCaption>{{ translate(uiLang, 'window.note') }}</KitCaption>
+  </KitSection>
 </template>

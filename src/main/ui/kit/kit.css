@@ -199,12 +199,90 @@
   outline-offset: -1px;
 }
 
-.kit-debug-on .kit-debug-overflow,
-.kit-debug-on .kit-debug-overflow * {
+/* 只标真正被裁的那一个元素（不加后代规则——那会把「一个容器溢出」放大成整页全红） */
+.kit-debug-on .kit-debug-overflow {
   outline: 1px solid rgb(var(--v-theme-error)) !important;
   outline-offset: -1px;
+  background: rgba(var(--v-theme-error), 0.14) !important;
 }
 
-.kit-debug-on .kit-debug-overflow {
-  background: rgba(var(--v-theme-error), 0.14) !important;
+/* ---------------------------------------------------------------------------
+ * 控件层（KitTextField / KitSelect / KitSlider / KitSwitch）
+ * 统一口径：同类控件高度一致（36px = 网格令牌 controlHeight）、圆角 8px（grid(2)）、
+ * 表面吃玻璃变量、内容率 80%（--kit-fit-scale 由 useFitBox 写入）。
+ * Vuetify 的密度算式用 !important 覆盖——它是组件库的内部算术，不是本项目的规范。
+ * ------------------------------------------------------------------------- */
+.kit-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 44px;
+  /* 字号锚在 body-2（0.875rem）：Vuetify 的控件高度由字号推算，不锚住就会随宿主字号漂
+     （实测锚 16px 时 field 高 46，锚 0.875rem 后回到输入档） */
+  font-size: calc(0.875rem * var(--kit-fit-scale, 1));
+}
+
+/* 输入类：v-text-field / v-select 的 field。
+   高度不覆盖——Vuetify compact 的自然高度（实测 39.6px）就是本项目的输入档，
+   硬压到 36 只会得到四不像；switch / slider 拉到同一档。 */
+.kit-control .v-field {
+  border-radius: 8px !important;
+  background: rgba(var(--kit-surface), var(--kit-glass-alpha));
+  backdrop-filter: blur(var(--kit-glass-blur));
+  -webkit-backdrop-filter: blur(var(--kit-glass-blur));
+}
+
+.kit-control .v-field__overlay {
+  background: transparent;
+}
+
+.kit-control .v-field__input {
+  font-size: 0.875rem;
+}
+
+.kit-control .v-field__outline {
+  --v-field-border-opacity: 0.28;
+}
+
+/* 数值框：等宽 + 居中（步进器用） */
+.kit-control--num .v-field__input {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 滑块：轨道与圆点尺寸从令牌算，高度拉到输入档（40px） */
+.kit-control .v-slider {
+  min-height: 40px;
+}
+
+.kit-control .v-slider-track {
+  height: 4px;
+}
+
+.kit-control .v-slider-thumb {
+  width: 16px;
+  height: 16px;
+}
+
+.kit-control .v-slider-thumb__surface {
+  width: 16px;
+  height: 16px;
+}
+
+/* 开关：Vuetify 的 selection-control 只有 28-40px，整控件拉到输入档（40px） */
+.kit-control .v-switch,
+.kit-control .v-selection-control {
+  min-height: 40px !important;
+  align-items: center;
+}
+
+/* 窄屏：控件降一档（根盒 36px = grid(9)，字号小一档）——SPEC「密度阶」 */
+@media (max-width: 720px) {
+  .kit-control {
+    min-height: 36px;
+  }
+
+  .kit-control .v-field__input {
+    font-size: 0.8125rem;
+  }
 }

@@ -5,6 +5,7 @@ import { ref, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
 import { PAGE_TRANSITIONS, type PageTransitionKey } from '@ui/animations'
+import { KitCaption, KitProse, KitSection, KitSettingRow, KitSwitch } from '@ui/kit'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
@@ -95,64 +96,53 @@ defineExpose({
 </script>
 
 <template>
-  <v-card rounded="lg" variant="tonal" class="card-fill">
-    <v-card-title class="text-subtitle-2">{{ translate(uiLang, 'animation.title') }}</v-card-title>
-    <v-card-text>
-      <v-switch
+  <KitSection :title="translate(uiLang, 'animation.title')" icon="mdi-motion-play-outline">
+    <KitSettingRow :label="translate(uiLang, 'animation.modernMotion')">
+      <KitSwitch
         :model-value="modernMotion"
-        :label="translate(uiLang, 'animation.modernMotion')"
-        color="primary"
-        density="compact"
-        hide-details
+        :aria-label="translate(uiLang, 'animation.modernMotion')"
         @update:model-value="setModernMotion"
       />
-      <div class="text-caption on-surface-variant mt-1 mb-2">
-        {{ translate(uiLang, 'animation.modernMotionCaption') }}
-      </div>
-      <v-divider class="my-3" />
-      <v-switch
+    </KitSettingRow>
+    <KitCaption>{{ translate(uiLang, 'animation.modernMotionCaption') }}</KitCaption>
+
+    <KitSettingRow :label="translate(uiLang, 'animation.enabled')">
+      <KitSwitch
         :model-value="enabled"
-        :label="translate(uiLang, 'animation.enabled')"
-        color="primary"
-        density="compact"
-        hide-details
         :disabled="!modernMotion"
+        :aria-label="translate(uiLang, 'animation.enabled')"
         @update:model-value="setEnabled"
       />
-      <v-divider class="my-3" />
-      <div class="text-body-2 mb-1">{{ translate(uiLang, 'animation.style') }}</div>
-      <v-radio-group
-        :model-value="enabled ? pageTransition : null"
-        density="compact"
-        hide-details
-        :disabled="!enabled || !modernMotion"
-        @update:model-value="setStyle"
-      >
-        <v-radio
-          v-for="t in PAGE_TRANSITIONS"
-          :key="t.key"
-          :label="translate(uiLang, t.labelKey)"
-          :value="t.key"
-        />
-      </v-radio-group>
-      <div class="text-caption on-surface-variant mt-2">
-        {{ translate(uiLang, 'animation.caption') }}
-      </div>
-      <v-divider class="my-3" />
-      <div class="text-body-2 mb-1">{{ translate(uiLang, 'animation.themeTransition') }}</div>
-      <v-radio-group
-        :model-value="themeTransition"
-        density="compact"
-        hide-details
-        :disabled="!modernMotion"
-        @update:model-value="setThemeTransition"
-      >
-        <v-radio :label="translate(uiLang, 'animation.themeCorner')" value="corner" />
-        <v-radio :label="translate(uiLang, 'animation.themeCursor')" value="cursor" />
-      </v-radio-group>
-      <div class="text-caption on-surface-variant mt-2">
-        {{ translate(uiLang, 'animation.themeTransitionCaption') }}
-      </div>
-    </v-card-text>
-  </v-card>
+    </KitSettingRow>
+
+    <KitProse>{{ translate(uiLang, 'animation.style') }}</KitProse>
+    <v-radio-group
+      :model-value="enabled ? pageTransition : null"
+      density="compact"
+      hide-details
+      :disabled="!enabled || !modernMotion"
+      @update:model-value="setStyle"
+    >
+      <v-radio
+        v-for="t in PAGE_TRANSITIONS"
+        :key="t.key"
+        :label="translate(uiLang, t.labelKey)"
+        :value="t.key"
+      />
+    </v-radio-group>
+    <KitCaption>{{ translate(uiLang, 'animation.caption') }}</KitCaption>
+
+    <KitProse>{{ translate(uiLang, 'animation.themeTransition') }}</KitProse>
+    <v-radio-group
+      :model-value="themeTransition"
+      density="compact"
+      hide-details
+      :disabled="!modernMotion"
+      @update:model-value="setThemeTransition"
+    >
+      <v-radio :label="translate(uiLang, 'animation.themeCorner')" value="corner" />
+      <v-radio :label="translate(uiLang, 'animation.themeCursor')" value="cursor" />
+    </v-radio-group>
+    <KitCaption>{{ translate(uiLang, 'animation.themeTransitionCaption') }}</KitCaption>
+  </KitSection>
 </template>

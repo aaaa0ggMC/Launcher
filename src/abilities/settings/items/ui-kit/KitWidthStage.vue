@@ -11,7 +11,7 @@
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
-import { KitCaption } from '@ui/kit'
+import { KitCaption, KitSlider } from '@ui/kit'
 
 const props = withDefaults(
   defineProps<{
@@ -112,15 +112,12 @@ const boxStyle = computed(() => ({
       >
         <v-btn v-for="p in PRESETS" :key="p" :value="p" size="small">{{ p }}</v-btn>
       </v-btn-toggle>
-      <v-slider
+      <KitSlider
         class="kit-stage__slider"
         :model-value="width"
         :min="min"
         :max="maxWidth"
         :step="8"
-        density="compact"
-        hide-details
-        color="primary"
         :aria-label="t('kit.gallery.width', '容器宽度')"
         @update:model-value="onSliderInput"
       />

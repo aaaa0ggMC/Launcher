@@ -15,7 +15,7 @@
 ## 0. 三条总原则
 
 1. **规范内建成默认值，不让页面作者记住。**chip 内边距、空状态观感、文字按钮密度、
-   窄屏边距 12px——这些都已经在 `global.css` 里全局统一（见 DESIGN §7 / §4.7），
+   窄屏边距 12px——这些都已经在 `global.css` 里全局统一（见 SPEC「空状态」），
    kit 组件直接用，页面**不要**再写一遍。
 2. **组件不许 import electron。**宿主能力（窗口 / 文件 / 剪贴板）用
    `window.cockpit.hasCap(...)` 降级，保证无头网页（`src/headless/`）与安卓 WebView 可用。
@@ -170,7 +170,7 @@ for 每个规划单元（单元素，或 KitRowGroup 捆成的一组）:
   └──────────────────┘
 ```
 
-不缩小字号来逃避布局问题（DESIGN §1.2）：「缩小」= 内容压缩到声明下限为止，
+不缩小字号来逃避布局问题（SPEC「启发式」）：「缩小」= 内容压缩到声明下限为止，
 下限就是「不变形的最小宽度」。
 
 ### 1.7 Vuetify 控件的自然宽度 vs 引擎采用宽度（排查裁剪的入口）
@@ -218,14 +218,14 @@ for 每个规划单元（单元素，或 KitRowGroup 捆成的一组）:
 
 **为什么是 `absolute; inset:0` 而不是 `calc(100vh - 96px)`**：那个 96 是
 「appbar 高 + 容器 padding」的魔数，appbar 实测高度会变（`bili/View.vue` 的注释记录
-实测 55px，不是 DESIGN §4.6 口径的 48/64px），魔数壳就短一截。绝对定位不依赖任何魔数，
+实测 55px，不是历史文档口径的 48/64px），魔数壳就短一截。绝对定位不依赖任何魔数，
 键盘弹出时也跟着可视区收。高度计算一律走 `viewport.ts` 的 `--app-vh`，**不写裸 `100vh`**。
 
 - app / canvas 是**通栏**外壳（不等宿主容器边距）：内部区域自己给内边距。
 - 挂载期间把宿主 `.page-host` 的 `min-height` 临时置 0（否则外壳下面多一条空滚动条），
   离开时还原（`settings/View.vue` 同款机制）。
 - props：`mode` / `maxWidth`（可读行宽，bili SubPage 用 960）/ `gutter`（自己负责左右边距，
-  窄屏 12px——DESIGN §3 的 px-3，不是 px-2；宿主 `v-container` 已给准时不用传）。
+  窄屏 12px——SPEC「断点令牌」的 px-3，不是 px-2；宿主 `v-container` 已给准时不用传）。
 
 > **给 DESIGN.md §4.6 的修订建议（本轮只记录，未改 DESIGN.md）**：
 > §4.6 现在写「必须 `calc(100vh - 96px)`」，建议改为「**必须铺满宿主可视区且外壳不出滚动条，
@@ -233,8 +233,8 @@ for 每个规划单元（单元素，或 KitRowGroup 捆成的一组）:
 
 ### 2.2 `<KitSection>`（分区卡片）
 
-标题 + 操作插槽 + 默认插槽，统一 `padding-block: 12px`（py-3，DESIGN §3）。
-操作区 `flex-wrap` 兜底（DESIGN §4.2）。`scroll` 插槽 prop 把本区变成内部滚动区，
+标题 + 操作插槽 + 默认插槽，统一 `padding-block: 12px`（= grid(3)，SPEC「网格令牌」）。
+操作区 `flex-wrap` 兜底（SPEC「启发式：空间冲突优先序」）。`scroll` 插槽 prop 把本区变成内部滚动区，
 行为随 KitPage 的模式切换（app = `flex-grow-1` 吃满；canvas = 内容高度 + 内滚；
 document = 正常流）。
 
@@ -310,7 +310,7 @@ slot `default` = 自定义控件。
 `− [ 42 % ] +`。**文本框只当草稿**：打字中途不夹取（否则打 "60" 会被 "6"→min 的钳制吃掉），
 失焦 / 回车 / ± 才夹取落值——下发的补单因此永远合法（语义照
 `bili/components/settings/DutySection.vue` 的 `makeStepper`，仓里第五份重复实现收敛到这一份）。
-± 是图标按钮（DESIGN §1.3 允许 `size="small"`），触控热区补到 40px。
+± 是图标按钮（SPEC「触控热区」允许 `size="small"`），热区补到 40px。
 
 ---
 
@@ -336,9 +336,9 @@ appVh() // 读 --app-vh（不写裸 100vh）
 
 ## 5. 禁止事项（写给页面作者）
 
-- 不要给文字按钮 / chip 加 `size="small"`（DESIGN §1.3 / §4.1；`global.css` 已全局兜底）。
+- 不要给文字按钮 / chip 加 `size="small"`（SPEC「密度阶」；`global.css` 已全局兜底）。
 - 不要再写一遍 chip 的 `padding-block:4px; min-height:24px`（`global.css:611-615` 已统一）。
-- 不要手写大图标空状态，用 `<v-empty-state>`（DESIGN §7）。
+- 不要手写大图标空状态，用 `<v-empty-state>`（SPEC「空状态」）。
 - 不要写裸 `100vh` / `calc(100vh - Npx)`，用 `KitPage` 或 `var(--app-vh)`。
 - 不要让 kit 组件 import electron；宿主能力一律 `window.cockpit.hasCap(...)` 降级。
 - 纯图标按钮必须 `aria-label` + `title`。
