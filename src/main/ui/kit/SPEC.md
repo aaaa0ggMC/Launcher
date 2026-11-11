@@ -35,7 +35,8 @@
 - Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
   （实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
   五类控件统一落在 44px 的办法是不碰内部高度，只把 switch / slider 拉到同一档。
-- `inline` 档 = 文字行高（24px）+ 11px。设置行不该出现 44px 的方块：实测输入档 44-48px
+- `inline` 档 = 文字行高（24px）+ 11px = 35px。窄屏（≤720px）下 inline 仍是 35px——
+  Vuetify 的 field 自带约 8px 纵向 padding，硬压到 28 会把下划线顶掉，不值得。设置行不该出现 44px 的方块：实测输入档 44-48px
   而同行文字行高只有 24px，视觉上下坠一个大方块。inline 用 underlined 细线
   （无 outlined 大盒、无背景块），四类控件（下拉 / 步进器 / 滑块 / 开关）高度一致 = 35px。
 - **滑块必须吃满控件槽**：`v-slider` 默认没有 width/flex，在 flex 容器里按内容宽收缩，

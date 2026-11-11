@@ -251,10 +251,16 @@
   width: 44px;
 }
 
-/* 数值框：等宽 + 居中（步进器用） */
+/* 数值框：等宽 + 右对齐（步进器用）。
+   右对齐是为了让「数字 → 单位」紧贴且位置稳定：居中的数字会随位数左右晃，
+   单位跟在后面看着就是「漂移 + 中间空一截」（用户原话）。padding-right 给一口气。 */
 .kit-control--num .v-field__input {
-  text-align: center;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.kit-control--num .v-field__input input {
+  padding-right: 6px;
 }
 
 /* 滑块：轨道与圆点尺寸从令牌算，高度拉到输入档（40px） */
@@ -365,8 +371,20 @@
   min-height: 32px !important;
 }
 
+/* 窄屏：控件降一档——SPEC「密度阶」tight 档。
+   注意顺序：inline 的规则必须排在 input 之后，否则同样命中两个类时被
+   .kit-control 的 36px 盖掉（实测窄屏 inline 控件因此变成 40px）。 */
 @media (max-width: 720px) {
-  .kit-control--inline {
+  .kit-control {
+    min-height: 36px;
+  }
+
+  .kit-control .v-field__input {
+    font-size: 0.8125rem;
+  }
+
+  .kit-control--inline,
+  .kit-stepper.kit-control--inline {
     min-height: 28px;
   }
 
@@ -374,18 +392,13 @@
     min-height: 28px !important;
   }
 
+  .kit-control--inline .v-field {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
   .kit-control--inline .v-field__input {
-    font-size: 0.8125rem;
-  }
-}
-
-/* 窄屏：控件降一档（根盒 36px = grid(9)，字号小一档）——SPEC「密度阶」 */
-@media (max-width: 720px) {
-  .kit-control {
-    min-height: 36px;
-  }
-
-  .kit-control .v-field__input {
+    min-height: 26px;
     font-size: 0.8125rem;
   }
 }
