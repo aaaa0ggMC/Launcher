@@ -5,10 +5,11 @@
  */
 import { computed, useAttrs } from 'vue'
 import { useKitSurface } from '../composables/useKitSurface'
+import { resolveDensity, useKitDensity } from '../layout/density'
 
 defineOptions({ inheritAttrs: false })
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
     size?: 'input' | 'inline'
@@ -22,6 +23,8 @@ withDefaults(
 const emit = defineEmits<{ 'update:modelValue': [number] }>()
 const attrs = useAttrs()
 useKitSurface()
+/** 生效密度：显式 size > 容器上下文（KitSettingRow=inline）> input */
+const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
 const rootStyle = computed(() => ({ '--kit-fit-scale': '1' }))
 </script>
@@ -30,7 +33,7 @@ const rootStyle = computed(() => ({ '--kit-fit-scale': '1' }))
   <div
     class="kit-control"
     :class="[
-      size === 'inline' ? 'kit-control--inline' : undefined,
+      density === 'inline' ? 'kit-control--inline' : undefined,
       fill ? 'kit-control--fill' : undefined
     ]"
     :style="rootStyle"

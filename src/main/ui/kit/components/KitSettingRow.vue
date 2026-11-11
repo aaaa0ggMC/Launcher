@@ -19,6 +19,7 @@ import { computed, toValue, useSlots } from 'vue'
 import type { Ref } from 'vue'
 import { useAdaptive } from '../composables/useAdaptive'
 import KitSlider from './KitSlider.vue'
+import { provideDensity } from '../layout/density'
 import KitSmartRow from '../layout/KitSmartRow.vue'
 import KitRowItem from '../layout/KitRowItem.vue'
 import KitNumberStepper from './KitNumberStepper.vue'
@@ -69,6 +70,8 @@ const narrow = computed(() =>
 
 const priority = computed(() => (props.secondary ? 'secondary' : 'primary'))
 const controlSize = computed(() => props.controlSize ?? 'inline')
+// 密度上下文：设置行里的控件默认 inline，调用方不用记 size（架构修正，见 density.ts）
+provideDensity(controlSize.value)
 const showSlider = computed(() => props.slider === true && !narrow.value)
 const hasControl = computed(() => slots.default !== undefined)
 const valueText = computed<string | undefined>(() => {

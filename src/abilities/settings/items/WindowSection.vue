@@ -148,7 +148,6 @@ defineExpose({
   <KitSection :title="translate(uiLang, 'window.title')" icon="mdi-window-maximize">
     <KitSettingRow v-if="hasFrame" :label="translate(uiLang, 'window.frameless')">
       <KitSwitch
-        size="inline"
         :model-value="frameless"
         :aria-label="translate(uiLang, 'window.frameless')"
         @update:model-value="setFrameless"
@@ -157,7 +156,6 @@ defineExpose({
 
     <KitSettingRow v-if="hasFrame" :label="translate(uiLang, 'window.rounded')">
       <KitSwitch
-        size="inline"
         :model-value="rounded"
         :aria-label="translate(uiLang, 'window.rounded')"
         @update:model-value="setRounded"
@@ -172,7 +170,6 @@ defineExpose({
 
     <KitSettingRow :label="translate(uiLang, 'window.bgSelect')">
       <KitSelect
-        size="inline"
         v-model="background"
         :items="bgItems"
         item-title="name"
@@ -185,7 +182,6 @@ defineExpose({
 
     <KitSettingRow v-if="background === 'image'" :label="translate(uiLang, 'window.imgPath')">
       <KitTextField
-        size="inline"
         v-model="backgroundImage"
         placeholder="/home/user/Pictures/wall.jpg"
         :aria-label="translate(uiLang, 'window.imgPath')"
@@ -211,7 +207,6 @@ defineExpose({
       :value="`${Math.round(fuseAlpha * 100)}%`"
     >
       <KitSlider
-        size="inline"
         v-model="fuseAlpha"
         :min="0"
         :max="1"
@@ -228,7 +223,6 @@ defineExpose({
       :value="`${Math.round(backgroundOpacity * 100)}%`"
     >
       <KitSlider
-        size="inline"
         v-model="backgroundOpacity"
         :min="0"
         :max="1"
@@ -241,7 +235,6 @@ defineExpose({
 
     <KitSettingRow :label="translate(uiLang, 'window.bgBlur')" :value="`${fuseBlur}px`">
       <KitSlider
-        size="inline"
         v-model="fuseBlur"
         :min="0"
         :max="60"

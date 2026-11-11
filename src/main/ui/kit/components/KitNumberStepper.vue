@@ -9,10 +9,11 @@
  * 尺寸（SPEC「3）：± 是图标按钮，允许 size="small"；输入框 compact 密度；
  * ± 按钮触控热区 ≥40px（v-btn size="small" 默认 32px，用内边距补足）。
  */
-import { inject, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { translateTemplate } from '../../i18n'
 import KitTextField from './KitTextField.vue'
+import { resolveDensity, useKitDensity } from '../layout/density'
 
 const props = defineProps<{
   /** 密度档：input = 输入档（44px）；inline = 行内档（32px，设置行用） */
@@ -34,6 +35,8 @@ const emit = defineEmits<{
 }>()
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
+/** 生效密度：显式 size > 容器上下文（KitSettingRow=inline）> input */
+const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
 const draft = ref(String(props.modelValue))
 
@@ -80,7 +83,7 @@ const incLabel = (): string =>
 <template>
   <div
     class="kit-stepper kit-control"
-    :class="size === 'inline' ? 'kit-control--inline' : undefined"
+    :class="density === 'inline' ? 'kit-control--inline' : undefined"
     :style="width ? { width: `${width}px` } : undefined"
   >
     <v-btn
@@ -98,7 +101,7 @@ const incLabel = (): string =>
     <KitTextField
       v-model="draft"
       class="kit-stepper__field"
-      :size="size"
+      :size="density"
       numeric
       inputmode="numeric"
       :suffix="unit"

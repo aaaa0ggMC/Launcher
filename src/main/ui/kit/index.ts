@@ -75,4 +75,5 @@ export { circleDiameter, fitRatio, fitScale, fitState, type FitState } from './l
 
 // 行内上下文类型（给要读取行状态的调用方）
 export { smartRowKey, rowGroupKey, DEFAULT_SLOT } from './layout/smart-row-context'
+export { kitDensityKey, resolveDensity, useKitDensity, type KitDensity } from './layout/density'
 export type { SmartRowContext, SmartRowItemInput, SmartRowSlot } from './layout/smart-row-context'

@@ -9,10 +9,11 @@
 import { computed, useAttrs } from 'vue'
 import { useFitBox } from '../composables/useFitBox'
 import { useKitSurface } from '../composables/useKitSurface'
+import { resolveDensity, useKitDensity } from '../layout/density'
 
 defineOptions({ inheritAttrs: false })
 
-defineProps<{
+const props = defineProps<{
   /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
   size?: 'input' | 'inline'
   modelValue?: string | number | null
@@ -23,6 +24,8 @@ defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [unknown] }>()
 const attrs = useAttrs()
 useKitSurface()
+/** 生效密度：显式 size > 容器上下文（KitSettingRow=inline）> input */
+const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
 const { target, content, scale } = useFitBox()
 const rootStyle = computed(() => ({ '--kit-fit-scale': String(scale.value) }))
@@ -40,7 +43,7 @@ function onInput(v: unknown): void {
     ref="target"
     class="kit-control"
     :class="[
-      size === 'inline' ? 'kit-control--inline' : undefined,
+      density === 'inline' ? 'kit-control--inline' : undefined,
       numeric ? 'kit-control--num' : undefined
     ]"
     :style="rootStyle"
@@ -48,7 +51,7 @@ function onInput(v: unknown): void {
     <v-text-field
       :model-value="modelValue"
       density="compact"
-      :variant="size === 'inline' ? 'underlined' : 'outlined'"
+      :variant="density === 'inline' ? 'underlined' : 'outlined'"
       hide-details
       v-bind="attrs"
       @update:model-value="onInput"
