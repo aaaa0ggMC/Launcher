@@ -7,16 +7,16 @@
 
 ## 1. 网格单位与间距阶
 
-| 令牌                 | 值   | 说明                                             |
-| -------------------- | ---- | ------------------------------------------------ |
-| `GRID.unit`          | 4px  | 基础单位。一切尺寸都是它的整数倍，肉眼可对齐     |
-| `GRID.gutter`        | 8px  | 栏距 / 区块间距（= 2 单位）                      |
-| `GRID.radius`        | 12px | 卡片圆角（= 3 单位）；控件内圆角 8px（= 2 单位） |
-| `GRID.pad`           | 12px | 卡片内边距（= 3 单位）                           |
-| `GRID.touch`         | 40px | 触控热区下界（= 10 单位）                        |
-| `GRID.controlHeight` | 36px | 文字按钮高度（= 9 单位）                         |
-| `GRID.iconHeight`    | 32px | 图标按钮高度（= 8 单位）                         |
-| `GRID.inputHeight`   | 44px | 输入类控件高度（= 11 单位）                      |
+| 令牌 | 值 | 说明 |
+| --- | --- | --- |
+| `GRID.unit` | 4px | 基础单位。一切尺寸都是它的整数倍，肉眼可对齐 |
+| `GRID.gutter` | 8px | 栏距 / 区块间距（= 2 单位） |
+| `GRID.radius` | 12px | 卡片圆角（= 3 单位）；控件内圆角 8px（= 2 单位） |
+| `GRID.pad` | 12px | 卡片内边距（= 3 单位） |
+| `GRID.touch` | 40px | 触控热区下界（= 10 单位） |
+| `GRID.controlHeight` | 36px | 文字按钮高度（= 9 单位） |
+| `GRID.iconHeight` | 32px | 图标按钮高度（= 8 单位） |
+| `GRID.inputHeight` | 44px | 输入类控件高度（= 11 单位） |
 
 **间距阶**（从紧到松）：`grid(1)=4`（同组元素内）→ `grid(2)=8`（栏距 / 区块间距起步）
 → `grid(3)=12`（卡片内边距 / 分区之间）→ `grid(4)=16`（页面级分组）。
@@ -24,11 +24,11 @@
 
 ## 2. 密度阶（实测数字）
 
-| 档位                 | 控件高                            | 字号      | 用在哪                 |
-| -------------------- | --------------------------------- | --------- | ---------------------- |
-| compact（全局默认）  | 输入 44px / 开关 44px / 滑块 44px | 0.875rem  | 设置项、工具条、列表行 |
-| default              | 输入 56px                         | 0.875rem  | 独立表单、对话框主输入 |
-| tight（窄屏 ≤720px） | 输入 40px / 开关 40px             | 0.8125rem | 手机上的密集区         |
+| 档位 | 控件高 | 字号 | 用在哪 |
+| --- | --- | --- | --- |
+| compact（全局默认） | 输入 44px / 开关 44px / 滑块 44px | 0.875rem | 设置项、工具条、列表行 |
+| default | 输入 56px | 0.875rem | 独立表单、对话框主输入 |
+| tight（窄屏 ≤720px） | 输入 40px / 开关 40px | 0.8125rem | 手机上的密集区 |
 
 实测备注：Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
 （实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
@@ -37,14 +37,14 @@
 
 ## 3. 字号阶与行高
 
-| 用途               | 字号                       | 行高 |
-| ------------------ | -------------------------- | ---- |
-| 标题（KitTitle）   | 1rem / 次级 0.9375rem      | 1.4  |
-| 正文（KitProse）   | 0.875rem                   | 1.6  |
-| 说明（KitCaption） | 0.75rem                    | 1.5  |
-| 提示行（KitHint）  | 0.8125rem                  | 1.55 |
-| 输入文字           | 0.875rem（窄屏 0.8125rem） | —    |
-| 数值               | 0.9375rem + `tabular-nums` | —    |
+| 用途 | 字号 | 行高 |
+| --- | --- | --- |
+| 标题（KitTitle） | 1rem / 次级 0.9375rem | 1.4 |
+| 正文（KitProse） | 0.875rem | 1.6 |
+| 说明（KitCaption） | 0.75rem | 1.5 |
+| 提示行（KitHint） | 0.8125rem | 1.55 |
+| 输入文字 | 0.875rem（窄屏 0.8125rem） | — |
+| 数值 | 0.9375rem + `tabular-nums` | — |
 
 窄屏（≤720px）标题降一档、正文降到 caption 档、代码与 import 行降一档——**降档是响应式的，
 不是「塞不下就缩小」的借口**（见 §10 启发式）。
@@ -54,12 +54,12 @@
 `useKitSurface()` 把设置 → 外观的 `window.fuseAlpha` / `window.fuseBlur`
 （订阅 `cockpit:config-changed`，改动即时跟随）写成四个变量，**所有 kit 表面只用这组**：
 
-| 变量                | 值                                                 |
-| ------------------- | -------------------------------------------------- |
-| `--kit-glass-alpha` | `fuseAlpha`（默认 1 = 不透，保持旧观感）           |
-| `--kit-glass-blur`  | `fuseBlur`（`window.blur=off` 或窄屏 auto 时为 0） |
-| `--kit-surface`     | `var(--v-theme-surface)`（主题切换自动跟随）       |
-| `--kit-border`      | `rgba(var(--v-theme-on-surface), 0.12)`            |
+| 变量 | 值 |
+| --- | --- |
+| `--kit-glass-alpha` | `fuseAlpha`（默认 1 = 不透，保持旧观感） |
+| `--kit-glass-blur` | `fuseBlur`（`window.blur=off` 或窄屏 auto 时为 0） |
+| `--kit-surface` | `var(--v-theme-surface)`（主题切换自动跟随） |
+| `--kit-border` | `rgba(var(--v-theme-on-surface), 0.12)` |
 
 阴影阶：浮层 `0 8px 24px rgba(0,0,0,.28)`；卡片不加阴影（用边框分层）。
 **不要各写各的 `backdrop-filter`**；首帧同步写默认值，避免「没有背景色」的一帧。
@@ -73,17 +73,17 @@
 
 ## 6. 控件尺寸表（实测，排查裁剪的入口）
 
-| 控件                      | 自然宽度                                         | kit 默认 kind          | 要显式 minWidth 吗      |
-| ------------------------- | ------------------------------------------------ | ---------------------- | ----------------------- |
-| `v-switch`（compact）     | 28px（wrapper；轨道 36px 会溢出 wrapper 4px/侧） | `control` 88           | 不用（别低于 40）       |
-| `v-switch`（默认密度）    | 40px                                             | 同上                   | 不用                    |
-| `v-slider`                | 百分比宽（弹性）                                 | `slider` 120 / 手机 88 | 不用（低于 ~88 不好用） |
-| `v-select`                | 百分比宽；min-content ≈ 70px                     | `control` 88           | 要（内容长时给 120+）   |
-| `v-text-field`            | 百分比宽；min-content ≈ 60px                     | `number` 64            | 要（内容长时给 80+）    |
-| `v-btn` `size=small icon` | 50px（CSS `min-width`）                          | `icon` 40              | 要（给 56+）            |
-| `v-btn` 文字 + 图标       | min-width 64 + 文字                              | `control` 88           | 要（按文字长度）        |
-| `v-chip`                  | 文字 + 16px 内边距                               | `label` 估算 + 8       | 要（自绘 chip 一定量）  |
-| 自绘 chip / 徽标          | **必须实测**                                     | —                      | 要                      |
+| 控件 | 自然宽度 | kit 默认 kind | 要显式 minWidth 吗 |
+| --- | --- | --- | --- |
+| `v-switch`（compact） | 28px（wrapper；轨道 36px 会溢出 wrapper 4px/侧） | `control` 88 | 不用（别低于 40） |
+| `v-switch`（默认密度） | 40px | 同上 | 不用 |
+| `v-slider` | 百分比宽（弹性） | `slider` 120 / 手机 88 | 不用（低于 ~88 不好用） |
+| `v-select` | 百分比宽；min-content ≈ 70px | `control` 88 | 要（内容长时给 120+） |
+| `v-text-field` | 百分比宽；min-content ≈ 60px | `number` 64 | 要（内容长时给 80+） |
+| `v-btn` `size=small icon` | 50px（CSS `min-width`） | `icon` 40 | 要（给 56+） |
+| `v-btn` 文字 + 图标 | min-width 64 + 文字 | `control` 88 | 要（按文字长度） |
+| `v-chip` | 文字 + 16px 内边距 | `label` 估算 + 8 | 要（自绘 chip 一定量） |
+| 自绘 chip / 徽标 | **必须实测** | — | 要 |
 
 声明下限是个谎言时元素会被 `overflow:hidden` 裁一截（实测：自绘 chip 声明 46、自然 49
 → 右缘切 3px）。引擎两道防线：规划前 `applyNaturalFloor` 把刚性元素下限抬到实测自然宽度；
@@ -145,32 +145,12 @@
 容器 padding」的魔数，appbar 实测 55px（不是 48/64），魔数壳就短一截。绝对定位不依赖任何
 魔数，键盘弹出时也跟着可视区收。高度计算一律 `var(--app-vh)`，不写裸 `100vh`。
 
-## 12. 参考实现（迁移照抄这个结构）
+## 12. 与 DESIGN.md 的冲突（kit 赢）
 
-`src/abilities/mirror/View.vue` 是第一个整体迁到 kit 的内容页，后续 ability 迁移照它抄：
-
-```vue
-<KitPage mode="document|app|canvas">
-  <KitSection :title="…" icon="mdi-…">
-    <template #actions><v-btn …>操作</v-btn></template>
-    <KitSettingRow v-model="x" label="…" :min :max unit="…" />   <!-- 数值型 -->
-    <KitSettingRow label="…"><KitSwitch v-model="y" aria-label="…" /></KitSettingRow>  <!-- 自定义控件 -->
-    <KitEmpty v-if="!list.length" kind="list" :title :text />    <!-- 空态 -->
-    <KitGrid :min-col="260"><v-card v-for=…>…</v-card></KitGrid>  <!-- 卡片网格 -->
-  </KitSection>
-</KitPage>
-```
-
-要点：分区外壳 `KitSection`、设置行 `KitSettingRow`、控件一律控件层、空态 `KitEmpty`、
-多列 `KitGrid`；`toMarkdown` 深导出、翻译键、`v-privacy` / `v-agent-forbidden`、
-`aria-label` 全部保留；**导航结构 / keep-alive / 返回链不动**。
-
-## 13. 与 DESIGN.md 的冲突（kit 赢）
-
-| #   | DESIGN.md 原表述                              | kit 规范                                                     | 理由（实测）                                                               |
-| --- | --------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| 1   | §4.6「必须 `calc(100vh - 96px)`」             | `absolute; inset:0` 铺满宿主可视区                           | appbar 实测 55px，魔数口径必短一截；`bili/View.vue` 的注释早就记了这件事   |
-| 2   | §3「区块间距 ≥8px 底线」（据此否掉 4px 单位） | 间距阶自己定：4px 单位 → 8px 栏距 → 12px 卡片 → 16px 页面    | 「一个网格单位」= 4px 是用户原话；8px 是**栏距**不是底线，两者是阶不是竞争 |
-| 3   | §1.3「chip 默认密度 + 显式 padding-block」    | chip 内边距由 global.css 全局统一，kit 的 `KitChip` 是薄封装 | 32 处页面在重复写同一条规则，是冗余不是缺原语                              |
+| # | DESIGN.md 原表述 | kit 规范 | 理由（实测） |
+| --- | --- | --- | --- |
+| 1 | §4.6「必须 `calc(100vh - 96px)`」 | `absolute; inset:0` 铺满宿主可视区 | appbar 实测 55px，魔数口径必短一截；`bili/View.vue` 的注释早就记了这件事 |
+| 2 | §3「区块间距 ≥8px 底线」（据此否掉 4px 单位） | 间距阶自己定：4px 单位 → 8px 栏距 → 12px 卡片 → 16px 页面 | 「一个网格单位」= 4px 是用户原话；8px 是**栏距**不是底线，两者是阶不是竞争 |
+| 3 | §1.3「chip 默认密度 + 显式 padding-block」 | chip 内边距由 global.css 全局统一，kit 的 `KitChip` 是薄封装 | 32 处页面在重复写同一条规则，是冗余不是缺原语 |
 
 DESIGN.md 开头已加指向：凡 kit 覆盖的范围以本文为准。

@@ -5,7 +5,6 @@ import { ref, shallowRef, computed, onMounted, inject } from 'vue'
 import type { Ref } from 'vue'
 import type { MirrorInfo, MirrorEntry } from './types'
 import { translate, translateTemplate } from '@ui/i18n'
-import { KitCaption, KitEmpty, KitGrid, KitPage, KitProse, KitSection, KitSwitch } from '@ui/kit'
 
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 
@@ -129,41 +128,38 @@ defineExpose({ toMarkdown })
 </script>
 
 <template>
-  <!-- 样板页：KitPage(document) + KitSection + KitSettingRow + 控件层 + KitEmpty。
-       这就是「几分钟一个页面」的参考实现——后续 ability 迁移照抄这个结构。 -->
-  <KitPage mode="document">
-    <KitSection :title="translate(uiLang, 'mirror.heading')" icon="mdi-earth">
-      <template #actions>
-        <v-btn variant="tonal" prepend-icon="mdi-speedometer" :loading="testing" @click="runTest">
-          {{ translate(uiLang, 'mirror.test') }}
-        </v-btn>
-      </template>
+  <div>
+    <div class="d-flex align-center justify-space-between mb-1">
+      <div>
+        <div class="text-h6 font-weight-medium">{{ translate(uiLang, 'mirror.heading') }}</div>
+        <div class="text-caption on-surface-variant mt-1">
+          {{ translateTemplate(uiLang, 'mirror.subtitle', { n: String(enabledCount) }) }}
+        </div>
+      </div>
+      <v-btn variant="tonal" prepend-icon="mdi-speedometer" :loading="testing" @click="runTest">
+        {{ translate(uiLang, 'mirror.test') }}
+      </v-btn>
+    </div>
 
-      <KitProse>
-        {{ translateTemplate(uiLang, 'mirror.subtitle', { n: String(enabledCount) }) }}
-      </KitProse>
+    <v-alert v-if="error" type="error" variant="tonal" class="mb-3 mt-3" density="compact">
+      {{ error }}
+    </v-alert>
 
-      <v-alert v-if="error" type="error" variant="tonal" density="compact">
-        {{ error }}
-      </v-alert>
+    <v-empty-state
+      v-if="info && sortedMirrors.length === 0 && !error"
+      icon="mdi-earth-off"
+      :title="translate(uiLang, 'mirror.empty')"
+      :text="translate(uiLang, 'mirror.emptyText')"
+      class="mt-6"
+    />
 
-      <!-- 空状态走 kit 的 KitEmpty（语义 icon 表：list = 列表类空态） -->
-      <KitEmpty
-        v-if="info && sortedMirrors.length === 0 && !error"
-        kind="list"
-        :title="translate(uiLang, 'mirror.empty')"
-        :text="translate(uiLang, 'mirror.emptyText')"
-      />
-
-      <!-- 镜像卡片网格：等宽栏 + 等高 + 统一栏距（网格令牌） -->
-      <KitGrid v-if="sortedMirrors.length" :min-col="260" :gap="12">
+    <v-row dense class="mt-2">
+      <v-col v-for="m in sortedMirrors" :key="m.name" cols="12" sm="6" md="4">
         <v-card
-          v-for="m in sortedMirrors"
-          :key="m.name"
           rounded="lg"
           variant="tonal"
-          class="card-fill mirror-card"
-          :class="{ 'mirror-card--enabled': m.enabled }"
+          class="card-fill"
+          :class="m.enabled ? 'mirror-enabled' : ''"
         >
           <v-card-text>
             <div class="d-flex align-center ga-2">
@@ -186,38 +182,42 @@ defineExpose({ toMarkdown })
                 }}</v-chip>
               </template>
             </div>
-            <div class="mt-2 text-truncate" :title="m.url">
-              <KitCaption>{{ m.url }}</KitCaption>
-            </div>
-            <KitCaption v-if="testResults[m.name]?.ok" class="mt-1">
+            <div class="text-caption on-surface-variant mt-2 text-truncate">{{ m.url }}</div>
+            <div v-if="testResults[m.name]?.ok" class="text-caption on-surface-variant mt-1">
               <v-icon size="12" class="mr-1">mdi-download</v-icon>
               {{ fmtSpeed(testResults[m.name].speed) }}
-            </KitCaption>
+            </div>
             <div
               v-else-if="testResults[m.name]?.error"
-              class="mt-1 text-error text-truncate"
+              class="text-caption text-error mt-1 text-truncate"
               :title="testResults[m.name].error"
             >
-              <KitCaption>{{ testResults[m.name].error }}</KitCaption>
+              {{ testResults[m.name].error }}
             </div>
           </v-card-text>
           <v-card-actions class="px-4 pb-4 pt-0">
-            <KitSwitch
+            <v-switch
               :model-value="m.enabled"
+              color="success"
+              density="compact"
+              hide-details
               :loading="toggling === m.name"
-              :aria-label="m.name"
-              @update:model-value="(v: boolean) => toggle(m, v)"
-            />
-            <span class="text-body-2 ml-2">
-              {{
+              :label="
                 m.enabled
                   ? translate(uiLang, 'mirror.enabled')
                   : translate(uiLang, 'mirror.disabled')
-              }}
-            </span>
+              "
+              @update:model-value="(v: boolean | null) => toggle(m, !!v)"
+            />
           </v-card-actions>
         </v-card>
-      </KitGrid>
-    </KitSection>
-  </KitPage>
+      </v-col>
+    </v-row>
+  </div>
 </template>
+
+<style scoped>
+.mirror-enabled {
+  border: 1px solid rgba(var(--v-theme-success), 0.4);
+}
+</style>
