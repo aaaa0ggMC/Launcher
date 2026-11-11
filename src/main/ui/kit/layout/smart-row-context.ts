@@ -35,6 +35,8 @@ export interface SmartRowContext {
   narrow: Ref<boolean>
   /** 行是否处于退化态（多行 / 有元素被隐藏） */
   tight: Ref<boolean>
+  /** 被隐藏（收进「更多」浮层）的元素个数 */
+  hiddenCount: Ref<number>
   /** 溢出浮层的挂载点：被隐藏的控件 teleport 到这里（overflow="none" 时为 null） */
   overflowTarget: Ref<HTMLElement | null>
   overflowOpen: Ref<boolean>

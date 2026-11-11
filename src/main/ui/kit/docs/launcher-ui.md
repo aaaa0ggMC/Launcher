@@ -280,11 +280,27 @@ appVh() // 读 --app-vh（不写裸 100vh）
 
 ---
 
-## 6. 待补积木（后续批次）
+## 6. 画廊：设置页「UI 库」分类
 
-`KitToolbar`（从 `yaya/components/plugin-kit/DiagramFrame.vue` 上移，含「容器 <520px 收进 ⋮」）/
-`KitEmpty`（`v-empty-state` 薄封装 + actions 插槽 + 语义 icon 表）/
-`KitChip`（薄封装）/ `KitJsonTree`（四份合一：toolbox / playground / yarj）/
-`KitFormDialog`（桌面居中 + 窄屏 bottom-sheet）/ `useAsyncState` + `KitAsync`
-（把 `LoadingBar.vue` 的视觉与 `useLoading.ts` 的状态接上，**不写第三套状态原语**）/
-设置页「UI 库」gallery 分类。
+`src/abilities/settings/index.ts` 注入分类 `ui-kit`（label「UI 库」，放在「外观」后面），
+每个积木一个设置项，组件在 `src/abilities/settings/items/ui-kit/`：
+
+| 设置项                  | 演示                                                                                                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 智能行 · 宽度模拟器     | `KitWidthStage`（预设 1280/720/390 + 滑块 + 右缘拖拽手柄，键盘 ±8px）里放三行：Group 成组的设置行、次要元素整行隐藏 + 「⋯」浮层、名字与控件不同组的换行退化；右上角实时显示 `planRow` 结果（几行 / 隐藏几个 / 紧凑态） |
+| 页面外壳 · 三种滚动模式 | document / app / canvas 三栏并排（app/canvas 套 `position:relative` 定高盒，模拟宿主）                                                                                                                                 |
+| 设置行 · 三档并排       | 480 / 320 / 232 三档同数据，宽屏滑块、中屏步进器、窄屏收起数值框                                                                                                                                                       |
+| 分区卡片                | 普通 / 带操作 / 内部滚动三种用法                                                                                                                                                                                       |
+| 数字步进器              | 草稿语义（打字中途不夹取）+ 落值反馈                                                                                                                                                                                   |
+
+画廊是 `@ui/kit` 的第一个真实消费者（解决 tree-shake：`build:headless --only settings`
+里能看到 `KitSmartRowDemo` / `KitSettingRowDemo` 等 chunk）。
+
+## 7. 待补积木（下一批）
+
+`KitToolbar`（图标组 `size=small + ga-1` / 文字组默认密度 + `ga-2` 分插槽，窄屏文字组收进 ⋮，
+先例 `yaya/components/plugin-kit/DiagramFrame.vue`）/ `KitEmpty`（`v-empty-state` 薄封装 +
+actions 插槽 + 语义 icon 表）/ `KitChip`（薄封装 + `priority`）/ `KitJsonTree`
+（四份合一：toolbox / playground / yarj）/ `KitFormDialog`（桌面居中 + 窄屏 bottom-sheet）/
+`useAsyncState` + `KitAsync`（把 `LoadingBar.vue` 的视觉与 `useLoading.ts` 的状态接上，
+**不写第三套状态原语**）。每做好一个就往画廊里补一节。

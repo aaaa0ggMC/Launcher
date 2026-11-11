@@ -62,6 +62,11 @@ const props = defineProps<{
   align?: 'center' | 'start'
 }>()
 
+const emit = defineEmits<{
+  /** 规划结果变化时上报（画廊 / 需要响应退化的调用方用） */
+  state: [{ lines: number; hidden: number; tight: boolean }]
+}>()
+
 const uiLang = inject('cockpit:lang', ref('zh')) as Ref<string>
 const { narrow } = useAdaptive()
 const { target, width: containerWidth } = useContainerWidth()
@@ -112,6 +117,7 @@ const ctx: SmartRowContext = {
   slots,
   narrow,
   tight,
+  hiddenCount,
   overflowTarget: popEl,
   overflowOpen: moreOpen
 }
@@ -185,6 +191,7 @@ function apply(result: PlanRowResult, resolved: RowItem[]): void {
   const degraded = result.lines.length > 1 || result.hidden.length > 0
   tight.value = degraded
   hiddenCount.value = result.hidden.length
+  emit('state', { lines: result.lines.length, hidden: result.hidden.length, tight: degraded })
   for (const slot of rowSlots(result)) {
     const item = byId.get(slot.id)
     slots[slot.id] = {

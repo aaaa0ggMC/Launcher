@@ -15,7 +15,8 @@
  *
  * `secondary`：整行标 secondary，窄屏下可被 KitSmartRow 整体隐藏（收进行尾「更多」）。
  */
-import { computed, useSlots } from 'vue'
+import { computed, toValue, useSlots } from 'vue'
+import type { Ref } from 'vue'
 import { useAdaptive } from '../composables/useAdaptive'
 import KitSmartRow from '../layout/KitSmartRow.vue'
 import KitRowItem from '../layout/KitRowItem.vue'
@@ -44,14 +45,24 @@ const props = defineProps<{
   slider?: boolean
   /** 隐藏右侧数值（数值型行默认显示） */
   hideValue?: boolean
+  /**
+   * 窄屏判定的外部覆盖：传 true 强制按手机档渲染（步进器、隐藏数值框）。
+   * 缺省跟视口断点（useAdaptive 的 720）；容器比视口窄的场景（画廊宽度模拟器、
+   * 侧栏里的面板）传一个容器断点 Ref 进来。
+   */
+  narrow?: boolean | Ref<boolean>
 }>()
 
 defineEmits<{
   'update:modelValue': [number]
 }>()
 
-const { narrow } = useAdaptive()
+const viewportNarrow = useAdaptive().narrow
 const slots = useSlots()
+/** 窄屏判定：外部覆盖优先（容器断点），否则跟视口断点 */
+const narrow = computed(() =>
+  props.narrow === undefined ? viewportNarrow.value : toValue(props.narrow)
+)
 
 const priority = computed(() => (props.secondary ? 'secondary' : 'primary'))
 const showSlider = computed(() => props.slider === true && !narrow.value)

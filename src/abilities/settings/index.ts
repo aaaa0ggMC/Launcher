@@ -164,6 +164,81 @@ export default {
       ]
     },
     {
+      key: 'ui-kit',
+      label: 'UI 库',
+      icon: 'mdi-widgets-outline',
+      description:
+        '内置 UI 库（@ui/kit）的活示例：排版引擎、设置行、页面外壳——可交互，可拖宽度看退化',
+      keywords: [
+        'UI',
+        '组件',
+        '组件库',
+        'demo',
+        '示例',
+        '画廊',
+        '排版',
+        '智能行',
+        'kit',
+        'gallery',
+        'layout'
+      ],
+      items: [
+        {
+          key: 'smart-row',
+          label: '智能行 · 宽度模拟器',
+          icon: 'mdi-page-layout-body',
+          description: '拖动容器宽度，看同一行从「一行」到「隐藏数值框」再到「换行」',
+          keywords: [
+            '智能行',
+            '排版',
+            '宽度',
+            '模拟器',
+            '退化',
+            '隐藏',
+            '换行',
+            'smartrow',
+            'layout'
+          ],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitSmartRowDemo.vue'))
+        },
+        {
+          key: 'page',
+          label: '页面外壳 · 三种滚动模式',
+          icon: 'mdi-page-layout-header-footer',
+          description: 'document 整页滚 / app 页面级零滚动 / canvas 两个滚动条都在',
+          keywords: ['页面', '外壳', '滚动', '模式', 'page', 'scroll', 'canvas', 'app', 'document'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitPageDemo.vue'))
+        },
+        {
+          key: 'setting-row',
+          label: '设置行 · 三档并排',
+          icon: 'mdi-tune-variant',
+          description: '名字 + 控件 + 数值：宽屏滑块、中屏步进器、窄屏收起数值框',
+          keywords: ['设置行', '滑块', '步进器', '数值', 'settingrow', 'slider', 'stepper'],
+          fullWidth: true,
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitSettingRowDemo.vue'))
+        },
+        {
+          key: 'section',
+          label: '分区卡片',
+          icon: 'mdi-card-outline',
+          description: '标题 + 操作插槽 + 默认插槽，统一 py-3 与换行兜底',
+          keywords: ['分区', '卡片', 'section', 'card', '标题', '操作'],
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitSectionDemo.vue'))
+        },
+        {
+          key: 'stepper',
+          label: '数字步进器',
+          icon: 'mdi-numeric',
+          description: '文本框只当草稿：打字中途不夹取，失焦/回车/± 才落值',
+          keywords: ['步进器', '数字', 'stepper', 'number', '草稿'],
+          component: defineAsyncComponent(() => import('./items/ui-kit/KitNumberStepperDemo.vue'))
+        }
+      ]
+    },
+    {
       key: 'boot',
       label: '开机服务',
       icon: 'mdi-power-cycle',
