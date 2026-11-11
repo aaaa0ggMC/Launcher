@@ -1,0 +1,51 @@
+/* ---------------------------------------------------------------------------
+ * kit.css —— 积木级样式（只放「没法 scoped」的那部分）。
+ *
+ * 主题变量仍归 color_schemes / global.css：这里一律用 --v-theme-*，不写死 hex。
+ * 组件自己的样式都写在各自的 <style scoped> 里；只有 KitSmartRow 的「更多」浮层
+ * 是 teleport 到 body 的（为了不被祖先的 overflow:hidden 裁掉），必须用全局样式。
+ * ------------------------------------------------------------------------- */
+
+/* 「更多」溢出浮层：被 KitSmartRow 隐藏的控件 teleport 到这里，功能不丢失 */
+.kit-overflow {
+  position: fixed;
+  z-index: 2000;
+  min-width: 200px;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.kit-overflow__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.kit-overflow:focus {
+  outline: none;
+}
+
+/* 浮层里的行元素：恢复普通块级布局（KitRowItem 的 scoped 样式也兜了一层） */
+.kit-overflow > * {
+  flex: none;
+}
+
+/* 等宽数值（设置行右侧的数值、步进器输入）——读数不跳 */
+.kit-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

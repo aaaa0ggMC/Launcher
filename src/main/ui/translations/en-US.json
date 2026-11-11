@@ -257,5 +257,9 @@
   "export.clipboard": "Copy to clipboard",
   "export.file": "Save as file…",
   "export.copied": "Copied to clipboard",
-  "bt.copied": "Copied the output of \"{name}\" to the clipboard"
+  "bt.copied": "Copied the output of \"{name}\" to the clipboard",
+  "kit.overflow.more": "More",
+  "kit.overflow.title": "More options",
+  "kit.stepper.decrease": "Decrease {label}",
+  "kit.stepper.increase": "Increase {label}"
 }

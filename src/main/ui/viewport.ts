@@ -20,7 +20,12 @@ function isEditing(): boolean {
   )
 }
 
+/** 幂等：main.ts 启动时调一次，kit 的 useAdaptive 也会保证调过一次（重复调用会叠监听器） */
+let viewportVarInstalled = false
+
 export function installViewportVar(): void {
+  if (viewportVarInstalled) return
+  viewportVarInstalled = true
   if (window.cockpit.hasCap('window.frame')) return
   const root = document.documentElement
   const probe = document.createElement('div')

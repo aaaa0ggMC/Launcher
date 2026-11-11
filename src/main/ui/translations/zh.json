@@ -257,5 +257,9 @@
   "export.clipboard": "复制到剪贴板",
   "export.file": "保存为文件…",
   "export.copied": "已复制到剪贴板",
-  "bt.copied": "已把「{name}」的输出复制到剪贴板"
+  "bt.copied": "已把「{name}」的输出复制到剪贴板",
+  "kit.overflow.more": "更多",
+  "kit.overflow.title": "更多选项",
+  "kit.stepper.decrease": "减少 {label}",
+  "kit.stepper.increase": "增加 {label}"
 }
