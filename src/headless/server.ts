@@ -283,8 +283,20 @@ function serveStatic(webRoot: string, pathname: string, res: ServerResponse): vo
   let file = resolve(webRoot, rel || 'index.html')
   if (!file.startsWith(webRoot)) return json(res, 403, { error: 'forbidden' })
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(webRoot, 'index.html')
+  // 缓存策略：缺了 cache-control，浏览器会启发式缓存 index.html，于是每次发版用户看到的
+  // 还是旧界面（线上出现过两次「改了没效果」，根因都是这个，不是样式没生效）。
+  //   - HTML（index.html）：no-store，每次都要重新取，才能拿到新的 assets 哈希
+  //   - 带内容哈希的 /assets/*（index-AbC12345.js）：文件名变即内容变，可长期强缓存
+  //   - 其余（图标协议等）：no-cache，每次重验
+  const hashedAsset = /^assets\/.+[.-][A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i.test(rel)
+  const cacheControl = hashedAsset
+    ? 'public, max-age=31536000, immutable'
+    : extname(file) === '.html'
+      ? 'no-store'
+      : 'no-cache'
   res.writeHead(200, {
     'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    'cache-control': cacheControl,
     // 跨源隔离（self.crossOriginIsolated）：掌机的 mGBA wasm 用 SharedArrayBuffer，没有它会
     // DataCloneError。Electron 里靠启动开关，网页里只能靠这两个头。COEP 用 credentialless 而不是
     // require-corp：后者会挡掉没带 CORP 头的跨源图片 / 媒体。（注意 crossOriginIsolated 还要求安全上下文：
