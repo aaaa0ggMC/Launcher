@@ -44,6 +44,13 @@
   实测修前轨道 114px / 控件盒 104px（溢出 10px 被裁）；误加 `width:100%` 反而塌成 0
   （父盒本身是内容宽的，百分比解析为 0）。正确做法：`.kit-control--fill { flex: 1 1 auto }`
   让**根盒**先吃满槽，滑块再 `flex: 1 1 auto`。修后轨道 = 控件槽全宽。
+- **覆盖 Vuetify 内部结构前先读它的 sass/jsx**：`.v-field__append-inner` 自带
+  `padding-inline-start: var(--v-field-padding-after)` 和 `align-items: flex-start`，
+  `.v-field.v-field--variant-underlined .v-field__append-inner` 的特异性是 (0,3,0)——
+  比 `.kit-control--num .v-field__append-inner` 的 (0,2,0) 高，两级选择器压不住它；
+  而 `.v-field__input` 这个类 Vuetify 是加在 `<input>` **本身**上（不包一层 div），
+  写成 `.v-field__input input` 的后代选择器永远不匹配。这三件事都踩过，全部记录在
+  kit.css 对应规则的注释里。
 - **Vue 会把缺席的 Boolean prop 铸成 `false`**：「默认开」的开关（如 `fill`）必须用
   `withDefaults(defineProps<…>(), { fill: true })` 声明默认值，否则默认是关的（踩过）。
 

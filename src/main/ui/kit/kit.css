@@ -288,7 +288,11 @@
    （只有 .v-field--center-affix 才居中）——于是单位和数字空一截、还上下错位，
    用户看到的就是「漂移」。.kit-unit 自己清零 margin/padding 管不到父容器这两条。
    出处：node_modules/vuetify/lib/components/VField/VField.sass:180-188。 */
-.kit-control--num .v-field__append-inner {
+/* 选择器要压过 Vuetify 的 `.v-field.v-field--variant-underlined .v-field__append-inner`
+   （特异性 0,3,0 > 0,2,0）——只用两级选择器时 align-items 会被那条盖回去，
+   单位仍旧贴顶（实测 computed 仍是 flex-start）。 */
+.kit-control--num .v-field.v-field--variant-underlined .v-field__append-inner,
+.kit-control--num .v-field .v-field__append-inner {
   padding-inline-start: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -303,6 +307,9 @@
   width: 4em;
   padding-right: 2px !important;
   text-align: right;
+  /* 输入框自己在 grid 里是顶对齐的，单位是居中的——于是 % 比数字低一截。
+     把输入也居中，两者中线就重合了（实测修复前后见报告）。 */
+  align-self: center;
 }
 
 .kit-stepper__field {
