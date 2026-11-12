@@ -283,6 +283,18 @@
   opacity: 0.85;
 }
 
+/* 治父容器，不然单位永远贴不上：Vuetify 给 .v-field__append-inner 加了
+   padding-inline-start: var(--v-field-padding-after)，且默认 align-items:flex-start
+   （只有 .v-field--center-affix 才居中）——于是单位和数字空一截、还上下错位，
+   用户看到的就是「漂移」。.kit-unit 自己清零 margin/padding 管不到父容器这两条。
+   出处：node_modules/vuetify/lib/components/VField/VField.sass:180-188。 */
+.kit-control--num .v-field__append-inner {
+  padding-inline-start: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
+}
+
 /* 数字位宽：4 位数字，随字号缩放（em），不写死 px；右对齐 + 2px 呼吸隙，
    单位（.kit-unit，margin/padding 0）紧贴数字——间距 ≤2px、位数变化不位移。
    注意：Vuetify 把 .v-field__input 这个类加在 <input> **本身**上（不是包一层 div），
