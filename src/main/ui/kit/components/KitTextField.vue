@@ -17,8 +17,11 @@ const props = defineProps<{
   /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
   size?: 'input' | 'inline'
   modelValue?: string | number | null
-  /** 等宽数值框（居中 + tabular-nums） */
+  /** 等宽数值框（右对齐 + tabular-nums） */
   numeric?: boolean
+  /** 单位后缀（自绘，紧贴文字；不走 Vuetify 的 suffix prop——那个被 flex 推到输入区
+   *  右缘，和数字之间空一截，用户看来就是「漂」。见 kit.css 的 .kit-unit） */
+  suffix?: string
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [unknown] }>()
@@ -56,6 +59,9 @@ function onInput(v: unknown): void {
       v-bind="attrs"
       @update:model-value="onInput"
     >
+      <template v-if="suffix" #append-inner>
+        <span class="kit-unit">{{ suffix }}</span>
+      </template>
       <template v-for="(_, n) in $slots as Record<string, unknown>" :key="n" #[n]="slotProps">
         <slot :name="n" v-bind="slotProps ?? {}" />
       </template>

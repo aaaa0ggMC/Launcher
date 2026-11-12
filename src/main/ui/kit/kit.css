@@ -65,6 +65,19 @@
   padding: 12px;
 }
 
+.kit-setting-row__value {
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 设置行：行标签与行内控件文字同一个字号令牌（SPEC「字号阶」设置行 = 0.9375rem）。
+   实测修复前：行标签 16px（继承 .v-application 的 1rem）而行内控件 14px——
+   用户看到的就是「下拉里的 dark 字样比同行文字小」。 */
+.kit-setting-row__label {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
 /* 等宽数值（设置行右侧的数值、步进器输入）——读数不跳 */
 .kit-num {
   font-variant-numeric: tabular-nums;
@@ -251,16 +264,38 @@
   width: 44px;
 }
 
-/* 数值框：等宽 + 右对齐（步进器用）。
-   右对齐是为了让「数字 → 单位」紧贴且位置稳定：居中的数字会随位数左右晃，
-   单位跟在后面看着就是「漂移 + 中间空一截」（用户原话）。padding-right 给一口气。 */
+/* 数值框：等宽 + 右对齐。
+   右对齐 + 自绘单位（.kit-unit）让「数字 → 单位」紧贴且位置稳定：居中的数字会随位数
+   左右晃，Vuetify 的 suffix prop 又被 flex 推到输入区右缘，看着就是「漂 + 空一截」。 */
 .kit-control--num .v-field__input {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.kit-control--num .v-field__input input {
-  padding-right: 6px;
+/* 自绘单位：紧贴文字，不吃 Vuetify suffix 的 flex 间隙 */
+.kit-unit {
+  margin-inline-start: 0;
+  padding: 0;
+  align-self: center;
+  line-height: inherit;
+  font-size: inherit;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* 数字位宽：4 位数字，随字号缩放（em），不写死 px；右对齐 + 2px 呼吸隙，
+   单位（.kit-unit，margin/padding 0）紧贴数字——间距 ≤2px、位数变化不位移。
+   注意：Vuetify 把 .v-field__input 这个类加在 <input> **本身**上（不是包一层 div），
+   所以这里直接命中 input，别写成 `.v-field__input input`（那样永远不匹配——踩过）。 */
+.kit-control--num .v-field__input {
+  width: 4em;
+  padding-right: 2px !important;
+  text-align: right;
+}
+
+.kit-stepper__field {
+  width: auto !important;
+  flex: 0 0 auto;
 }
 
 /* 滑块：轨道与圆点尺寸从令牌算，高度拉到输入档（40px） */
@@ -333,7 +368,8 @@
   min-height: 30px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 0.875rem;
+  /* 与行标签同一个字号令牌（SPEC「字号阶」设置行 = 0.9375rem） */
+  font-size: 0.9375rem;
 }
 
 .kit-control--inline .v-slider {
@@ -354,11 +390,6 @@
 
 .kit-stepper.kit-control--inline .v-field__outline {
   display: none;
-}
-
-/* inline 档的数字框：3 位数字 + 单位后缀的量级（内容率 80%） */
-.kit-stepper.kit-control--inline .kit-stepper__field {
-  width: 64px;
 }
 
 .kit-stepper.kit-control--inline .kit-stepper__btn {
