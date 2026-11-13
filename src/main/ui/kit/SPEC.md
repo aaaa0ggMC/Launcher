@@ -30,12 +30,33 @@
 | `inline`（**KitSettingRow 默认**） | **35px**（四类控件全部一致）                           | 0.875rem  | 设置行：一行文字 + 一个控件 |
 | `tight`（窄屏 ≤720px）             | inline 28px / input 36px                               | 0.8125rem | 手机上的密集区              |
 
+**禁令：inline 档的自建盒模型优先，禁止为 inline 档去覆盖 Vuetify 内部类。**
+Vuetify 的 `.v-field` 是为「outlined + label」设计的网格（`grid-template-areas`、各 variant
+再按需改 affix 对齐、input 区域自带 padding-top）。把 outline 扒掉、却留着它为 outline
+服务的那套网格和内边距，等于在别人的盒模型里打补丁，补丁和补丁互相打架
+（治 affix padding → 治特异性被盖 → 治 input 自己顶对齐 → 一条 align-items 把 input 和
+单位一起搞乱——这就是那次「彻底回归」的由来）。所以：
+
+- `input` 档（对话框 / 独立表单）继续用 v-text-field / v-select 原装外观——那里有 outline、
+  有 label，Vuetify 的网格是对的。只碰 `.v-field` **根类**（圆角 / 玻璃面 / 字号 /
+  `--v-field-border-opacity`），不碰 `.v-field__*` 子元素；
+- `inline` 档改用 **kit 自己的 markup**：`.kit-inline-row`（flex 行）+ 原生 `<input>` +
+  自绘单位 `.kit-unit`；下拉是 kit 自绘触发器 + `v-menu` + `v-list`（只用公开组件的菜单与
+  选择逻辑，视觉层全部 kit 画）。盒模型完全归我们，对齐 / 尺寸 / 单位位置从此是确定的；
+- 滑块（v-slider）是唯一还得用 Vuetify 的 inline 控件：白名单只留轨道 4px / 圆点 16px /
+  根类高度 / `--fill` 吃满槽，理由逐条写在 kit.css 注释里；
+- `align.test.ts` 有条禁令测试守着：kit.css 出现白名单外的 `.v-field__*` /
+  `.v-selection-control__*` / `.v-slider-*` 选择器就直接红。
+
 实测备注（Electron + uiScale 1.1 下量到）：
 
 - Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
   （实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
   五类控件统一落在 44px 的办法是不碰内部高度，只把 switch / slider 拉到同一档。
-- `inline` 档 = 文字行高（24px）+ 11px = 35px。窄屏（≤720px）下 inline 仍是 35px——
+- **口径**：CSS 里的 px 是**布局像素**，界面缩放（uiScale 1.1）会把视觉尺寸再乘 1.1——
+  布局 32px → 视觉 35px。本文所有「实测」数字除特别说明外都是视觉值（用户看到的）。
+  排查时别混用：`getComputedStyle().height` 给布局值，`getBoundingClientRect()` 给视觉值。
+- `inline` 档 = 文字行高（24px）+ 11px = 35px（视觉）。窄屏（≤720px）下 inline 仍是 35px——
   Vuetify 的 field 自带约 8px 纵向 padding，硬压到 28 会把下划线顶掉，不值得。设置行不该出现 44px 的方块：实测输入档 44-48px
   而同行文字行高只有 24px，视觉上下坠一个大方块。inline 用 underlined 细线
   （无 outlined 大盒、无背景块），四类控件（下拉 / 步进器 / 滑块 / 开关）高度一致 = 35px。
@@ -89,6 +110,45 @@
 仓里原有 480/520/560/600/640/720 六种并存，后续迁移都引用这三个常量，不要再手写魔数。
 `narrow`（720）是与外壳（侧栏、容器 px-3）一致的兼容值；容器语义用 `useContainerWidth()`
 （带 8px 滞回），不要拿视口断点假装容器断点。
+
+## 4.5 行内对齐（默认 center + 可覆盖）
+
+**硬规则：一行之内，所有元素共享同一条中线**——文字、输入、下拉、滑块、开关、chip、
+图标按钮、右侧数值，几何中心落在同一条水平线上，**偏差 ≤ 1px**。
+「一行」按**视觉行**（flex line）算：换行的行里每条 line 有各自中线，拿整个容器当参照
+会把正常换行的元素误判成没对齐（实测 232px 档因此误报 22px）。
+
+**机制（一条规则治一类的，不要三条治三个）**：Vuetify 的 `.v-field` 是
+`display:grid`，`grid-template-areas: "prepend-inner field clear append-inner"`
+（VField.sass:12-19），各 variant 再把 affix 改成 `flex-start`
+（underlined/plain 在 :195-201）——单位、前后置图标、clearable 全部贴顶。
+正解是在 **field 根节点**定对齐：
+
+```css
+.kit-control .v-field {
+  align-items: var(--kit-field-align, center);
+}
+```
+
+这一条同时治好单位、前置/后置图标、clearable 和以后加的任何 affix。
+行/元素用 CSS 变量链传递：`--kit-row-align`（行）→ `--kit-item-align`（元素）→
+`--kit-field-align`（控件内部），缺省全部回落 `center`。
+
+**覆盖（默认 + 可覆盖）**：`KitSmartRow` / `KitRowItem` / `KitSettingRow` / 控件层
+（KitTextField / KitSelect / KitSlider / KitSwitch / KitNumberStepper）都有同一个 prop：
+
+```ts
+align?: 'center' | 'start' | 'end' | 'baseline' | 'stretch'   // 缺省 'center'
+```
+
+`KitSettingRow` 会把 align 透传到控件插槽（`<slot :size :align>`），否则调用方传了也没用。
+覆盖必须是少数、有理由、看得见的：只有多行文字、顶部对齐的图标+两行说明这类场景才传，
+且**布局自检会把偏离行默认对齐模式的元素标成另一种颜色并注明 align 值**（默认的只描边）。
+
+**自检**：`KitDebugOutline mode="align|both"`（默认关）逐视觉行量每个子元素的几何中心
+vs 行中线，偏差 >1px 标黄、覆盖默认对齐的标紫，偏差值写在 `data-kit-align-dev` 里。
+实测（Electron + uiScale 1.1）：gallery 三档（480/320/232）+ 真实设置页窗口分区
+共 17 条视觉行 43 个元素，**偏差全部 0px**。
 
 ## 6. 控件尺寸表（实测，排查裁剪的入口）
 

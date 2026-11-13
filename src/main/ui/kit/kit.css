@@ -220,116 +220,157 @@
 }
 
 /* ---------------------------------------------------------------------------
- * 控件层（KitTextField / KitSelect / KitSlider / KitSwitch）
- * 统一口径：同类控件高度一致（36px = 网格令牌 controlHeight）、圆角 8px（grid(2)）、
- * 表面吃玻璃变量、内容率 80%（--kit-fit-scale 由 useFitBox 写入）。
- * Vuetify 的密度算式用 !important 覆盖——它是组件库的内部算术，不是本项目的规范。
+ * 控件层（KitTextField / KitSelect / KitSlider / KitSwitch / KitNumberStepper）
+ *
+ * 两档盒模型（SPEC「密度阶」）：
+ *   input 档（44px，对话框 / 独立表单）——继续用 Vuetify 的 v-text-field / v-select
+ *     原装外观（有 outline、有 label，Vuetify 的网格是对的）。只碰 .v-field 根类
+ *     （公开的组件根类，不是 __internal 子元素）：圆角、玻璃面、字号、描边不透明度。
+ *   inline 档（35px，设置行）——**kit 自己的 markup**：一个 flex 行 + 原生 <input> +
+ *     自绘单位 / 自绘按钮。盒模型完全归我们，对齐 / 尺寸 / 单位位置从此是确定的，
+ *     不依赖 Vuetify 任何内部类。扒掉 outline 却留着它为 outline 服务的那套网格和
+ *     内边距，只会在别人的盒模型里打补丁、补丁互相打架（那次「彻底回归」的由来）。
+ *
+ * SPEC 禁令：**inline 档的自建盒模型优先，禁止为 inline 档去覆盖 Vuetify 内部类**。
+ * 唯一例外是滑块（v-slider 是唯一还得用 Vuetify 的 inline 控件），见下面白名单注释。
  * ------------------------------------------------------------------------- */
+
+/* 控件根盒：flex + 中线对齐（--kit-field-align 由组件的 align prop 写入，默认 center） */
 .kit-control {
   display: flex;
-  align-items: center;
+  align-items: var(--kit-field-align, center);
   min-width: 0;
   min-height: 44px;
-  /* 字号锚在 body-2（0.875rem）：Vuetify 的控件高度由字号推算，不锚住就会随宿主字号漂
-     （实测锚 16px 时 field 高 46，锚 0.875rem 后回到输入档） */
+  /* 自绘底线（inline 档的 1px border-bottom）算进高度里，否则带边框的控件比不带的高 1px */
+  box-sizing: border-box;
+  /* 字号锚在 body-2（0.875rem）：Vuetify 的控件高度由字号推算，不锚住就会随宿主字号漂 */
   font-size: calc(0.875rem * var(--kit-fit-scale, 1));
 }
 
-/* 输入类：v-text-field / v-select 的 field。
-   高度不覆盖——Vuetify compact 的自然高度（实测 39.6px）就是本项目的输入档，
-   硬压到 36 只会得到四不像；switch / slider 拉到同一档。 */
+/* ── input 档：只碰 .v-field 根类（公开根类，非 __internal）────────────────── */
 .kit-control .v-field {
-  border-radius: 8px !important;
+  border-radius: 8px;
   background: rgba(var(--kit-surface), var(--kit-glass-alpha));
   backdrop-filter: blur(var(--kit-glass-blur));
   -webkit-backdrop-filter: blur(var(--kit-glass-blur));
-}
-
-.kit-control .v-field__overlay {
-  background: transparent;
-}
-
-.kit-control .v-field__input {
-  font-size: 0.875rem;
-}
-
-.kit-control .v-field__outline {
+  /* Vuetify 暴露的 CSS 变量（VField.sass:324），在根类上改即可，不用碰 __outline */
   --v-field-border-opacity: 0.28;
+  /* 80% 内容率：useFitBox 量出的 scale 从这里注入（Vuetify 把字号写在 .v-field 上） */
+  font-size: calc(0.875rem * var(--kit-fit-scale, 1));
 }
 
-/* 开关：Vuetify 的 wrapper 只有 28px，而轨道 36-40px——轨道会溢出 wrapper 两侧各 ~5px，
-   一旦外层有 overflow:hidden（.kit-row-item 就有）就被切成「只剩个脑袋」。
-   把 wrapper 拉到 44px，轨道完整落在盒子内，任何祖先都裁不到它。 */
-.kit-control .v-switch .v-selection-control__wrapper {
-  width: 44px;
+/* ── inline 档：kit 自建 flex 行（不碰任何 Vuetify 内部类）────────────────────
+   注意 CSS 里的 px 是**布局像素**，界面缩放（uiScale 1.1）会把视觉尺寸再乘 1.1：
+   布局 32px → 视觉 35px。SPEC 密度阶记的是视觉值（用户看到的）。 */
+.kit-control--inline {
+  min-height: 32px;
+  /* 自绘底线：替代 Vuetify 的 underlined 变体（那个变体会改 affix 对齐） */
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.28);
 }
 
-/* 数值框：等宽 + 右对齐。
-   右对齐 + 自绘单位（.kit-unit）让「数字 → 单位」紧贴且位置稳定：居中的数字会随位数
-   左右晃，Vuetify 的 suffix prop 又被 flex 推到输入区右缘，看着就是「漂 + 空一截」。 */
-.kit-control--num .v-field__input {
+.kit-control--inline:focus-within {
+  border-bottom-color: rgb(var(--v-theme-primary));
+}
+
+.kit-inline-row {
+  display: flex;
+  align-items: var(--kit-field-align, center);
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 原生 input：盒模型完全归我们 */
+.kit-inline-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  outline: none;
+}
+
+.kit-inline-input::placeholder {
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.kit-inline-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 数值：右对齐 + 等宽 + 位宽随字号（em），单位紧贴、位数变化不位移 */
+.kit-inline-input--num {
+  flex: 0 0 auto;
+  width: 4em;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-/* 自绘单位：紧贴文字，不吃 Vuetify suffix 的 flex 间隙 */
+/* 自绘单位：紧贴数字（父盒是 kit 自己的 flex 行，没有 Vuetify 的 affix 间隙） */
 .kit-unit {
-  margin-inline-start: 0;
+  margin: 0;
   padding: 0;
-  align-self: center;
   line-height: inherit;
   font-size: inherit;
   white-space: nowrap;
   opacity: 0.85;
 }
 
-/* 治父容器，不然单位永远贴不上：Vuetify 给 .v-field__append-inner 加了
-   padding-inline-start: var(--v-field-padding-after)，且默认 align-items:flex-start
-   （只有 .v-field--center-affix 才居中）——于是单位和数字空一截、还上下错位，
-   用户看到的就是「漂移」。.kit-unit 自己清零 margin/padding 管不到父容器这两条。
-   出处：node_modules/vuetify/lib/components/VField/VField.sass:180-188。 */
-/* 选择器要压过 Vuetify 的 `.v-field.v-field--variant-underlined .v-field__append-inner`
-   （特异性 0,3,0 > 0,2,0）——只用两级选择器时 align-items 会被那条盖回去，
-   单位仍旧贴顶（实测 computed 仍是 flex-start）。 */
-.kit-control--num .v-field.v-field--variant-underlined .v-field__append-inner,
-.kit-control--num .v-field .v-field__append-inner {
-  padding-inline-start: 0;
-  padding-top: 0;
-  padding-bottom: 0;
+/* inline 档下拉触发器（kit 自绘，v-menu 只负责菜单行为） */
+.kit-inline-select {
+  display: flex;
   align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
 }
 
-/* 数字位宽：4 位数字，随字号缩放（em），不写死 px；右对齐 + 2px 呼吸隙，
-   单位（.kit-unit，margin/padding 0）紧贴数字——间距 ≤2px、位数变化不位移。
-   注意：Vuetify 把 .v-field__input 这个类加在 <input> **本身**上（不是包一层 div），
-   所以这里直接命中 input，别写成 `.v-field__input input`（那样永远不匹配——踩过）。 */
-.kit-control--num .v-field__input {
-  width: 4em;
-  padding-right: 2px !important;
-  text-align: right;
-  /* 输入框自己在 grid 里是顶对齐的，单位是居中的——于是 % 比数字低一截。
-     把输入也居中，两者中线就重合了（实测修复前后见报告）。 */
-  align-self: center;
+.kit-inline-select__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.kit-stepper__field {
-  width: auto !important;
+.kit-inline-select__arrow {
   flex: 0 0 auto;
+  opacity: 0.7;
+  font-size: 0.875em;
 }
 
-/* 滑块：轨道与圆点尺寸从令牌算，高度拉到输入档（40px） */
+/* inline 档菜单（v-list 是公开组件，用公开类配色） */
+.kit-inline-menu {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ── 滑块（唯一还得用 Vuetify 的 inline 控件）────────────────────────────────
+   白名单说明（为什么不能删）：v-slider 没有 kit 自绘替代品（轨道填充、圆点拖拽、
+   键盘可达性都重写不划算），所以保留**最小限度**的内部覆盖：
+   ① 轨道 4px / 圆点 16px——尺寸从网格令牌算，删了就用 Vuetify 默认 6px/20px，和
+      行内其它控件不成比例；
+   ② .kit-control--fill 让根盒吃满控件槽——v-slider 默认没有 flex/width，在 flex 容器里
+      按内容宽收缩，轨道会溢出盒子被裁（用户看到过「右边一个点」）；
+   ③ .kit-control .v-slider { min-height } ——把滑块拉到和行内其它控件同高。
+   除此之外不碰 v-slider 任何内部结构（对齐由我们自己的 flex 盒保证）。 */
 .kit-control .v-slider {
-  min-height: 40px;
+  /* min-height 只是下限——Vuetify 的 compact 滑块自己就有 39px，会把行撑高。
+     钉高度（打在 .v-slider 根类上，不碰它的子元素）让行内档统一。
+     布局 32px → 视觉 35px（zoom 1.1）。 */
+  height: 32px;
 }
 
-/* 滑块：**必须吃满控件槽**。v-slider 默认没有 width/flex，在 flex 容器里按内容宽收缩，
-   轨道会溢出盒子被 .kit-row-item 的 overflow:hidden 裁掉——用户看到的「右边一个点」。
-   实测：修前轨道 114px / 控件盒 104px（溢出 10px 被裁），修后轨道 = 控件槽全宽。 */
-/* fill 档：滑块吃满控件槽。v-slider 默认没有 width/flex，在 flex 容器里按内容宽收缩，
-   轨道会溢出盒子被 .kit-row-item 的 overflow:hidden 裁掉——用户看到的「右边一个点」。
-   实测：修前轨道 114px / 控件盒 104px（溢出 10px 被裁）；修后轨道 = 控件槽全宽。
-   注意不能给 .v-slider 写 width:100%——它的父 .kit-control 本身就是内容宽的，
-   百分比会解析成 0（实测滑轨塌成 0）。正确做法是让 .kit-control 先吃满槽。 */
 .kit-control--fill {
   flex: 1 1 auto;
   min-width: 0;
@@ -344,111 +385,97 @@
   height: 4px;
 }
 
-.kit-control .v-slider-thumb {
-  width: 16px;
-  height: 16px;
-}
-
+.kit-control .v-slider-thumb,
 .kit-control .v-slider-thumb__surface {
   width: 16px;
   height: 16px;
 }
 
-/* 开关：Vuetify 的 selection-control 只有 28-40px，整控件拉到输入档（40px） */
+/* ── 开关：不碰 .v-selection-control__* 内部类────────────────────────────────
+   以前把 wrapper 拉到 44px 是为了防「轨道被 .kit-row-item 的 overflow:hidden 裁掉」。
+   现在从根上治：.kit-row-item 只有真需要截断的项才 overflow:hidden（见「智能行」），
+   控件项不裁，Vuetify 轨道那 ~5px 的故意越界就裁不到它。 */
 .kit-control .v-switch,
 .kit-control .v-selection-control {
-  min-height: 40px !important;
+  min-height: 32px;
+}
+
+/* ── 步进器：inline 档是 kit 自建行；input 档继续用 v-text-field ─────────────── */
+.kit-stepper__btn {
+  display: flex;
   align-items: center;
-}
-
-/* ── inline 档（SPEC「密度阶」第三档）：设置行专用 ───────────────────────────
-   设置行是「一行文字 + 一个控件」，不该出现 44px 的方块：实测输入档 44-48px
-   而同行文字行高只有 24px，视觉上下坠一个大方块（用户原话「高了啊」）。
-   inline 档：underlined 细线（无 outlined 大盒、无背景块），高度 = 文字行高 + 8 = 32px。
-   步进器 / 下拉 / 滑块 / 开关在 inline 档下高度一致（同一条老规矩）。 */
-.kit-control--inline {
-  min-height: 32px;
-}
-
-.kit-control--inline .v-field {
-  min-height: 32px !important;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-.kit-control--inline .v-field__outline {
-  display: none;
-}
-
-.kit-control--inline .v-field__input {
-  min-height: 30px;
-  padding-top: 0;
-  padding-bottom: 0;
-  /* 与行标签同一个字号令牌（SPEC「字号阶」设置行 = 0.9375rem） */
-  font-size: 0.9375rem;
-}
-
-.kit-control--inline .v-slider {
-  min-height: 32px;
-}
-
-/* 步进器根盒也走 inline 档（KitNumberStepper 的根是 .kit-stepper，补 kit-control--inline 类） */
-.kit-stepper.kit-control--inline {
-  min-height: 32px;
-}
-
-.kit-stepper.kit-control--inline .v-field {
-  min-height: 32px !important;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.kit-stepper.kit-control--inline .v-field__outline {
-  display: none;
-}
-
-.kit-stepper.kit-control--inline .kit-stepper__btn {
+  justify-content: center;
   min-width: 40px;
-  min-height: 35px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
-.kit-control--inline .v-switch,
-.kit-control--inline .v-selection-control {
-  min-height: 32px !important;
+.kit-stepper__btn:hover {
+  background: rgba(var(--v-theme-on-surface), 0.08);
 }
 
-/* 窄屏：控件降一档——SPEC「密度阶」tight 档。
-   注意顺序：inline 的规则必须排在 input 之后，否则同样命中两个类时被
-   .kit-control 的 36px 盖掉（实测窄屏 inline 控件因此变成 40px）。 */
+.kit-stepper__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.kit-stepper__field {
+  flex: 0 0 auto;
+}
+
+/* 窄屏：控件降一档（SPEC「密度阶」tight 档） */
 @media (max-width: 720px) {
   .kit-control {
     min-height: 36px;
   }
 
-  .kit-control .v-field__input {
-    font-size: 0.8125rem;
-  }
-
-  .kit-control--inline,
-  .kit-stepper.kit-control--inline {
+  .kit-control--inline {
     min-height: 28px;
   }
 
-  .kit-control--inline .v-field {
-    min-height: 28px !important;
+  .kit-control .v-slider {
+    height: 28px;
   }
 
-  .kit-control--inline .v-field {
-    padding-top: 0;
-    padding-bottom: 0;
+  .kit-stepper__btn {
+    min-height: 28px;
   }
+}
 
-  .kit-control--inline .v-field__input {
-    min-height: 26px;
-    font-size: 0.8125rem;
-  }
+/* 行内对齐（SPEC「行内对齐」）：默认 center，可用组件 align prop 覆盖。
+   走 CSS 变量链：元素没传 align 时跟行的，行没传时回落 center——
+   覆盖因此是少数、有理由、看得见（自检里会标出来）。 */
+.kit-smart-row__line {
+  align-items: var(--kit-row-align, center);
+}
+
+.kit-row-item {
+  align-self: var(--kit-item-align, var(--kit-row-align, center));
+}
+
+/* 布局自检 · 行内对齐视图（KitDebugOutline mode 含 align，默认关）：
+   行中线用虚线画出来，偏差 >1px 的元素标黄并把偏差写在 data-kit-align-dev 里，
+   覆盖了行默认对齐的标紫（自检默认只标「偏离默认」的，覆盖的另标）。 */
+.kit-debug-on .kit-debug-align {
+  outline: 1px dashed rgba(var(--v-theme-primary), 0.5);
+  outline-offset: 0;
+}
+
+.kit-debug-on .kit-debug-align--bad {
+  outline: 1px solid rgb(var(--v-theme-warning)) !important;
+  background: rgba(var(--v-theme-warning), 0.16) !important;
+}
+
+.kit-debug-on .kit-debug-align--override {
+  outline: 1px solid rgb(var(--v-theme-secondary)) !important;
+  background: rgba(var(--v-theme-secondary), 0.18) !important;
+}
+
+.kit-debug-on .kit-debug-align--bad.kit-debug-align--override {
+  outline: 1px solid rgb(var(--v-theme-error)) !important;
 }

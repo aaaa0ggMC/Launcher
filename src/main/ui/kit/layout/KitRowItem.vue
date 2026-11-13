@@ -18,6 +18,7 @@ import {
   type SmartRowSlot
 } from './smart-row-context'
 import type { ItemKind, ItemPriority } from './engine'
+import type { KitAlign } from './align'
 
 const props = defineProps<{
   /** primary（默认，永不隐藏）/ secondary / tertiary（最先隐藏） */
@@ -36,6 +37,8 @@ const props = defineProps<{
   truncate?: boolean
   /** 稳定 id（缺省自动生成） */
   id?: string
+  /** 行内对齐覆盖（SPEC「行内对齐」）：缺省跟行（行默认 center） */
+  align?: KitAlign
 }>()
 
 const ctx = inject<SmartRowContext | null>(smartRowKey, null)
@@ -78,6 +81,7 @@ const itemStyle = computed<Record<string, string>>(() => {
     'flex-grow': s.grow ? '1' : '0'
   }
   if (typeof s.basis === 'number') style['flex-basis'] = `${s.basis}px`
+  if (props.align) style['--kit-item-align'] = props.align
   // 隐藏 = 根节点退出排版（display:none，不占 flex 空间）；内容要么 teleport 进「更多」浮层，
   // 要么（overflow="none"）跟着根节点一起藏掉。根节点始终挂着——组件实例不重建，状态不丢。
   if (s.visible === false) style.display = 'none'
@@ -107,6 +111,12 @@ const itemStyle = computed<Record<string, string>>(() => {
   display: flex;
   min-width: 0;
   flex-shrink: 1;
+}
+
+/* 只有真需要截断的项才裁。控件项（开关轨道等）带着 Vuetify 故意的 ~5px 越界，
+   一律 overflow:hidden 会把它切成「只剩个脑袋」——所以裁剪只给截断项。
+   溢出自检的「会被裁」判定也只看这一项。 */
+.kit-row-item--truncate {
   overflow: hidden;
 }
 
