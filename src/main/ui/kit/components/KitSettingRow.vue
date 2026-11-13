@@ -20,7 +20,6 @@ import type { Ref } from 'vue'
 import { useAdaptive } from '../composables/useAdaptive'
 import KitSlider from './KitSlider.vue'
 import { provideDensity } from '../layout/density'
-import type { KitAlign } from '../layout/align'
 import KitSmartRow from '../layout/KitSmartRow.vue'
 import KitRowItem from '../layout/KitRowItem.vue'
 import KitNumberStepper from './KitNumberStepper.vue'
@@ -50,8 +49,6 @@ const props = defineProps<{
   hideValue?: boolean
   /** 控件密度档（缺省 inline = 设置行行内档；独立大表单可传 'input'） */
   controlSize?: 'input' | 'inline'
-  /** 行内对齐（SPEC「行内对齐」）：缺省 center；透传给行与控件插槽 */
-  align?: KitAlign
   /**
    * 窄屏判定的外部覆盖：传 true 强制按手机档渲染（步进器、隐藏数值框）。
    * 缺省跟视口断点（useAdaptive 的 720）；容器比视口窄的场景（画廊宽度模拟器、
@@ -85,7 +82,7 @@ const valueText = computed<string | undefined>(() => {
 </script>
 
 <template>
-  <KitSmartRow class="kit-setting-row" :hint="hint" :align="align">
+  <KitSmartRow class="kit-setting-row" :hint="hint">
     <!-- 名字：可省略号、可生长（吃掉控件剩下的空间），永远可见 -->
     <KitRowItem kind="label" :text="label" :priority="priority" truncate grow>
       <div class="kit-setting-row__name" :title="label">
@@ -99,7 +96,7 @@ const valueText = computed<string | undefined>(() => {
     <!-- 控件：调用方给插槽；没给插槽时按数值型行渲染步进器 / 滑块 -->
     <KitRowItem v-if="hasControl" :priority="priority" :min-width="controlWidth ?? 160">
       <!-- 行内档：设置行不该出现 44px 的方块（SPEC「密度阶」）。调用方可用 control-size 覆盖 -->
-      <slot :size="controlSize" :align="align" />
+      <slot :size="controlSize" />
     </KitRowItem>
     <KitRowItem
       v-else-if="modelValue !== undefined"

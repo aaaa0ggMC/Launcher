@@ -243,18 +243,6 @@
   background: rgba(var(--kit-surface), var(--kit-glass-alpha));
   backdrop-filter: blur(var(--kit-glass-blur));
   -webkit-backdrop-filter: blur(var(--kit-glass-blur));
-  /* ── 行内对齐（SPEC「行内对齐」）：一条规则治所有 affix ───────────────────
-     .v-field 是 display:grid，grid-template-areas: "prepend-inner field clear
-     append-inner"（VField.sass:12-19）；Vuetify 只给 affix 容器设了
-     align-items:flex-start，underlined/plain 变体还会再设一遍
-     （VField.sass:195-201）——于是单位、前置/后置图标、clearable 全部贴顶，
-     和文字/输入不在一条中线上（用户原话「为啥对齐这么混乱」）。
-     正解是在 field 根节点定对齐：网格项不再 stretch、按内容尺寸居中，
-     一条同时治好单位、前后置图标、clearable 和以后加的任何 affix。
-     之前那三条补丁（父容器 align-items、提特异性、input 的 align-self）已删——
-     能被这条替代的就删，只留和间距有关的 padding-inline-start:0。
-     控件层的 align prop 写 --kit-field-align 覆盖这一条（默认 center）。 */
-  align-items: var(--kit-field-align, center);
 }
 
 .kit-control .v-field__overlay {
@@ -288,18 +276,27 @@
 .kit-unit {
   margin-inline-start: 0;
   padding: 0;
+  align-self: center;
   line-height: inherit;
   font-size: inherit;
   white-space: nowrap;
   opacity: 0.85;
 }
 
-/* 单位和数字之间的间距：Vuetify 给 .v-field__append-inner 加了
-   padding-inline-start: var(--v-field-padding-after)，单位和数字就空一截。
-   只管间距——对齐由 `.kit-control .v-field { align-items: center }` 一条治
-   （见上面「行内对齐」），不用再逐个追 affix 容器。 */
-.kit-control--num .v-field__append-inner {
+/* 治父容器，不然单位永远贴不上：Vuetify 给 .v-field__append-inner 加了
+   padding-inline-start: var(--v-field-padding-after)，且默认 align-items:flex-start
+   （只有 .v-field--center-affix 才居中）——于是单位和数字空一截、还上下错位，
+   用户看到的就是「漂移」。.kit-unit 自己清零 margin/padding 管不到父容器这两条。
+   出处：node_modules/vuetify/lib/components/VField/VField.sass:180-188。 */
+/* 选择器要压过 Vuetify 的 `.v-field.v-field--variant-underlined .v-field__append-inner`
+   （特异性 0,3,0 > 0,2,0）——只用两级选择器时 align-items 会被那条盖回去，
+   单位仍旧贴顶（实测 computed 仍是 flex-start）。 */
+.kit-control--num .v-field.v-field--variant-underlined .v-field__append-inner,
+.kit-control--num .v-field .v-field__append-inner {
   padding-inline-start: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
 }
 
 /* 数字位宽：4 位数字，随字号缩放（em），不写死 px；右对齐 + 2px 呼吸隙，
@@ -310,6 +307,9 @@
   width: 4em;
   padding-right: 2px !important;
   text-align: right;
+  /* 输入框自己在 grid 里是顶对齐的，单位是居中的——于是 % 比数字低一截。
+     把输入也居中，两者中线就重合了（实测修复前后见报告）。 */
+  align-self: center;
 }
 
 .kit-stepper__field {
@@ -451,37 +451,4 @@
     min-height: 26px;
     font-size: 0.8125rem;
   }
-}
-
-/* 行内对齐（SPEC「行内对齐」）：默认 center，可用组件 align prop 覆盖。
-   走 CSS 变量链：元素没传 align 时跟行的，行没传时回落 center——
-   覆盖因此是少数、有理由、看得见（自检里会标出来）。 */
-.kit-smart-row__line {
-  align-items: var(--kit-row-align, center);
-}
-
-.kit-row-item {
-  align-self: var(--kit-item-align, var(--kit-row-align, center));
-}
-
-/* 布局自检 · 行内对齐视图（KitDebugOutline mode 含 align，默认关）：
-   行中线用虚线画出来，偏差 >1px 的元素标黄并把偏差写在 data-kit-align-dev 里，
-   覆盖了行默认对齐的标紫（自检默认只标「偏离默认」的，覆盖的另标）。 */
-.kit-debug-on .kit-debug-align {
-  outline: 1px dashed rgba(var(--v-theme-primary), 0.5);
-  outline-offset: 0;
-}
-
-.kit-debug-on .kit-debug-align--bad {
-  outline: 1px solid rgb(var(--v-theme-warning)) !important;
-  background: rgba(var(--v-theme-warning), 0.16) !important;
-}
-
-.kit-debug-on .kit-debug-align--override {
-  outline: 1px solid rgb(var(--v-theme-secondary)) !important;
-  background: rgba(var(--v-theme-secondary), 0.18) !important;
-}
-
-.kit-debug-on .kit-debug-align--bad.kit-debug-align--override {
-  outline: 1px solid rgb(var(--v-theme-error)) !important;
 }

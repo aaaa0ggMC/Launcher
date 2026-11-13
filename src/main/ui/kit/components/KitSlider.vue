@@ -6,7 +6,6 @@
 import { computed, useAttrs } from 'vue'
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
-import type { KitAlign } from '../layout/align'
 
 defineOptions({ inheritAttrs: false })
 
@@ -18,8 +17,6 @@ const props = withDefaults(
      *  注意：Vue 会把缺席的 Boolean prop 铸成 false，所以默认值必须写在 withDefaults 里 */
     fill?: boolean
     modelValue?: number | null
-    /** 控件内部对齐（SPEC「行内对齐」）：缺省 center */
-    align?: KitAlign
   }>(),
   { fill: true }
 )
@@ -29,10 +26,7 @@ useKitSurface()
 /** 生效密度：显式 size > 容器上下文（KitSettingRow=inline）> input */
 const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
-const rootStyle = computed(() => ({
-  '--kit-fit-scale': '1',
-  '--kit-field-align': props.align ?? 'center'
-}))
+const rootStyle = computed(() => ({ '--kit-fit-scale': '1' }))
 </script>
 
 <template>
