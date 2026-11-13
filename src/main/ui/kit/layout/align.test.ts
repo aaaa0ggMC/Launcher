@@ -69,3 +69,16 @@ test('自检有对齐视图：中线偏差标色 + 覆盖标色都在 kit.css �
   assert.match(css, /\.kit-debug-on \.kit-debug-align--bad \{/)
   assert.match(css, /\.kit-debug-on \.kit-debug-align--override \{/)
 })
+
+test('行尾 chrome 永不参与换行：「更多」按钮不能是 flex:none', () => {
+  // 用户截图里的毛病：紧凑态行尾一个孤零零的「...」独占一行。根因是
+  // .kit-smart-row__more 写成 flex:none，它就是个普通 flex 项、照样参与换行。
+  // 同「primary 永不隐藏」是同一类原则：chrome 不是行内容，不参与内容的让位博弈。
+  const more = readFileSync(fileURLToPath(new URL('./KitSmartRow.vue', import.meta.url)), 'utf8')
+  const block = more.slice(more.indexOf('.kit-smart-row__more {'))
+  const body = block.slice(0, block.indexOf('}'))
+  assert.doesNotMatch(body, /flex:\s*none/, 'flex:none 会让它作为普通 flex 项参与换行')
+  assert.match(body, /order:\s*9999/, '排在所有元素之后')
+  assert.match(body, /flex:\s*1 1 auto/, '有剩余空间时长大吃掉行尾空间、按钮贴最右')
+  assert.match(body, /min-width:\s*40px/, '保底 = 按钮自身宽度，没空间也不会被挤到下一行')
+})
