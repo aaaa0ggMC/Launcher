@@ -424,10 +424,16 @@ onBeforeUnmount(() => {
   align-items: flex-start;
 }
 
-/* 「更多」按钮排在所有元素之后，且不参与规划（flex:none 防被压缩） */
+/* 「更多」按钮排在所有元素之后。它是行尾 chrome，不是行内容——
+   所以绝不能参与换行（一换就独占一行，用户截图里的毛病正是如此）。
+   flex:1 1 auto + min-width 保底：有剩余空间时长大后吃掉行尾空间、按钮贴最右；
+   没有剩余空间时缩到 min-width（= 按钮自身宽度），也不会被挤到下一行。 */
 .kit-smart-row__more {
   order: 9999;
   display: inline-flex;
-  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 40px;
 }
 </style>
