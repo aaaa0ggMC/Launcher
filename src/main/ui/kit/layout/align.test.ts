@@ -13,11 +13,16 @@ import { DEFAULT_ALIGN, isAlignOverride, type KitAlign } from './align'
 
 const css = readFileSync(fileURLToPath(new URL('../kit.css', import.meta.url)), 'utf8')
 
-test('行内对齐默认 center：field 根节点一条规则治所有 affix', () => {
+test('行内对齐默认 center：落在 kit 自己的 flex 盒上', () => {
+  // 控件根盒：flex + 中线（--kit-field-align 由组件的 align prop 写入）
   assert.match(
     css,
-    /\.kit-control \.v-field \{[^}]*align-items: var\(--kit-field-align, center\)/,
-    'field 根节点定对齐（grid 四个区域共享中线），可用 --kit-field-align 覆盖'
+    /\.kit-control \{\s*display: flex;\s*align-items: var\(--kit-field-align, center\)/
+  )
+  // inline 档自建行：同样吃 --kit-field-align
+  assert.match(
+    css,
+    /\.kit-inline-row \{\s*display: flex;\s*align-items: var\(--kit-field-align, center\)/
   )
   // 行 / 元素的变量链：元素没传跟行，行没传回落 center
   assert.match(css, /\.kit-smart-row__line \{\s*align-items: var\(--kit-row-align, center\)/)

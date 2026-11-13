@@ -111,6 +111,12 @@ const itemStyle = computed<Record<string, string>>(() => {
   display: flex;
   min-width: 0;
   flex-shrink: 1;
+}
+
+/* 只有真需要截断的项才裁。控件项（开关轨道等）带着 Vuetify 故意的 ~5px 越界，
+   一律 overflow:hidden 会把它切成「只剩个脑袋」——所以裁剪只给截断项。
+   溢出自检的「会被裁」判定也只看这一项。 */
+.kit-row-item--truncate {
   overflow: hidden;
 }
 

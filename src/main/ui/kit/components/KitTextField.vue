@@ -48,29 +48,34 @@ function onInput(v: unknown): void {
 </script>
 
 <template>
-  <div
-    ref="target"
-    class="kit-control"
-    :class="[
-      density === 'inline' ? 'kit-control--inline' : undefined,
-      numeric ? 'kit-control--num' : undefined
-    ]"
-    :style="rootStyle"
-  >
+  <!-- input 档：Vuetify 原装外观（有 outline / label，它的网格是对的） -->
+  <div v-if="density !== 'inline'" ref="target" class="kit-control" :style="rootStyle">
     <v-text-field
       :model-value="modelValue"
       density="compact"
-      :variant="density === 'inline' ? 'underlined' : 'outlined'"
+      variant="outlined"
       hide-details
       v-bind="attrs"
       @update:model-value="onInput"
     >
-      <template v-if="suffix" #append-inner>
-        <span class="kit-unit">{{ suffix }}</span>
-      </template>
       <template v-for="(_, n) in $slots as Record<string, unknown>" :key="n" #[n]="slotProps">
         <slot :name="n" v-bind="slotProps ?? {}" />
       </template>
     </v-text-field>
+  </div>
+
+  <!-- inline 档：kit 自建 flex 行 + 原生 input + 自绘单位（盒模型完全归我们，
+       对齐 / 尺寸 / 单位位置确定，不依赖 Vuetify 任何内部类——SPEC 禁令） -->
+  <div v-else ref="target" class="kit-control kit-control--inline" :style="rootStyle">
+    <div class="kit-inline-row">
+      <input
+        class="kit-inline-input"
+        :class="numeric ? 'kit-inline-input--num' : undefined"
+        :value="modelValue ?? ''"
+        v-bind="attrs"
+        @input="onInput(($event.target as HTMLInputElement).value)"
+      />
+      <span v-if="suffix" class="kit-unit">{{ suffix }}</span>
+    </div>
   </div>
 </template>

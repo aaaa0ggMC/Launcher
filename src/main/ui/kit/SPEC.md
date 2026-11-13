@@ -30,12 +30,33 @@
 | `inline`（**KitSettingRow 默认**） | **35px**（四类控件全部一致）                           | 0.875rem  | 设置行：一行文字 + 一个控件 |
 | `tight`（窄屏 ≤720px）             | inline 28px / input 36px                               | 0.8125rem | 手机上的密集区              |
 
+**禁令：inline 档的自建盒模型优先，禁止为 inline 档去覆盖 Vuetify 内部类。**
+Vuetify 的 `.v-field` 是为「outlined + label」设计的网格（`grid-template-areas`、各 variant
+再按需改 affix 对齐、input 区域自带 padding-top）。把 outline 扒掉、却留着它为 outline
+服务的那套网格和内边距，等于在别人的盒模型里打补丁，补丁和补丁互相打架
+（治 affix padding → 治特异性被盖 → 治 input 自己顶对齐 → 一条 align-items 把 input 和
+单位一起搞乱——这就是那次「彻底回归」的由来）。所以：
+
+- `input` 档（对话框 / 独立表单）继续用 v-text-field / v-select 原装外观——那里有 outline、
+  有 label，Vuetify 的网格是对的。只碰 `.v-field` **根类**（圆角 / 玻璃面 / 字号 /
+  `--v-field-border-opacity`），不碰 `.v-field__*` 子元素；
+- `inline` 档改用 **kit 自己的 markup**：`.kit-inline-row`（flex 行）+ 原生 `<input>` +
+  自绘单位 `.kit-unit`；下拉是 kit 自绘触发器 + `v-menu` + `v-list`（只用公开组件的菜单与
+  选择逻辑，视觉层全部 kit 画）。盒模型完全归我们，对齐 / 尺寸 / 单位位置从此是确定的；
+- 滑块（v-slider）是唯一还得用 Vuetify 的 inline 控件：白名单只留轨道 4px / 圆点 16px /
+  根类高度 / `--fill` 吃满槽，理由逐条写在 kit.css 注释里；
+- `align.test.ts` 有条禁令测试守着：kit.css 出现白名单外的 `.v-field__*` /
+  `.v-selection-control__*` / `.v-slider-*` 选择器就直接红。
+
 实测备注（Electron + uiScale 1.1 下量到）：
 
 - Vuetify compact 的输入框自然高度就是 44px。**不要用 `min-height` 去压它**
   （实测压到 36 得到 39.4 的四不像；给 outlined field 再加一圈 border 会变成 46）——
   五类控件统一落在 44px 的办法是不碰内部高度，只把 switch / slider 拉到同一档。
-- `inline` 档 = 文字行高（24px）+ 11px = 35px。窄屏（≤720px）下 inline 仍是 35px——
+- **口径**：CSS 里的 px 是**布局像素**，界面缩放（uiScale 1.1）会把视觉尺寸再乘 1.1——
+  布局 32px → 视觉 35px。本文所有「实测」数字除特别说明外都是视觉值（用户看到的）。
+  排查时别混用：`getComputedStyle().height` 给布局值，`getBoundingClientRect()` 给视觉值。
+- `inline` 档 = 文字行高（24px）+ 11px = 35px（视觉）。窄屏（≤720px）下 inline 仍是 35px——
   Vuetify 的 field 自带约 8px 纵向 padding，硬压到 28 会把下划线顶掉，不值得。设置行不该出现 44px 的方块：实测输入档 44-48px
   而同行文字行高只有 24px，视觉上下坠一个大方块。inline 用 underlined 细线
   （无 outlined 大盒、无背景块），四类控件（下拉 / 步进器 / 滑块 / 开关）高度一致 = 35px。

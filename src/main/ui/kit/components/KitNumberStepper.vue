@@ -86,22 +86,34 @@ const incLabel = (): string =>
     :class="density === 'inline' ? 'kit-control--inline' : undefined"
     :style="width ? { width: `${width}px` } : undefined"
   >
-    <v-btn
+    <button
+      type="button"
       class="kit-stepper__btn"
-      size="small"
-      variant="text"
-      icon
       :disabled="modelValue <= min"
-      :aria-label="decLabel"
-      :title="decLabel"
+      :aria-label="decLabel()"
+      :title="decLabel()"
       @click="stepBy(-1)"
     >
-      <v-icon>mdi-minus</v-icon>
-    </v-btn>
+      <v-icon size="small">mdi-minus</v-icon>
+    </button>
+    <!-- inline 档：kit 自建 input + 自绘单位（盒模型归我们，单位紧贴数字不漂） -->
+    <div v-if="density === 'inline'" class="kit-inline-row kit-stepper__field">
+      <input
+        class="kit-inline-input kit-inline-input--num"
+        :value="draft"
+        inputmode="numeric"
+        :aria-label="label"
+        @input="draft = ($event.target as HTMLInputElement).value"
+        @blur="commit"
+        @keydown.enter="commit"
+      />
+      <span v-if="unit" class="kit-unit">{{ unit }}</span>
+    </div>
+    <!-- input 档：Vuetify 原装外观 -->
     <KitTextField
+      v-else
       v-model="draft"
       class="kit-stepper__field"
-      :size="density"
       numeric
       inputmode="numeric"
       :suffix="unit"
@@ -109,52 +121,23 @@ const incLabel = (): string =>
       @blur="commit"
       @keydown.enter="commit"
     />
-    <v-btn
+    <button
+      type="button"
       class="kit-stepper__btn"
-      size="small"
-      variant="text"
-      icon
       :disabled="modelValue >= max"
-      :aria-label="incLabel"
-      :title="incLabel"
+      :aria-label="incLabel()"
+      :title="incLabel()"
       @click="stepBy(1)"
     >
-      <v-icon>mdi-plus</v-icon>
-    </v-btn>
+      <v-icon size="small">mdi-plus</v-icon>
+    </button>
   </div>
 </template>
 
 <style scoped>
-.kit-stepper {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* ± 触控热区 = 输入档 40px（v-btn size="small" 只有 ~32px），整行与输入框同高 */
-.kit-stepper__btn {
-  min-width: 40px;
-  min-height: 40px;
-}
-
-.kit-stepper {
-  min-height: 40px;
-}
-
-/* inline 档（设置行）：整行降到 32px，± 按钮热区仍 ≥40px（用内边距补，不撑高盒子） */
-.kit-stepper.kit-control--inline {
-  min-height: 32px;
-}
-
-.kit-stepper.kit-control--inline .kit-stepper__btn {
-  min-width: 40px;
-  min-height: 32px;
-}
-
-/* 框宽按「3 位数字 + 单位后缀」的量级收窄（80% 内容率：文字占输入区 80%，
-   整体不再比内容大一圈）；高度 / 圆角 / 表面由 KitTextField 统一 */
+/* ± 触控热区 ≥40px 宽（v-btn size="small" 只有 ~32px）；高度 / 表面 / 对齐由 kit.css
+   的 .kit-stepper__btn 与 .kit-control 统一给，这里只留步进器特有的间距。 */
 .kit-stepper__field {
   flex: 0 0 auto;
-  width: 72px;
 }
 </style>
