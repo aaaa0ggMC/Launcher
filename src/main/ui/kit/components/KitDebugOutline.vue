@@ -32,6 +32,7 @@ const OVERFLOW_CLASS = 'kit-debug-overflow'
 const ALIGN_MARK_CLASS = 'kit-debug-align'
 const ALIGN_BAD_CLASS = 'kit-debug-align--bad'
 const ALIGN_OVERRIDE_CLASS = 'kit-debug-align--override'
+const EDGE_BAD_CLASS = 'kit-debug-edge--bad'
 /** 行中线偏差阈值（px）——SPEC「行内对齐」：一行之内所有元素共享同一条中线 */
 const ALIGN_TOLERANCE = 1
 
@@ -81,7 +82,14 @@ function scanAlign(): void {
     // 按视觉行（flex line）分组：换行的行里每条 line 有各自中线
     const samples = kids.map((el) => {
       const r = el.getBoundingClientRect()
-      return { el, top: r.top, height: r.height, center: r.top + r.height / 2 }
+      return {
+        el,
+        top: r.top,
+        height: r.height,
+        center: r.top + r.height / 2,
+        left: r.left,
+        right: r.right
+      }
     })
     for (const line of clusterLines(samples)) {
       if (line.length < 2) continue
@@ -101,6 +109,45 @@ function scanAlign(): void {
         if (Math.abs(dev) > ALIGN_TOLERANCE) el.classList.add(ALIGN_BAD_CLASS)
         if (align !== rowAlign) el.classList.add(ALIGN_OVERRIDE_CLASS)
       }
+    }
+    checkEdges(row, samples)
+  }
+}
+
+/**
+ * 左缘 / 右缘对齐线（SPEC「行内对齐」）：
+ *  ① 左缘同线——同一行换行后，每条视觉行**首个**元素的左缘应彼此同线（= 行标签左缘）；
+ *  ② 右缘贴行尾——每行**末个**元素的右缘应与行右缘同线（数值贴行尾）。
+ * 不齐的标出来（kit-debug-edge--bad），让「谁没对齐」能用眼睛验证。
+ */
+function checkEdges(
+  row: Element,
+  samples: { el: HTMLElement; left: number; right: number }[]
+): void {
+  if (samples.length < 2) return
+  const rowRect = row.getBoundingClientRect()
+  const groups = clusterLines(
+    samples.map((s) => ({
+      ...s,
+      top: 0,
+      height: 1,
+      center: s.el.getBoundingClientRect().top + s.el.getBoundingClientRect().height / 2
+    }))
+  )
+  if (groups.length < 1) return
+  const firsts = groups.map((g) => g[0])
+  const leftRef = Math.min(...firsts.map((f) => f.left))
+  for (const f of firsts) {
+    if (Math.abs(f.left - leftRef) > ALIGN_TOLERANCE) f.el.classList.add(EDGE_BAD_CLASS)
+  }
+  const lasts = groups.map((g) => g[g.length - 1])
+  const rightRef = Math.max(...lasts.map((l) => l.right))
+  for (const l of lasts) {
+    if (
+      Math.abs(l.right - rightRef) > ALIGN_TOLERANCE &&
+      Math.abs(l.right - rowRect.right) > ALIGN_TOLERANCE
+    ) {
+      l.el.classList.add(EDGE_BAD_CLASS)
     }
   }
 }

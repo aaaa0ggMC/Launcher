@@ -18,12 +18,41 @@ const scheme = ref('dark')
 const schemes = ['dark', 'light', 'pureblack', 'moonlight', 'forest', 'aurora']
 
 /** 三档并排：宽 / 中 / 窄。列宽按 480:320:232 的比例（fr），容器变窄时同比收缩，
- *  等高 + 底部留白一致由 KitGrid 的 align-stretch 与栏距令牌保证 */
+ *  等高 + 底部留白一致由 KitGrid 的 align-stretch 与栏距令牌保证。
+ *  每档都自述当前状态（state）：拆两行是引擎设计好的退化，不是坏了——
+ *   宽/中：一行 `[标签][控件][数值]`；窄：标签独占一行、控件落第二行，数值（secondary）
+ *   装不下先收进行尾「更多」。 */
 const stages = computed(() => [
-  { width: 480, narrow: false, label: t('kit.gallery.wide', '宽') },
-  { width: 320, narrow: false, label: t('kit.gallery.mid', '中') },
-  { width: 232, narrow: true, label: t('kit.gallery.tight', '窄') }
+  {
+    width: 480,
+    narrow: false,
+    label: t('kit.gallery.wide', '宽'),
+    state: t('kit.gallery.settingRow.stateWide', '一行：标签 + 控件 + 数值')
+  },
+  {
+    width: 320,
+    narrow: false,
+    label: t('kit.gallery.mid', '中'),
+    state: t('kit.gallery.settingRow.stateMid', '一行：标签 + 步进器 + 数值（滑块换步进器）')
+  },
+  {
+    width: 232,
+    narrow: true,
+    label: t('kit.gallery.tight', '窄'),
+    state: t(
+      'kit.gallery.settingRow.stateTight',
+      '窄屏退化：标签独占一行，控件落第二行（刻意设计）'
+    )
+  }
 ])
+
+/** 每行的对齐档标记（SPEC「行内对齐」：下拉/输入=左，数值=右） */
+const alignTags = computed(() => ({
+  slider: t('kit.gallery.alignLeft', '值·左'),
+  num: t('kit.gallery.alignRight', '值·右'),
+  select: t('kit.gallery.alignLeft', '值·左'),
+  btn: t('kit.gallery.alignLeft', '值·左')
+}))
 </script>
 
 <template>
@@ -46,43 +75,59 @@ const stages = computed(() => [
   >
     <KitGrid cols="minmax(0, 1.55fr) minmax(0, 1.03fr) minmax(0, 0.75fr)" :gap="12">
       <div v-for="s in stages" :key="s.width" class="kit-demo-stagecol">
-        <div class="kit-demo-stagecol__head">{{ s.label }} · {{ s.width }}px</div>
+        <div class="kit-demo-stagecol__head">
+          <span>{{ s.label }} · {{ s.width }}px</span>
+          <span class="kit-demo-stagecol__state">{{ s.state }}</span>
+        </div>
         <div class="kit-demo-stagecol__box" :style="{ maxWidth: `${s.width}px` }">
-          <KitSettingRow
-            v-model="volume"
-            :label="t('kit.gallery.masterVolume', '主音量')"
-            :min="0"
-            :max="100"
-            unit="%"
-            slider
-            :narrow="s.narrow"
-            :hint="t('kit.gallery.settingRow.hint', '拖动或点 ± 都能改')"
-          />
-          <KitSettingRow
-            v-model="scale"
-            :label="t('kit.gallery.uiScale', '界面缩放')"
-            :min="80"
-            :max="180"
-            :step="10"
-            unit="%"
-          />
-          <KitSettingRow :label="t('kit.gallery.theme', '配色方案')" :narrow="s.narrow">
-            <KitSelect
-              v-model="scheme"
-              :items="schemes"
-              :aria-label="t('kit.gallery.theme', '配色方案')"
+          <div class="kit-demo-tagged">
+            <KitSettingRow
+              v-model="volume"
+              :label="t('kit.gallery.masterVolume', '主音量')"
+              :min="0"
+              :max="100"
+              unit="%"
+              slider
+              :narrow="s.narrow"
+              :hint="t('kit.gallery.settingRow.hint', '拖动或点 ± 都能改')"
             />
-          </KitSettingRow>
-          <KitSettingRow
-            :label="t('kit.gallery.optionalRow', '可整行隐藏的次要设置')"
-            secondary
-            :narrow="s.narrow"
-            value="1.4 GB"
-          >
-            <v-btn variant="text" prepend-icon="mdi-folder-open-outline" size="default">
-              {{ t('kit.gallery.pickDir', '选择目录') }}
-            </v-btn>
-          </KitSettingRow>
+            <span class="kit-demo-tagged__tag">{{ alignTags.slider }}</span>
+          </div>
+          <div class="kit-demo-tagged">
+            <KitSettingRow
+              v-model="scale"
+              :label="t('kit.gallery.uiScale', '界面缩放')"
+              :min="80"
+              :max="180"
+              :step="10"
+              unit="%"
+              :narrow="s.narrow"
+            />
+            <span class="kit-demo-tagged__tag">{{ alignTags.num }}</span>
+          </div>
+          <div class="kit-demo-tagged">
+            <KitSettingRow :label="t('kit.gallery.theme', '配色方案')" :narrow="s.narrow">
+              <KitSelect
+                v-model="scheme"
+                :items="schemes"
+                :aria-label="t('kit.gallery.theme', '配色方案')"
+              />
+            </KitSettingRow>
+            <span class="kit-demo-tagged__tag">{{ alignTags.select }}</span>
+          </div>
+          <div class="kit-demo-tagged">
+            <KitSettingRow
+              :label="t('kit.gallery.optionalRow', '可整行隐藏的次要设置')"
+              secondary
+              :narrow="s.narrow"
+              value="1.4 GB"
+            >
+              <v-btn variant="text" prepend-icon="mdi-folder-open-outline" size="default">
+                {{ t('kit.gallery.pickDir', '选择目录') }}
+              </v-btn>
+            </KitSettingRow>
+            <span class="kit-demo-tagged__tag">{{ alignTags.btn }}</span>
+          </div>
         </div>
       </div>
     </KitGrid>
@@ -97,6 +142,37 @@ const stages = computed(() => [
   min-width: 0;
   /* 等高：KitGrid 的 align-stretch 已经把列拉成一样高，这里把内容往下推 */
   height: 100%;
+}
+
+/* 每档自述状态：拆两行是刻意退化，不是坏了 */
+.kit-demo-stagecol__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kit-demo-stagecol__state {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
+/* 行尾对齐档小标记：绝对定位浮在行尾，不占行宽（列宽宣称值不变） */
+.kit-demo-tagged {
+  position: relative;
+}
+
+.kit-demo-tagged__tag {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  line-height: 1.5;
+  opacity: 0.75;
+  background: rgba(var(--v-theme-on-surface), 0.1);
+  pointer-events: none;
 }
 
 .kit-demo-stagecol__box {

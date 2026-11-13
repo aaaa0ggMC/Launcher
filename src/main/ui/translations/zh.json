@@ -337,5 +337,10 @@
   "kit.hint.warn": "避免",
   "kit.gallery.debugOutline": "布局自检：打开后本页所有元素描边，溢出容器的元素标红",
   "kit.gallery.notify": "通知",
-  "kit.gallery.debugToggle": "布局自检开关"
+  "kit.gallery.debugToggle": "布局自检开关",
+  "kit.gallery.settingRow.stateWide": "一行：标签 + 控件 + 数值",
+  "kit.gallery.settingRow.stateMid": "一行：标签 + 步进器 + 数值（滑块换步进器）",
+  "kit.gallery.settingRow.stateTight": "窄屏退化：标签独占一行，控件落第二行（刻意设计）",
+  "kit.gallery.alignLeft": "值·左",
+  "kit.gallery.alignRight": "值·右"
 }

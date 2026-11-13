@@ -337,5 +337,10 @@
   "kit.hint.warn": "Avoid",
   "kit.gallery.debugOutline": "Layout self-check: outlines every element on this page and marks overflowing ones in red",
   "kit.gallery.notify": "Notifications",
-  "kit.gallery.debugToggle": "Layout self-check toggle"
+  "kit.gallery.debugToggle": "Layout self-check toggle",
+  "kit.gallery.settingRow.stateWide": "One line: label + control + value",
+  "kit.gallery.settingRow.stateMid": "One line: label + stepper + value (slider becomes stepper)",
+  "kit.gallery.settingRow.stateTight": "Narrow degradation: label takes its own line, control drops to line 2 (by design)",
+  "kit.gallery.alignLeft": "value·left",
+  "kit.gallery.alignRight": "value·right"
 }

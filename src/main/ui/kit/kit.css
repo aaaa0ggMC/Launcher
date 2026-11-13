@@ -68,6 +68,9 @@
 .kit-setting-row__value {
   font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
+  /* 右对齐贴行尾（SPEC「行内对齐」数值档）：它的 item 是 flex 盒，
+     不推的话文字会留在 item 左侧、离行尾空一截（实测差 15px）。 */
+  margin-inline-start: auto;
 }
 
 /* 设置行：行标签与行内控件文字同一个字号令牌（SPEC「字号阶」设置行 = 0.9375rem）。
@@ -478,4 +481,10 @@
 
 .kit-debug-on .kit-debug-align--bad.kit-debug-align--override {
   outline: 1px solid rgb(var(--v-theme-error)) !important;
+}
+
+/* 左缘 / 右缘不齐：同一条行里换行后首个元素左缘不同线、或末个元素右缘不贴行尾 */
+.kit-debug-on .kit-debug-edge--bad {
+  outline: 1px dotted rgb(var(--v-theme-error)) !important;
+  outline-offset: 1px;
 }
