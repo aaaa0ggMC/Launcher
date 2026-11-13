@@ -34,6 +34,7 @@ import { translate } from '../../i18n'
 import { useAdaptive, useContainerWidth } from '../composables/useAdaptive'
 import { useAnchor } from '../composables/useAnchor'
 import { useKitSurface } from '../composables/useKitSurface'
+import type { KitAlign } from './align'
 import {
   applyNaturalFloor,
   planRow,
@@ -61,8 +62,11 @@ const props = defineProps<{
   gap?: number
   /** 隐藏元素的去向：menu = 行尾「更多」浮层（默认）；none = 直接 display:none */
   overflow?: 'menu' | 'none'
-  /** 纵向对齐 */
-  align?: 'center' | 'start'
+  /**
+   * 行内对齐（SPEC「行内对齐」）：默认 center——一行之内所有元素共享同一条中线。
+   * 只有多行文字、顶部对齐的图标+两行说明这类场景才覆盖，且覆盖会在布局自检里被标出来。
+   */
+  align?: KitAlign
 }>()
 
 const emit = defineEmits<{
@@ -350,8 +354,7 @@ onBeforeUnmount(() => {
     <div
       ref="target"
       class="kit-smart-row__line"
-      :class="`kit-smart-row__line--${align ?? 'center'}`"
-      :style="{ gap: `${gap()}px` }"
+      :style="{ gap: `${gap()}px`, '--kit-row-align': align }"
     >
       <slot />
       <span

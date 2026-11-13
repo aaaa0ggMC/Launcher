@@ -90,6 +90,45 @@
 `narrow`（720）是与外壳（侧栏、容器 px-3）一致的兼容值；容器语义用 `useContainerWidth()`
 （带 8px 滞回），不要拿视口断点假装容器断点。
 
+## 4.5 行内对齐（默认 center + 可覆盖）
+
+**硬规则：一行之内，所有元素共享同一条中线**——文字、输入、下拉、滑块、开关、chip、
+图标按钮、右侧数值，几何中心落在同一条水平线上，**偏差 ≤ 1px**。
+「一行」按**视觉行**（flex line）算：换行的行里每条 line 有各自中线，拿整个容器当参照
+会把正常换行的元素误判成没对齐（实测 232px 档因此误报 22px）。
+
+**机制（一条规则治一类的，不要三条治三个）**：Vuetify 的 `.v-field` 是
+`display:grid`，`grid-template-areas: "prepend-inner field clear append-inner"`
+（VField.sass:12-19），各 variant 再把 affix 改成 `flex-start`
+（underlined/plain 在 :195-201）——单位、前后置图标、clearable 全部贴顶。
+正解是在 **field 根节点**定对齐：
+
+```css
+.kit-control .v-field {
+  align-items: var(--kit-field-align, center);
+}
+```
+
+这一条同时治好单位、前置/后置图标、clearable 和以后加的任何 affix。
+行/元素用 CSS 变量链传递：`--kit-row-align`（行）→ `--kit-item-align`（元素）→
+`--kit-field-align`（控件内部），缺省全部回落 `center`。
+
+**覆盖（默认 + 可覆盖）**：`KitSmartRow` / `KitRowItem` / `KitSettingRow` / 控件层
+（KitTextField / KitSelect / KitSlider / KitSwitch / KitNumberStepper）都有同一个 prop：
+
+```ts
+align?: 'center' | 'start' | 'end' | 'baseline' | 'stretch'   // 缺省 'center'
+```
+
+`KitSettingRow` 会把 align 透传到控件插槽（`<slot :size :align>`），否则调用方传了也没用。
+覆盖必须是少数、有理由、看得见的：只有多行文字、顶部对齐的图标+两行说明这类场景才传，
+且**布局自检会把偏离行默认对齐模式的元素标成另一种颜色并注明 align 值**（默认的只描边）。
+
+**自检**：`KitDebugOutline mode="align|both"`（默认关）逐视觉行量每个子元素的几何中心
+vs 行中线，偏差 >1px 标黄、覆盖默认对齐的标紫，偏差值写在 `data-kit-align-dev` 里。
+实测（Electron + uiScale 1.1）：gallery 三档（480/320/232）+ 真实设置页窗口分区
+共 17 条视觉行 43 个元素，**偏差全部 0px**。
+
 ## 6. 控件尺寸表（实测，排查裁剪的入口）
 
 | 控件                      | 自然宽度                                         | kit 默认 kind          | 要显式 minWidth 吗      |

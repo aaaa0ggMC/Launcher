@@ -10,6 +10,7 @@ import { computed, useAttrs } from 'vue'
 import { useFitBox } from '../composables/useFitBox'
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
+import type { KitAlign } from '../layout/align'
 
 defineOptions({ inheritAttrs: false })
 
@@ -17,6 +18,8 @@ const props = defineProps<{
   /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
   size?: 'input' | 'inline'
   modelValue?: string | number | null
+  /** 控件内部对齐（SPEC「行内对齐」）：缺省 center */
+  align?: KitAlign
   /** 等宽数值框（右对齐 + tabular-nums） */
   numeric?: boolean
   /** 单位后缀（自绘，紧贴文字；不走 Vuetify 的 suffix prop——那个被 flex 推到输入区
@@ -31,7 +34,10 @@ useKitSurface()
 const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
 const { target, content, scale } = useFitBox()
-const rootStyle = computed(() => ({ '--kit-fit-scale': String(scale.value) }))
+const rootStyle = computed(() => ({
+  '--kit-fit-scale': String(scale.value),
+  '--kit-field-align': props.align ?? 'center'
+}))
 // target/content 在模板里绑到元素上（80% 内容率量容器与内容）；显式引用避免未使用告警
 void target
 void content

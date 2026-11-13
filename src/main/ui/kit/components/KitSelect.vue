@@ -6,6 +6,7 @@ import { computed, useAttrs } from 'vue'
 import { useFitBox } from '../composables/useFitBox'
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
+import type { KitAlign } from '../layout/align'
 
 defineOptions({ inheritAttrs: false })
 
@@ -13,6 +14,8 @@ const props = defineProps<{
   /** 密度档：input = 输入档（44px outlined，独立表单/对话框用）；inline = 行内档（32px underlined，设置行用） */
   size?: 'input' | 'inline'
   modelValue?: unknown
+  /** 控件内部对齐（SPEC「行内对齐」）：缺省 center */
+  align?: KitAlign
   items?: readonly unknown[]
 }>()
 
@@ -23,7 +26,10 @@ useKitSurface()
 const density = computed(() => resolveDensity(props.size, useKitDensity()))
 
 const { target, scale } = useFitBox()
-const rootStyle = computed(() => ({ '--kit-fit-scale': String(scale.value) }))
+const rootStyle = computed(() => ({
+  '--kit-fit-scale': String(scale.value),
+  '--kit-field-align': props.align ?? 'center'
+}))
 void target
 </script>
 
