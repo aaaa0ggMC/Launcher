@@ -48,9 +48,11 @@ test('KitCircleStat：label 会随直径收缩截断，必须接', () => {
 
 test('原语本身：只在真截断时挂 title（避免满屏 title）', () => {
   const src = read('../composables/useTruncatable.ts')
-  assert.match(src, /scrollWidth > el\.clientWidth \+ 1/, '真截断判定用布局像素（zoom 下口径一致）')
+  // 判定走纯函数 isTruncatedProbe（自身在裁 + 被祖先裁，两条取或）
+  assert.match(src, /isTruncatedProbe\(probe\)/, '判定收敛到纯函数（可单测）')
   assert.match(src, /truncated\.value \? text\.value : undefined/, '没截断就不挂 title')
   assert.match(src, /new ResizeObserver/, '容器尺寸变化要重判')
+  assert.match(src, /recheckAllTruncatables/, '浮层打开时统一重判')
 })
 
 test('原语：触摸腿是点按浮层（不是只靠 hover）', () => {
@@ -79,4 +81,18 @@ test('「更多」浮层内不截断（档 2 的全文保证别回退）', () =>
   // 规则在 KitRowItem 的 scoped 样式里（:global(.kit-overflow) .kit-row-item__inner）
   const src = read('../layout/KitRowItem.vue')
   assert.match(src, /kit-overflow[\s\S]*?text-overflow: clip/, '浮层内保持全文（不截断）')
+})
+
+test('检测把祖先链算进去：不只是自己盒子在裁', () => {
+  const src = read('../composables/useTruncatable.ts')
+  assert.match(src, /isTruncatedProbe/, '用纯函数判定（可单测）')
+  assert.match(src, /clipRightOf/, '沿祖先链找第一个会裁的盒子')
+  assert.match(src, /self \|\| byAncestor|self \|\| ancestor|return self \|\|/, '两条路取或')
+})
+
+test('浮层里的项打开时要重判（不能停在隐藏期的死状态）', () => {
+  const comp = read('../composables/useTruncatable.ts')
+  assert.match(comp, /recheckAllTruncatables/, '提供统一重判入口')
+  const row = read('../layout/KitSmartRow.vue')
+  assert.match(row, /recheckAllTruncatables\(\)/, '打开「更多」浮层后通知其中的 KitTruncated 重判')
 })

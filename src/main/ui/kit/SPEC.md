@@ -243,9 +243,16 @@ KitChip / KitCircleStat），而揭示机制几乎为零（只有 2 个 title，
 
 实现（一个共用原语，不许每个积木各写一遍）：
 
-- `useTruncatable(el, fullText)`：`scrollWidth > clientWidth`（+ ResizeObserver）判定**真截断**；
-  只在真截断时挂 `title` 和点按揭示，没截断什么都不做（避免满屏 title）；
+- `useTruncatable(el, fullText)`：判定**真截断**——两条路取或（纯函数 `isTruncatedProbe`
+  可单测）：① 自己这个盒子在裁（`scrollWidth > clientWidth`）；② **被祖先裁**（自身
+  sw==cw，但右缘超出祖先链上第一个 `overflow` 非 visible 的盒子的内容右缘）。
+  只认①会漏掉用户 live 数据里的胶囊（sw==cw==58 却被切短 → 永远判 false → 没 title、
+  点按没反应）。只在真截断时挂 `title` 和点按揭示，没截断什么都不做（避免满屏 title）；
   暴露响应式 `truncated`（自检用它上标记）。
+- 触发重判：ResizeObserver（元素 + 父元素）、窗口 resize、文字变化、以及挂载后几拍异步
+  兜底（字号常是异步算的，那时盒子没变只有文字变，RO 不触发；Vue 的样式更新走 style
+  属性赋值也不触发 MutationObserver——实测无效）；`KitSmartRow` 打开「更多」浮层时统一
+  `recheckAllTruncatables()`（浮层里的项从 `display:none` 变可见，检测状态在隐藏期是死的）。
 - `KitTruncated`：包裹件，自带 ellipsis 样式 + 上述两条腿；点按浮层是 kit 自绘
   （Teleport + `useAnchor` + 和「更多」浮层同一套玻璃样式），不新造第三套定位。
 - 已接：`KitRowItem`（truncate）、`KitSettingRow`（label / desc / value）、`KitChip`、

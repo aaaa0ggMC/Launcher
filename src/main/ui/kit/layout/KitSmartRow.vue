@@ -33,6 +33,7 @@ import type { Ref } from 'vue'
 import { translate } from '../../i18n'
 import { useAdaptive, useContainerWidth } from '../composables/useAdaptive'
 import { useAnchor } from '../composables/useAnchor'
+import { recheckAllTruncatables } from '../composables/useTruncatable'
 import { useKitSurface } from '../composables/useKitSurface'
 import type { KitAlign } from './align'
 import {
@@ -310,6 +311,9 @@ watch(moreOpen, async (open) => {
   await nextTick()
   placePop()
   popEl.value?.focus()
+  // 浮层里的项从 display:none 变成可见：通知其中的 KitTruncated 重判截断
+  // （它们在图里应该是全文，但检测状态在隐藏期是死的）。
+  recheckAllTruncatables()
 })
 
 // 浮层打开期间：点外面 / Esc / 滚动缩放 都要收起来

@@ -54,7 +54,14 @@ export { default as KitEmpty } from './components/KitEmpty.vue'
 export { default as KitChip } from './components/KitChip.vue'
 export { default as KitTruncated } from './components/KitTruncated.vue'
 export { default as KitBuildStamp } from './components/KitBuildStamp.vue'
-export { useTruncatable, type Truncatable } from './composables/useTruncatable'
+export {
+  useTruncatable,
+  isTruncatedProbe,
+  clipRightOf,
+  recheckAllTruncatables,
+  type Truncatable,
+  type TruncateProbe
+} from './composables/useTruncatable'
 export { default as KitTitle } from './components/KitTitle.vue'
 export { default as KitProse } from './components/KitProse.vue'
 export { default as KitCaption } from './components/KitCaption.vue'
