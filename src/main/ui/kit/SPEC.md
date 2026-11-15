@@ -223,6 +223,39 @@ vs 行中线，偏差 >1px 标黄、覆盖默认对齐的标紫，偏差值写�
   焦点序按 DOM 序（kit 用 CSS `order` 调视觉序，不搬家 DOM，焦点不受影响）；
   文字对比度取 `--v-theme-on-surface(-variant)`，不写死 hex。
 
+## 9.5 信息降级链（可达性律第一条）
+
+**每条内容都有确定的降级路径，任何一级降级都不允许信息丢失。**
+截断不是样式问题，是信息问题——用户原话「我怀疑整个 UI 库目前还没有为截断后如何展示
+信息考虑过」，审计确认：截断点有 6 处以上（KitRowItem / KitSettingRow 的 label·desc·value /
+KitChip / KitCircleStat），而揭示机制几乎为零（只有 2 个 title，chip 和 row-item 连 title
+都没有），全库没有任何点按 / 浮层揭示。于是「不折行」被做成了「看不见」。
+
+| 档  | 状态                   | 要求                                                 |
+| --- | ---------------------- | ---------------------------------------------------- |
+| 0   | 完整显示               | —                                                    |
+| 1   | 截断显示（ellipsis）   | **必须可揭示**：桌面 `title` + 触摸**点按**出全文    |
+| 2   | 整元素隐藏（priority） | 进行尾「更多」浮层，**浮层内显示全文**（已有，保持） |
+| 3   | 整行隐藏               | 不支持就不允许整行 hidden；要支持就得同样给去处      |
+
+不变量：**不存在「降级了但看不到原文」的元素**。这与行内三律、行尾 chrome 不换行并列，
+是可达性律的第一条。
+
+实现（一个共用原语，不许每个积木各写一遍）：
+
+- `useTruncatable(el, fullText)`：`scrollWidth > clientWidth`（+ ResizeObserver）判定**真截断**；
+  只在真截断时挂 `title` 和点按揭示，没截断什么都不做（避免满屏 title）；
+  暴露响应式 `truncated`（自检用它上标记）。
+- `KitTruncated`：包裹件，自带 ellipsis 样式 + 上述两条腿；点按浮层是 kit 自绘
+  （Teleport + `useAnchor` + 和「更多」浮层同一套玻璃样式），不新造第三套定位。
+- 已接：`KitRowItem`（truncate）、`KitSettingRow`（label / desc / value）、`KitChip`、
+  `KitCircleStat`（label）。
+- **新积木 checklist 加一条：会 ellipsis 就必须接 `KitTruncated` / `useTruncatable`**，
+  否则契约测试（逐个积木一条）会红。
+
+自检：布局自检给**真截断**的元素描一种边（`kit-debug-truncated`，与溢出红 / 对齐黄 /
+覆盖紫 / 尺寸警告区分开）——这页哪里有信息被降级，一眼可见；降级不可怕，看不见才可怕。
+
 ## 10. 启发式：空间冲突时怎么决策
 
 优先序（从温和到激烈）：
@@ -255,6 +288,15 @@ vs 行中线，偏差 >1px 标黄、覆盖默认对齐的标紫，偏差值写�
 **为什么是 `absolute; inset:0` 而不是 `calc(100vh - 96px)`**：那个 96 是「appbar 高 +
 容器 padding」的魔数，appbar 实测 55px（不是 48/64），魔数壳就短一截。绝对定位不依赖任何
 魔数，键盘弹出时也跟着可视区收。高度计算一律 `var(--app-vh)`，不写裸 `100vh`。
+
+## 11.5 新积木 checklist
+
+1. 高度 / 内边距 / 圆角 / 字号全部从令牌算，不写裸数字；
+2. inline 档用 kit 自建盒模型，**禁止**为 inline 档覆盖 Vuetify 内部类；
+3. **会 ellipsis 就必须接 `KitTruncated` / `useTruncatable`**（信息降级链档 1）；
+4. 同一行里的同类元素尺寸一致（差异只能来自密度阶）；
+5. 密度走容器上下文（`useKitDensity`），不要求调用方记参数；
+6. 契约测试补齐（含上一条的截断揭示）。
 
 ## 12. 参考实现（迁移照抄这个结构）
 

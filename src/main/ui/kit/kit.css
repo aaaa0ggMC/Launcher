@@ -59,6 +59,27 @@
   flex: none;
 }
 
+/* 截断揭示浮层（KitTruncated 点按出全文）：和「更多」浮层同一套玻璃样式，
+   定位走 useAnchor（页面缩放下口径一致）。SPEC「信息降级链」档 1 的触摸腿。 */
+.kit-truncate-tip {
+  position: fixed;
+  z-index: 2100;
+  min-width: 120px;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(var(--kit-surface), var(--kit-glass-alpha));
+  backdrop-filter: blur(var(--kit-glass-blur));
+  -webkit-backdrop-filter: blur(var(--kit-glass-blur));
+  border: 1px solid var(--kit-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: normal;
+  word-break: break-word;
+}
+
 /* 玻璃卡片：gallery / 需要浮起的内容面（吃全局透明与模糊配置） */
 .kit-glass-card {
   border-radius: 12px;
@@ -487,6 +508,13 @@
 .kit-debug-on .kit-debug-edge--bad {
   outline: 1px dotted rgb(var(--v-theme-error)) !important;
   outline-offset: 1px;
+}
+
+/* 截断标记（SPEC「信息降级链」自检腿）：被 ellipsis 的元素描一种边，
+   让用户一眼看出「这页哪里有信息被降级」——降级不可怕，看不见才可怕 */
+.kit-debug-on .kit-debug-truncated {
+  outline: 1px dashed rgb(var(--v-theme-info)) !important;
+  outline-offset: -1px;
 }
 
 /* 同类不同尺寸：同一行里同 kind 的元素高度不一致（差异只能来自密度阶） */

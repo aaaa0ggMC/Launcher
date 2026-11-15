@@ -25,10 +25,17 @@ test('高度走密度阶令牌，不随内容变', () => {
   assert.doesNotMatch(style, /min-height/, 'min-height 会让它随内容长')
 })
 
-test('文字不折行：nowrap + 超长省略号', () => {
-  assert.match(style, /white-space: nowrap/)
-  assert.match(style, /text-overflow: ellipsis/)
-  assert.match(style, /overflow: hidden/)
+test('文字不折行：ellipsis 归 KitTruncated 管，不在这再写一遍', () => {
+  // 截断与揭示都收编到 KitTruncated（SPEC「信息降级链」）：积木不再各自写 ellipsis
+  const truncated = readFileSync(
+    fileURLToPath(new URL('./KitTruncated.vue', import.meta.url)),
+    'utf8'
+  )
+  assert.match(truncated, /white-space: nowrap/)
+  assert.match(truncated, /text-overflow: ellipsis/)
+  assert.match(truncated, /overflow: hidden/)
+  // KitChip 自己不再重复实现（重复就是两份会漂的实现）
+  assert.doesNotMatch(style, /text-overflow: ellipsis/, 'ellipsis 归原语，积木不重复写')
 })
 
 test('内边距 / 圆角 / 字号从令牌算，表面吃玻璃变量', () => {

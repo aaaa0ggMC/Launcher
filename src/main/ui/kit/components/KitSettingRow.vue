@@ -19,6 +19,7 @@ import { computed, toValue, useSlots } from 'vue'
 import type { Ref } from 'vue'
 import { useAdaptive } from '../composables/useAdaptive'
 import KitSlider from './KitSlider.vue'
+import KitTruncated from './KitTruncated.vue'
 import { provideDensity } from '../layout/density'
 import type { KitAlign } from '../layout/align'
 import KitSmartRow from '../layout/KitSmartRow.vue'
@@ -88,11 +89,11 @@ const valueText = computed<string | undefined>(() => {
   <KitSmartRow class="kit-setting-row" :hint="hint" :align="align">
     <!-- 名字：可省略号、可生长（吃掉控件剩下的空间），永远可见 -->
     <KitRowItem kind="label" :text="label" :priority="priority" truncate grow>
-      <div class="kit-setting-row__name" :title="label">
-        <span class="kit-setting-row__label">{{ label }}</span>
-        <span v-if="desc" class="kit-setting-row__desc text-caption on-surface-variant">
-          {{ desc }}
-        </span>
+      <div class="kit-setting-row__name">
+        <KitTruncated class="kit-setting-row__label" :text="label">{{ label }}</KitTruncated>
+        <KitTruncated v-if="desc" class="kit-setting-row__desc" :text="desc">{{
+          desc
+        }}</KitTruncated>
       </div>
     </KitRowItem>
 
@@ -136,7 +137,7 @@ const valueText = computed<string | undefined>(() => {
       :min-width="48"
       :text="valueText"
     >
-      <span class="kit-setting-row__value" :title="valueText">{{ valueText }}</span>
+      <KitTruncated class="kit-setting-row__value" :text="valueText">{{ valueText }}</KitTruncated>
     </KitRowItem>
   </KitSmartRow>
 </template>

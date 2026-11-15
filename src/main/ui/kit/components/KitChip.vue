@@ -15,6 +15,7 @@
  * - `priority` 交给行的引擎：secondary / tertiary 装不下时被自动隐藏、收进行尾「更多」。
  */
 import { computed, useAttrs } from 'vue'
+import KitTruncated from './KitTruncated.vue'
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
 import { GRID } from '../layout/tokens'
@@ -63,7 +64,7 @@ const rootStyle = computed(() => ({
     @click="emit('click', $event)"
   >
     <v-icon v-if="icon" class="kit-chip__icon" size="x-small">{{ icon }}</v-icon>
-    <span class="kit-chip__text">{{ text }}</span>
+    <KitTruncated class="kit-chip__text" :text="text">{{ text }}</KitTruncated>
   </span>
 </template>
 
@@ -87,13 +88,7 @@ const rootStyle = computed(() => ({
   vertical-align: middle;
 }
 
-/* 超长只省略，不折行（折行会让胶囊变高，行内同尺寸就破了） */
-.kit-chip__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
+/* 文字截断与揭示交给 KitTruncated（SPEC「信息降级链」档 1） */
 
 .kit-chip__icon {
   flex: 0 0 auto;

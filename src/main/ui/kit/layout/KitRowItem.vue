@@ -17,6 +17,7 @@ import {
   type SmartRowContext,
   type SmartRowSlot
 } from './smart-row-context'
+import KitTruncated from '../components/KitTruncated.vue'
 import type { ItemKind, ItemPriority } from './engine'
 import type { KitAlign } from './align'
 
@@ -98,7 +99,10 @@ const itemStyle = computed<Record<string, string>>(() => {
   >
     <Teleport :to="teleportTo" :disabled="teleportTo === null">
       <div class="kit-row-item__inner">
-        <slot />
+        <KitTruncated v-if="truncate" class="kit-row-item__label" :text="text">{{
+          text
+        }}</KitTruncated>
+        <slot v-else />
       </div>
     </Teleport>
   </div>

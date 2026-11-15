@@ -34,6 +34,7 @@ const ALIGN_BAD_CLASS = 'kit-debug-align--bad'
 const ALIGN_OVERRIDE_CLASS = 'kit-debug-align--override'
 const EDGE_BAD_CLASS = 'kit-debug-edge--bad'
 const SIZE_BAD_CLASS = 'kit-debug-size--bad'
+const TRUNCATED_CLASS = 'kit-debug-truncated'
 /** 行中线偏差阈值（px）——SPEC「行内对齐」：一行之内所有元素共享同一条中线 */
 const ALIGN_TOLERANCE = 1
 
@@ -191,9 +192,34 @@ function checkEdges(
   }
 }
 
+function clearTruncateMarks(): void {
+  for (const el of document.querySelectorAll(`.${TRUNCATED_CLASS}`)) {
+    el.classList.remove(TRUNCATED_CLASS)
+  }
+}
+
+/**
+ * 截断标记（SPEC「信息降级链」自检腿）：把**真截断**（ellipsis + nowrap +
+ * scrollWidth > clientWidth）的元素描出来——这页哪里有信息被降级，一眼可见。
+ * 判定口径与 useTruncatable 一致（布局像素，页面缩放在两种口径下都成立）。
+ */
+function scanTruncated(): void {
+  clearTruncateMarks()
+  for (const el of document.body.querySelectorAll('*')) {
+    const node = el as HTMLElement
+    if (node === debugHost) continue
+    const cs = getComputedStyle(node)
+    if (cs.textOverflow !== 'ellipsis' || cs.whiteSpace === 'normal') continue
+    if (node.scrollWidth > node.clientWidth + 1 && node.clientWidth > 0) {
+      node.classList.add(TRUNCATED_CLASS)
+    }
+  }
+}
+
 function scan(): void {
   clearMarks()
   clearAlignMarks()
+  clearTruncateMarks()
   if (props.mode !== 'align') {
     const all = document.body.querySelectorAll('*')
     for (const node of all) {
@@ -220,6 +246,7 @@ function scan(): void {
     }
   }
   if (props.mode !== 'overflow') scanAlign()
+  scanTruncated()
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

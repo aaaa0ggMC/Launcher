@@ -71,9 +71,14 @@ const ringStyle = computed(() => {
       <span class="kit-circle__value kit-num" :style="{ fontSize: `${valueSize}rem` }">{{
         value
       }}</span>
-      <span v-if="label" class="kit-circle__label" :style="{ fontSize: `${labelSize}rem` }">{{
-        label
-      }}</span>
+      <!-- label 会随圆环直径收缩而截断——截断就必须可揭示（SPEC「信息降级链」） -->
+      <KitTruncated
+        v-if="label"
+        class="kit-circle__label"
+        :text="label"
+        :style="{ fontSize: `${labelSize}rem` }"
+        >{{ label }}</KitTruncated
+      >
     </div>
   </div>
 </template>
