@@ -74,6 +74,12 @@ const rootStyle = computed(() => ({
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* 必须能缩：flex 项的 min-width 默认是 auto = min-content = 全文宽，不补这条
+     胶囊永远缩不到文字宽度以下——截断就从不在 .kit-truncated 上发生，于是
+     truncated 永远是 false、没 title、点按没反应（用户：「悬浮还是点击都啥都没有」）。
+     补了 min-width:0 后 max-width:100% 才能生效，文字在 .kit-truncated 上 ellipsis，
+     揭示机制（title + 点按浮层）随之生效。 */
+  min-width: 0;
   height: var(--kit-chip-height);
   /* 内边距从令牌算：inline 档左右 2 单位（8px） */
   padding: 0 8px;

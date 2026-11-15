@@ -8,6 +8,7 @@
  * `aspect-ratio:1` 保证是圆、`overflow:visible` 保证圆环不被裁、内盒固定 80%。
  */
 import { computed } from 'vue'
+import KitTruncated from './KitTruncated.vue'
 import { circleDiameter } from '../layout/fit'
 import { estimateTextWidth } from '../layout/engine'
 

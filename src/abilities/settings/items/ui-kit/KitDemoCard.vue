@@ -3,7 +3,7 @@
  * 画廊 demo 的统一外壳：标题 + 活示例 + 「什么时候用 / 不要用什么」+ 导入行。
  * 全部由 kit 积木拼（KitTitle / KitImport / KitHint / KitProse），不允许裸文本。
  */
-import { KitHint, KitImport, KitTitle } from '@ui/kit'
+import { KitBuildStamp, KitHint, KitImport, KitTitle } from '@ui/kit'
 
 defineProps<{
   /** 积木名（标题） */
@@ -22,7 +22,10 @@ defineProps<{
 <template>
   <v-card rounded="lg" variant="tonal" class="card-fill kit-demo">
     <v-card-text class="kit-demo__body">
-      <KitTitle :icon="'mdi-puzzle-outline'">{{ title }}</KitTitle>
+      <div class="kit-demo__head">
+        <KitTitle :icon="'mdi-puzzle-outline'">{{ title }}</KitTitle>
+        <KitBuildStamp />
+      </div>
       <KitImport v-if="importPath" :from="importPath" :names="importNames" />
       <slot />
       <div v-if="use || avoid" class="kit-demo__note">
@@ -34,6 +37,13 @@ defineProps<{
 </template>
 
 <style scoped>
+.kit-demo__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .kit-demo__body {
   display: flex;
   flex-direction: column;

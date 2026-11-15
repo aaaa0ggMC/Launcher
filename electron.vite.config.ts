@@ -2,8 +2,19 @@ import { createRequire } from 'module'
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { execSync } from 'node:child_process'
 import type { Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+
+/** 构建版本号：git 短 hash（取不到时回落 'dev'）——gallery 页脚显示，
+ *  用来确认「用户跑的到底是哪一版」（我们和用户之间为此猜过好几轮） */
+function buildHash(): string {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim() || 'dev'
+  } catch {
+    return 'dev'
+  }
+}
 
 // campusnet 依赖的 hustnet 只装在 ability 的 node_modules 里；tsconfig 又把
 // `hustnet` 指到本地 .d.ts 做 typecheck。主进程打包必须显式 alias 回真包，
@@ -148,6 +159,16 @@ export default defineConfig({
   renderer: {
     // UI framework lives in src/main/ui (part of the "main" program shell).
     root: resolve('src/main/ui'),
+    // 构建版本标记：注入 git 短 hash + 构建时间，gallery 页脚显示。
+    // 我们和用户之间一直在猜「用户跑的是哪一版」——这个号一出现就能直接确认，
+    // 用户看不到新功能时第一步就是看它（省掉整轮沟通）。
+    define: {
+      ...toggleDefine,
+      __KIT_BUILD__: JSON.stringify({
+        hash: buildHash(),
+        time: new Date().toISOString()
+      })
+    },
     resolve: {
       alias: {
         '@ui': resolve('src/main/ui'),
@@ -157,7 +178,6 @@ export default defineConfig({
       }
     },
     plugins: [abilityToggleGlobPlugin(), vue()],
-    define: toggleDefine,
     build: {
       rollupOptions: {
         input: resolve('src/main/ui/index.html')

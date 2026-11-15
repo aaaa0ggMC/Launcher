@@ -57,3 +57,15 @@ test('priority 交给行的引擎：demo 里两个胶囊都是 tertiary', () => 
   // 它们挂在 priority=tertiary 的 KitRowItem 下，行装不下时会被自动收进行尾「更多」
   assert.match(demo, /priority="tertiary"[^>]*>\s*<KitChip/)
 })
+
+test('回归：.kit-chip 必须可缩（min-width:0），否则截断永不发生、揭示也就永不生效', () => {
+  // 实测踩坑：flex 项的 min-width 默认 auto = min-content = 全文宽，胶囊因此缩不到
+  // 文字宽度以下 → .kit-truncated 的 scrollWidth 永远等于 clientWidth → truncated
+  // 永远是 false → 没 title、点按没反应（用户：「悬浮还是点击都啥都没有」）。
+  assert.match(style, /\.kit-chip \{[^}]*min-width: 0/, '没有 min-width:0 就缩不下去')
+  assert.match(
+    style,
+    /max-width: 100%/,
+    'max-width 让胶囊不超过容器，配合 min-width:0 才会真的截断'
+  )
+})

@@ -48,19 +48,40 @@ export function useTruncatable(
     if (!truncated.value) tipOpen.value = false
   }
 
+  // 三重触发，缺一不可（都踩过）：
+  //   ① ResizeObserver 观察**元素本身**：盒子宽度变化（容器变窄 / 行重排）；
+  //   ② ResizeObserver 观察**父元素**：盒子由父级决定时，父级先变；
+  //   ③ MutationObserver 观察 style / class：字号是异步算的（KitCircleStat 的 fit
+  //      缩放）——那时**盒子宽度没变、只有文字宽度变**，RO 一个都不触发，
+  //      检测就停在旧结论上（实测 kit-circle__label 截断了却没 title，就是这个坑）。
   let ro: ResizeObserver | null = null
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => check())
     watch(
       target,
       (el, _, onCleanup) => {
-        if (el) ro?.observe(el)
+        if (!el) return
+        ro?.observe(el)
+        if (el.parentElement) ro?.observe(el.parentElement)
         onCleanup(() => {
-          if (el) ro?.unobserve(el)
+          ro?.unobserve(el)
+          if (el.parentElement) ro?.unobserve(el.parentElement)
         })
       },
       { immediate: true }
     )
+  }
+  // ③ 异步兜底重判：字号常是异步算出来的（KitCircleStat 的 fit 缩放、翻译后置），
+  //    那时**盒子宽度没变、只有文字宽度变**——RO 不触发，而 Vue 的样式更新走
+  //    style 属性赋值也不产生 MutationObserver 的 attribute mutation（实测无效）。
+  //    所以挂载后补几拍定时重判，不停地轮询（1s 后自停）。
+  if (typeof requestAnimationFrame !== 'undefined') {
+    const later = [250, 1000]
+    requestAnimationFrame(() => {
+      check()
+      requestAnimationFrame(() => check())
+      for (const ms of later) setTimeout(check, ms)
+    })
   }
   watch(text, () => check())
   if (typeof window !== 'undefined') {
