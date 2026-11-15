@@ -9,7 +9,7 @@
 import { computed, inject, ref } from 'vue'
 import type { Ref } from 'vue'
 import {
-  KitCaption,
+  KitChip,
   KitDebugOutline,
   KitProse,
   KitRowGroup,
@@ -134,10 +134,10 @@ const qualities = [
           <KitSwitch v-model="notify" :aria-label="t('kit.gallery.notify', '通知')" />
         </KitRowItem>
         <KitRowItem kind="label" priority="tertiary" :text="t('kit.gallery.latency', '延迟 12ms')">
-          <KitCaption class="kit-demo-chip">{{ t('kit.gallery.latency', '延迟 12ms') }}</KitCaption>
+          <KitChip :text="t('kit.gallery.latency', '延迟 12ms')" />
         </KitRowItem>
         <KitRowItem kind="label" priority="tertiary" :text="t('kit.gallery.fps', '60 FPS')">
-          <KitCaption class="kit-demo-chip">{{ t('kit.gallery.fps', '60 FPS') }}</KitCaption>
+          <KitChip :text="t('kit.gallery.fps', '60 FPS')" tone="primary" />
         </KitRowItem>
       </KitSmartRow>
 
@@ -169,14 +169,6 @@ const qualities = [
 
 .kit-demo-value {
   white-space: nowrap;
-}
-
-.kit-demo-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  background: rgba(var(--v-theme-on-surface), 0.08);
 }
 
 .kit-demo-debug {

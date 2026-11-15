@@ -488,3 +488,10 @@
   outline: 1px dotted rgb(var(--v-theme-error)) !important;
   outline-offset: 1px;
 }
+
+/* 同类不同尺寸：同一行里同 kind 的元素高度不一致（差异只能来自密度阶） */
+.kit-debug-on .kit-debug-size--bad {
+  outline: 1px dashed rgb(var(--v-theme-warning)) !important;
+  outline-offset: 2px;
+  background: rgba(var(--v-theme-warning), 0.18) !important;
+}

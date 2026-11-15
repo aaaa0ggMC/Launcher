@@ -33,6 +33,7 @@ const ALIGN_MARK_CLASS = 'kit-debug-align'
 const ALIGN_BAD_CLASS = 'kit-debug-align--bad'
 const ALIGN_OVERRIDE_CLASS = 'kit-debug-align--override'
 const EDGE_BAD_CLASS = 'kit-debug-edge--bad'
+const SIZE_BAD_CLASS = 'kit-debug-size--bad'
 /** 行中线偏差阈值（px）——SPEC「行内对齐」：一行之内所有元素共享同一条中线 */
 const ALIGN_TOLERANCE = 1
 
@@ -111,6 +112,44 @@ function scanAlign(): void {
       }
     }
     checkEdges(row, samples)
+    checkSizes(samples)
+  }
+}
+
+/**
+ * 同类尺寸（SPEC「行内三律」第三条）：同一行里同 kind 的元素高度必须一致——
+ * 差异只能来自密度阶，不能来自内容长短。反例就是手写胶囊（无 nowrap / 无高度兜底），
+ * 行内一紧文字折行、胶囊变高，一行里一个两行高一个一行高。
+ * 这里按「同 kind + 同密度档」分组比高度，不一致的标出来。
+ */
+function checkSizes(samples: { el: HTMLElement; height: number }[]): void {
+  if (samples.length < 2) return
+  const groups = new Map<string, { el: HTMLElement; height: number }[]>()
+  for (const s of samples) {
+    const kind =
+      s.el.dataset.kitKind ||
+      (s.el.querySelector('.kit-chip')
+        ? 'chip'
+        : s.el.querySelector('.v-switch')
+          ? 'switch'
+          : s.el.querySelector('.kit-stepper')
+            ? 'stepper'
+            : s.el.querySelector('.v-slider')
+              ? 'slider'
+              : s.el.querySelector('.v-select, .kit-inline-select')
+                ? 'select'
+                : 'other')
+    if (kind === 'other') continue
+    const list = groups.get(kind) ?? []
+    list.push(s)
+    groups.set(kind, list)
+  }
+  for (const list of groups.values()) {
+    if (list.length < 2) continue
+    const max = Math.max(...list.map((x) => x.height))
+    for (const x of list) {
+      if (max - x.height > ALIGN_TOLERANCE) x.el.classList.add(SIZE_BAD_CLASS)
+    }
   }
 }
 
@@ -190,6 +229,15 @@ let debugHost: HTMLElement | null = null
 function start(): void {
   document.documentElement.classList.add(DEBUG_CLASS)
   scan()
+  // 行内元素是**异步注册**的（引擎等子元素 register 后才 apply CSS），开启这一刻
+  // 常常还没上树——首次 scan 会扫出 0 个标记，用户以为自检坏了。补两拍延迟扫描
+  // （rAF + 一帧之后），异步内容落地后再扫一次。仍算「开启时扫」，不改 interval 语义。
+  requestAnimationFrame(() => {
+    if (props.active) scan()
+    requestAnimationFrame(() => {
+      if (props.active) scan()
+    })
+  })
   if (props.interval && props.interval > 0) {
     timer = setInterval(scan, props.interval)
   }
