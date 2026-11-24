@@ -301,6 +301,7 @@ const MEASURE_FN = `function measure(el) {
     textOverflow: cs.textOverflow,
     whiteSpace: cs.whiteSpace,
     fontSize: cs.fontSize,
+    flex: cs.flex,
     overflowX: cs.overflowX,
     minWidth: cs.minWidth,
     maxWidth: cs.maxWidth,
