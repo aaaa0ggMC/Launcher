@@ -22,7 +22,7 @@ export interface TruncateProbe {
   clientWidth: number
   /** 自身右缘（视觉像素，getBoundingClientRect().right） */
   right: number
-  /** 祖先链上第一个会裁的盒子的**内容右缘**（视觉像素）；没有则 null */
+  /** 祖先链上第一个会裁的盒子的 **padding 右缘**（视觉像素）；没有则 null */
   clipRight: number | null
 }
 
@@ -31,7 +31,7 @@ export interface TruncateProbe {
  *   ① 自己这个盒子在裁：scrollWidth > clientWidth（KitRowItem truncate /
  *      KitSettingRow label 走的就是这条，一直正常工作）；
  *   ② **被祖先裁**：自己盒子和内容一样宽（sw==cw），但右缘超出了祖先链上第一个
- *      overflow 非 visible 的盒子的内容右缘。用户 live 数据里的胶囊正是这种：
+ *      overflow 非 visible 的盒子的 padding 右缘。用户 live 数据里的胶囊正是这种：
  *      sw==cw==58 却被切短，之前只认①所以永远判 false、没 title、点按没反应。
  * 两条都量视觉像素（缩放下同口径相乘，比较不受影响）；①用布局像素（自身两个值同口径）。
  */
@@ -41,7 +41,17 @@ export function isTruncatedProbe(p: TruncateProbe): boolean {
   return self || byAncestor
 }
 
-/** 沿祖先链找第一个会裁的盒子，返回它的**内容右缘**（视觉像素）；没有则 null */
+/**
+ * 裁剪右缘（纯函数，语义可单测）：CSS overflow 的裁剪发生在 **padding 边缘**，
+ * 不是内容边缘——内容铺进 padding 区并不会被切。用内容右缘（再减 paddingRight）
+ * 会把「贴到 padding 的全宽内容」整片误判成被裁（探针 232 档实测误报过 v-card
+ * 里的全宽子元素）。
+ */
+export function clipEdgeRight(rectRight: number, borderRightWidth: number): number {
+  return rectRight - (Number.isFinite(borderRightWidth) ? borderRightWidth : 0)
+}
+
+/** 沿祖先链找第一个会裁的盒子，返回它的 **padding 右缘**（视觉像素）；没有则 null */
 export function clipRightOf(el: HTMLElement): number | null {
   let p = el.parentElement
   while (p && p !== document.body && p !== document.documentElement) {
@@ -51,9 +61,7 @@ export function clipRightOf(el: HTMLElement): number | null {
     const clips = ox !== 'visible' || oy !== 'visible'
     if (clips) {
       const r = p.getBoundingClientRect()
-      const pad = Number.parseFloat(cs.paddingRight || '0') || 0
-      const border = Number.parseFloat(cs.borderRightWidth || '0') || 0
-      return r.right - pad - border
+      return clipEdgeRight(r.right, Number.parseFloat(cs.borderRightWidth || '0') || 0)
     }
     p = p.parentElement
   }

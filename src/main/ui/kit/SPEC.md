@@ -245,7 +245,9 @@ KitChip / KitCircleStat），而揭示机制几乎为零（只有 2 个 title，
 
 - `useTruncatable(el, fullText)`：判定**真截断**——两条路取或（纯函数 `isTruncatedProbe`
   可单测）：① 自己这个盒子在裁（`scrollWidth > clientWidth`）；② **被祖先裁**（自身
-  sw==cw，但右缘超出祖先链上第一个 `overflow` 非 visible 的盒子的内容右缘）。
+  sw==cw，但右缘超出祖先链上第一个 `overflow` 非 visible 的盒子的 **padding 右缘**——
+  CSS overflow 裁剪发生在 padding 边缘，用内容右缘会把铺到 padding 区的全宽内容误判成
+  被裁，探针 232 档实测误报过一片）。
   只认①会漏掉用户 live 数据里的胶囊（sw==cw==58 却被切短 → 永远判 false → 没 title、
   点按没反应）。只在真截断时挂 `title` 和点按揭示，没截断什么都不做（避免满屏 title）；
   暴露响应式 `truncated`（自检用它上标记）。

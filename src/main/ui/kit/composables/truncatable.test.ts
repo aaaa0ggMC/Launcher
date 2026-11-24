@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isTruncatedProbe, type TruncateProbe } from './useTruncatable'
+import { clipEdgeRight, isTruncatedProbe, type TruncateProbe } from './useTruncatable'
 
 /**
  * 截断判定纯函数（SPEC「信息降级链」档 1 的判定内核）。
@@ -18,14 +18,23 @@ test('①自己盒子在裁：scrollWidth > clientWidth 即截断', () => {
   assert.equal(isTruncatedProbe({ ...base, scrollWidth: 57, clientWidth: 36 }), true)
 })
 
-test('②被祖先裁：自身 sw==cw 但右缘超出祖先内容右缘', () => {
-  // 用户 live 的胶囊：sw==cw==58，却被切短 → 祖先内容右缘 50
+test('②被祖先裁：自身 sw==cw 但右缘超出祖先 padding 右缘', () => {
+  // 用户 live 的胶囊：sw==cw==58，却被切短 → 祖先 padding 右缘 50
   assert.equal(
     isTruncatedProbe({ ...base, scrollWidth: 58, clientWidth: 58, right: 58, clipRight: 50 }),
     true
   )
-  // 右缘正好贴着祖先内容右缘 → 不算
+  // 右缘正好贴着祖先 padding 右缘 → 不算
   assert.equal(isTruncatedProbe({ ...base, right: 50, clipRight: 50 }), false)
+})
+
+test('裁剪右缘 = padding 边缘（不是内容边缘）', () => {
+  // CSS overflow 裁剪发生在 padding 边缘：内容铺进 padding 区不被切。
+  // 内容右缘 = rect.right - padding - border 会把这类全宽内容误判成被裁
+  // （探针 232 档实测：v-card 里 240px 全宽子元素整片误报「祖裁」）。
+  assert.equal(clipEdgeRight(240, 1), 239)
+  assert.equal(clipEdgeRight(240, 0), 240)
+  assert.equal(clipEdgeRight(100, Number.NaN), 100)
 })
 
 test('两条都不成立 → 没截断（不挂 title，避免满屏 title）', () => {
