@@ -42,6 +42,9 @@ defineProps<{
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* 标题 + 构建号一行的 min-content 可能超过窄卡片（232 档实测标题被硬裁
+     13.6px）：允许换行降级——放不下时构建号挪到第二行，标题完整不丢信息 */
+  flex-wrap: wrap;
 }
 
 .kit-demo__body {

@@ -104,6 +104,7 @@ const boxStyle = computed(() => ({
   <div class="kit-stage">
     <div class="kit-stage__bar">
       <v-btn-toggle
+        class="kit-stage__presets"
         :model-value="activePreset"
         density="compact"
         variant="outlined"
@@ -158,6 +159,14 @@ const boxStyle = computed(() => ({
   align-items: center;
   gap: 8px;
   padding-bottom: 8px;
+}
+
+/* 预设按钮组不许被压窄：v-btn-group 的 overflow:hidden 让 min-width:auto 算成 0，
+   flex 收缩会把它压到内容宽以下、按钮被自己硬裁（探针 232 档实测「390」按钮
+   右缘出组 40px）。它属于行尾 chrome——宁可整组换行也不压缩。
+   用 :deep 打到 v-btn-group 本体：不依赖类名 fallthrough（实测类名规则没生效）。 */
+.kit-stage__bar :deep(.v-btn-group) {
+  flex: 0 0 auto;
 }
 
 .kit-stage__slider {
