@@ -9,6 +9,7 @@
  *     它为 outline 服务的网格与内边距，只会在别人的盒模型里打补丁。
  */
 import { computed, ref, useAttrs } from 'vue'
+import { mapSelectOptions, type SelectOption } from '../composables/select-options'
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
 import type { KitAlign } from '../layout/align'
@@ -33,20 +34,15 @@ const density = computed(() => resolveDensity(props.size, useKitDensity()))
 /** inline 档：菜单开合 */
 const open = ref(false)
 
-interface Option {
-  title: string
-  value: unknown
-}
+/** item-title / item-value：与 v-select 同名 attrs 指路对象数组的取值键（缺省 title / value）。
+ *  只认 {title,value} 会把 {id,name,description} 这类形状映射成全空（静态审计 A-1）：
+ *  设置页「背景」下拉就是 item-title="name" + item-value="id"。 */
+const itemTitleKey = computed(() => String(attrs['item-title'] ?? 'title'))
+const itemValueKey = computed(() => String(attrs['item-value'] ?? 'value'))
 
-/** items 兼容 Vuetify 的两种写法：字符串数组 或 { title, value, props } 对象数组 */
-const options = computed<Option[]>(() =>
-  (props.items ?? []).map((raw) => {
-    if (raw !== null && typeof raw === 'object') {
-      const o = raw as { title?: unknown; value?: unknown }
-      return { title: String(o.title ?? ''), value: o.value ?? o.title }
-    }
-    return { title: String(raw), value: raw }
-  })
+/** items 兼容 Vuetify 写法：字符串数组、{ title, value } 对象、item-title/item-value 指路的对象 */
+const options = computed<SelectOption[]>(() =>
+  mapSelectOptions(props.items, itemTitleKey.value, itemValueKey.value)
 )
 
 const current = computed(() => options.value.find((o) => o.value === props.modelValue))
