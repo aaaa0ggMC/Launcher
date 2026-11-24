@@ -45,7 +45,7 @@
  */
 
 import { spawn, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -108,7 +108,54 @@ function chromeBin() {
   throw new Error('找不到 Chrome（google-chrome / chromium）；用 --chrome 指定')
 }
 
+/** 杀 Chrome 进程树 + 删临时 user-data-dir（SIGKILL 到进程组：renderer/gpu 一起走） */
+function killChromeTree(child, userData) {
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
+  try {
+    rmSync(userData, { recursive: true, force: true })
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * 清掉上次探针遗留的 Chrome（事故记录：SIGTERM 只到主进程，renderer/gpu/crashpad
+ * 子进程成孤儿，28 个 chrome 跑 26 分钟没人管）。启动时先扫一遍，保证起点干净：
+ * 按 user-data-dir 模式（ui-probe-chrome-）杀进程树 + 删临时目录。
+ */
+function sweepLeftoverChromes() {
+  try {
+    execFileSync('pkill', ['-KILL', '-f', 'ui-probe-chrome-'], { stdio: 'ignore' })
+  } catch {
+    /* 没有匹配进程 → pkill 非零退出，正常 */
+  }
+  for (const prefix of ['ui-probe-chrome-', 'ui-probe-home-']) {
+    try {
+      for (const ent of readdirSync(tmpdir())) {
+        if (ent.startsWith(prefix)) {
+          try {
+            rmSync(join(tmpdir(), ent), { recursive: true, force: true })
+          } catch {
+            /* 被占着就留给下一轮 */
+          }
+        }
+      }
+    } catch {
+      /* noop */
+    }
+  }
+}
+
 function launchChrome() {
+  sweepLeftoverChromes()
   const userData = mkdtempSync(join(tmpdir(), 'ui-probe-chrome-'))
   const args = [
     '--headless=new',
@@ -121,7 +168,7 @@ function launchChrome() {
     `--user-data-dir=${userData}`,
     'about:blank'
   ]
-  const child = spawn(chromeBin(), args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  const child = spawn(chromeBin(), args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true })
   return new Promise((res, rej) => {
     let buf = ''
     const timer = setTimeout(() => rej(new Error('Chrome 10s 内没吐出 DevTools 端点')), 10000)
@@ -247,6 +294,7 @@ const MEASURE_FN = `function measure(el) {
     trulyTruncated: selfTrunc || ancTrunc,
     textOverflow: cs.textOverflow,
     whiteSpace: cs.whiteSpace,
+    fontSize: cs.fontSize,
     overflowX: cs.overflowX,
     minWidth: cs.minWidth,
     maxWidth: cs.maxWidth,
@@ -701,6 +749,26 @@ async function main() {
 
   const { child, userData, wsUrl } = await launchChrome()
   log('Chrome CDP:', wsUrl)
+  // 兜底清理：finally 覆盖不了「await 卡住 / 被信号中断 / 未捕获异常」的路径——
+  // 那次 28 个 chrome 泄漏就是这么攒的。exit/信号/异常都挂同一套杀树动作。
+  const emergency = () => {
+    if (!opts['keep-chrome']) killChromeTree(child, userData)
+    server?.stop()
+  }
+  const onFatal = (kind, arg) => {
+    emergency()
+    if (kind === 'uncaughtException' || kind === 'unhandledRejection') {
+      console.error(`[probe][${kind}]`, arg)
+      process.exit(1)
+    }
+    process.exit(130)
+  }
+  process.on('exit', emergency)
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => onFatal(sig))
+  }
+  process.on('uncaughtException', (e) => onFatal('uncaughtException', e))
+  process.on('unhandledRejection', (e) => onFatal('unhandledRejection', e))
   const cdp = new Cdp(wsUrl)
   let probe
   try {
@@ -909,21 +977,11 @@ async function main() {
       server.stop()
       log('被测 headless 宿主已停')
     }
+    cdp.close()
     if (opts['keep-chrome']) {
       log('keep-chrome：Chrome 保留运行（临时目录', userData, '）')
     } else {
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        /* noop */
-      }
-      cdp.close()
-      await sleep(200)
-      try {
-        rmSync(userData, { recursive: true, force: true })
-      } catch {
-        /* noop */
-      }
+      killChromeTree(child, userData)
     }
   }
 
