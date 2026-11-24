@@ -3,13 +3,25 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import type { Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-/** 构建版本号：git 短 hash（取不到时回落 'dev'）——gallery 页脚显示，
- *  用来确认「用户跑的到底是哪一版」（我们和用户之间为此猜过好几轮） */
+/** 构建版本号 = **最后触碰 src/ 的 commit**（git 短 hash，取不到回落 HEAD / 'dev'）——
+ *  gallery 页脚显示，用来确认「用户跑的到底是哪一版」（我们和用户之间为此猜过好几轮）。
+ *
+ *  口径必须和 ui-probe 的核对基准**完全一致**（都是 `git log -1 --format=%h -- src`）：
+ *  曾经用裸 HEAD，于是「只改 scripts/ 的 commit」和「merge commit」两种情况里
+ *  页面 stamp 与 git log 结果跨口径，门禁误报「测的不是这套代码」（实测踩过两轮）。
+ *  merge 下 git log 不返回 merge 本身、返回最后的非 merge 触碰 src 的提交——两边同用
+ *  这个口径后 merge 不再干扰。 */
 function buildHash(): string {
   try {
+    const srcBase = execSync('git log -1 --format=%h -- src', {
+      encoding: 'utf8',
+      cwd: fileURLToPath(new URL('.', import.meta.url))
+    }).trim()
+    if (srcBase) return srcBase
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim() || 'dev'
   } catch {
     return 'dev'
