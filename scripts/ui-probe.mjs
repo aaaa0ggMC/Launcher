@@ -430,6 +430,105 @@ function itemAnchorExpr(item) {
   })()`
 }
 
+/**
+ * 行一致性扫描（第 3 类对齐 + 第 4 类同类尺寸）。
+ *
+ * 分组策略（探针侧，判定内核在 layout/row-audit.ts 同口径）：
+ * - 「一行」= class 含 kit- 的 flex 行容器（display:flex + flex-direction:row）；
+ * - 第 3 类：行的**直接子元素**按生效对齐分组（子级 align-self > 行 align-items），
+ *   同组 ≥2 个：center 比中线、start 比顶、end 比底，散布 >1px 判缺陷；
+ *   baseline / 混合声明不判（声明出来的不对齐是设计，魔数 margin 冒充的才是缺陷）；
+ * - 第 4 类：行的**后代**按 kind（首个 kit-/v- 类名）分组，剔除同类嵌套：
+ *   控件类（kit-chip/kit-stepper/kit-switch/kit-slider/kit-select/v-btn/…）比高度，
+ *   等宽数值（kit-num）加比宽度；kit-circle 豁免（直径内容驱动是设计）。
+ */
+const ROW_SCAN_EXPR = `(() => {
+  const root = document.querySelector(${JSON.stringify('__ROOT__')}) || document.body
+  const CONTROL_KIND = /^(kit-(chip|stepper|switch|slider|select|field|control|btn|number)|v-(btn|input|switch|select|field))/
+  const WIDTH_CONTRACT = /^kit-num$|^kit-stage__num$/
+  const EXEMPT = /^kit-circle/
+  const kindOf = (el) => {
+    const cls = typeof el.className === 'string' ? el.className : ''
+    const t = cls.trim().split(/\s+/)[0]
+    return t || el.tagName.toLowerCase()
+  }
+  const visible = (el) => {
+    const cs = getComputedStyle(el)
+    const r = el.getBoundingClientRect()
+    return r.width > 0 && r.height > 0 && cs.position !== 'absolute' && cs.visibility !== 'hidden' && cs.display !== 'none'
+  }
+  const rectOf = (el) => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+  }
+  const spread = (vals) => (vals.length < 2 ? 0 : Math.max(...vals) - Math.min(...vals))
+  const rows = []
+  for (const el of root.querySelectorAll('*')) {
+    const cls = typeof el.className === 'string' ? el.className : ''
+    if (!/(^|\s)kit-/.test(cls)) continue
+    const cs = getComputedStyle(el)
+    if (cs.display !== 'flex' && cs.display !== 'inline-flex') continue
+    if (!/^row/.test(cs.flexDirection)) continue
+    const kids = [...el.children].filter(visible)
+    if (kids.length < 2) continue
+    // ── 第 3 类：直接子元素按生效对齐分组 ──
+    const groups = new Map()
+    for (const k of kids) {
+      const kcs = getComputedStyle(k)
+      let a = kcs.alignSelf
+      if (a === 'auto' || !a) a = cs.alignItems
+      const norm = a === 'center' ? 'center' : a === 'flex-end' ? 'end' : a === 'flex-start' ? 'start' : a === 'stretch' ? 'start' : null
+      if (!norm) continue
+      if (!groups.has(norm)) groups.set(norm, [])
+      groups.get(norm).push(k)
+    }
+    for (const [align, members] of groups) {
+      if (members.length < 2) continue
+      const rs = members.map(rectOf)
+      const dev =
+        align === 'center'
+          ? spread(rs.map((r) => (r.top + r.bottom) / 2))
+          : align === 'end'
+            ? spread(rs.map((r) => r.bottom))
+            : spread(rs.map((r) => r.top))
+      rows.push({
+        type: 'align',
+        container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
+        align,
+        deviation: Math.round(dev * 10) / 10,
+        members: members.map((m) => ({ kind: kindOf(m), text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18) }))
+      })
+    }
+    // ── 第 4 类：后代按 kind 分组（剔除同类嵌套）──
+    const desc = [...el.querySelectorAll('*')].filter((d) => visible(d) && !EXEMPT.test(kindOf(d)))
+    const byKind = new Map()
+    for (const d of desc) {
+      const k = kindOf(d)
+      if (!byKind.has(k)) byKind.set(k, [])
+      byKind.get(k).push(d)
+    }
+    for (const [kind, members] of byKind) {
+      const tops = members.filter((m) => !members.some((o) => o !== m && o.contains(m)))
+      if (tops.length < 2) continue
+      const isControl = CONTROL_KIND.test(kind)
+      const checkWidth = WIDTH_CONTRACT.test(kind)
+      if (!isControl && !checkWidth) continue
+      const rs = tops.map(rectOf)
+      const hDev = spread(rs.map((r) => r.bottom - r.top))
+      const wDev = checkWidth ? spread(rs.map((r) => r.right - r.left)) : 0
+      rows.push({
+        type: 'size',
+        container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
+        kind,
+        heightDev: Math.round(hDev * 10) / 10,
+        widthDev: Math.round(wDev * 10) / 10,
+        members: tops.map((m) => (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18))
+      })
+    }
+  }
+  return rows
+})()`
+
 /** 当前可见的揭示浮层（KitTruncated 的点按浮层，v-show 控制 display） */
 const TIP_EXPR = `(() => {
   return [...document.querySelectorAll('.kit-truncate-tip')]
@@ -773,7 +872,7 @@ async function main() {
     stampMatch: null,
     perWidth: {},
     demoLabelPresence: {},
-    gate: { failures: [], truncatedSamples: 0, overflowSamples: 0, revealClicks: 0 }
+    gate: { failures: [], truncatedSamples: 0, overflowSamples: 0, alignDefects: 0, sizeDefects: 0, revealClicks: 0 }
   }
 
   const { child, userData, wsUrl } = await launchChrome()
@@ -1038,6 +1137,26 @@ async function main() {
           )
         }
       }
+
+      // ── 第 3/4 类：行一致性（对齐偏差 / 同类尺寸）——row-audit.ts 同口径 ──
+      const rowAudit = await probe.eval(ROW_SCAN_EXPR.replace('__ROOT__', scanRoot))
+      report.perWidth[tag].rows = rowAudit
+      if (ASSERT_UI) {
+        for (const r of rowAudit) {
+          if (r.type === 'align' && r.deviation > 1.001) {
+            report.gate.alignDefects++
+            report.gate.failures.push(
+              `${wlabel}: 对齐错乱（${r.align} 行偏差 ${r.deviation}px）— 行 ${r.container} 成员 ${JSON.stringify(r.members)}`
+            )
+          }
+          if (r.type === 'size' && (r.heightDev > 1.001 || r.widthDev > 1.001)) {
+            report.gate.sizeDefects++
+            report.gate.failures.push(
+              `${wlabel}: 同类尺寸不一（高差 ${r.heightDev}px / 宽差 ${r.widthDev}px）— ${r.kind} @ 行 ${r.container} 成员 ${JSON.stringify(r.members)}`
+            )
+          }
+        }
+      }
     }
 
     // ── 门禁汇总 ──────────────────────────────────────────────────────────
@@ -1084,7 +1203,10 @@ async function main() {
       console.log(
         `\n✓ 门禁通过：${report.gate.truncatedSamples} 个真截断样本全部有揭示入口，` +
           `${report.gate.revealClicks} 次点按全部弹出全文` +
-          (ASSERT_UI ? `，溢出/被裁缺陷 ${report.gate.overflowSamples} 处（0 = 干净）` : '')
+          (ASSERT_UI
+            ? `，溢出/被裁缺陷 ${report.gate.overflowSamples} 处，对齐缺陷 ${report.gate.alignDefects} 处，` +
+              `尺寸缺陷 ${report.gate.sizeDefects} 处（0 = 干净）`
+            : '')
       )
     }
   }
