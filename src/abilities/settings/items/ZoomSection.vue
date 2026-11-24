@@ -29,9 +29,9 @@ defineExpose({
 <template>
   <KitSection :title="translate(uiLang, 'zoom.title')" icon="mdi-magnify-plus-outline">
     <KitSmartRow :gap="8">
-      <KitRowItem kind="label" :text="translate(uiLang, 'zoom.label')" truncate grow>
-        <span>{{ translate(uiLang, 'zoom.label') }}</span>
-      </KitRowItem>
+      <!-- 不传 slot：走 KitRowItem 的内置 KitTruncated（text 即全文，截断可揭示）。
+           原来的 slot 是没接原语的裸 span，slot 优先后会把揭示顶掉（A-2 回归口径）。 -->
+      <KitRowItem kind="label" :text="translate(uiLang, 'zoom.label')" truncate grow />
       <KitRowItem kind="number" priority="secondary" :min-width="56">
         <span class="kit-num">{{ Math.round(uiScale * 100) }}%</span>
       </KitRowItem>

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 import { test } from 'node:test'
 
@@ -33,6 +33,26 @@ test('KitRowItem：truncate 时接截断揭示', () => {
   assert.match(src, /:text="text"/, '用引擎已有的 text 当全文')
 })
 
+test('KitRowItem：truncate 不许吞 slot——内置渲染只是 slot 的缺省（A-2）', () => {
+  // 出过的事故：truncate 分支 <KitTruncated v-if>…<slot v-else /> 把 slot 整个吞掉
+  // → KitSettingRow 的 desc 永不渲染（P0 信息不全）、行标签丢 .kit-setting-row__label
+  // 的 0.9375rem 字号（「标签 16px / 控件 14px」旧毛病复发）。slot 必须优先。
+  const src = read('../layout/KitRowItem.vue')
+  assert.match(src, /<slot>\s*<KitTruncated v-if="truncate"/, 'KitTruncated 只能是 slot 的缺省内容')
+  assert.doesNotMatch(src, /<slot v-else\s*\/>/, '不允许 v-else 吞 slot')
+})
+
+test('KitSettingRow：desc 渲染链完整（A-2 的 P0 不回归）', () => {
+  const src = read('KitSettingRow.vue')
+  // desc 的 KitTruncated 在 KitRowItem 的 slot 里，必须真渲染出来
+  assert.match(src, /<KitTruncated v-if="desc"/, 'desc 要有揭示原语')
+  assert.match(
+    src,
+    /<KitRowItem[^>]*truncate[^>]*>[\s\S]*?<KitTruncated v-if="desc"/,
+    'desc 所在的 slot 必须挂在 truncate 行下且不被吞'
+  )
+})
+
 test('KitSettingRow：label / desc / value 三处都接', () => {
   const src = read('KitSettingRow.vue')
   const uses = [...src.matchAll(/<KitTruncated/g)]
@@ -57,11 +77,30 @@ test('原语本身：只在真截断时挂 title（避免满屏 title）', () =>
 
 test('原语：触摸腿是点按浮层（不是只靠 hover）', () => {
   const src = read('KitTruncated.vue')
-  assert.match(src, /@click="openTip\(\)"/, '点按揭示')
+  assert.match(src, /@click="onReveal\(\$event\)"/, '点按揭示')
   assert.match(src, /@keydown\.enter/, '键盘也要能揭示（可达性）')
   assert.match(src, /<Teleport to="body">/, '浮层 teleport 到 body')
   assert.match(src, /useAnchor/, '定位复用 useAnchor（页面缩放下口径一致），不新造第三套')
   assert.match(src, /kit-truncate-tip/, '浮层样式类名')
+})
+
+test('原语：真截断时点按接管点击（stopPropagation），没截断不拦宿主控件', () => {
+  // 不拦的后果（实测）：点「看全文」顺带把 KitSelect 的菜单弹起来盖住浮层；
+  // 拦的代价：截断时宿主控件（chip click / 下拉展开）收不到这次点击——按 SPEC
+  // 「点按出全文」语义，截断文本上揭示手势优先。没截断时必须完全透明。
+  const src = read('KitTruncated.vue')
+  assert.match(src, /if \(!truncated\.value\) return/, '没截断直接放行')
+  assert.match(src, /e\.stopPropagation\(\)/, '截断时接管点击，不冒泡给宿主')
+})
+
+test('KitSelect：inline 触发器文字接截断揭示（1-1，静态审计点名的活体缺口）', () => {
+  const src = read('KitSelect.vue')
+  assert.ok(usesPrimitive(src), 'KitSelect 必须接 KitTruncated / useTruncatable')
+  assert.match(
+    src,
+    /<KitTruncated class="kit-inline-select__text" :text=/,
+    '触发器文字包原语且传全文（title + 点按浮层用）'
+  )
 })
 
 test('自检：截断标记与其它标记颜色区分开', () => {
@@ -80,7 +119,8 @@ test('自检：截断标记与其它标记颜色区分开', () => {
 test('「更多」浮层内不截断（档 2 的全文保证别回退）', () => {
   // 规则在 KitRowItem 的 scoped 样式里（:global(.kit-overflow) .kit-row-item__inner）
   const src = read('../layout/KitRowItem.vue')
-  assert.match(src, /kit-overflow[\s\S]*?text-overflow: clip/, '浮层内保持全文（不截断）')
+  assert.match(src, /kit-overflow[\s\S]*?overflow: visible/, '浮层内不裁（overflow 可见）')
+  assert.match(src, /kit-overflow[\s\S]*?white-space: normal/, '浮层内正常折行（nowrap 解除）')
 })
 
 test('检测把祖先链算进去：不只是自己盒子在裁', () => {
@@ -95,4 +135,33 @@ test('浮层里的项打开时要重判（不能停在隐藏期的死状态）',
   assert.match(comp, /recheckAllTruncatables/, '提供统一重判入口')
   const row = read('../layout/KitSmartRow.vue')
   assert.match(row, /recheckAllTruncatables\(\)/, '打开「更多」浮层后通知其中的 KitTruncated 重判')
+})
+
+test('守卫：text-overflow: ellipsis 只允许写在 KitTruncated 原语里', () => {
+  // 「ellipsis 归原语管」是 SPEC §9.5 的实现纪律：积木自己写就是绕过揭示原语——
+  // KitSelect 的 .kit-inline-select__text 正是这么漏成「截断不可揭示」的（1-1）。
+  // 扫 kit 全部样式源 + 画廊 demo：任何非原语文件声明 ellipsis 都是缺口。
+  const roots = [
+    new URL('..', import.meta.url), // src/main/ui/kit
+    new URL('../../../../abilities/settings/items/ui-kit/', import.meta.url) // 画廊
+  ]
+  const offenders: string[] = []
+  const walk = (dir: URL): void => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const u = new URL(ent.name + (ent.isDirectory() ? '/' : ''), dir)
+      if (ent.isDirectory()) {
+        if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue
+        walk(u)
+      } else if (/\.(vue|css)$/.test(ent.name)) {
+        const raw = readFileSync(u, 'utf8')
+        // 去掉注释再查（「…归原语」的说明注释不算声明）
+        const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+        if (/text-overflow:\s*ellipsis/.test(code) && !u.pathname.endsWith('KitTruncated.vue')) {
+          offenders.push(u.pathname)
+        }
+      }
+    }
+  }
+  for (const r of roots) walk(r)
+  assert.deepEqual(offenders, [], `ellipsis 只许 KitTruncated.vue 写，违规：${offenders.join(', ')}`)
 })

@@ -60,7 +60,7 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
               :title="t('kit.gallery.page.fixedHead', '固定顶栏')"
               icon="mdi-page-layout-header"
             >
-              <KitProse>t('kit.gallery.page.fixedHeadDesc', '不滚动的头部')</KitProse>
+              <KitProse>{{ t('kit.gallery.page.fixedHeadDesc', '不滚动的头部') }}</KitProse>
             </KitSection>
             <KitSection
               scroll
@@ -75,7 +75,7 @@ const lines = Array.from({ length: 24 }, (_, i) => i + 1)
               :title="t('kit.gallery.page.fixedFoot', '固定底栏')"
               icon="mdi-page-layout-footer"
             >
-              <KitProse>t('kit.gallery.page.fixedFootDesc', '输入条 / 操作区')</KitProse>
+              <KitProse>{{ t('kit.gallery.page.fixedFootDesc', '输入条 / 操作区') }}</KitProse>
             </KitSection>
           </KitPage>
         </div>

@@ -361,11 +361,8 @@
   cursor: pointer;
 }
 
-.kit-inline-select__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* .kit-inline-select__text 的省略号样式归 KitTruncated 原语（类挂在原语根上），
+   这里不再重复写——重复就是两份会漂的实现（chip.test.ts 钉的口径）。 */
 
 .kit-inline-select__arrow {
   flex: 0 0 auto;

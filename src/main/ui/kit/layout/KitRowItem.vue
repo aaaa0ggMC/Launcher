@@ -99,10 +99,15 @@ const itemStyle = computed<Record<string, string>>(() => {
   >
     <Teleport :to="teleportTo" :disabled="teleportTo === null">
       <div class="kit-row-item__inner">
-        <KitTruncated v-if="truncate" class="kit-row-item__label" :text="text">{{
-          text
-        }}</KitTruncated>
-        <slot v-else />
+        <!-- slot 优先，内置渲染只是缺省：truncate 只接管「没给 slot 的纯文本项」。
+             不许吞 slot（静态审计 A-2）——吞掉会丢 KitSettingRow 的 desc（P0 信息不全）、
+             丢调用方的字号类 .kit-setting-row__label（0.9375rem，「标签 16px / 控件 14px」
+             旧毛病复发的根因）。slot 里的截断揭示由 slot 作者接原语（SPEC §9.5 checklist）。 -->
+        <slot>
+          <KitTruncated v-if="truncate" class="kit-row-item__label" :text="text">{{
+            text
+          }}</KitTruncated>
+        </slot>
       </div>
     </Teleport>
   </div>
@@ -134,7 +139,7 @@ const itemStyle = computed<Record<string, string>>(() => {
 .kit-row-item--truncate .kit-row-item__inner {
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  /* 省略号归 .kit-truncated 原语；inner 是 flex 包裹层，它的 text-overflow 永不渲染 */
 }
 
 /* 被收进「更多」浮层里的是内层容器（根节点始终 display:none 挂在行里——保实例不保空间）：
@@ -147,6 +152,5 @@ const itemStyle = computed<Record<string, string>>(() => {
 
 :global(.kit-overflow) .kit-row-item--truncate .kit-row-item__inner {
   overflow: visible;
-  text-overflow: clip;
 }
 </style>
