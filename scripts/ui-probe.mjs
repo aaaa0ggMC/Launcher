@@ -447,7 +447,7 @@ function itemAnchorExpr(item) {
  */
 const ROW_SCAN_EXPR = `(() => {
   const root = document.querySelector(${JSON.stringify('__ROOT__')}) || document.body
-  const CONTROL_KIND = /^(kit-(chip|stepper|switch|slider|select|field|control|btn|number)|v-(btn|input|switch|select|field))/
+  const CONTROL_KIND = /^(kit-(chip|stepper|switch|slider|select|field|control|btn|number)|v-(btn|chip|input|switch|select|field))/
   const WIDTH_CONTRACT = /^kit-num$|^kit-stage__num$/
   const EXEMPT = /^kit-circle/
   // 内部零件（按钮内容层/覆盖层/输入内层…）不是「同类元素」——比容器（v-btn），不比零件
@@ -1206,8 +1206,11 @@ async function main() {
 
     // ── 门禁汇总 ──────────────────────────────────────────────────────────
     if (ASSERT) {
-      if (report.gate.truncatedSamples === 0) {
-        report.gate.failures.push('门禁无效：各档里没找到任何真截断样本（无法证明揭示机制被测到）')
+      // 「至少 1 个截断样本」的防空调检查只对画廊（UI 库）生效——它是设计好的压力页，
+      // 没有截断样本 = 场景没被构造出来。其它分类天然可以零截断（如开机服务短名字），
+      // 不该被这条误伤；揭示机制本身由画廊的样本 + 61 次点按实测兜底。
+      if (opts.category === 'UI 库' && report.gate.truncatedSamples === 0) {
+        report.gate.failures.push('门禁无效：画廊里没找到任何真截断样本（无法证明揭示机制被测到）')
       }
     }
   } finally {
