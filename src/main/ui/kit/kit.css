@@ -455,6 +455,13 @@
     min-height: 36px;
   }
 
+  /* tight 档控件必须真到 36：Vuetify .v-field（v-select / v-text-field）内容高 40，
+     min-height 压不住 → 同行里下拉 40 开关 36 滑块 36（探针第 4 类实测高差 4px，
+     「同类元素尺寸不一致」）。字段是单行的，定高 36 正好贴档。 */
+  .kit-control .v-field {
+    height: 36px;
+  }
+
   .kit-control--inline {
     min-height: 28px;
   }
