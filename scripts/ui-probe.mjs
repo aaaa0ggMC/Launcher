@@ -26,7 +26,10 @@
  *                        行内容（胶囊等）要靠模拟器压窄才现形；固定在宽视口下逐档跑
  *   --height <px>        视口高度，默认 820
  *   --dump <选择器>      逗号分隔，额外 dump 这些选择器的度量
- *   --assert-truncation  门禁模式：真截断必有揭示入口（title + 点按浮层），否则退出码 1
+ *   --assert-truncation  门禁（第 1 类）：真截断必有揭示入口（title + 点按浮层），否则退出码 1
+ *   --assert-ui          门禁（第 1+2 类）：再加「溢出/被裁」——内容被硬切且无揭示去处
+ *                        （overflow-defect.ts 判定内核，与单测同口径）
+ *   --item <文本|id>     定位到设置条目（如 背景 / window）：滚到可见 + 只扫该条目
  *   --allow-build-mismatch  构建号与「最后触碰 src/ 的 commit」不一致时只警告不判失败
  *   --shots <目录>       截图目录（默认 out/probe；--no-shots 关闭）
  *   --json <文件>        把机器可读报告写到文件
@@ -64,6 +67,8 @@ const { values: opts } = parseArgs({
     height: { type: 'string', default: '820' },
     dump: { type: 'string', default: '' },
     'assert-truncation': { type: 'boolean', default: false },
+    'assert-ui': { type: 'boolean', default: false },
+    item: { type: 'string', default: '' },
     'allow-build-mismatch': { type: 'boolean', default: false },
     shots: { type: 'string', default: 'out/probe' },
     'no-shots': { type: 'boolean', default: false },
@@ -84,7 +89,8 @@ const STAGE_WIDTHS = opts['stage-widths']
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n) && n > 0)
 const HEIGHT = Number(opts.height) || 820
-const ASSERT = opts['assert-truncation']
+const ASSERT = opts['assert-truncation'] || opts['assert-ui']
+const ASSERT_UI = opts['assert-ui']
 const SHOTS_DIR = opts['no-shots'] ? null : resolve(opts.shots)
 const ROOT_SEL = '.settings-content'
 
@@ -399,6 +405,28 @@ function clickElemExpr(resolverExpr) {
 /** 按选择器找元素的点击点 */
 function clickPointExpr(sel) {
   return clickElemExpr(`document.querySelector(${JSON.stringify(sel)})`)
+}
+
+/**
+ * 设置条目定位（--item）：settings 条目有稳定锚点 settings-item-<id>
+ * （SettingsCategoryView 注入），id 对不上再按文本找 .settings-item。
+ * 找到后滚到可见 + 打 data-probe-scan-root 标记（--item 时只扫该条目）。
+ */
+function itemAnchorExpr(item) {
+  return `(() => {
+    const q = ${JSON.stringify(item)}
+    let el = document.getElementById('settings-item-' + q)
+    if (!el) {
+      el = [...document.querySelectorAll('.settings-item')].find((e) => (e.textContent || '').includes(q)) ?? null
+    }
+    if (!el) return null
+    for (const n of document.querySelectorAll('[data-probe-scan-root]')) {
+      n.removeAttribute('data-probe-scan-root')
+    }
+    el.setAttribute('data-probe-scan-root', '1')
+    el.scrollIntoView({ block: 'start' })
+    return { id: el.id || null, text: (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 40) }
+  })()`
 }
 
 /** 当前可见的揭示浮层（KitTruncated 的点按浮层，v-show 控制 display） */
@@ -744,7 +772,7 @@ async function main() {
     stampMatch: null,
     perWidth: {},
     demoLabelPresence: {},
-    gate: { failures: [], truncatedSamples: 0, revealClicks: 0 }
+    gate: { failures: [], truncatedSamples: 0, overflowSamples: 0, revealClicks: 0 }
   }
 
   const { child, userData, wsUrl } = await launchChrome()
@@ -809,6 +837,15 @@ async function main() {
       `document.querySelector('.settings-content')?.textContent?.trim() ? true : null`,
       `分类「${opts.category}」内容渲染`
     )
+    let scanRoot = ROOT_SEL
+    if (opts.item) {
+      const anchor = await probe.waitReady(
+        `(() => { const r = (${itemAnchorExpr(opts.item)}); return r ?? null })()`,
+        `条目「${opts.item}」`
+      )
+      log('定位条目', anchor)
+      scanRoot = '[data-probe-scan-root]'
+    }
 
     const ready = await probe.eval(READY_EXPR)
     report.stamp = ready.buildStamp
@@ -853,7 +890,7 @@ async function main() {
         log('截图', f)
       }
 
-      const scan = await probe.eval(scanExpr(ROOT_SEL))
+      const scan = await probe.eval(scanExpr(scanRoot))
       const extra = {}
       for (const sel of opts.dump.split(',').map((s) => s.trim()).filter(Boolean)) {
         extra[sel] = await probe.eval(pickExpr(sel))
@@ -963,6 +1000,25 @@ async function main() {
           }
         }
       }
+
+      // ── 第 2 类：溢出/被裁——内容被硬切且无揭示去处（overflow-defect.ts 同口径）──
+      // 合法裁剪（真截断 + .kit-truncated 揭示）是档 1 工作状态，放行；
+      // 第 1 类范围（ellipsis 无揭示）上面报过，这里只报「非 ellipsis 的硬切」。
+      if (ASSERT_UI) {
+        for (const m of scan.items) {
+          if (!m.hasText || !m.kitOwned) continue
+          const revealed = !!(m.reveal && m.reveal.armed && /kit-truncated/.test(m.reveal.cls || ''))
+          const selfOv = m.cw > 0 && m.sw > m.cw + 1
+          const ancClipped = m.clipRight !== null && m.right > m.clipRight + 1
+          if (!(selfOv || ancClipped) || revealed) continue
+          if (m.textOverflow === 'ellipsis') continue
+          report.gate.overflowSamples++
+          report.gate.failures.push(
+            `${wlabel}: 溢出/被裁 — ${m.tag}.${(m.cls || '').split(/\s+/)[0]}「${m.text}」` +
+              ` sw=${m.sw} cw=${m.cw} 右缘=${m.right} clip=${m.clipRight} clipper=${m.clipper}`
+          )
+        }
+      }
     }
 
     // ── 门禁汇总 ──────────────────────────────────────────────────────────
@@ -1007,7 +1063,9 @@ async function main() {
       process.exitCode = 1
     } else {
       console.log(
-        `\n✓ 门禁通过：${report.gate.truncatedSamples} 个真截断样本全部有揭示入口，${report.gate.revealClicks} 次点按全部弹出全文`
+        `\n✓ 门禁通过：${report.gate.truncatedSamples} 个真截断样本全部有揭示入口，` +
+          `${report.gate.revealClicks} 次点按全部弹出全文` +
+          (ASSERT_UI ? `，溢出/被裁缺陷 ${report.gate.overflowSamples} 处（0 = 干净）` : '')
       )
     }
   }
