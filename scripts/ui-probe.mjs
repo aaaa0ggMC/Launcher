@@ -1163,9 +1163,11 @@ async function main() {
         const got = await probe.setStageWidth(w)
         log('模拟器盒子宽度', got)
       }
-      const state = await probe.eval(READY_EXPR)
-      if (!state.settingsView) {
-        report.gate.failures.push(`${wlabel}: 设置内容不可见（.settings-view 缺失），无法实测`)
+      const rootReady = await probe.eval(
+        `document.querySelector(${JSON.stringify(scanRoot)})?.textContent?.trim() ? true : null`
+      )
+      if (!rootReady) {
+        report.gate.failures.push(`${wlabel}: 扫描根不可见（${scanRoot} 无内容），无法实测`)
         continue
       }
       if (SHOTS_DIR) {
@@ -1345,7 +1347,7 @@ async function main() {
       // 「至少 1 个截断样本」的防空调检查只对画廊（UI 库）生效——它是设计好的压力页，
       // 没有截断样本 = 场景没被构造出来。其它分类天然可以零截断（如开机服务短名字），
       // 不该被这条误伤；揭示机制本身由画廊的样本 + 61 次点按实测兜底。
-      if (opts.category === 'UI 库' && report.gate.truncatedSamples === 0) {
+      if (opts.category === 'UI 库' && !opts.ability && !opts.item && report.gate.truncatedSamples === 0) {
         report.gate.failures.push('门禁无效：画廊里没找到任何真截断样本（无法证明揭示机制被测到）')
       }
     }
