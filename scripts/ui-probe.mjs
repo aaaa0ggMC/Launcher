@@ -821,7 +821,7 @@ async function startHeadless() {
  */
 function expectedBuild() {
   try {
-    return execFileSync('git', ['log', '-1', '--format=%h', '--', 'src'], {
+    return execFileSync('git', ['log', '-1', '--format=%h', '--', 'src', ':(exclude,glob)**/*.test.ts'], {
       cwd: resolve(import.meta.dirname, '..')
     })
       .toString()

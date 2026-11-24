@@ -17,7 +17,7 @@ import vue from '@vitejs/plugin-vue'
  *  这个口径后 merge 不再干扰。 */
 function buildHash(): string {
   try {
-    const srcBase = execSync('git log -1 --format=%h -- src', {
+    const srcBase = execSync("git log -1 --format=%h -- src ':(exclude,glob)**/*.test.ts'", {
       encoding: 'utf8',
       cwd: fileURLToPath(new URL('.', import.meta.url))
     }).trim()
