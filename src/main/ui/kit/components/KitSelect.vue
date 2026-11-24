@@ -13,6 +13,7 @@ import { mapSelectOptions, type SelectOption } from '../composables/select-optio
 import { useKitSurface } from '../composables/useKitSurface'
 import { resolveDensity, useKitDensity } from '../layout/density'
 import type { KitAlign } from '../layout/align'
+import KitTruncated from './KitTruncated.vue'
 
 defineOptions({ inheritAttrs: false })
 
@@ -85,7 +86,12 @@ const rootStyle = computed(() => ({
           class="kit-inline-select"
           :aria-label="(attrs['aria-label'] as string) ?? undefined"
         >
-          <span class="kit-inline-select__text">{{ current ? current.title : '' }}</span>
+          <!-- 选项标题可能很长：截断必须可揭示（SPEC 信息降级链档 1）——
+               包 KitTruncated 拿 title + 点按浮层；真截断时点按不再冒泡去开菜单
+               （菜单会盖住浮层），点箭头或未截断的区域仍正常开菜单 -->
+          <KitTruncated class="kit-inline-select__text" :text="current ? current.title : ''">{{
+            current ? current.title : ''
+          }}</KitTruncated>
           <span class="kit-inline-select__arrow" aria-hidden="true">▾</span>
         </button>
       </template>

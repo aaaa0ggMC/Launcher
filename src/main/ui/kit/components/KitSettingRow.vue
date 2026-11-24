@@ -156,8 +156,8 @@ const valueText = computed<string | undefined>(() => {
 .kit-setting-row__label {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  /* text-overflow: ellipsis 归 .kit-truncated 原语（这个类就挂在原语根上），不重复写 */
 }
 
 .kit-setting-row__desc {

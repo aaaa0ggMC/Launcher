@@ -15,7 +15,16 @@ const t = (key: string, fallback?: string): string => translate(uiLang.value, ke
 const volume = ref(42)
 const scale = ref(110)
 const scheme = ref('dark')
-const schemes = ['dark', 'light', 'pureblack', 'moonlight', 'forest', 'aurora']
+/** 选项标题故意放一条超长的：inline 触发器被压窄时会 ellipsis——截断必须可揭示
+ *  （SPEC 信息降级链档 1），画廊拿它当活体样本（和标签的「很长的设置项名称」同思路）。 */
+const schemes = [
+  { title: 'dark · 深色主题（超长选项标题：截断时必须能揭示全文）', value: 'dark' },
+  'light',
+  'pureblack',
+  'moonlight',
+  'forest',
+  'aurora'
+]
 
 /** 三档并排：宽 / 中 / 窄。列宽按 480:320:232 的比例（fr），容器变窄时同比收缩，
  *  等高 + 底部留白一致由 KitGrid 的 align-stretch 与栏距令牌保证。
@@ -106,7 +115,11 @@ const alignTags = computed(() => ({
             <span class="kit-demo-tagged__tag">{{ alignTags.num }}</span>
           </div>
           <div class="kit-demo-tagged">
-            <KitSettingRow :label="t('kit.gallery.theme', '配色方案')" :narrow="s.narrow">
+            <KitSettingRow
+              :label="t('kit.gallery.theme', '配色方案')"
+              :desc="t('kit.gallery.settingRow.themeDesc', '长选项标题：截断时点按或悬浮看全文')"
+              :narrow="s.narrow"
+            >
               <KitSelect
                 v-model="scheme"
                 :items="schemes"

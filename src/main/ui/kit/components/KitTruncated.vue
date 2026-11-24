@@ -40,6 +40,18 @@ async function openTip(): Promise<void> {
   }
 }
 
+/**
+ * 点按 = 揭示手势（SPEC 信息降级链档 1 触摸腿）。
+ * 真截断时接管这次点击（stopPropagation）：不然「看全文」会顺带触发宿主控件——
+ * 下拉触发器会把菜单弹起来盖住浮层（KitSelect 实测）、胶囊会把 click 发给消费方。
+ * 没截断时不拦：KitTruncated 对正常点击完全透明，控件该怎么响应还怎么响应。
+ */
+function onReveal(e: MouseEvent | KeyboardEvent): void {
+  if (!truncated.value) return
+  e.stopPropagation()
+  void openTip()
+}
+
 // 浮层打开期间：点外面 / Esc 收起
 if (typeof document !== 'undefined') {
   const onDown = (e: MouseEvent): void => {
@@ -71,8 +83,8 @@ if (typeof document !== 'undefined') {
     :tabindex="truncated ? 0 : undefined"
     :role="truncated ? 'button' : undefined"
     :aria-label="truncated ? full : undefined"
-    @click="openTip()"
-    @keydown.enter.prevent="openTip()"
+    @click="onReveal($event)"
+    @keydown.enter.prevent="onReveal($event)"
   >
     <slot />
     <Teleport to="body">

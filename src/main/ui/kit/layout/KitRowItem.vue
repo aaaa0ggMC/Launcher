@@ -139,7 +139,7 @@ const itemStyle = computed<Record<string, string>>(() => {
 .kit-row-item--truncate .kit-row-item__inner {
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  /* 省略号归 .kit-truncated 原语；inner 是 flex 包裹层，它的 text-overflow 永不渲染 */
 }
 
 /* 被收进「更多」浮层里的是内层容器（根节点始终 display:none 挂在行里——保实例不保空间）：
@@ -152,6 +152,5 @@ const itemStyle = computed<Record<string, string>>(() => {
 
 :global(.kit-overflow) .kit-row-item--truncate .kit-row-item__inner {
   overflow: visible;
-  text-overflow: clip;
 }
 </style>

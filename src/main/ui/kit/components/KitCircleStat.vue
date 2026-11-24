@@ -129,7 +129,7 @@ const ringStyle = computed(() => {
   color: rgba(var(--v-theme-on-surface-variant), 0.9);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 100%;
+  /* text-overflow: ellipsis 归 .kit-truncated 原语，不重复写 */
 }
 </style>
