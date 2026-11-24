@@ -99,10 +99,15 @@ const itemStyle = computed<Record<string, string>>(() => {
   >
     <Teleport :to="teleportTo" :disabled="teleportTo === null">
       <div class="kit-row-item__inner">
-        <KitTruncated v-if="truncate" class="kit-row-item__label" :text="text">{{
-          text
-        }}</KitTruncated>
-        <slot v-else />
+        <!-- slot 优先，内置渲染只是缺省：truncate 只接管「没给 slot 的纯文本项」。
+             不许吞 slot（静态审计 A-2）——吞掉会丢 KitSettingRow 的 desc（P0 信息不全）、
+             丢调用方的字号类 .kit-setting-row__label（0.9375rem，「标签 16px / 控件 14px」
+             旧毛病复发的根因）。slot 里的截断揭示由 slot 作者接原语（SPEC §9.5 checklist）。 -->
+        <slot>
+          <KitTruncated v-if="truncate" class="kit-row-item__label" :text="text">{{
+            text
+          }}</KitTruncated>
+        </slot>
       </div>
     </Teleport>
   </div>

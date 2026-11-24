@@ -33,6 +33,26 @@ test('KitRowItem：truncate 时接截断揭示', () => {
   assert.match(src, /:text="text"/, '用引擎已有的 text 当全文')
 })
 
+test('KitRowItem：truncate 不许吞 slot——内置渲染只是 slot 的缺省（A-2）', () => {
+  // 出过的事故：truncate 分支 <KitTruncated v-if>…<slot v-else /> 把 slot 整个吞掉
+  // → KitSettingRow 的 desc 永不渲染（P0 信息不全）、行标签丢 .kit-setting-row__label
+  // 的 0.9375rem 字号（「标签 16px / 控件 14px」旧毛病复发）。slot 必须优先。
+  const src = read('../layout/KitRowItem.vue')
+  assert.match(src, /<slot>\s*<KitTruncated v-if="truncate"/, 'KitTruncated 只能是 slot 的缺省内容')
+  assert.doesNotMatch(src, /<slot v-else\s*\/>/, '不允许 v-else 吞 slot')
+})
+
+test('KitSettingRow：desc 渲染链完整（A-2 的 P0 不回归）', () => {
+  const src = read('KitSettingRow.vue')
+  // desc 的 KitTruncated 在 KitRowItem 的 slot 里，必须真渲染出来
+  assert.match(src, /<KitTruncated v-if="desc"/, 'desc 要有揭示原语')
+  assert.match(
+    src,
+    /<KitRowItem[^>]*truncate[^>]*>[\s\S]*?<KitTruncated v-if="desc"/,
+    'desc 所在的 slot 必须挂在 truncate 行下且不被吞'
+  )
+})
+
 test('KitSettingRow：label / desc / value 三处都接', () => {
   const src = read('KitSettingRow.vue')
   const uses = [...src.matchAll(/<KitTruncated/g)]

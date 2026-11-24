@@ -93,9 +93,13 @@ const qualities = [
       <!-- 设置项：名字 + 滑块 + 数值框。数值框标 secondary，窄了自动收进 ⋯ -->
       <KitSmartRow :gap="8" @state="onRowState">
         <KitRowGroup>
-          <KitRowItem kind="label" text="主音量" truncate grow priority="primary">
-            <span class="kit-demo-label">{{ t('kit.gallery.masterVolume', '主音量') }}</span>
-          </KitRowItem>
+          <KitRowItem
+            kind="label"
+            :text="t('kit.gallery.masterVolume', '主音量')"
+            truncate
+            grow
+            priority="primary"
+          />
           <KitRowItem priority="primary" :min-width="120">
             <KitSlider
               v-model="volume"
@@ -118,9 +122,12 @@ const qualities = [
 
       <!-- 次要元素整行隐藏 + 「更多」浮层 -->
       <KitSmartRow :gap="8" :label="t('kit.gallery.secondaryRow', '次要元素（tertiary 先藏）')">
-        <KitRowItem kind="label" :text="t('kit.gallery.status', '状态')" truncate grow>
-          <span class="kit-demo-label">{{ t('kit.gallery.status', '状态') }}</span>
-        </KitRowItem>
+        <KitRowItem
+          kind="label"
+          :text="t('kit.gallery.status', '状态')"
+          truncate
+          grow
+        />
         <KitRowItem kind="control" priority="primary" :min-width="120">
           <KitSelect
             v-model="quality"
@@ -143,9 +150,13 @@ const qualities = [
 
       <!-- 换行退化：名字与控件不同 Group，窄了各占一行 -->
       <KitSmartRow :gap="8" :label="t('kit.gallery.wrapRow', '换行退化（名字与控件不同组）')">
-        <KitRowItem kind="label" text="很长的设置项名称" truncate grow priority="primary">
-          <span class="kit-demo-label">{{ t('kit.gallery.longName', '很长的设置项名称') }}</span>
-        </KitRowItem>
+        <KitRowItem
+          kind="label"
+          :text="t('kit.gallery.longName', '很长的设置项名称')"
+          truncate
+          grow
+          priority="primary"
+        />
         <KitRowItem kind="control" priority="primary" :min-width="160">
           <v-btn variant="text" prepend-icon="mdi-cog" size="default">
             {{ t('kit.gallery.configure', '配置') }}
@@ -160,13 +171,9 @@ const qualities = [
 </template>
 
 <style scoped>
-.kit-demo-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* 截断标签走 KitRowItem 的内置 KitTruncated（text prop 即全文、带揭示）。
+   不放 slot：slot 优先后 slot 作者要自己接原语——原来那个 .kit-demo-label 裸 span
+   有 ellipsis 没揭示（且曾被 v-else 吞掉不渲染，探针四档实测出现 0 次），删掉走内置路线。 */
 .kit-demo-value {
   white-space: nowrap;
 }
