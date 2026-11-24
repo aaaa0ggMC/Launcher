@@ -20,10 +20,12 @@
  *   --url <url>          被测站点（默认 http://127.0.0.1:4444/，launcher-headless.service）
  *                        没带 token 时自动读 ~/.config/LinuxCockpit/headless-token 拼上
  *   --widths <列表>      视口宽度档，默认 480,320,232,390（480/320/232 三档 + 390 手机档）
+ *   --stage-widths <列表>  画廊宽度模拟器（KitWidthStage）档，如 390,340,240——
+ *                        行内容（胶囊等）要靠模拟器压窄才现形；固定在宽视口下逐档跑
  *   --height <px>        视口高度，默认 820
  *   --dump <选择器>      逗号分隔，额外 dump 这些选择器的度量
  *   --assert-truncation  门禁模式：真截断必有揭示入口（title + 点按浮层），否则退出码 1
- *   --allow-build-mismatch  构建号与当前 git HEAD 不一致时只警告不判失败
+ *   --allow-build-mismatch  构建号与「最后触碰 src/ 的 commit」不一致时只警告不判失败
  *   --shots <目录>       截图目录（默认 out/probe；--no-shots 关闭）
  *   --json <文件>        把机器可读报告写到文件
  *   --keep-chrome        结束后不关 Chrome（本地调试用）
@@ -31,7 +33,7 @@
  *
  * 度量口径（与 useTruncatable.ts 的判定同口径，两边不一致就是 bug）：
  *   selfTrunc = scrollWidth > clientWidth + 1（自己这个盒子在裁）
- *   ancTrunc  = 右缘 > 祖先链第一个 overflow 非 visible 盒子的内容右缘 + 1（被祖先裁）
+ *   ancTrunc  = 右缘 > 祖先链第一个 overflow 非 visible 盒子的 padding 右缘 + 1（被祖先裁）
  *   trulyTruncated = selfTrunc || ancTrunc
  *   揭示入口 = 自己 / 祖先 / 后代里有「armed」的 .kit-truncated（挂了 title 或 role=button）
  */
@@ -50,6 +52,7 @@ const { values: opts } = parseArgs({
   options: {
     url: { type: 'string', default: 'http://127.0.0.1:4444/' },
     widths: { type: 'string', default: '480,320,232,390' },
+    'stage-widths': { type: 'string', default: '' },
     height: { type: 'string', default: '820' },
     dump: { type: 'string', default: '' },
     'assert-truncation': { type: 'boolean', default: false },
@@ -63,6 +66,10 @@ const { values: opts } = parseArgs({
 })
 
 const WIDTHS = opts.widths
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0)
+const STAGE_WIDTHS = opts['stage-widths']
   .split(',')
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n) && n > 0)
@@ -189,7 +196,8 @@ class Cdp {
 const MEASURE_FN = `function measure(el) {
   const cs = getComputedStyle(el)
   const r = el.getBoundingClientRect()
-  // 祖先链上第一个会裁的盒子的内容右缘（与 clipRightOf 同算法）
+  // 祖先链上第一个会裁的盒子。CSS overflow 裁剪发生在 **padding 边缘**（不是内容边缘）：
+  // 内容铺进 padding 区不会被切，用内容右缘会大量误判「被祖先裁」（232 档实测踩过）。
   let p = el.parentElement
   let clipRight = null
   let clipper = null
@@ -197,9 +205,8 @@ const MEASURE_FN = `function measure(el) {
     const pcs = getComputedStyle(p)
     if (pcs.overflowX !== 'visible' || pcs.overflowY !== 'visible') {
       const pr = p.getBoundingClientRect()
-      const pad = Number.parseFloat(pcs.paddingRight || '0') || 0
       const border = Number.parseFloat(pcs.borderRightWidth || '0') || 0
-      clipRight = pr.right - pad - border
+      clipRight = pr.right - border
       const cls = typeof p.className === 'string' && p.className ? '.' + p.className.trim().split(/\\s+/).slice(0, 3).join('.') : ''
       clipper = p.tagName.toLowerCase() + cls
       break
@@ -273,9 +280,8 @@ function scanExpr(rootSel) {
         const pcs = getComputedStyle(p)
         if (pcs.overflowX !== 'visible' || pcs.overflowY !== 'visible') {
           const pr = p.getBoundingClientRect()
-          const pad = Number.parseFloat(pcs.paddingRight || '0') || 0
           const border = Number.parseFloat(pcs.borderRightWidth || '0') || 0
-          const clipRight = pr.right - pad - border
+          const clipRight = pr.right - border
           if (r.right > clipRight + 1) push(el)
           break
         }
@@ -454,6 +460,46 @@ class Probe {
     await sleep(80)
   }
 
+  /** 单键按下抬起（方向键驱动宽度模拟器手柄用） */
+  async keyPress(key, code, vk) {
+    const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base }, this.sessionId)
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base }, this.sessionId)
+    await sleep(30)
+  }
+
+  /**
+   * 把 KitWidthStage（画廊宽度模拟器）的盒子设到目标宽度。
+   * 手柄支持键盘（Home=最小、→/←=±8），比拖拽坐标稳定：先聚焦手柄 →
+   * Home 归到 240 → 步进到目标。多实例时只驱动第一个（画廊当前只有一个）。
+   */
+  async setStageWidth(target) {
+    const focused = await this.eval(
+      `(() => {
+        const h = document.querySelector('.kit-stage__handle')
+        if (!h) return false
+        h.focus()
+        h.scrollIntoView({ block: 'center', inline: 'nearest' })
+        return document.activeElement === h
+      })()`
+    )
+    if (!focused) throw new Error('找不到 .kit-stage__handle（画廊宽度模拟器）或聚焦失败')
+    await this.keyPress('Home', 'Home', 36)
+    const min = 240
+    const steps = Math.max(0, Math.round((target - min) / 8))
+    for (let i = 0; i < steps; i++) await this.keyPress('ArrowRight', 'ArrowRight', 39)
+    await sleep(200)
+    await this.eval('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))')
+    await sleep(150)
+    return this.eval(
+      `(() => {
+        const box = document.querySelector('.kit-stage__box')
+        const num = document.querySelector('.kit-stage__num')
+        return { box: box ? box.getBoundingClientRect().width : null, label: num ? (num.textContent || '').trim() : null }
+      })()`
+    )
+  }
+
   async screenshot(file) {
     if (!SHOTS_DIR) return null
     const r = await this.cdp.send('Page.captureScreenshot', { format: 'png' }, this.sessionId)
@@ -472,9 +518,17 @@ class Probe {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 构建号核对：页面 KitBuildStamp 显示的 git 短 hash 应 == 正在测的 commit */
+/**
+ * 构建号核对基准 = 最后一个改动 `src/` 的 commit（不是裸 HEAD）。
+ * 页面 KitBuildStamp 显示的是**构建时**的 git 短 hash；只改 scripts/、docs/ 的 commit
+ * 不影响 UI 产物，拿裸 HEAD 比会误报「测的不是这套代码」（main 实测踩过）。
+ * 用「最后触碰 src/ 的 commit」比：相等 ⇒ 页面 UI 就是当前这套源码构建出来的。
+ */
 function expectedBuild() {
   try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: import.meta.dirname })
+    return execFileSync('git', ['log', '-1', '--format=%h', '--', 'src'], {
+      cwd: import.meta.dirname
+    })
       .toString()
       .trim()
   } catch {
@@ -568,24 +622,38 @@ async function main() {
     report.stamp = ready.buildStamp
     const stampHash = ready.buildStamp ? ready.buildStamp.replace(/^构建\s*/, '').trim() : null
     report.stampMatch = !expect || !stampHash ? null : stampHash === expect
-    log('KitBuildStamp:', ready.buildStamp, '| 当前 HEAD:', expect, '| 一致:', report.stampMatch)
+    log('KitBuildStamp:', ready.buildStamp, '| src 基准:', expect, '| 一致:', report.stampMatch)
     if (ASSERT && report.stampMatch === false && !opts['allow-build-mismatch']) {
       report.gate.failures.push(
         `构建号不一致：页面是「${stampHash}」，正在测的 commit 是「${expect}」——测的不是这套代码`
       )
     }
 
-    // ── 四档实测 ────────────────────────────────────────────────────────────
-    for (const w of WIDTHS) {
-      log(`── 宽度 ${w} ──`)
-      await probe.setViewport(w, HEIGHT)
+    // ── 多档实测：视口四档 + 画廊宽度模拟器档（胶囊这类行内容要靠模拟器压窄才现形）──
+    const phases = [
+      ...WIDTHS.map((w) => ({ kind: 'viewport', w })),
+      ...STAGE_WIDTHS.map((w) => ({ kind: 'stage', w }))
+    ]
+    for (const ph of phases) {
+      const w = ph.w
+      const tag = ph.kind === 'viewport' ? `vw${w}` : `stage${w}`
+      const wlabel = ph.kind === 'viewport' ? `视口 ${w}` : `模拟器 ${w}`
+      log(`── ${wlabel} ──`)
+      if (ph.kind === 'viewport') {
+        await probe.setViewport(w, HEIGHT)
+      } else {
+        // 模拟器档固定宽视口（盒子宽度由模拟器定，视口只要放得下）
+        await probe.setViewport(Math.max(560, w + 96), HEIGHT)
+        const got = await probe.setStageWidth(w)
+        log('模拟器盒子宽度', got)
+      }
       const state = await probe.eval(READY_EXPR)
       if (state.demoCards === 0) {
-        report.gate.failures.push(`宽度 ${w}: 画廊不可见（.kit-demo=0），无法实测`)
+        report.gate.failures.push(`${wlabel}: 画廊不可见（.kit-demo=0），无法实测`)
         continue
       }
       if (SHOTS_DIR) {
-        const f = await probe.screenshot(join(SHOTS_DIR, `w${w}-gallery.png`))
+        const f = await probe.screenshot(join(SHOTS_DIR, `${tag}-gallery.png`))
         log('截图', f)
       }
 
@@ -596,7 +664,7 @@ async function main() {
       }
       // 消歧检查：.kit-demo-label 是「死 slot 还是活截断点」只能看真实 DOM
       const demoLabel = await probe.eval(pickExpr('.kit-demo-label'))
-      report.demoLabelPresence[w] = demoLabel.length
+      report.demoLabelPresence[tag] = demoLabel.length
 
       const rows = scan.items.map(fmtRow)
       console.table(rows)
@@ -606,7 +674,7 @@ async function main() {
           console.table(items.map(fmtRow))
         }
       }
-      report.perWidth[w] = { scan, extra, demoLabelCount: demoLabel.length }
+      report.perWidth[tag] = { scan, extra, demoLabelCount: demoLabel.length }
 
       // ── 点按揭示实测：真截断 + 有揭示入口的元素逐个点 ──────────────────────
       const clickTargets = scan.items.filter(
@@ -660,14 +728,14 @@ async function main() {
         const ok = tips.some((t) => t && (t === full || full.includes(t) || t.includes(m.text.slice(0, 10))))
         m.tapTest = { clicked: !!(clicked && clicked.x), tips, ok }
         if (m.isKitTruncated && !shotTaken && SHOTS_DIR && tips.length) {
-          const f = await probe.screenshot(join(SHOTS_DIR, `w${w}-reveal.png`))
+          const f = await probe.screenshot(join(SHOTS_DIR, `${tag}-reveal.png`))
           log('揭示态截图', f)
           shotTaken = true
         }
         report.gate.revealClicks++
         if (!ok) {
           report.gate.failures.push(
-            `宽度 ${w}: 点按「${m.text}」没弹出全文浮层（tips=${JSON.stringify(tips)}，clicked=${JSON.stringify(clicked)}）`
+            `${wlabel}: 点按「${m.text}」没弹出全文浮层（tips=${JSON.stringify(tips)}，clicked=${JSON.stringify(clicked)}）`
           )
         }
         await probe.keyEscape()
@@ -683,17 +751,17 @@ async function main() {
           report.gate.truncatedSamples++
           if (!(m.reveal && m.reveal.armed)) {
             report.gate.failures.push(
-              `宽度 ${w}: 真截断无揭示入口 — ${m.tag}.${(m.cls || '').split(/\s+/)[0]}「${m.text}」` +
+              `${wlabel}: 真截断无揭示入口 — ${m.tag}.${(m.cls || '').split(/\s+/)[0]}「${m.text}」` +
                 ` sw=${m.sw} cw=${m.cw} 自裁=${m.selfTrunc} 祖裁=${m.ancTrunc} clipper=${m.clipper}`
             )
           }
         }
-        if (report.demoLabelPresence[w] > 0) {
+        if (report.demoLabelPresence[tag] > 0) {
           const dl = await probe.eval(pickExpr('.kit-demo-label'))
           for (const m of dl) {
             if (m.trulyTruncated && !(m.reveal && m.reveal.armed)) {
               report.gate.failures.push(
-                `宽度 ${w}: .kit-demo-label 在 DOM 里且真截断无揭示（判 B：活截断点）—「${m.text}」`
+                `${wlabel}: .kit-demo-label 在 DOM 里且真截断无揭示（判 B：活截断点）—「${m.text}」`
               )
             }
           }
@@ -704,7 +772,7 @@ async function main() {
     // ── 门禁汇总 ──────────────────────────────────────────────────────────
     if (ASSERT) {
       if (report.gate.truncatedSamples === 0) {
-        report.gate.failures.push('门禁无效：四档里没找到任何真截断样本（无法证明揭示机制被测到）')
+        report.gate.failures.push('门禁无效：各档里没找到任何真截断样本（无法证明揭示机制被测到）')
       }
     }
   } finally {
@@ -729,11 +797,10 @@ async function main() {
   // ── 报告 ────────────────────────────────────────────────────────────────
   console.log('\n════════════ 报告 ════════════')
   console.log('构建号：页面', report.stamp, '| HEAD', report.expectBuild, '| 一致:', report.stampMatch)
-  for (const w of WIDTHS) {
-    const pw = report.perWidth[w]
+  for (const [tag, pw] of Object.entries(report.perWidth)) {
     if (!pw) continue
     console.log(
-      `宽度 ${w}: 扫描 ${pw.scan.count} 个候选，.kit-demo-label 出现 ${pw.demoLabelCount} 次`
+      `${tag}: 扫描 ${pw.scan.count} 个候选，.kit-demo-label 出现 ${pw.demoLabelCount} 次`
     )
   }
   if (opts.json) {
