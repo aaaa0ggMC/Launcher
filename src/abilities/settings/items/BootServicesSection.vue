@@ -4,7 +4,7 @@ defineOptions({ name: 'cockpit-settings-boot-services' })
 import { inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { translate } from '@ui/i18n'
-import { KitCaption, KitEmpty, KitProse, KitSection, KitSwitch } from '@ui/kit'
+import { KitCaption, KitEmpty, KitProse, KitSection, KitSwitch , KitTruncated } from '@ui/kit'
 
 /** 与主进程 boot-services.ts 的 BootServiceState 对应 */
 interface BootServiceState {
@@ -113,7 +113,11 @@ defineExpose({
     >
       <div v-for="s in services" :key="s.id" class="boot-row" role="listitem">
         <div class="boot-text min-w-0">
-          <div class="boot-title text-body-2 font-weight-medium">{{ labelOf(s) }}</div>
+          <!-- 服务名是名字类元素：截断必须可揭示（SPEC 档 1）——
+               宽屏 ellipsis + title/点按浮层，窄屏整名换行不截断 -->
+          <div class="boot-title text-body-2 font-weight-medium">
+            <KitTruncated :text="labelOf(s)">{{ labelOf(s) }}</KitTruncated>
+          </div>
           <div v-if="descOf(s)" class="boot-desc text-caption text-medium-emphasis">
             {{ descOf(s) }}
           </div>
@@ -201,9 +205,8 @@ defineExpose({
 }
 .boot-title {
   line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  /* 省略号归 KitTruncated 原语（信息降级链档 1：截断必有 title + 点按揭示） */
 }
 .boot-desc {
   line-height: 1.5;
@@ -220,6 +223,8 @@ defineExpose({
 .boot-chip {
   padding-block: 4px;
   min-height: 24px;
+  /* 不折行：chip 被挤窄时折行会一高一低（第 4 类同类尺寸），换行交给 .boot-side */
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
@@ -227,8 +232,11 @@ defineExpose({
   .boot-text {
     flex: 1 1 100%;
   }
-  .boot-title {
+  /* 窄屏不截断：整名换行（无降级就无需揭示） */
+  .boot-title :deep(.kit-truncated) {
     white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
   .boot-side {
     margin-inline-start: 0;
