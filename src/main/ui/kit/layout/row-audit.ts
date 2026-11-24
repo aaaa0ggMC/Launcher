@@ -75,3 +75,44 @@ export function isSizeDefect(
   if (boxes.length < 2) return false
   return dims.some((d) => sizeSpread(boxes, d) > tolerance + 0.001)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 第 5 类「文字碰撞 / 高低错落」判定（纯函数，可单测）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 两矩形相交面积（px²，不含仅贴边） */
+export function overlapArea(a: Box, b: Box): number {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+  return w > 0 && h > 0 ? w * h : 0
+}
+
+/** 一个矩形是否包含另一个（父子/覆盖层，不算碰撞） */
+export function contains(a: Box, b: Box): boolean {
+  return a.left <= b.left && a.right >= b.right && a.top <= b.top && a.bottom >= b.bottom
+}
+
+/**
+ * 碰撞/重叠缺陷：非父子的可见元素矩形相交（> tolerance px²）。
+ * 文字被压住、浮标压在控件上（审计 5-4）都是这类；贴边（0 面积）不算。
+ */
+export function isCollision(a: Box, b: Box, tolerance = 1): boolean {
+  return !contains(a, b) && !contains(b, a) && overlapArea(a, b) > tolerance
+}
+
+/**
+ * 高低错落（视觉断层）：同一行容器里元素的顶缘散布超过「行高」的一半。
+ * 行高 = 最矮成员的高度（1px 行/图标不把阈值拉没）。折行到第二行的元素
+ * top 差接近整个行高，必然超过一半；正常同排的顶缘差只来自高度差的一半。
+ */
+export function isStaggered(boxes: Box[], tolerance = 0): boolean {
+  if (boxes.length < 2) return false
+  const lineH = Math.min(...boxes.map((b) => b.bottom - b.top))
+  const topDev = edgeSpread(boxes, 'top')
+  return topDev > lineH / 2 + tolerance
+}
+
+/** 两文本元素的水平间距（px）：负值 = 重叠，0 = 贴着 */
+export function horizontalGap(a: Box, b: Box): number {
+  return Math.max(a.left, b.left) - Math.min(a.right, b.right)
+}

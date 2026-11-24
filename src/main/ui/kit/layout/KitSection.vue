@@ -126,7 +126,11 @@ defineProps<{
 }
 
 /* canvas：按内容高度排，最多占到外壳一半，超出自行内滚；
-   真有更多内容时外壳滚（两个滚动条都在） */
+   真有更多内容时外壳滚（两个滚动条都在）。
+   **所有**分区都封顶 50% + 自滚：只封 scroll 分区时，非 scroll 分区的内容
+   （如画布占位的 min-height）会溢出自己的盒子压到下一个分区上——探针第 5 类
+   碰撞实测 6px 交叠，且贴着 50% 边缘时布局不稳定（1.3px 缝隙 ↔ 6px 交叠）。 */
+.kit-page--canvas .kit-section,
 .kit-page--canvas .kit-section--scroll {
   flex: 0 0 auto;
   max-height: 50%;
