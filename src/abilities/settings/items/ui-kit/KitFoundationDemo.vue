@@ -79,7 +79,7 @@ const stats = [
         <div v-for="n in 6" :key="n" class="kit-demo-cell">
           <KitCaption>{{ grid(n) }}px</KitCaption>
           <KitProse
-            >t('kit.gallery.foundation.cell', '格子 {n}').replace('{n}', String(n))</KitProse
+            >{{ t('kit.gallery.foundation.cell', '格子 {n}').replace('{n}', String(n)) }}</KitProse
           >
         </div>
       </KitGrid>
