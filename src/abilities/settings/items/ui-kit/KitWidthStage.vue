@@ -209,6 +209,7 @@ const boxStyle = computed(() => ({
 }
 
 .kit-stage__caption {
+  display: block; /* inline span 的 padding 伸出 line box 会压住下面的行（第 5 类碰撞实测 8px） */
   padding-bottom: 8px;
 }
 

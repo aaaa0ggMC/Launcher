@@ -2,9 +2,14 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   centerSpread,
+  contains,
   edgeSpread,
+  horizontalGap,
   isAlignmentDefect,
+  isCollision,
   isSizeDefect,
+  isStaggered,
+  overlapArea,
   sizeSpread,
   type Box
 } from './row-audit'
@@ -66,4 +71,32 @@ test('第 4 类：等宽数值类比宽度（kit-num「读数不跳」）', () =
   assert.equal(sizeSpread([narrow, wide], 'width'), 8)
   // 单个 / 两个以下不算
   assert.equal(isSizeDefect([narrow], ['height', 'width']), false)
+})
+
+// ── 第 5 类（碰撞 / 高低错落）───────────────────────────────────────────────
+
+test('碰撞：非父子矩形相交 >1px² 判缺陷；贴边与包含不算', () => {
+  const a = b(0, 24, 0, 40)
+  const hit = b(10, 20, 30, 50) // 相交 10×10
+  assert.equal(overlapArea(a, hit), 100)
+  assert.equal(isCollision(a, hit), true)
+  // 贴边（右缘相接）不算
+  assert.equal(isCollision(a, b(0, 24, 40, 80)), false)
+  // 父子包含不算（覆盖层/内层）
+  assert.equal(isCollision(a, b(2, 22, 2, 38)), false)
+})
+
+test('高低错落：顶缘散布 > 行高一半判缺陷（折行断层口径）', () => {
+  // 同排一个 24 高一个 48 高：顶缘差 12 = 行高(24)/2 → 不超
+  assert.equal(isStaggered([b(0, 24), b(0, 48)]), false)
+  // 折到第二行：top 差 30 > 行高(24)/2 → 断层
+  assert.equal(isStaggered([b(0, 24), b(30, 54)]), true)
+  // 单元素 / 空
+  assert.equal(isStaggered([b(0, 24)]), false)
+})
+
+test('水平间距：负值=重叠、0=贴着', () => {
+  assert.equal(horizontalGap(b(0, 10, 0, 40), b(0, 10, 30, 60)), -10)
+  assert.equal(horizontalGap(b(0, 10, 0, 40), b(0, 10, 40, 60)), 0)
+  assert.equal(horizontalGap(b(0, 10, 0, 40), b(0, 10, 46, 60)), 6)
 })

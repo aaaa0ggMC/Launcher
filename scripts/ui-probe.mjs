@@ -30,6 +30,7 @@
  *   --assert-ui          门禁（第 1+2 类）：再加「溢出/被裁」——内容被硬切且无揭示去处
  *                        （overflow-defect.ts 判定内核，与单测同口径）
  *   --item <文本|id>     定位到设置条目（如 背景 / window）：滚到可见 + 只扫该条目
+ *   --ability <id>       直接进某个能力页（如 mirror），扫 .page-host（不进设置）
  *   --allow-build-mismatch  构建号与「最后触碰 src/ 的 commit」不一致时只警告不判失败
  *   --shots <目录>       截图目录（默认 out/probe；--no-shots 关闭）
  *   --json <文件>        把机器可读报告写到文件
@@ -69,6 +70,7 @@ const { values: opts } = parseArgs({
     'assert-truncation': { type: 'boolean', default: false },
     'assert-ui': { type: 'boolean', default: false },
     item: { type: 'string', default: '' },
+    ability: { type: 'string', default: '' },
     'allow-build-mismatch': { type: 'boolean', default: false },
     shots: { type: 'string', default: 'out/probe' },
     'no-shots': { type: 'boolean', default: false },
@@ -293,6 +295,7 @@ const MEASURE_FN = `function measure(el) {
     oh: el.offsetHeight,
     cw: el.clientWidth,
     sw: el.scrollWidth,
+    top: Math.round(r.top * 10) / 10,
     right: Math.round(r.right * 10) / 10,
     clipRight: clipRight === null ? null : Math.round(clipRight * 10) / 10,
     clipper,
@@ -434,6 +437,95 @@ function itemAnchorExpr(item) {
 }
 
 /**
+ * 第 5 类(a/b)：碰撞/重叠 + 文字挤贴扫描。
+ * 内容盒 = 有文本或控件类名、可见、非解剖零件；两两求交（剔除父子包含）。
+ * 碰撞（相交 >1px²）判缺陷；水平挤贴（间距 0~2px）只报信息（排版里贴着未必错）。
+ */
+function collisionExpr(rootSel) {
+  return `(() => {
+    const root = document.querySelector(${JSON.stringify(rootSel)}) || document.body
+    const ANATOMY =
+      /^v-(input|field|selection-control|locale|row|col|container|spacer)|__(content|overlay|underlay|loader|details|field|control|input|icon|prepend|append|thumb|track|rail|handle|selection|wrapper|body|head|line|inner|text|label|hint|title|value|desc|name|tag|state|note|slot)/
+    const boxes = []
+    for (const el of root.querySelectorAll('*')) {
+      const cs = getComputedStyle(el)
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue
+      const r = el.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) continue
+      const cls = typeof el.className === 'string' ? el.className : ''
+      const kind = cls.trim().split(/\\s+/)[0] || el.tagName.toLowerCase()
+      if (ANATOMY.test(kind)) continue
+      const hasText = (el.textContent || '').trim().length > 0
+      const isControl = /kit-|v-btn|v-chip|v-switch|v-select|v-field/.test(cls)
+      if (!hasText && !isControl) continue
+      // 可见矩形 = 自身矩形 ∩ 所有裁剪祖先的 padding 矩形——滚动内容的 rect 会伸出
+      // 裁剪盒（document 页滚出 220px 限高），不做裁剪会把整片滚动内容报成碰撞
+      let v = { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+      let q = el.parentElement
+      while (q && q !== root && q !== document.body) {
+        const qcs = getComputedStyle(q)
+        if (qcs.overflowX !== 'visible' || qcs.overflowY !== 'visible') {
+          const qr = q.getBoundingClientRect()
+          const qBorder = {
+            top: qr.top + Number.parseFloat(qcs.borderTopWidth || '0'),
+            bottom: qr.bottom - Number.parseFloat(qcs.borderBottomWidth || '0'),
+            left: qr.left + Number.parseFloat(qcs.borderLeftWidth || '0'),
+            right: qr.right - Number.parseFloat(qcs.borderRightWidth || '0')
+          }
+          v = {
+            top: Math.max(v.top, qBorder.top),
+            bottom: Math.min(v.bottom, qBorder.bottom),
+            left: Math.max(v.left, qBorder.left),
+            right: Math.min(v.right, qBorder.right)
+          }
+          if (v.right - v.left < 2 || v.bottom - v.top < 2) break
+        }
+        q = q.parentElement
+      }
+      if (v.right - v.left < 2 || v.bottom - v.top < 2) continue
+      boxes.push({
+        el,
+        kind: (el.tagName.toLowerCase() + '.' + cls.trim().split(/\\s+/).slice(0, 2).join('.')).slice(0, 60),
+        text: (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 18),
+        b: v
+      })
+    }
+    // 父子用 DOM 判（滚动容器的 rect 不含溢出子级，用 rect 判会把整页父子全报成碰撞）
+    const contains = (a, b) => a.left <= b.left && a.right >= b.right && a.top <= b.top && a.bottom >= b.bottom
+    const domRelated = (x, y) => x.el.contains(y.el) || y.el.contains(x.el)
+    const overlap = (a, b) =>
+      Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+      Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+    const collisions = []
+    const gaps = []
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const A = boxes[i], B = boxes[j]
+        if (domRelated(A, B) || contains(A.b, B.b) || contains(B.b, A.b)) continue
+        const ov = overlap(A.b, B.b)
+        if (ov > 1) {
+          if (collisions.length < 40) {
+            collisions.push({
+              a: { kind: A.kind, text: A.text, rect: [A.b.left, A.b.top, A.b.right, A.b.bottom].map((v) => Math.round(v)) },
+              b: { kind: B.kind, text: B.text, rect: [B.b.left, B.b.top, B.b.right, B.b.bottom].map((v) => Math.round(v)) },
+              area: Math.round(ov)
+            })
+          }
+          continue
+        }
+        // 水平贴挤（只报信息）：同段竖向区间、水平间距 0~2px
+        const vOv = Math.min(A.b.bottom, B.b.bottom) - Math.max(A.b.top, B.b.top)
+        const gap = Math.max(A.b.left, B.b.left) - Math.min(A.b.right, B.b.right)
+        if (vOv > 2 && gap >= 0 && gap < 2 && (A.text || B.text)) {
+          if (gaps.length < 20) gaps.push({ a: A.text || A.kind, b: B.text || B.kind, gap: Math.round(gap * 10) / 10 })
+        }
+      }
+    }
+    return { collisions, gaps }
+  })()`
+}
+
+/**
  * 行一致性扫描（第 3 类对齐 + 第 4 类同类尺寸）。
  *
  * 分组策略（探针侧，判定内核在 layout/row-audit.ts 同口径）：
@@ -455,7 +547,9 @@ const ROW_SCAN_EXPR = `(() => {
     /^v-(input|field|selection-control|locale)|__(content|overlay|underlay|loader|details|field|control|input|icon|prepend|append|thumb|track|rail|handle|selection|wrapper|body|head|line|inner|text|label|hint|title|value|desc|name|tag|state|note|slot)/
   const kindOf = (el) => {
     const cls = typeof el.className === 'string' ? el.className : ''
-    const t = cls.trim().split(/\s+/)[0]
+    const t = cls.trim().split(/\\s+/)[0]
+    // v-btn 的 icon 变体（22px 圆钮）与文本钮不是「同类」：分开比尺寸
+    if (/^v-btn/.test(t) && /(^|\\s)v-btn--icon(\\s|$)/.test(cls)) return 'v-btn--icon'
     return t || el.tagName.toLowerCase()
   }
   const visible = (el) => {
@@ -471,7 +565,7 @@ const ROW_SCAN_EXPR = `(() => {
   const rows = []
   for (const el of root.querySelectorAll('*')) {
     const cls = typeof el.className === 'string' ? el.className : ''
-    if (!/(^|\s)kit-/.test(cls)) continue
+    if (!/(^|\\s)kit-/.test(cls)) continue
     const cs = getComputedStyle(el)
     if (cs.display !== 'flex' && cs.display !== 'inline-flex') continue
     if (!/^row/.test(cs.flexDirection)) continue
@@ -498,6 +592,17 @@ const ROW_SCAN_EXPR = `(() => {
         }
       }
     }
+    // ── 第 5 类(c)：nowrap 行（未规划折行）拆成多视觉行 = 视觉断层（「错落」）──
+    // flex-wrap:wrap 的容器折行是设计（demo 头部/按钮条），不判；
+    // 智能行的规划折行是分成多个 .line 容器，行内拆行必然是没规划到的
+    if (cs.flexWrap !== 'wrap' && visualLines.length > 1) {
+      rows.push({
+        type: 'stagger',
+        container: (cls || el.tagName).split(/\\s+/).slice(0, 2).join('.'),
+        lines: visualLines.length,
+        members: kids.map((m) => (m.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 18))
+      })
+    }
     for (const line of visualLines) {
       const groups = new Map()
       for (const k of line.members) {
@@ -520,14 +625,14 @@ const ROW_SCAN_EXPR = `(() => {
               : spread(rs.map((r) => r.top))
         rows.push({
           type: 'align',
-          container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
+          container: (cls || el.tagName).split(/\\s+/).slice(0, 2).join('.'),
           align,
           deviation: Math.round(dev * 10) / 10,
           members: members.map((m) => {
             const r = rectOf(m)
             return {
               kind: kindOf(m),
-              text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18),
+              text: (m.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 18),
               y: Math.round(((r.top + r.bottom) / 2) * 10) / 10,
               h: Math.round((r.bottom - r.top) * 10) / 10
             }
@@ -556,14 +661,14 @@ const ROW_SCAN_EXPR = `(() => {
       const wDev = checkWidth ? spread(rs.map((r) => r.right - r.left)) : 0
       rows.push({
         type: 'size',
-        container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
+        container: (cls || el.tagName).split(/\\s+/).slice(0, 2).join('.'),
         kind,
         heightDev: Math.round(hDev * 10) / 10,
         widthDev: Math.round(wDev * 10) / 10,
         members: tops.map((m) => {
           const r = rectOf(m)
           return {
-            text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18),
+            text: (m.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 18),
             h: Math.round((r.bottom - r.top) * 10) / 10,
             w: Math.round((r.right - r.left) * 10) / 10
           }
@@ -917,7 +1022,7 @@ async function main() {
     stampMatch: null,
     perWidth: {},
     demoLabelPresence: {},
-    gate: { failures: [], truncatedSamples: 0, overflowSamples: 0, alignDefects: 0, sizeDefects: 0, revealClicks: 0 }
+    gate: { failures: [], truncatedSamples: 0, overflowSamples: 0, alignDefects: 0, sizeDefects: 0, collisionDefects: 0, staggerDefects: 0, revealClicks: 0 }
   }
 
   const { child, userData, wsUrl } = await launchChrome()
@@ -960,6 +1065,21 @@ async function main() {
       'App 就绪'
     )
 
+    let scanRoot = ROOT_SEL
+    if (opts.ability) {
+      // 能力页直达（mirror 等非设置页）：扫描根 = .page-host；
+      // 能力页没有 KitBuildStamp——构建号在设置流程里已核过（--assert-ui 常连跑）
+      await probe.clickWithRetry(
+        clickElemExpr(`document.querySelector('[data-ability-id="${opts.ability}"]')`),
+        `能力「${opts.ability}」`
+      )
+      await probe.waitReady(
+        `document.querySelector('[data-ability-ready]')?.getAttribute('data-ability-ready') === ${JSON.stringify(opts.ability)} ? true : null`,
+        `能力「${opts.ability}」就绪`
+      )
+      await sleep(500)
+      scanRoot = '.page-host'
+    } else {
     // 设置 → UI 库分类。侧栏条目有稳定的 data-ability-id（App.vue 注入），
     // 优先用它；文本匹配只当兜底（rail 折叠态没有文字，只有 aria-label）。
     // 点击一律走命中测试（elementFromPoint），点不中就换采样点 / 重试——
@@ -1015,7 +1135,7 @@ async function main() {
       '全部设置项挂载完'
     ).catch(() => null)
     await sleep(400)
-    let scanRoot = ROOT_SEL
+    }
     if (opts.item) {
       const anchor = await probe.waitReady(
         `(() => { const r = (${itemAnchorExpr(opts.item)}); return r ?? null })()`,
@@ -1186,6 +1306,9 @@ async function main() {
       // ── 第 3/4 类：行一致性（对齐偏差 / 同类尺寸）——row-audit.ts 同口径 ──
       const rowAudit = await probe.eval(ROW_SCAN_EXPR.replace('__ROOT__', scanRoot))
       report.perWidth[tag].rows = rowAudit
+      // ── 第 5 类(a/b)：碰撞/重叠 + 挤字（挤字只报信息）──
+      const collision = await probe.eval(collisionExpr(scanRoot))
+      report.perWidth[tag].collisions = collision
       if (ASSERT_UI) {
         for (const r of rowAudit) {
           if (r.type === 'align' && r.deviation > 1.001) {
@@ -1200,6 +1323,19 @@ async function main() {
               `${wlabel}: 同类尺寸不一（高差 ${r.heightDev}px / 宽差 ${r.widthDev}px）— ${r.kind} @ 行 ${r.container} 成员 ${JSON.stringify(r.members)}`
             )
           }
+          // 第 5 类(c)：nowrap 行内拆行 = 视觉断层
+          if (r.type === 'stagger') {
+            report.gate.staggerDefects++
+            report.gate.failures.push(
+              `${wlabel}: 高低错落/断层（nowrap 行拆成 ${r.lines} 个视觉行）— 行 ${r.container} 成员 ${JSON.stringify(r.members)}`
+            )
+          }
+        }
+        for (const c of collision.collisions) {
+          report.gate.collisionDefects++
+          report.gate.failures.push(
+            `${wlabel}: 碰撞/重叠（${c.area}px²）— ${c.a.kind}「${c.a.text}」× ${c.b.kind}「${c.b.text}」`
+          )
         }
       }
     }
@@ -1253,7 +1389,8 @@ async function main() {
           `${report.gate.revealClicks} 次点按全部弹出全文` +
           (ASSERT_UI
             ? `，溢出/被裁缺陷 ${report.gate.overflowSamples} 处，对齐缺陷 ${report.gate.alignDefects} 处，` +
-              `尺寸缺陷 ${report.gate.sizeDefects} 处（0 = 干净）`
+              `尺寸缺陷 ${report.gate.sizeDefects} 处，碰撞缺陷 ${report.gate.collisionDefects} 处，` +
+              `断层缺陷 ${report.gate.staggerDefects} 处（0 = 干净）`
             : '')
       )
     }
