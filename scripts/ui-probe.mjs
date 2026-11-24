@@ -290,6 +290,7 @@ const MEASURE_FN = `function measure(el) {
     cls: typeof el.className === 'string' ? el.className : '',
     text: (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60),
     ow: el.offsetWidth,
+    oh: el.offsetHeight,
     cw: el.clientWidth,
     sw: el.scrollWidth,
     right: Math.round(r.right * 10) / 10,
@@ -302,6 +303,8 @@ const MEASURE_FN = `function measure(el) {
     whiteSpace: cs.whiteSpace,
     fontSize: cs.fontSize,
     flex: cs.flex,
+    minHeight: cs.minHeight,
+    zoom: cs.zoom,
     overflowX: cs.overflowX,
     minWidth: cs.minWidth,
     maxWidth: cs.maxWidth,
@@ -447,6 +450,9 @@ const ROW_SCAN_EXPR = `(() => {
   const CONTROL_KIND = /^(kit-(chip|stepper|switch|slider|select|field|control|btn|number)|v-(btn|input|switch|select|field))/
   const WIDTH_CONTRACT = /^kit-num$|^kit-stage__num$/
   const EXEMPT = /^kit-circle/
+  // 内部零件（按钮内容层/覆盖层/输入内层…）不是「同类元素」——比容器（v-btn），不比零件
+  const ANATOMY =
+    /^v-(input|field|selection-control|locale)|__(content|overlay|underlay|loader|details|field|control|input|icon|prepend|append|thumb|track|rail|handle|selection|wrapper|body|head|line|inner|text|label|hint|title|value|desc|name|tag|state|note|slot)/
   const kindOf = (el) => {
     const cls = typeof el.className === 'string' ? el.className : ''
     const t = cls.trim().split(/\s+/)[0]
@@ -471,36 +477,68 @@ const ROW_SCAN_EXPR = `(() => {
     if (!/^row/.test(cs.flexDirection)) continue
     const kids = [...el.children].filter(visible)
     if (kids.length < 2) continue
-    // ── 第 3 类：直接子元素按生效对齐分组 ──
-    const groups = new Map()
+    // ── 第 3 类：先按「同一视觉行」分组（flex-wrap 换行后不同行不比对齐——
+    //    28.8px≈一行高、114px=多行高，跨行比中线是假缺陷），再按生效对齐分组 ──
+    const visualLines = []
     for (const k of kids) {
-      const kcs = getComputedStyle(k)
-      let a = kcs.alignSelf
-      if (a === 'auto' || !a) a = cs.alignItems
-      const norm = a === 'center' ? 'center' : a === 'flex-end' ? 'end' : a === 'flex-start' ? 'start' : a === 'stretch' ? 'start' : null
-      if (!norm) continue
-      if (!groups.has(norm)) groups.set(norm, [])
-      groups.get(norm).push(k)
+      const r = rectOf(k)
+      const hit = visualLines.filter((L) =>
+        L.members.some((m) => {
+          const mr = rectOf(m)
+          return Math.min(r.bottom, mr.bottom) - Math.max(r.top, mr.top) > 0.5
+        })
+      )
+      if (hit.length === 0) visualLines.push({ members: [k] })
+      else {
+        const first = hit[0]
+        first.members.push(k)
+        for (let i = 1; i < hit.length; i++) {
+          first.members.push(...hit[i].members)
+          visualLines.splice(visualLines.indexOf(hit[i]), 1)
+        }
+      }
     }
-    for (const [align, members] of groups) {
-      if (members.length < 2) continue
-      const rs = members.map(rectOf)
-      const dev =
-        align === 'center'
-          ? spread(rs.map((r) => (r.top + r.bottom) / 2))
-          : align === 'end'
-            ? spread(rs.map((r) => r.bottom))
-            : spread(rs.map((r) => r.top))
-      rows.push({
-        type: 'align',
-        container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
-        align,
-        deviation: Math.round(dev * 10) / 10,
-        members: members.map((m) => ({ kind: kindOf(m), text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18) }))
-      })
+    for (const line of visualLines) {
+      const groups = new Map()
+      for (const k of line.members) {
+        const kcs = getComputedStyle(k)
+        let a = kcs.alignSelf
+        if (a === 'auto' || !a) a = cs.alignItems
+        const norm = a === 'center' ? 'center' : a === 'flex-end' ? 'end' : a === 'flex-start' ? 'start' : a === 'stretch' ? 'start' : null
+        if (!norm) continue
+        if (!groups.has(norm)) groups.set(norm, [])
+        groups.get(norm).push(k)
+      }
+      for (const [align, members] of groups) {
+        if (members.length < 2) continue
+        const rs = members.map(rectOf)
+        const dev =
+          align === 'center'
+            ? spread(rs.map((r) => (r.top + r.bottom) / 2))
+            : align === 'end'
+              ? spread(rs.map((r) => r.bottom))
+              : spread(rs.map((r) => r.top))
+        rows.push({
+          type: 'align',
+          container: (cls || el.tagName).split(/\s+/).slice(0, 2).join('.'),
+          align,
+          deviation: Math.round(dev * 10) / 10,
+          members: members.map((m) => {
+            const r = rectOf(m)
+            return {
+              kind: kindOf(m),
+              text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18),
+              y: Math.round(((r.top + r.bottom) / 2) * 10) / 10,
+              h: Math.round((r.bottom - r.top) * 10) / 10
+            }
+          })
+        })
+      }
     }
     // ── 第 4 类：后代按 kind 分组（剔除同类嵌套）──
-    const desc = [...el.querySelectorAll('*')].filter((d) => visible(d) && !EXEMPT.test(kindOf(d)))
+    const desc = [...el.querySelectorAll('*')].filter(
+      (d) => visible(d) && !EXEMPT.test(kindOf(d)) && !ANATOMY.test(kindOf(d))
+    )
     const byKind = new Map()
     for (const d of desc) {
       const k = kindOf(d)
@@ -522,7 +560,14 @@ const ROW_SCAN_EXPR = `(() => {
         kind,
         heightDev: Math.round(hDev * 10) / 10,
         widthDev: Math.round(wDev * 10) / 10,
-        members: tops.map((m) => (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18))
+        members: tops.map((m) => {
+          const r = rectOf(m)
+          return {
+            text: (m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 18),
+            h: Math.round((r.bottom - r.top) * 10) / 10,
+            w: Math.round((r.right - r.left) * 10) / 10
+          }
+        })
       })
     }
   }
