@@ -10,6 +10,12 @@
  * 第三条腿（priority 整元素隐藏 → 行尾「更多」浮层显示全文）由 KitSmartRow 负责。
  *
  * 自己带 ellipsis 样式：调用方只要把内容放进来，不用再写一遍 nowrap/ellipsis。
+ *
+ * 模板结构纪律（踩过血亏）：**根节点必须只有 span 这一个节点**。Teleport 只能放 span
+ * 内部（写成兄弟就变 fragment）；模板根级连 HTML 注释都不行——Vue 会把 [注释, span]
+ * 编译成 Fragment，调用方传的 class / attrs 全部被静默丢弃（实测：.kit-setting-row__label
+ * 的字号、.kit-chip__text 等消费方样式集体失效了整整一版）。注释只许写进 script 文档
+ * 或元素内部。
  */
 import { computed, nextTick, onScopeDispose, ref } from 'vue'
 import { useAnchor } from '../composables/useAnchor'
@@ -73,8 +79,6 @@ if (typeof document !== 'undefined') {
 </script>
 
 <template>
-  <!-- Teleport 放在 span 内部：组件保持单根，调用方传的 class（如 .kit-chip__text）
-       才能落到这个 span 上；写成兄弟节点会变成 fragment，class 会被 Vue 丢弃。 -->
   <span
     ref="el"
     class="kit-truncated"

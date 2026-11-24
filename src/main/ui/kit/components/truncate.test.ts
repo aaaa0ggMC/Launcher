@@ -137,6 +137,38 @@ test('浮层里的项打开时要重判（不能停在隐藏期的死状态）',
   assert.match(row, /recheckAllTruncatables\(\)/, '打开「更多」浮层后通知其中的 KitTruncated 重判')
 })
 
+test('KitTruncated：模板根节点只有 span 一个（多根 = Fragment = class 被丢）', () => {
+  const src = read('KitTruncated.vue')
+  assert.match(src, /<template>\s*<span\b/, '根级第一个节点必须是 span——注释/兄弟节点都会变 Fragment')
+})
+
+test('守卫：模板根级不许有注释——根级注释把根变 Fragment，调用方 class/attrs 被静默丢弃', () => {
+  // 血亏记录：KitTruncated 根级一句「Teleport 放 span 内部」的注释就把模板根编译成
+  // [注释, span] Fragment，消费方传的 class（.kit-setting-row__label / .kit-chip__text …）
+  // 全部丢掉——kit.css 的字号规则匹配不上，「标签 16px / 控件 14px」旧毛病复发的真因。
+  // 注释写进 script 文档或元素内部。
+  const roots = [
+    new URL('..', import.meta.url), // src/main/ui/kit
+    new URL('../../../../abilities/settings/items/ui-kit/', import.meta.url) // 画廊
+  ]
+  const offenders: string[] = []
+  const walk = (dir: URL): void => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const u = new URL(ent.name + (ent.isDirectory() ? '/' : ''), dir)
+      if (ent.isDirectory()) {
+        if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue
+        walk(u)
+      } else if (ent.name.endsWith('.vue')) {
+        const raw = readFileSync(u, 'utf8')
+        const m = raw.match(/<template>([\s\S]*?)<\/template>/)
+        if (m && m[1].trimStart().startsWith('<!--')) offenders.push(u.pathname)
+      }
+    }
+  }
+  for (const r of roots) walk(r)
+  assert.deepEqual(offenders, [], `根级注释会造出 Fragment（class 被丢），违规：${offenders.join(', ')}`)
+})
+
 test('守卫：text-overflow: ellipsis 只允许写在 KitTruncated 原语里', () => {
   // 「ellipsis 归原语管」是 SPEC §9.5 的实现纪律：积木自己写就是绕过揭示原语——
   // KitSelect 的 .kit-inline-select__text 正是这么漏成「截断不可揭示」的（1-1）。

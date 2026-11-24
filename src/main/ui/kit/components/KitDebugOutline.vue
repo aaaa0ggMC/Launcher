@@ -305,6 +305,6 @@ onBeforeUnmount(stop)
 </script>
 
 <template>
-  <!-- 无渲染：只改 <html> 的 class 与被扫元素的 class（挂个隐藏宿主用于自排除） -->
+  
   <span ref="hostEl" style="display: none" aria-hidden="true" />
 </template>

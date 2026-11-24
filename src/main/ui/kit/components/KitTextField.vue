@@ -48,7 +48,6 @@ function onInput(v: unknown): void {
 </script>
 
 <template>
-  <!-- input 档：Vuetify 原装外观（有 outline / label，它的网格是对的） -->
   <div v-if="density !== 'inline'" ref="target" class="kit-control" :style="rootStyle">
     <v-text-field
       :model-value="modelValue"
