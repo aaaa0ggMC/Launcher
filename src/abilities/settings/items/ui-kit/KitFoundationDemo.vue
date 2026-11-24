@@ -157,6 +157,7 @@ const stats = [
 .kit-demo-placeholders {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* min(200px, 100%)：窄容器可收缩，否则 200px 下限把整张网格顶出卡片被硬裁 */
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
 }
 </style>

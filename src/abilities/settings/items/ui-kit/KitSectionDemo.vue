@@ -86,7 +86,8 @@ const lines = Array.from({ length: 18 }, (_, i) => i + 1)
 <style scoped>
 .kit-demo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* min(240px, 100%)：窄容器可收缩，否则 240px 下限把整张网格顶出卡片被硬裁 */
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 12px;
   align-items: start;
 }

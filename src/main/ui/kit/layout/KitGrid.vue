@@ -29,9 +29,11 @@ const props = withDefaults(
 )
 
 const template = computed<string>(() => {
-  if (props.minCol) return `repeat(auto-fit, minmax(${props.minCol}px, 1fr))`
+  // min(Npx, 100%)：容器比下限窄时列宽下限回落到容器宽，网格绝不横向溢出
+  // （裸 minmax(Npx, 1fr) 的下限不可收缩，窄容器里整张网格被卡片硬裁——第 2 类缺陷）
+  if (props.minCol) return `repeat(auto-fit, minmax(min(${props.minCol}px, 100%), 1fr))`
   if (typeof props.cols === 'number') return `repeat(${props.cols}, minmax(0, 1fr))`
-  return props.cols ?? 'repeat(auto-fit, minmax(240px, 1fr))'
+  return props.cols ?? 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))'
 })
 </script>
 
