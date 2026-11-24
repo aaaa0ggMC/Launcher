@@ -167,6 +167,10 @@ const boxStyle = computed(() => ({
    用 :deep 打到 v-btn-group 本体：不依赖类名 fallthrough（实测类名规则没生效）。 */
 .kit-stage__bar :deep(.v-btn-group) {
   flex: 0 0 auto;
+  /* 实测（探针 232 档）：v-btn-group 带 max-width:100%，被夹到容器宽 137 而内容
+     要 174 → overflow:hidden 自裁按钮（「390」右缘出组 40px）。flex:0 0 auto 救不了
+     （宽度还是被 max-width 夹住），只有让按钮在组内换行：宁可两行也不裁按钮。 */
+  flex-wrap: wrap;
 }
 
 .kit-stage__slider {
