@@ -30,6 +30,10 @@
  *   --allow-build-mismatch  构建号与「最后触碰 src/ 的 commit」不一致时只警告不判失败
  *   --shots <目录>       截图目录（默认 out/probe；--no-shots 关闭）
  *   --json <文件>        把机器可读报告写到文件
+ *   --serve              自起被测 headless 宿主（隔离 HOME，绝不碰正式服务的单例锁）——
+ *                        测完必杀进程组 + 删临时 HOME。用它替代手工 `--force` 起 4455：
+ *                        游离的 --force 实例会让正式服务（4444）单例守卫退出、崩溃循环（踩过）
+ *   --serve-port <端口>  --serve 时指定端口（默认取空闲端口）
  *   --keep-chrome        结束后不关 Chrome（本地调试用）
  *   --chrome <路径>      Chrome 可执行文件（默认 google-chrome / google-chrome-stable）
  *
@@ -42,6 +46,7 @@
 
 import { spawn, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -64,7 +69,9 @@ const { values: opts } = parseArgs({
     'no-shots': { type: 'boolean', default: false },
     json: { type: 'string', default: '' },
     'keep-chrome': { type: 'boolean', default: false },
-    chrome: { type: 'string', default: '' }
+    chrome: { type: 'string', default: '' },
+    serve: { type: 'boolean', default: false },
+    'serve-port': { type: 'string', default: '' }
   }
 })
 
@@ -521,11 +528,117 @@ class Probe {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 构建号核对：页面 KitBuildStamp 显示的 git 短 hash 应 == 正在测的 commit */
+// ─────────────────────────────────────────────────────────────────────────────
+// 被测 headless 宿主：隔离 HOME 自起自灭（绝不碰正式服务的单例锁）
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * 构建号核对基准 = 最后一个改动 `src/` 的 commit（不是裸 HEAD）。
- * 页面 KitBuildStamp 显示的是**构建时**的 git 短 hash；只改 scripts/、docs/ 的 commit
- * 不影响 UI 产物，拿裸 HEAD 比会误报「测的不是这套代码」（main 实测踩过）。
- * 用「最后触碰 src/ 的 commit」比：相等 ⇒ 页面 UI 就是当前这套源码构建出来的。
+ * 起一个被测 headless 宿主，**用完必杀**。
+ *
+ * 为什么必须隔离 + 必杀（事故记录）：headless 宿主有单例锁
+ * （~/.config/LinuxCockpit/host.lock，按配置目录）。手工 `--force` 起的测试实例
+ * 会让正式服务（launcher-headless.service，4444）的单例守卫直接退出 → systemd
+ * 崩溃循环 45+ 次，用户部署全挂。所以探针自起的实例：
+ *   ① HOME / XDG_CONFIG_HOME 指到临时目录——锁落在临时目录，和正式服务零交集；
+ *   ② 绝不用 --force；
+ *   ③ 进程组（detached）+ finally + process.on('exit') 三重杀 + 删临时目录。
+ */
+function freePort() {
+  return new Promise((res, rej) => {
+    const srv = createServer()
+    srv.listen(0, '127.0.0.1', () => {
+      const port = srv.address().port
+      srv.close(() => res(port))
+    })
+    srv.on('error', rej)
+  })
+}
+
+async function startHeadless() {
+  const repoRoot = resolve(import.meta.dirname, '..')
+  const entry = join(repoRoot, 'out/headless/index.js')
+  if (!existsSync(entry)) {
+    throw new Error(`${entry} 不存在——先跑 pnpm build:headless 再用 --serve`)
+  }
+  const home = mkdtempSync(join(tmpdir(), 'ui-probe-home-'))
+  const port = opts['serve-port'] ? Number(opts['serve-port']) : await freePort()
+  const child = spawn(
+    process.execPath,
+    [entry, '--host', '127.0.0.1', '--port', String(port)],
+    {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config') },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: true // 独立进程组：stop 时 kill(-pid) 连子孙一起带走
+    }
+  )
+  let stderr = ''
+  child.stderr.on('data', (d) => {
+    stderr += d.toString()
+  })
+  const killTree = (signal = 'SIGTERM') => {
+    try {
+      process.kill(-child.pid, signal)
+    } catch {
+      try {
+        child.kill(signal)
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  const onExit = () => killTree()
+  process.on('exit', onExit)
+
+  // 等 token 写出 + HTTP 可达（隔离 HOME 下 token 在临时目录里）
+  const tokenFile = join(home, '.config/LinuxCockpit/headless-token')
+  let token = ''
+  const deadline = Date.now() + 20000
+  for (;;) {
+    await sleep(250)
+    if (child.exitCode !== null) {
+      process.off('exit', onExit)
+      rmSync(home, { recursive: true, force: true })
+      throw new Error(`headless 宿主提前退出 code=${child.exitCode}\n${stderr}`)
+    }
+    if (!token && existsSync(tokenFile)) {
+      token = readFileSync(tokenFile, 'utf8').trim()
+    }
+    const up = await fetch(`http://127.0.0.1:${port}/`)
+      .then((r) => r.ok)
+      .catch(() => false)
+    if (up && token) break
+    if (Date.now() > deadline) {
+      killTree()
+      process.off('exit', onExit)
+      rmSync(home, { recursive: true, force: true })
+      throw new Error(`headless 宿主 20s 没就绪\n${stderr}`)
+    }
+  }
+  log(`被测 headless 就绪: http://127.0.0.1:${port}/ （隔离 HOME ${home}）`)
+  return {
+    url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
+    stop() {
+      killTree()
+      process.off('exit', onExit)
+      // 给退出一点时间再删目录（服务端可能还在写）
+      setTimeout(() => {
+        try {
+          rmSync(home, { recursive: true, force: true })
+        } catch {
+          /* noop */
+        }
+      }, 300)
+    }
+  }
+}
+
+/**
+ * 构建号核对基准 = 最后一个改动 `src/` 的 commit——**与构建注入的 stamp 同口径**
+ * （electron.vite.config.ts buildHash() 注入的就是这个值）。只改 scripts/、docs/ 的
+ * commit 不影响 UI 产物，merge commit 下 git log 也不返回 merge 本身：跨口径比较
+ * （页面 stamp=HEAD vs git log -- src）两种情况都会误报（实测踩过两轮），所以两边
+ * 同用 `git log -1 --format=%h -- src`。
  * 注意 cwd 必须是仓库根：pathspec `src` 相对 cwd 解析，在 scripts/ 下跑会匹配到
  * scripts/src（不存在）→ 返回空 → 静默放行（门禁漏洞，main 实测踩过）。取不到
  * 返回空串，由调用方判「无法核对」。
@@ -570,8 +683,10 @@ function fmtRow(m) {
 }
 
 async function main() {
-  log('目标站点:', opts.url)
-  const url = withToken(opts.url)
+  // --serve：自起隔离 HOME 的被测宿主（测完必杀）；否则打外部站点
+  const server = opts.serve ? await startHeadless() : null
+  const url = server ? server.url : withToken(opts.url)
+  log('目标站点:', url.replace(/token=[^&]*/, 'token=***'))
   const expect = expectedBuild()
   const report = {
     url: opts.url,
@@ -789,6 +904,11 @@ async function main() {
       }
     }
   } finally {
+    // 被测宿主三重杀里的第一重：正常路径在这里停（crash 路径靠 process.on('exit')）
+    if (server) {
+      server.stop()
+      log('被测 headless 宿主已停')
+    }
     if (opts['keep-chrome']) {
       log('keep-chrome：Chrome 保留运行（临时目录', userData, '）')
     } else {
