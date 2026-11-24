@@ -830,24 +830,13 @@ async function main() {
       `document.querySelector('[data-ability-ready]')?.getAttribute('data-ability-ready') === 'settings' ? true : null`,
       '设置页就绪'
     )
-    await probe.clickWithRetry(
-      clickElemExpr(elemByTextExpr(opts.category)),
-      `分类「${opts.category}」`
-    )
+    // 构建号先核对：KitBuildStamp 只渲染在 UI 库画廊卡片上——先到画廊读号，
+    // 再去目标分类（否则非画廊分类会「页面 stamp=(无)」误判无法核对）
+    await probe.clickWithRetry(clickElemExpr(elemByTextExpr('UI 库')), '分类「UI 库」')
     await probe.waitReady(
-      `document.querySelector('.settings-content')?.textContent?.trim() ? true : null`,
-      `分类「${opts.category}」内容渲染`
+      `document.querySelectorAll('.kit-demo').length > 0 ? true : null`,
+      'UI 库画廊渲染'
     )
-    let scanRoot = ROOT_SEL
-    if (opts.item) {
-      const anchor = await probe.waitReady(
-        `(() => { const r = (${itemAnchorExpr(opts.item)}); return r ?? null })()`,
-        `条目「${opts.item}」`
-      )
-      log('定位条目', anchor)
-      scanRoot = '[data-probe-scan-root]'
-    }
-
     const ready = await probe.eval(READY_EXPR)
     report.stamp = ready.buildStamp
     const stampHash = ready.buildStamp ? ready.buildStamp.replace(/^构建\s*/, '').trim() : null
@@ -861,6 +850,35 @@ async function main() {
           ? `构建号不一致：页面是「${stampHash}」，src 基准是「${expect}」——测的不是这套代码`
           : `无法核对构建号：页面 stamp=${stampHash ?? '(无)'}，src 基准=${expect || '(取不到)'}——无法证明测的是这套代码`
       )
+    }
+
+    if (opts.category !== 'UI 库') {
+      await probe.clickWithRetry(
+        clickElemExpr(elemByTextExpr(opts.category)),
+        `分类「${opts.category}」`
+      )
+      await probe.waitReady(
+        `document.querySelector('.settings-content')?.textContent?.trim() ? true : null`,
+        `分类「${opts.category}」内容渲染`
+      )
+    }
+    // 设置项是 defineAsyncComponent 逐个挂载的——全挂完再扫，扫早了会漏整块内容
+    await probe.waitReady(
+      `(() => {
+        const items = [...document.querySelectorAll('.settings-item')]
+        return items.length > 0 && items.every((e) => e.childElementCount > 0) ? true : null
+      })()`,
+      '全部设置项挂载完'
+    ).catch(() => null)
+    await sleep(400)
+    let scanRoot = ROOT_SEL
+    if (opts.item) {
+      const anchor = await probe.waitReady(
+        `(() => { const r = (${itemAnchorExpr(opts.item)}); return r ?? null })()`,
+        `条目「${opts.item}」`
+      )
+      log('定位条目', anchor)
+      scanRoot = '[data-probe-scan-root]'
     }
 
     // ── 多档实测：视口四档 + 画廊宽度模拟器档（胶囊这类行内容要靠模拟器压窄才现形）──
