@@ -20,6 +20,8 @@
  *   --url <url>          被测站点（默认 http://127.0.0.1:4444/，launcher-headless.service）
  *                        没带 token 时自动读 ~/.config/LinuxCockpit/headless-token 拼上
  *   --widths <列表>      视口宽度档，默认 480,320,232,390（480/320/232 三档 + 390 手机档）
+ *   --category <文本>      进设置页后点的分类（默认「UI 库」；扫别的分区用它，
+ *                        如 --category 窗口 查「背景」下拉——静态审计 A-1 的动态核对）
  *   --stage-widths <列表>  画廊宽度模拟器（KitWidthStage）档，如 390,340,240——
  *                        行内容（胶囊等）要靠模拟器压窄才现形；固定在宽视口下逐档跑
  *   --height <px>        视口高度，默认 820
@@ -53,6 +55,7 @@ const { values: opts } = parseArgs({
     url: { type: 'string', default: 'http://127.0.0.1:4444/' },
     widths: { type: 'string', default: '480,320,232,390' },
     'stage-widths': { type: 'string', default: '' },
+    category: { type: 'string', default: 'UI 库' },
     height: { type: 'string', default: '820' },
     dump: { type: 'string', default: '' },
     'assert-truncation': { type: 'boolean', default: false },
@@ -523,16 +526,19 @@ class Probe {
  * 页面 KitBuildStamp 显示的是**构建时**的 git 短 hash；只改 scripts/、docs/ 的 commit
  * 不影响 UI 产物，拿裸 HEAD 比会误报「测的不是这套代码」（main 实测踩过）。
  * 用「最后触碰 src/ 的 commit」比：相等 ⇒ 页面 UI 就是当前这套源码构建出来的。
+ * 注意 cwd 必须是仓库根：pathspec `src` 相对 cwd 解析，在 scripts/ 下跑会匹配到
+ * scripts/src（不存在）→ 返回空 → 静默放行（门禁漏洞，main 实测踩过）。取不到
+ * 返回空串，由调用方判「无法核对」。
  */
 function expectedBuild() {
   try {
     return execFileSync('git', ['log', '-1', '--format=%h', '--', 'src'], {
-      cwd: import.meta.dirname
+      cwd: resolve(import.meta.dirname, '..')
     })
       .toString()
       .trim()
   } catch {
-    return null
+    return ''
   }
 }
 
@@ -612,20 +618,27 @@ async function main() {
       `document.querySelector('[data-ability-ready]')?.getAttribute('data-ability-ready') === 'settings' ? true : null`,
       '设置页就绪'
     )
-    await probe.clickWithRetry(clickElemExpr(elemByTextExpr('UI 库')), '分类「UI 库」')
+    await probe.clickWithRetry(
+      clickElemExpr(elemByTextExpr(opts.category)),
+      `分类「${opts.category}」`
+    )
     await probe.waitReady(
-      `document.querySelectorAll('.kit-demo').length > 0 ? true : null`,
-      'UI 库画廊渲染'
+      `document.querySelector('.settings-content')?.textContent?.trim() ? true : null`,
+      `分类「${opts.category}」内容渲染`
     )
 
     const ready = await probe.eval(READY_EXPR)
     report.stamp = ready.buildStamp
     const stampHash = ready.buildStamp ? ready.buildStamp.replace(/^构建\s*/, '').trim() : null
-    report.stampMatch = !expect || !stampHash ? null : stampHash === expect
-    log('KitBuildStamp:', ready.buildStamp, '| src 基准:', expect, '| 一致:', report.stampMatch)
-    if (ASSERT && report.stampMatch === false && !opts['allow-build-mismatch']) {
+    report.stampMatch = expect && stampHash ? stampHash === expect : null
+    log('KitBuildStamp:', ready.buildStamp, '| src 基准:', expect || '(取不到)', '| 一致:', report.stampMatch)
+    if (ASSERT && report.stampMatch !== true && !opts['allow-build-mismatch']) {
+      // 无法核对 ≠ 通过：null（基准取不到 / 页面没 stamp）必须当失败，
+      // 否则「比不了」会被静默放行——门禁可信度漏洞（main 实测踩过）
       report.gate.failures.push(
-        `构建号不一致：页面是「${stampHash}」，正在测的 commit 是「${expect}」——测的不是这套代码`
+        report.stampMatch === false
+          ? `构建号不一致：页面是「${stampHash}」，src 基准是「${expect}」——测的不是这套代码`
+          : `无法核对构建号：页面 stamp=${stampHash ?? '(无)'}，src 基准=${expect || '(取不到)'}——无法证明测的是这套代码`
       )
     }
 
@@ -648,8 +661,8 @@ async function main() {
         log('模拟器盒子宽度', got)
       }
       const state = await probe.eval(READY_EXPR)
-      if (state.demoCards === 0) {
-        report.gate.failures.push(`${wlabel}: 画廊不可见（.kit-demo=0），无法实测`)
+      if (!state.settingsView) {
+        report.gate.failures.push(`${wlabel}: 设置内容不可见（.settings-view 缺失），无法实测`)
         continue
       }
       if (SHOTS_DIR) {
@@ -796,7 +809,7 @@ async function main() {
 
   // ── 报告 ────────────────────────────────────────────────────────────────
   console.log('\n════════════ 报告 ════════════')
-  console.log('构建号：页面', report.stamp, '| HEAD', report.expectBuild, '| 一致:', report.stampMatch)
+  console.log('构建号：页面', report.stamp, '| src 基准', report.expectBuild || '(取不到)', '| 一致:', report.stampMatch)
   for (const [tag, pw] of Object.entries(report.perWidth)) {
     if (!pw) continue
     console.log(
