@@ -59,7 +59,6 @@ const rootStyle = computed(() => ({
 </script>
 
 <template>
-  <!-- input 档：v-select 原装外观 -->
   <div v-if="density !== 'inline'" class="kit-control" :style="rootStyle">
     <v-select
       :model-value="modelValue"
